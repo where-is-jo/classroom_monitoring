@@ -84,6 +84,6 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 ## 관련 문서
 
 - [AI 에이전트 규칙](../docs/agents/ai-agent.md)
-- [모니터링 지표 추가 절차](../docs/skills/add-monitoring-metric/SKILL.md)
+- `add-monitoring-metric` 스킬
 - [데이터 흐름](../docs/architecture/data-flow.md)
 - [아키텍처 개요](../docs/architecture/overview.md)

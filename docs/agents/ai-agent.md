@@ -28,7 +28,7 @@
 - [`deeplearning/README.md`](../../deeplearning/README.md), [`worker/README.md`](../../worker/README.md)
 - [데이터 흐름](../architecture/data-flow.md) — 프레임 전달 경로와 미확정 지점
 - [코딩 규칙](../conventions/coding-convention.md)
-- [모니터링 지표 추가 Skill](../skills/add-monitoring-metric/SKILL.md) — 성능 지표 추가 시
+- `add-monitoring-metric` 스킬 — 성능 지표 추가 시
 - 기존 입출력 스키마와 결과 소비자(fastapi)의 사용 방식
 
 ## Workflow

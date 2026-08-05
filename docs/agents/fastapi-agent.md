@@ -29,7 +29,7 @@ API 응답 또는 Jinja2로 렌더링한 화면을 돌려준다.
 - [API 규칙](../conventions/api-convention.md) — URL·상태 코드·오류 형식
 - [코딩 규칙](../conventions/coding-convention.md) — Python 원칙
 - [환경변수 규칙](../conventions/environment-convention.md)
-- [FastAPI 기능 추가 Skill](../skills/create-fastapi-feature/SKILL.md) — 실행 절차
+- `create-fastapi-feature` 스킬 — 실행 절차
 - 변경 대상 라우터·서비스·스키마·템플릿의 기존 구조
 
 ## Workflow

@@ -33,7 +33,7 @@ Prometheus와 Grafana 기반 관측 설정을 관리하는 디렉터리다.
 
 - 프로젝트 지표 이름은 가능한 경우 `smart_office_` 접두사를 사용한다.
 - 사용자 ID, 요청 ID처럼 값이 무한히 늘어나는 label은 사용하지 않는다.
-- 지표 추가 절차는 [모니터링 지표 추가 Skill](../docs/skills/add-monitoring-metric/SKILL.md)을 따른다.
+- 지표 추가 절차는 `add-monitoring-metric` 스킬을 따른다.
 
 ## 예상 기술
 
@@ -68,6 +68,6 @@ Prometheus와 Grafana 기반 관측 설정을 관리하는 디렉터리다.
 
 ## 관련 문서
 
-- [모니터링 지표 추가 절차](../docs/skills/add-monitoring-metric/SKILL.md)
+- `add-monitoring-metric` 스킬
 - [아키텍처 개요](../docs/architecture/overview.md)
 - [코딩 규칙](../docs/conventions/coding-convention.md)

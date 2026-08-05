@@ -8,7 +8,7 @@
 1. 아래 변수 값을 정한다. 증상과 재현 방법은 최대한 구체적으로 적는다.
 2. `## 프롬프트` 블록을 복사해 변수를 치환한 뒤 에이전트에게 전달한다.
 
-관련 문서: [AGENTS.md](../agents/AGENTS.md) · [코드 리뷰 Skill](../skills/review-code/SKILL.md)
+관련 문서: [AGENTS.md](../agents/AGENTS.md) · `review-code` 스킬
 
 ## 변수
 
@@ -47,8 +47,8 @@
 - 문제가 발생한 영역의 Agent 문서(fastapi / ai / rpa)
 
 ## 참고할 Skill
-- `docs/skills/review-code/SKILL.md` — 원인 후보를 좁힐 때 점검 순서로 사용
-- 수정이 문서에 영향을 주면: `docs/skills/update-documentation/SKILL.md`
+- `review-code` 스킬 — 원인 후보를 좁힐 때 점검 순서로 사용
+- 수정이 문서에 영향을 주면: `update-documentation` 스킬
 
 ## 작업 절차
 1. **재현**

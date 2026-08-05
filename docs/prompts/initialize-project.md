@@ -7,7 +7,7 @@
 1. 아래 변수 값을 정한다. 비어 있는 항목이 있으면 먼저 확정한다.
 2. `## 프롬프트` 블록을 복사해 변수를 치환한 뒤 에이전트에게 전달한다.
 
-관련 문서: [AGENTS.md](../agents/AGENTS.md) · [Skill 목록](../skills/README.md) · [RPA 규칙](../../RPAs/README.md)
+관련 문서: [AGENTS.md](../agents/AGENTS.md) · Claude Code 스킬 (`/skills`) · [RPA 규칙](../../RPAs/README.md)
 
 ## 변수
 
@@ -45,8 +45,8 @@
 - `docs/agents/documentation-agent.md` (README 작성 기준)
 
 ## 참고할 Skill
-- rpa인 경우: `docs/skills/create-rpa-workflow/SKILL.md`
-- 새 Skill이 필요하다고 판단되면: `docs/skills/README.md`
+- rpa인 경우: `create-rpa-workflow` 스킬
+- 새 Skill이 필요하다고 판단되면: `.claude/skills/README.md` (저장소에 없음)
 
 ## 작업 절차
 1. 루트 `README.md`와 최상위 구조 제약을 확인한다.

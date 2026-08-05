@@ -173,7 +173,7 @@ tests/                     외부 의존성 없이 실행되는 테스트
 ## 관련 문서
 
 - [FastAPI 에이전트 규칙](../../docs/agents/fastapi-agent.md)
-- [FastAPI 기능 추가 절차](../../docs/skills/create-fastapi-feature/SKILL.md)
+- `create-fastapi-feature` 스킬
 - [API 규칙](../../docs/conventions/api-convention.md)
 - [아키텍처 개요](../../docs/architecture/overview.md)
 - [데이터 흐름](../../docs/architecture/data-flow.md)

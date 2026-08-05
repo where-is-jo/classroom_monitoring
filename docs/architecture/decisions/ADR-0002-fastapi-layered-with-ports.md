@@ -132,7 +132,7 @@ MinIO는 S3 호환이므로 실제 S3로 옮길 가능성도 남아 있다.
 
 - [`webapps/fastapi/README.md`](../../../webapps/fastapi/README.md) — 디렉터리 구조 절
 - [`docs/agents/fastapi-agent.md`](../../agents/fastapi-agent.md) — 포트 관련 규칙
-- [`docs/skills/create-fastapi-feature/SKILL.md`](../../skills/create-fastapi-feature/SKILL.md) — 구현 절차
+- `create-fastapi-feature` 스킬 — 구현 절차
 
 ## Follow-up Actions
 

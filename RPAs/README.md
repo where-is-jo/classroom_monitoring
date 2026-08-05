@@ -77,7 +77,7 @@ RPAs/
 ## 관련 문서
 
 - [RPA 에이전트 규칙](../docs/agents/rpa-agent.md)
-- [RPA 워크플로 작성 절차](../docs/skills/create-rpa-workflow/SKILL.md)
+- `create-rpa-workflow` 스킬
 - [프로젝트 초기화 프롬프트](../docs/prompts/initialize-project.md)
 - [공유 문서 영역](./shared/documentation/README.md)
 - [공유 자산 영역](./shared/assets/README.md)

@@ -4,7 +4,7 @@
 > 이 파일을 복사해 이 인용 블록과 안내 문구(`>` 로 시작하는 줄)를 지우고 채운다.
 >
 > 형식 기준은 [API 규칙](../conventions/api-convention.md)에 있다.
-> 구현 절차는 [FastAPI 기능 추가 Skill](../skills/create-fastapi-feature/SKILL.md)을 따른다.
+> 구현 절차는 `create-fastapi-feature` 스킬을 따른다.
 >
 > **구현 후에는 자동 생성되는 OpenAPI 문서가 정본이다.** 이 명세는 구현 전 합의를 위한
 > 것이고, 같은 내용을 두 곳에서 계속 관리하지 않는다.

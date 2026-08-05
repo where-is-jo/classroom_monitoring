@@ -24,7 +24,7 @@
 
 - [문서 작성 규칙](../conventions/documentation-convention.md)
 - [AGENTS.md의 Source of Truth](./AGENTS.md#source-of-truth) — 주제별 기준 문서
-- [문서 갱신 Skill](../skills/update-documentation/SKILL.md) — 실행 절차
+- `update-documentation` 스킬 — 실행 절차
 - [문서 템플릿](../templates/) — 새 문서 작성 시
 - 변경 대상 문서가 설명하는 실제 코드나 설정
 

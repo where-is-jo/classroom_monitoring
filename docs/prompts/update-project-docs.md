@@ -7,7 +7,7 @@
 1. 아래 변수 값을 정한다. 갱신 범위를 좁게 잡을수록 결과가 정확하다.
 2. `## 프롬프트` 블록을 복사해 변수를 치환한 뒤 에이전트에게 전달한다.
 
-관련 문서: [AGENTS.md](../agents/AGENTS.md) · [문서 갱신 Skill](../skills/update-documentation/SKILL.md)
+관련 문서: [AGENTS.md](../agents/AGENTS.md) · `update-documentation` 스킬
 
 ## 변수
 
@@ -38,7 +38,7 @@
 - `docs/agents/documentation-agent.md`
 
 ## 참고할 Skill
-- `docs/skills/update-documentation/SKILL.md` — 절차를 그대로 따른다
+- `update-documentation` 스킬 — 절차를 그대로 따른다
 
 ## 작업 절차
 1. 대상 문서의 서술을 하나씩 실제 코드·설정과 대조한다.

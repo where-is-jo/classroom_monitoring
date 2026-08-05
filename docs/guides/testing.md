@@ -89,6 +89,6 @@ pytest는 되돌리기 쉬운 선택이라 ADR을 쓰지 않았다.
 ## 관련 문서
 
 - [코딩 규칙](../conventions/coding-convention.md)
-- [코드 리뷰 Skill](../skills/review-code/SKILL.md)
+- `review-code` 스킬
 - [버그 조사 프롬프트](../prompts/investigate-bug.md)
 - [로컬 개발](./local-development.md)

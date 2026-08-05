@@ -8,6 +8,10 @@ initial_prompt.md
 # 개별 작업 폴더 - 로컬에서 개별적으로 관리합니다.
 individual_tasks/*
 
+# Claude Code 설정·스킬·지침 - 팀원과는 저장소 밖에서 공유한다.
+.claude/
+CLAUDE.md
+
 # Python 실행 산출물
 __pycache__/
 *.py[cod]

@@ -27,7 +27,7 @@ RPA 공통 규칙은 [`RPAs/README.md`](../../RPAs/README.md)에 있다.
 
 - [`RPAs/README.md`](../../RPAs/README.md) — 프로젝트 생성·이름·자격 증명 규칙
 - [`RPAs/examples/README.md`](../../RPAs/examples/README.md) — 권장 구조와 README 항목
-- [RPA 워크플로 작성 Skill](../skills/create-rpa-workflow/SKILL.md) — 실행 절차
+- `create-rpa-workflow` 스킬 — 실행 절차
 - [환경변수 규칙](../conventions/environment-convention.md)
 - 대상 업무의 현재 수행 방식과 담당자 확인 절차
 

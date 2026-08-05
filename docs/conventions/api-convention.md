@@ -139,7 +139,7 @@ GET /events?limit=50&offset=0
 
 ## 관련 문서
 
-- [FastAPI 기능 추가 Skill](../skills/create-fastapi-feature/SKILL.md)
+- `create-fastapi-feature` 스킬
 - [fastapi-agent](../agents/fastapi-agent.md)
 - [코딩 규칙](./coding-convention.md)
 - [fastapi README](../../webapps/fastapi/README.md)

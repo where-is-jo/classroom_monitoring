@@ -41,7 +41,7 @@ RPAs/<rpa-name>/
 ## 작성 순서
 
 1. [RPA 공통 규칙](../README.md)을 읽는다.
-2. [RPA 워크플로 작성 절차](../../docs/skills/create-rpa-workflow/SKILL.md)를 따라 업무를 정의한다.
+2. `create-rpa-workflow` 스킬를 따라 업무를 정의한다.
 3. `RPAs/<rpa-name>/`을 만들고 README를 먼저 작성한다.
 4. 입력·출력과 실패 조건이 확정된 뒤에 코드를 작성한다.
 

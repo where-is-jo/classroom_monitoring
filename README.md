@@ -30,7 +30,7 @@ webapps/       웹 애플리케이션
 deeplearning/  모델 추론 서비스
 worker/        영상 수신·프레임 공급
 monitoring/    Prometheus·Grafana 설정
-docs/          문서, AI 에이전트 규칙, Skill, 프롬프트
+docs/          문서, AI 에이전트 규칙, 프롬프트
 RPAs/          업무 자동화 프로젝트
 README.md      이 문서
 ```
@@ -56,7 +56,6 @@ README.md      이 문서
 | 디렉터리 | 역할 |
 | --- | --- |
 | `docs/agents` | AI 에이전트가 지켜야 할 작업 규칙 |
-| `docs/skills` | 반복 작업의 실행 절차 |
 | `docs/prompts` | 바로 복사해 쓰는 작업 프롬프트 |
 | `docs/architecture` | 구조 설명과 결정 기록(ADR) |
 | `docs/conventions` | Git·코딩·API·환경변수·문서 규칙 |
@@ -82,7 +81,8 @@ README.md      이 문서
 
 - 공통 작업 계약은 [docs/agents/AGENTS.md](./docs/agents/AGENTS.md)에 있다. 에이전트는 이 문서를 먼저 읽는다.
 - 역할별 규칙: [FastAPI](./docs/agents/fastapi-agent.md) · [AI](./docs/agents/ai-agent.md) · [RPA](./docs/agents/rpa-agent.md) · [문서](./docs/agents/documentation-agent.md)
-- 반복 작업은 [docs/skills/](./docs/skills/README.md)의 절차를 따른다. 새 Skill 추가 방법도 같은 문서에 있다.
+- 반복 작업은 Claude Code 스킬을 따른다. `/skills`로 목록을 볼 수 있다.
+  스킬은 `.claude/skills/`에 있으며 **저장소에 포함되지 않는다.** 팀원과는 따로 공유한다.
 - 작업 지시는 `docs/prompts/`의 템플릿을 복사해 변수를 채운 뒤 사용한다.
   [프로젝트 초기화](./docs/prompts/initialize-project.md) · [기능 구현](./docs/prompts/implement-feature.md) · [버그 조사](./docs/prompts/investigate-bug.md) · [PR 리뷰](./docs/prompts/review-pull-request.md) · [문서 갱신](./docs/prompts/update-project-docs.md)
 
@@ -97,7 +97,7 @@ README.md      이 문서
 | 새 RPA | `RPAs/<rpa-name>/` | [RPA 규칙](./RPAs/README.md) |
 | 아키텍처 결정 | `docs/architecture/decisions/` | [ADR 작성 방법](./docs/architecture/decisions/README.md) |
 | 개발 규칙 | `docs/conventions/` | 기존 문서 수정을 우선 |
-| 작업 절차 | `docs/skills/<skill-name>/SKILL.md` | [Skill 작성 방법](./docs/skills/README.md#새-skill-추가하기) |
+| 작업 절차 | `.claude/skills/<skill-name>/` | 저장소 밖. 작성법은 `.claude/skills/README.md` |
 | 문서 템플릿 | `docs/templates/` | |
 
 ## 기여 흐름

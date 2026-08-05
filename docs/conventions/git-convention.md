@@ -71,7 +71,7 @@ fix: 스트림 재연결 시 이전 연결이 정리되지 않던 문제 수정
 - 실행하지 못한 검증
 
 리뷰는 [PR 리뷰 프롬프트](../prompts/review-pull-request.md)와
-[코드 리뷰 Skill](../skills/review-code/SKILL.md)을 사용한다.
+`review-code` 스킬을 사용한다.
 
 - PR이 커지면 리뷰 품질이 떨어진다. 나눌 수 있으면 나눈다.
 - 리뷰 지적에 대응한 커밋을 squash하지 않고 남겨두면 리뷰어가 확인하기 쉽다.
@@ -97,4 +97,4 @@ fix: 스트림 재연결 시 이전 연결이 정리되지 않던 문제 수정
 
 - [코딩 규칙](./coding-convention.md)
 - [환경변수 규칙](./environment-convention.md)
-- [코드 리뷰 Skill](../skills/review-code/SKILL.md)
+- `review-code` 스킬

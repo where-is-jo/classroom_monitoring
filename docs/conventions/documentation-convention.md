@@ -3,7 +3,7 @@
 **목적**: 저장소의 문서가 서로 충돌하거나 중복되지 않게 하는 최소 규칙을 정한다.
 **대상 독자**: 문서를 쓰거나 고치는 모든 사람과 AI 에이전트.
 
-문서를 쓰는 절차는 [문서 갱신 Skill](../skills/update-documentation/SKILL.md)에,
+문서를 쓰는 절차는 `update-documentation` 스킬에,
 문서 담당 에이전트의 규칙은 [documentation-agent](../agents/documentation-agent.md)에 있다.
 이 문서는 **문서의 형식과 배치 기준**만 다룬다.
 
@@ -40,7 +40,7 @@ READMEs처럼 대상이 자명한 문서는 한 줄 설명으로 대신해도 �
 | 시스템이 어떻게 구성되는가 | `docs/architecture/` |
 | 왜 이렇게 결정했는가 | `docs/architecture/decisions/` |
 | 결과물이 어떤 형식이어야 하는가 | `docs/conventions/` |
-| 이 작업을 어떤 순서로 하는가 | `docs/skills/` |
+| 이 작업을 어떤 순서로 하는가 | `.claude/skills/` (저장소 밖) |
 | 에이전트가 무엇을 지켜야 하는가 | `docs/agents/` |
 | 에이전트에게 어떻게 지시하는가 | `docs/prompts/` |
 | 처음 접하는 사람이 어떻게 시작하는가 | `docs/guides/` |
@@ -104,6 +104,6 @@ READMEs처럼 대상이 자명한 문서는 한 줄 설명으로 대신해도 �
 
 ## 관련 문서
 
-- [문서 갱신 Skill](../skills/update-documentation/SKILL.md)
+- `update-documentation` 스킬
 - [documentation-agent](../agents/documentation-agent.md)
 - [문서 템플릿](../templates/)

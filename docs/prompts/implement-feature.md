@@ -7,7 +7,7 @@
 1. 아래 변수 값을 정한다. 특히 완료 조건은 비워두지 않는다.
 2. `## 프롬프트` 블록을 복사해 변수를 치환한 뒤 에이전트에게 전달한다.
 
-관련 문서: [AGENTS.md](../agents/AGENTS.md) · [Skill 목록](../skills/README.md)
+관련 문서: [AGENTS.md](../agents/AGENTS.md) · Claude Code 스킬 (`/skills`)
 
 ## 변수
 
@@ -44,9 +44,9 @@
 - 여러 영역에 걸치면 해당 문서를 모두 읽고, 규칙이 충돌하면 엄격한 쪽을 따른다.
 
 ## 참고할 Skill
-- 백엔드 API: `docs/skills/create-fastapi-feature/SKILL.md`
-- RPA 워크플로: `docs/skills/create-rpa-workflow/SKILL.md`
-- 지표 추가가 포함되면: `docs/skills/add-monitoring-metric/SKILL.md`
+- 백엔드 API: `create-fastapi-feature` 스킬
+- RPA 워크플로: `create-rpa-workflow` 스킬
+- 지표 추가가 포함되면: `add-monitoring-metric` 스킬
 
 해당하는 Skill이 있으면 그 절차를 그대로 따른다.
 

@@ -90,4 +90,4 @@
 - [API 규칙](./api-convention.md)
 - [환경변수 규칙](./environment-convention.md)
 - [Git 규칙](./git-convention.md)
-- [코드 리뷰 Skill](../skills/review-code/SKILL.md)
+- `review-code` 스킬
