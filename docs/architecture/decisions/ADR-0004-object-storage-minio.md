@@ -28,7 +28,7 @@ Accepted
 
 - 바이너리 데이터는 MinIO 버킷에 두고, 메타데이터 저장소에는 **참조(버킷·객체 키)만** 기록한다.
   영상 바이트를 MongoDB에 넣지 않는다.
-- backend는 [ADR-0002](./ADR-0002-backend-layered-with-ports.md)의 `ObjectStorage` 포트를 통해
+- fastapi는 [ADR-0002](./ADR-0002-fastapi-layered-with-ports.md)의 `ObjectStorage` 포트를 통해
   접근한다. MinIO SDK는 어댑터에만 둔다.
 - 접속 정보는 환경변수로 주입한다. 자격 증명을 저장소에 두지 않는다.
 - **S3 호환 API 범위 안에서 사용한다.** MinIO 고유 기능에 의존하지 않으면
@@ -90,9 +90,9 @@ MinIO를 쓰기로 한 것이지, **무엇을 얼마나 저장할지 정한 것�
 
 **영향받는 문서·코드**
 
-- [`webapps/stream-server/README.md`](../../../webapps/stream-server/README.md) — 영상 저장 책임
-- [`webapps/backend/README.md`](../../../webapps/backend/README.md) — 예상 기술, 환경변수
-- [`webapps/inference/README.md`](../../../webapps/inference/README.md) — 모델 파일 전달 경로 후보
+- [`worker/README.md`](../../../worker/README.md) — 영상 저장 책임
+- [`webapps/fastapi/README.md`](../../../webapps/fastapi/README.md) — 예상 기술, 환경변수
+- [`deeplearning/README.md`](../../../deeplearning/README.md) — 모델 파일 전달 경로 후보
 - [아키텍처 개요](../overview.md) · [시스템 컨텍스트](../system-context.md) · [데이터 흐름](../data-flow.md)
 
 ## Follow-up Actions
@@ -100,6 +100,6 @@ MinIO를 쓰기로 한 것이지, **무엇을 얼마나 저장할지 정한 것�
 - [x] 아키텍처 문서의 `후보`·`도입 여부 결정 필요` 표기 갱신
 - [x] 서비스 README의 예상 기술 갱신
 - [ ] **저장 정책 합의** — 저장 범위, 보존 기간, 접근 권한, 개인정보 처리 근거
-- [ ] 영상을 저장하는 주체 결정 (stream-server / backend)
+- [ ] 영상을 저장하는 주체 결정 (worker / fastapi)
 - [ ] 버킷 구성과 객체 키 규칙 정의
-- [ ] 모델 가중치를 MinIO로 전달할지 결정 — [inference README](../../../webapps/inference/README.md) 참고
+- [ ] 모델 가중치를 MinIO로 전달할지 결정 — [deeplearning README](../../../deeplearning/README.md) 참고

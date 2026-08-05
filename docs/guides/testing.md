@@ -27,11 +27,10 @@
 
 | 서비스 | 반드시 테스트할 것 | 분리할 것 |
 | --- | --- | --- |
-| [backend](../../webapps/backend/README.md) | 서비스 계층 로직, 요청 검증, 오류 상태 코드 | 실제 저장소 연동 |
-| [frontend](../../webapps/frontend/README.md) | API 클라이언트 응답 파싱·오류 분기, 상태별 렌더링 | 실제 백엔드 호출 |
-| [inference](../../webapps/inference/README.md) | 전처리·후처리, 결과 스키마 변환 | 실제 모델 추론 |
-| [stream-server](../../webapps/stream-server/README.md) | 연결 상태 전이, 프레임 샘플링 로직 | 실제 카메라 연결 |
-| [monitoring](../../webapps/monitoring/README.md) | 설정 파일 문법, 알림 규칙 표현식 | 실제 수집 |
+| [fastapi](../../webapps/fastapi/README.md) | 서비스 계층 로직, 요청 검증, 오류 상태 코드, 템플릿 렌더링 | 실제 저장소 연동 |
+| [deeplearning](../../deeplearning/README.md) | 전처리·후처리, 결과 스키마 변환 | 실제 모델 추론 |
+| [worker](../../worker/README.md) | 연결 상태 전이, 프레임 샘플링 로직 | 실제 카메라 연결 |
+| [monitoring](../../monitoring/README.md) | 설정 파일 문법, 알림 규칙 표현식 | 실제 수집 |
 | RPA | 입력 파싱, 중복 판별, 재시도 분기 | 실제 업무 시스템 접근 |
 
 ## 무엇을 테스트할지 고르기

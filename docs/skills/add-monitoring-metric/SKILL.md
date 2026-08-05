@@ -30,7 +30,7 @@
 
 ## Preconditions
 
-- [`webapps/monitoring/README.md`](../../../webapps/monitoring/README.md)를 읽었다
+- [`monitoring/README.md`](../../../monitoring/README.md)를 읽었다
 - 기존 지표 목록을 조회해 같은 것이 없는지 확인했다
 - 대상 서비스가 이미 지표 노출 경로를 가지고 있는지 확인했다
 
@@ -55,7 +55,7 @@
    - 형식: `smart_office_<대상>_<측정값>_<단위>`
    - 단위는 기본 단위를 쓴다: `_seconds`, `_bytes`, `_total`(Counter)
    - 예시
-     - `smart_office_inference_duration_seconds` (Histogram)
+     - `smart_office_deeplearning_duration_seconds` (Histogram)
      - `smart_office_frames_processed_total` (Counter)
      - `smart_office_stream_connections_active` (Gauge)
 
@@ -73,7 +73,7 @@
    - 이 지표로 답하려던 질문을 실제 쿼리로 적어 문서에 남긴다.
    - 예:
      - 초당 처리량: `rate(smart_office_frames_processed_total[5m])`
-     - 지연 95분위: `histogram_quantile(0.95, rate(smart_office_inference_duration_seconds_bucket[5m]))`
+     - 지연 95분위: `histogram_quantile(0.95, rate(smart_office_deeplearning_duration_seconds_bucket[5m]))`
      - 실패율: `rate(smart_office_requests_total{status="error"}[5m]) / rate(smart_office_requests_total[5m])`
 
 7. **Grafana 반영 검토**

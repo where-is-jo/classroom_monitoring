@@ -28,7 +28,7 @@ Accepted
 
 - 탐지 이벤트, 카메라 설정, 사용자 정보를 MongoDB에 보관한다.
 - 영상과 스냅샷 같은 바이너리는 여기에 넣지 않는다. [ADR-0004](./ADR-0004-object-storage-minio.md)를 따른다.
-- backend는 MongoDB에 직접 접근하지 않고 [ADR-0002](./ADR-0002-backend-layered-with-ports.md)의
+- fastapi는 MongoDB에 직접 접근하지 않고 [ADR-0002](./ADR-0002-fastapi-layered-with-ports.md)의
   저장소 포트를 통해 접근한다. MongoDB 관련 코드는 어댑터에만 둔다.
 - 접속 정보는 `DATABASE_URL` 환경변수로 주입한다. 값을 저장소에 두지 않는다.
 
@@ -74,13 +74,13 @@ Accepted
 
 **영향받는 문서·코드**
 
-- [`webapps/backend/README.md`](../../../webapps/backend/README.md) — 예상 기술, 환경변수
+- [`webapps/fastapi/README.md`](../../../webapps/fastapi/README.md) — 예상 기술, 환경변수
 - [아키텍처 개요](../overview.md) · [시스템 컨텍스트](../system-context.md) · [데이터 흐름](../data-flow.md)
 
 ## Follow-up Actions
 
 - [x] 아키텍처 문서의 `후보` 표기 제거
-- [x] backend README의 예상 기술 갱신
+- [x] fastapi README의 예상 기술 갱신
 - [ ] 컬렉션 구조와 인덱스를 조회 패턴 확정 후 문서화
 - [ ] 이벤트 보존 기간 정책 결정 — 아직 **결정 필요**
 - [ ] Python 드라이버 선택(동기·비동기) — 첫 구현 시 결정

@@ -3,8 +3,8 @@
 추론 서비스와 영상 프레임 처리 작업을 수행하는 에이전트의 규칙이다.
 공통 계약은 [AGENTS.md](./AGENTS.md)를 먼저 따른다.
 
-대상 서비스는 [`inference`](../../webapps/inference/README.md)와
-[`stream-server`](../../webapps/stream-server/README.md)다.
+대상 서비스는 [`deeplearning`](../../deeplearning/README.md)와
+[`worker`](../../worker/README.md)다.
 
 ## Purpose
 
@@ -25,16 +25,16 @@
 
 작업 전 다음을 읽는다.
 
-- [`webapps/inference/README.md`](../../webapps/inference/README.md), [`webapps/stream-server/README.md`](../../webapps/stream-server/README.md)
+- [`deeplearning/README.md`](../../deeplearning/README.md), [`worker/README.md`](../../worker/README.md)
 - [데이터 흐름](../architecture/data-flow.md) — 프레임 전달 경로와 미확정 지점
 - [코딩 규칙](../conventions/coding-convention.md)
 - [모니터링 지표 추가 Skill](../skills/add-monitoring-metric/SKILL.md) — 성능 지표 추가 시
-- 기존 입출력 스키마와 결과 소비자(backend)의 사용 방식
+- 기존 입출력 스키마와 결과 소비자(fastapi)의 사용 방식
 
 ## Workflow
 
 1. 입력(프레임 형식, 해상도, 색공간)과 출력(탐지 결과 스키마)을 먼저 확정한다.
-2. 출력 스키마를 바꾸는 작업이면 backend 영향을 먼저 확인하고 보고한다.
+2. 출력 스키마를 바꾸는 작업이면 fastapi 영향을 먼저 확인하고 보고한다.
 3. 전처리·후처리를 모델 호출과 분리해 구현한다.
 4. 모델 경로·버전·장치·임계값을 설정으로 주입받게 한다.
 5. 모델 없이 검증 가능한 부분(전처리, 결과 변환)을 단위 테스트한다.
@@ -47,12 +47,12 @@
 - **모델 경로·임계값을 코드에 하드코딩하지 않는다.**
 - **모델은 요청마다 로딩하지 않는다.** 프로세스 시작 시 1회 로딩을 원칙으로 한다.
 - **탐지 결과를 비즈니스 의미로 해석하지 않는다.** "사람 1명 탐지"까지가 이 서비스의 출력이고,
-  "재실 중"이나 "출근"으로의 해석은 backend 책임이다.
+  "재실 중"이나 "출근"으로의 해석은 fastapi 책임이다.
 - **탐지 결과를 이 서비스에서 영속 저장하지 않는다.**
 - **측정하지 않은 성능 수치를 문서나 보고에 적지 않는다.** FPS, 지연 시간, 정확도가 모두 해당한다.
 - **임계값을 조정해 결과를 맞추는 방식으로 문제를 덮지 않는다.** 조정했으면 근거와 함께 보고한다.
 - **GPU 전용 코드를 기본 경로로 만들지 않는다.** CPU 실행 경로를 함께 유지한다.
-- **stream-server에 추론 로직을, inference에 스트림 연결 관리를 넣지 않는다.**
+- **worker에 추론 로직을, deeplearning에 스트림 연결 관리를 넣지 않는다.**
 - **영상 원본과 개인정보가 로그·테스트 자산에 남지 않게 한다.**
 - 모델 종류·버전, 프레임 전달 방식, 실행 장치는 **결정 필요** 항목이다.
   확정 전이면 특정 선택에 강하게 결합된 구조를 굳히지 않고, 확정 시 [ADR](../architecture/decisions/)로 남긴다.

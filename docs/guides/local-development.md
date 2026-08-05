@@ -13,11 +13,10 @@
 
 | 서비스 | 실행 방법 위치 |
 | --- | --- |
-| frontend | [webapps/frontend/README.md](../../webapps/frontend/README.md) |
-| backend | [webapps/backend/README.md](../../webapps/backend/README.md) |
-| inference | [webapps/inference/README.md](../../webapps/inference/README.md) |
-| stream-server | [webapps/stream-server/README.md](../../webapps/stream-server/README.md) |
-| monitoring | [webapps/monitoring/README.md](../../webapps/monitoring/README.md) |
+| fastapi | [webapps/fastapi/README.md](../../webapps/fastapi/README.md) |
+| deeplearning | [deeplearning/README.md](../../deeplearning/README.md) |
+| worker | [worker/README.md](../../worker/README.md) |
+| monitoring | [monitoring/README.md](../../monitoring/README.md) |
 | 각 RPA | `RPAs/<rpa-name>/README.md` |
 
 여러 서비스를 한 번에 띄우는 통합 실행 수단(`docker-compose` 등)은 아직 없다.

@@ -12,8 +12,7 @@
 
 | Skill | 언제 쓰는가 |
 | --- | --- |
-| [create-fastapi-feature](./create-fastapi-feature/SKILL.md) | 백엔드에 새 API 엔드포인트를 추가할 때 |
-| [create-frontend-feature](./create-frontend-feature/SKILL.md) | 대시보드에 화면이나 기능을 추가할 때 |
+| [create-fastapi-feature](./create-fastapi-feature/SKILL.md) | API 엔드포인트나 화면을 추가할 때 |
 | [create-rpa-workflow](./create-rpa-workflow/SKILL.md) | 새 업무 자동화를 만들 때 |
 | [add-monitoring-metric](./add-monitoring-metric/SKILL.md) | Prometheus 지표를 추가할 때 |
 | [review-code](./review-code/SKILL.md) | 변경된 코드를 검토할 때 |

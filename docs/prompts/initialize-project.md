@@ -19,7 +19,7 @@
 | `{{RESPONSIBILITIES}}` | 담당할 책임 목록 | |
 | `{{OUT_OF_SCOPE}}` | 담당하지 않을 것 | |
 | `{{TECH_CANDIDATES}}` | 기술 후보와 확정 여부 | `Python / FastAPI (확정), 큐 (결정 필요)` |
-| `{{RELATED_SERVICES}}` | 연동할 서비스 | `backend, monitoring` |
+| `{{RELATED_SERVICES}}` | 연동할 서비스 | `fastapi, monitoring` |
 
 ## 프롬프트
 

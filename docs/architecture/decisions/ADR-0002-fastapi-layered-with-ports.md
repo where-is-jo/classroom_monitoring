@@ -1,12 +1,16 @@
-# ADR-0002: backend 계층형 구조와 경계 포트
+# ADR-0002: fastapi 계층형 구조와 경계 포트
 
 ## Status
 
 Accepted
 
+> 이 ADR 작성 이후 디렉터리가 개편되어 `webapps/backend`가 `webapps/fastapi`로 바뀌었고,
+> 프론트엔드가 Jinja2 템플릿으로 통합됐다. 아래 본문의 이름과 경로는 그에 맞게 갱신했다.
+> **결정 내용 자체는 바뀌지 않았다.** 구조를 다시 정할 경우 새 ADR을 작성한다.
+
 ## Context
 
-`webapps/backend` 구현을 시작하기 전에 내부 구조를 정해야 한다.
+`webapps/fastapi` 구현을 시작하기 전에 내부 구조를 정해야 한다.
 
 두 가지 제약이 맞선다.
 
@@ -24,7 +28,7 @@ Accepted
 
 따라서 그 경계에만 포트를 두고 나머지는 계층형을 유지한다.
 
-기존 [backend-agent 규칙](../../agents/backend-agent.md)은 이미 "서비스 계층은 FastAPI에
+기존 [fastapi-agent 규칙](../../agents/fastapi-agent.md)은 이미 "서비스 계층은 FastAPI에
 의존하지 않는다"를 요구하고 있다. 이 결정은 그 요구를 형식화하는 것이며 새 제약을 더하지 않는다.
 
 ## Decision
@@ -75,7 +79,7 @@ MinIO는 S3 호환이므로 실제 S3로 옮길 가능성도 남아 있다.
 기술 계층별(`routers/`, `services/`)이 아니라 기능별(`events/`, `cameras/`)로 나눈다.
 기능 하나를 추가·삭제·리뷰할 때 디렉터리 하나만 보면 된다.
 
-구체적인 디렉터리 구조는 [backend README의 디렉터리 구조](../../../webapps/backend/README.md#디렉터리-구조)에 있다.
+구체적인 디렉터리 구조는 [fastapi README의 디렉터리 구조](../../../webapps/fastapi/README.md#디렉터리-구조)에 있다.
 여기에 같은 트리를 복사하지 않는다.
 
 ### 5. 도메인 모델과 스키마를 구분한다
@@ -126,14 +130,14 @@ MinIO는 S3 호환이므로 실제 S3로 옮길 가능성도 남아 있다.
 
 **영향받는 문서·코드**
 
-- [`webapps/backend/README.md`](../../../webapps/backend/README.md) — 디렉터리 구조 절
-- [`docs/agents/backend-agent.md`](../../agents/backend-agent.md) — 포트 관련 규칙
+- [`webapps/fastapi/README.md`](../../../webapps/fastapi/README.md) — 디렉터리 구조 절
+- [`docs/agents/fastapi-agent.md`](../../agents/fastapi-agent.md) — 포트 관련 규칙
 - [`docs/skills/create-fastapi-feature/SKILL.md`](../../skills/create-fastapi-feature/SKILL.md) — 구현 절차
 
 ## Follow-up Actions
 
-- [x] backend README에 디렉터리 구조 절 추가
-- [x] backend-agent에 포트 규칙 추가
+- [x] fastapi README에 디렉터리 구조 절 추가
+- [x] fastapi-agent에 포트 규칙 추가
 - [x] create-fastapi-feature SKILL의 절차 갱신
 - [x] decisions/README.md 기록 목록에 추가
 - [ ] 의존성 주입을 FastAPI `Depends`로 할지 별도 컨테이너를 쓸지는 첫 엔드포인트 구현 시 결정

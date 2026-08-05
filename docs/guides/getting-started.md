@@ -14,7 +14,7 @@
 
 1. **[루트 README](../../README.md)** — 저장소 전체 구조와 아직 결정되지 않은 항목
 2. **[아키텍처 개요](../architecture/overview.md)** — 서비스가 어떻게 나뉘고 왜 그렇게 나뉘었는지
-3. **담당 영역의 서비스 README** — [frontend](../../webapps/frontend/README.md) · [backend](../../webapps/backend/README.md) · [inference](../../webapps/inference/README.md) · [stream-server](../../webapps/stream-server/README.md) · [monitoring](../../webapps/monitoring/README.md) · [RPAs](../../RPAs/README.md)
+3. **담당 영역의 서비스 README** — [fastapi](../../webapps/fastapi/README.md) · [deeplearning](../../deeplearning/README.md) · [worker](../../worker/README.md) · [monitoring](../../monitoring/README.md) · [RPAs](../../RPAs/README.md)
 4. **[개발 규칙](../conventions/)** — 전부 읽을 필요는 없다. 아래 순서로 필요할 때 본다
 
 | 상황 | 문서 |

@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `{{PR_REFERENCE}}` | PR 번호·URL 또는 브랜치 | `feature/event-list` |
 | `{{CHANGE_INTENT}}` | 이 변경이 해결하려는 문제 | |
-| `{{CHANGED_AREAS}}` | 변경된 영역 | `webapps/backend` |
+| `{{CHANGED_AREAS}}` | 변경된 영역 | `webapps/fastapi` |
 | `{{AUTHOR_VALIDATION}}` | 작성자가 실행한 검증 | `단위 테스트 통과` |
 | `{{FOCUS}}` | 특히 봐줬으면 하는 부분(없으면 `없음`) | |
 
@@ -37,7 +37,7 @@
 
 ## 참고할 Agent
 - `docs/agents/AGENTS.md` (공통 계약과 금지 사항)
-- 변경 영역의 Agent 문서(frontend / backend / ai / rpa / documentation)
+- 변경 영역의 Agent 문서(fastapi / ai / rpa / documentation)
 - 규칙 위반을 지적할 때는 근거가 되는 문서 경로를 함께 적는다.
 
 ## 참고할 Skill
@@ -50,7 +50,7 @@
    요구사항 → 오류 → 보안 → 데이터 손실 → 동시성 → 성능 → 테스트 → 문서
 4. 각 지적에 재현 조건이나 근거를 붙인다.
 5. 아키텍처 규칙 위반이 있는지 확인한다.
-   - 프론트엔드가 추론·스트림 서비스를 직접 호출하는가
+   - 템플릿이나 브라우저 스크립트에 비즈니스 판단이 들어갔는가
    - 라우터에 비즈니스 로직이 들어갔는가
    - 서비스 간 계약이 문서 없이 바뀌었는가
    - 영상과 메타데이터의 저장 책임이 섞였는가

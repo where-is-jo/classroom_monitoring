@@ -13,7 +13,7 @@
 
 | 변수 | 설명 | 예 |
 | --- | --- | --- |
-| `{{SCOPE}}` | 갱신 대상 범위 | `webapps/backend 문서 전체` |
+| `{{SCOPE}}` | 갱신 대상 범위 | `webapps/fastapi 문서 전체` |
 | `{{TRIGGER}}` | 갱신이 필요해진 이유 | `이벤트 조회 API 추가` |
 | `{{KNOWN_GAPS}}` | 이미 아는 불일치(없으면 `없음`) | |
 | `{{DECIDED_ITEMS}}` | 확정된 미결정 항목(없으면 `없음`) | `저장소를 MongoDB로 확정` |

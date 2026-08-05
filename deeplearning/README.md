@@ -1,4 +1,4 @@
-# inference
+# deeplearning
 
 컴퓨터 비전 모델을 실행해 영상 프레임에서 객체를 탐지하는 추론 서비스 디렉터리다.
 
@@ -29,9 +29,9 @@
 ## 포함하지 않아야 할 기능
 
 - 사용자 인증·권한 판정
-- 탐지 결과의 비즈니스 해석(예: "출근으로 간주") → `backend` 책임
+- 탐지 결과의 비즈니스 해석(예: "출근으로 간주") → `fastapi` 책임
 - 탐지 결과의 영속 저장
-- 스트림 연결 유지 → `stream-server` 책임
+- 스트림 연결 유지 → `worker` 책임
 - 모델 가중치 파일의 저장소 커밋
 
 ## 모델 파일 취급
@@ -43,7 +43,7 @@
 - 모델 교체 시 입출력 스키마 변경 여부를 먼저 확인한다.
 
 배포 시 모델 파일 전달 방식은 **결정 필요**다.
-객체 저장소가 MinIO로 확정됐으므로([ADR-0004](../../docs/architecture/decisions/ADR-0004-object-storage-minio.md))
+객체 저장소가 MinIO로 확정됐으므로([ADR-0004](../docs/architecture/decisions/ADR-0004-object-storage-minio.md))
 MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함, 볼륨 마운트도 여전히 후보다.
 
 ## 예상 기술
@@ -57,14 +57,14 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 
 ## 다른 서비스와의 관계
 
-- `stream-server`: 추론 대상 프레임의 공급원으로 예상한다. 전달 방식은 **결정 필요**.
-- `backend`: 추론 결과의 소비자다. 결과 스키마는 backend와 합의한 뒤 변경한다.
-- `frontend`: 직접 호출하지 않는다.
+- `worker`: 추론 대상 프레임의 공급원으로 예상한다. 전달 방식은 **결정 필요**.
+- `fastapi`: 추론 결과의 소비자다. 결과 스키마는 fastapi와 합의한 뒤 변경한다.
+- 브라우저: 직접 호출하지 않는다. `fastapi`를 통해서만 결과에 접근한다.
 - `monitoring`: 추론 지연·처리량 지표를 노출한다. 지표 이름은 `smart_office_` 접두사를 사용한다.
 
 ## 향후 구현 시 필요한 환경변수
 
-값의 취급과 명명 규칙은 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
+값의 취급과 명명 규칙은 [환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 
 ## 관련 문서
 
-- [AI 에이전트 규칙](../../docs/agents/ai-agent.md)
-- [모니터링 지표 추가 절차](../../docs/skills/add-monitoring-metric/SKILL.md)
-- [데이터 흐름](../../docs/architecture/data-flow.md)
-- [아키텍처 개요](../../docs/architecture/overview.md)
+- [AI 에이전트 규칙](../docs/agents/ai-agent.md)
+- [모니터링 지표 추가 절차](../docs/skills/add-monitoring-metric/SKILL.md)
+- [데이터 흐름](../docs/architecture/data-flow.md)
+- [아키텍처 개요](../docs/architecture/overview.md)

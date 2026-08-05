@@ -1,8 +1,12 @@
-# stream-server
+# worker
 
 CCTV 또는 Jetson 장치에서 영상을 수신하고, 추론 가능한 형태의 프레임으로 전달하는 서비스 디렉터리다.
 
 > 현재 상태: 구현 전. 프로토콜과 프레임 전달 방식은 아직 확정되지 않았다.
+>
+> **범위 주의**: 이름은 `worker`지만 현재 담당은 **영상 스트림 처리로 한정**한다.
+> 큐 소비, 배치 작업 같은 일반 백그라운드 작업은 아직 고려 대상이 아니다.
+> 그런 작업이 필요해지면 여기에 끼워 넣기 전에 책임 분리를 먼저 검토한다.
 
 ## 서비스 목적
 
@@ -26,9 +30,9 @@ CCTV 또는 Jetson 장치에서 영상을 수신하고, 추론 가능한 형태�
 
 ## 포함하지 않아야 할 기능
 
-- 객체 탐지·모델 추론 → `inference` 책임
+- 객체 탐지·모델 추론 → `deeplearning` 책임
 - 영상의 장기 보관 정책 결정과 저장 실행
-- 탐지 결과에 대한 비즈니스 판단 → `backend` 책임
+- 탐지 결과에 대한 비즈니스 판단 → `fastapi` 책임
 - 사용자 대상 API 제공
 
 ## 예상 기술
@@ -45,23 +49,23 @@ CCTV 또는 Jetson 장치에서 영상을 수신하고, 추론 가능한 형태�
 ## 다른 서비스와의 관계
 
 - 영상 소스(CCTV / Jetson): 외부 시스템이다. 접속 정보는 환경변수로 주입한다.
-- `inference`: 프레임 공급 대상이다. 전달 방식 확정 전까지 임의 구현하지 않는다.
-- `backend`: 스트림 연결 상태를 조회할 수 있게 한다. 조회 경로는 **결정 필요**.
-- `frontend`: 직접 호출하지 않는다.
+- `deeplearning`: 프레임 공급 대상이다. 전달 방식 확정 전까지 임의 구현하지 않는다.
+- `fastapi`: 스트림 연결 상태를 조회할 수 있게 한다. 조회 경로는 **결정 필요**.
+- 브라우저: 직접 호출하지 않는다. `fastapi`를 통해서만 상태를 조회한다.
 - `monitoring`: 연결 상태·프레임 처리량 지표를 노출한다.
 
 ## 영상 데이터와 메타데이터의 분리
 
 영상 바이트와 탐지 메타데이터는 저장 책임을 분리한다.
-메타데이터는 MongoDB, 영상·스냅샷은 MinIO에 보관한다([ADR-0003](../../docs/architecture/decisions/ADR-0003-metadata-store-mongodb.md), [ADR-0004](../../docs/architecture/decisions/ADR-0004-object-storage-minio.md)).
+메타데이터는 MongoDB, 영상·스냅샷은 MinIO에 보관한다([ADR-0003](../docs/architecture/decisions/ADR-0003-metadata-store-mongodb.md), [ADR-0004](../docs/architecture/decisions/ADR-0004-object-storage-minio.md)).
 
-**stream-server가 MinIO에 직접 쓸지, backend를 거칠지는 결정 필요 항목이다.**
+**worker가 MinIO에 직접 쓸지, fastapi를 거칠지는 결정 필요 항목이다.**
 저장 범위와 보존 기간도 아직 합의되지 않았다.
 확정 전까지 영상을 저장하는 기능을 만들지 않는다.
 
 ## 향후 구현 시 필요한 환경변수
 
-값의 취급과 명명 규칙은 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
+값의 취급과 명명 규칙은 [환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
 카메라 접속 자격 증명은 어떤 형태로도 저장소에 두지 않는다.
 
 | 이름 | 용도 | 비고 |
@@ -80,7 +84,7 @@ CCTV 또는 Jetson 장치에서 영상을 수신하고, 추론 가능한 형태�
 
 ## 관련 문서
 
-- [AI 에이전트 규칙](../../docs/agents/ai-agent.md)
-- [데이터 흐름](../../docs/architecture/data-flow.md)
-- [시스템 컨텍스트](../../docs/architecture/system-context.md)
-- [환경변수 규칙](../../docs/conventions/environment-convention.md)
+- [AI 에이전트 규칙](../docs/agents/ai-agent.md)
+- [데이터 흐름](../docs/architecture/data-flow.md)
+- [시스템 컨텍스트](../docs/architecture/system-context.md)
+- [환경변수 규칙](../docs/conventions/environment-convention.md)

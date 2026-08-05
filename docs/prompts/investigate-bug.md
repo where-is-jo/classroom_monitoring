@@ -44,7 +44,7 @@
 
 ## 참고할 Agent
 - `docs/agents/AGENTS.md` (공통 계약, 반드시 먼저 읽는다)
-- 문제가 발생한 영역의 Agent 문서(frontend / backend / ai / rpa)
+- 문제가 발생한 영역의 Agent 문서(fastapi / ai / rpa)
 
 ## 참고할 Skill
 - `docs/skills/review-code/SKILL.md` — 원인 후보를 좁힐 때 점검 순서로 사용

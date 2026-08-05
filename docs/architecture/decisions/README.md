@@ -56,7 +56,7 @@ ADR은 그 반복을 막기 위한 기록이다.
 
 | 번호 | 제목 | 상태 |
 | --- | --- | --- |
-| [0002](./ADR-0002-backend-layered-with-ports.md) | backend 계층형 구조와 경계 포트 | Accepted |
+| [0002](./ADR-0002-fastapi-layered-with-ports.md) | fastapi 계층형 구조와 경계 포트 | Accepted |
 | [0003](./ADR-0003-metadata-store-mongodb.md) | 메타데이터 저장소로 MongoDB 채택 | Accepted |
 | [0004](./ADR-0004-object-storage-minio.md) | 영상·스냅샷 저장소로 MinIO 채택 | Accepted |
 

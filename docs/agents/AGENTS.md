@@ -21,12 +21,18 @@
 
 | 영역 | 책임 | 여기에 두지 않는 것 |
 | --- | --- | --- |
-| [`webapps`](../../README.md#webapps) | 실행되는 서비스 코드. 서비스마다 독립 디렉터리를 가지며 각자의 README가 책임 범위를 정의한다. | 문서 체계, 자동화 워크플로 |
+| [`webapps/fastapi`](../../webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 외부 진입점. | 추론 연산, 스트림 처리 |
+| [`deeplearning`](../../deeplearning/README.md) | 모델 로딩과 추론. 표준화된 탐지 결과를 반환한다. | 비즈니스 해석, 영속 저장 |
+| [`worker`](../../worker/README.md) | 영상 수신과 프레임 공급. | 추론, 장기 저장 |
+| [`monitoring`](../../monitoring/README.md) | Prometheus·Grafana 설정. | 애플리케이션 비즈니스 로직 |
 | `docs` | 아키텍처, 개발 규칙, 에이전트 규칙, 작업 절차, 프롬프트, 템플릿. **AI 에이전트 관련 문서는 모두 여기에 둔다.** | 실행 코드 |
 | [`RPAs`](../../RPAs/README.md) | 업무 자동화 프로젝트. 프로젝트별 독립 디렉터리로 관리한다. | 상시 실행 서비스 |
 
-최상위에는 `webapps/`, `docs/`, `RPAs/`, `README.md`만 둔다.
+최상위에는 `webapps/`, `deeplearning/`, `worker/`, `monitoring/`, `docs/`, `RPAs/`, `README.md`만 둔다.
 최상위에 `AGENTS.md`, 빌드 설정, 인프라 파일, `scripts/`를 새로 만들지 않는다.
+
+`webapps/`는 웹 애플리케이션 전용이며 현재 `fastapi` 하나를 담는다.
+추론·스트림·관측처럼 웹 요청을 처리하지 않는 서비스는 최상위에 독립 디렉터리로 둔다.
 
 **예외**: 저장소 운영 자체에 필요한 `.gitignore`는 최상위에 둔다.
 또한 `.gitignore`로 추적에서 제외된 로컬 파일(`.env`, `initial_prompt.md` 등)은
@@ -45,7 +51,7 @@
 | 반복 작업의 실행 절차 | [`docs/skills`](../skills/README.md) |
 | 작업 지시 템플릿 | [`docs/prompts`](../prompts/) |
 | 역할별 에이전트 규칙 | [`docs/agents`](./) |
-| 개별 서비스의 책임과 범위 | 해당 `webapps/<service>/README.md` |
+| 개별 서비스의 책임과 범위 | 해당 서비스 디렉터리의 `README.md` |
 | RPA 공통 규칙 | [`RPAs/README.md`](../../RPAs/README.md) |
 | 저장소 진입점과 미결정 항목 목록 | [루트 `README.md`](../../README.md) |
 
@@ -56,8 +62,8 @@
 
 아래는 서비스 구현 시 지켜야 할 구조 원칙이다. 위반이 필요하면 먼저 [ADR](../architecture/decisions/)로 남긴다.
 
-1. **프론트엔드는 추론 서비스에 직접 접근하지 않는다.** `stream-server`도 마찬가지다.
-2. **외부 클라이언트 요청은 backend를 통해 처리한다.** backend가 유일한 외부 진입점이다.
+1. **브라우저는 `fastapi`만 호출한다.** `deeplearning`과 `worker`에 직접 접근하지 않는다.
+2. **외부 클라이언트 요청은 `fastapi`를 통해 처리한다.** `fastapi`가 유일한 외부 진입점이다.
 3. **영상 데이터와 메타데이터의 저장 책임을 분리한다.** 한 서비스가 둘을 모두 소유하지 않는다.
 4. **서비스 간 계약은 문서화된 API 또는 이벤트 스키마를 따른다.** 상대 서비스의 내부 구조에 의존하지 않는다.
 5. **비즈니스 로직과 프레임워크 코드를 분리한다.** 라우터·컴포넌트 안에 판단 로직을 두지 않는다.
@@ -81,8 +87,7 @@
 
 | 문서 | 담당 |
 | --- | --- |
-| [frontend-agent](./frontend-agent.md) | 대시보드 화면, API 클라이언트 |
-| [backend-agent](./backend-agent.md) | FastAPI API, 비즈니스 로직 |
+| [fastapi-agent](./fastapi-agent.md) | API, Jinja2 화면, 비즈니스 로직 |
 | [ai-agent](./ai-agent.md) | 추론 서비스, 스트림 처리 |
 | [rpa-agent](./rpa-agent.md) | 업무 자동화 워크플로 |
 | [documentation-agent](./documentation-agent.md) | 문서 작성과 정합성 |

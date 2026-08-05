@@ -33,7 +33,7 @@ Prometheus와 Grafana 기반 관측 설정을 관리하는 디렉터리다.
 
 - 프로젝트 지표 이름은 가능한 경우 `smart_office_` 접두사를 사용한다.
 - 사용자 ID, 요청 ID처럼 값이 무한히 늘어나는 label은 사용하지 않는다.
-- 지표 추가 절차는 [모니터링 지표 추가 Skill](../../docs/skills/add-monitoring-metric/SKILL.md)을 따른다.
+- 지표 추가 절차는 [모니터링 지표 추가 Skill](../docs/skills/add-monitoring-metric/SKILL.md)을 따른다.
 
 ## 예상 기술
 
@@ -46,13 +46,13 @@ Prometheus와 Grafana 기반 관측 설정을 관리하는 디렉터리다.
 
 ## 다른 서비스와의 관계
 
-- `backend`, `inference`, `stream-server`: 지표 노출 주체다. monitoring은 이를 수집만 한다.
-- `frontend`: 지표를 직접 조회하지 않는다.
+- `fastapi`, `deeplearning`, `worker`: 지표 노출 주체다. monitoring은 이를 수집만 한다.
+- 브라우저: 지표를 직접 조회하지 않는다. 필요하면 `fastapi`를 통한다.
 - `RPAs`: 자동화 실행 결과를 지표로 다룰지는 **결정 필요**.
 
 ## 향후 구현 시 필요한 환경변수
 
-값의 취급과 명명 규칙은 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
+값의 취급과 명명 규칙은 [환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
@@ -68,6 +68,6 @@ Prometheus와 Grafana 기반 관측 설정을 관리하는 디렉터리다.
 
 ## 관련 문서
 
-- [모니터링 지표 추가 절차](../../docs/skills/add-monitoring-metric/SKILL.md)
-- [아키텍처 개요](../../docs/architecture/overview.md)
-- [코딩 규칙](../../docs/conventions/coding-convention.md)
+- [모니터링 지표 추가 절차](../docs/skills/add-monitoring-metric/SKILL.md)
+- [아키텍처 개요](../docs/architecture/overview.md)
+- [코딩 규칙](../docs/conventions/coding-convention.md)

@@ -21,25 +21,30 @@
 ## 디렉터리 구조
 
 ```text
-webapps/     실행 서비스
-docs/        문서, AI 에이전트 규칙, Skill, 프롬프트
-RPAs/        업무 자동화 프로젝트
-README.md    이 문서
+webapps/       웹 애플리케이션
+deeplearning/  모델 추론 서비스
+worker/        영상 수신·프레임 공급
+monitoring/    Prometheus·Grafana 설정
+docs/          문서, AI 에이전트 규칙, Skill, 프롬프트
+RPAs/          업무 자동화 프로젝트
+README.md      이 문서
 ```
 
-최상위에는 위 네 항목과 `.gitignore`만 둔다. 빌드 설정, 인프라 파일, 에이전트 문서를
+최상위에는 위 항목과 `.gitignore`만 둔다. 빌드 설정, 인프라 파일, 에이전트 문서를
 최상위에 새로 만들지 않는다. 자세한 예외 범위는
 [AGENTS.md의 Repository Structure](./docs/agents/AGENTS.md#repository-structure)에 있다.
 
-### webapps
+### 서비스
 
 | 디렉터리 | 역할 |
 | --- | --- |
-| [frontend](./webapps/frontend/README.md) | 사용자·관리자 대시보드. backend를 통해서만 데이터를 조회한다. |
-| [backend](./webapps/backend/README.md) | FastAPI API 서버. 외부 요청의 유일한 진입점. |
-| [inference](./webapps/inference/README.md) | 영상 프레임 추론. 표준화된 탐지 결과를 반환한다. |
-| [stream-server](./webapps/stream-server/README.md) | CCTV·Jetson 영상 수신과 프레임 공급. |
-| [monitoring](./webapps/monitoring/README.md) | Prometheus·Grafana 설정 관리. |
+| [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. |
+| [deeplearning](./deeplearning/README.md) | 영상 프레임 추론. 표준화된 탐지 결과를 반환한다. |
+| [worker](./worker/README.md) | CCTV·Jetson 영상 수신과 프레임 공급. |
+| [monitoring](./monitoring/README.md) | Prometheus·Grafana 설정 관리. |
+
+`webapps/`는 웹 애플리케이션 전용이다. 웹 요청을 처리하지 않는 서비스는
+최상위에 독립 디렉터리로 둔다.
 
 ### docs
 
@@ -61,7 +66,7 @@ README.md    이 문서
 ## 팀원이 가장 먼저 읽을 문서
 
 1. 이 문서
-2. 담당 서비스의 `webapps/<service>/README.md`
+2. 담당 서비스 디렉터리의 `README.md`
 3. [아키텍처 개요](./docs/architecture/overview.md) — 서비스 관계와 미결정 항목
 4. 개발 규칙 — [Git](./docs/conventions/git-convention.md) · [코딩](./docs/conventions/coding-convention.md) · [API](./docs/conventions/api-convention.md) · [환경변수](./docs/conventions/environment-convention.md) · [문서](./docs/conventions/documentation-convention.md)
 5. [시작하기 가이드](./docs/guides/getting-started.md) — 무엇부터 읽고 어디서 시작할지
@@ -71,7 +76,7 @@ README.md    이 문서
 이 저장소는 AI 코딩 에이전트와 함께 작업하는 것을 전제로 한다.
 
 - 공통 작업 계약은 [docs/agents/AGENTS.md](./docs/agents/AGENTS.md)에 있다. 에이전트는 이 문서를 먼저 읽는다.
-- 역할별 규칙: [프론트엔드](./docs/agents/frontend-agent.md) · [백엔드](./docs/agents/backend-agent.md) · [AI](./docs/agents/ai-agent.md) · [RPA](./docs/agents/rpa-agent.md) · [문서](./docs/agents/documentation-agent.md)
+- 역할별 규칙: [FastAPI](./docs/agents/fastapi-agent.md) · [AI](./docs/agents/ai-agent.md) · [RPA](./docs/agents/rpa-agent.md) · [문서](./docs/agents/documentation-agent.md)
 - 반복 작업은 [docs/skills/](./docs/skills/README.md)의 절차를 따른다. 새 Skill 추가 방법도 같은 문서에 있다.
 - 작업 지시는 `docs/prompts/`의 템플릿을 복사해 변수를 채운 뒤 사용한다.
   [프로젝트 초기화](./docs/prompts/initialize-project.md) · [기능 구현](./docs/prompts/implement-feature.md) · [버그 조사](./docs/prompts/investigate-bug.md) · [PR 리뷰](./docs/prompts/review-pull-request.md) · [문서 갱신](./docs/prompts/update-project-docs.md)
@@ -82,7 +87,8 @@ README.md    이 문서
 
 | 추가할 것 | 위치 | 참고 |
 | --- | --- | --- |
-| 새 웹 서비스 | `webapps/<service-name>/` | [서비스 README 템플릿](./docs/templates/service-readme-template.md) |
+| 새 웹 애플리케이션 | `webapps/<service-name>/` | [서비스 README 템플릿](./docs/templates/service-readme-template.md) |
+| 웹이 아닌 새 서비스 | 최상위 `<service-name>/` | 동일. AGENTS.md의 최상위 제약도 갱신한다 |
 | 새 RPA | `RPAs/<rpa-name>/` | [RPA 규칙](./RPAs/README.md) |
 | 아키텍처 결정 | `docs/architecture/decisions/` | [ADR 작성 방법](./docs/architecture/decisions/README.md) |
 | 개발 규칙 | `docs/conventions/` | 기존 문서 수정을 우선 |
@@ -105,15 +111,15 @@ README.md    이 문서
 
 아래는 확정되지 않았다. 임의로 구현하지 말고 결정 후 ADR로 남긴다.
 
-- 프론트엔드 프레임워크와 실시간 전달 방식(WebSocket / SSE / 폴링)
+- 실시간 화면 갱신 방식(폴링 / SSE / WebSocket)
 - 서비스 간 통신 방식(동기 HTTP / 메시지 큐)
 - 사용할 모델과 버전, GPU·Jetson 실행 범위
 - 영상 수신 프로토콜(RTSP / WebRTC / HTTP 푸시)
 - 캐시·큐 도입 여부(Redis는 후보)
 - 영상 저장 범위·보존 기간·접근 권한 — 개인정보가 걸린 합의 사항
-- 영상을 저장하는 주체(stream-server / backend)
+- 영상을 저장하는 주체(worker / fastapi)
 - 배포 환경과 배포 방식
 - 알림 채널
 
 확정된 결정은 [ADR](./docs/architecture/decisions/README.md)에 기록되어 있다.
-메타데이터 저장소(MongoDB), 영상 저장소(MinIO), backend 내부 구조가 여기에 해당한다.
+메타데이터 저장소(MongoDB), 영상 저장소(MinIO), fastapi 내부 구조가 여기에 해당한다.

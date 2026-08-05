@@ -16,20 +16,20 @@
 → 추론 서비스
 → FastAPI
 → 데이터 저장소
-→ 프론트엔드 대시보드
+→ fastapi 화면
 ```
 
 ## 단계별 데이터 변환
 
 | 단계 | 입력 | 출력 | 담당 |
 | --- | --- | --- | --- |
-| 1. 수집 | 카메라 영상 스트림 | 연속 프레임 | stream-server |
-| 2. 샘플링 | 연속 프레임 | 추론 대상 프레임(일부) | stream-server |
-| 3. 추론 | 프레임 | 탐지 결과(객체·좌표·신뢰도) | inference |
-| 4. 해석 | 탐지 결과 | 업무 의미가 부여된 이벤트 | backend |
-| 5. 저장 | 이벤트 | 저장된 레코드 | backend |
-| 6. 조회 | 조회 요청 | 응답 데이터 | backend |
-| 7. 표시 | 응답 데이터 | 화면 | frontend |
+| 1. 수집 | 카메라 영상 스트림 | 연속 프레임 | worker |
+| 2. 샘플링 | 연속 프레임 | 추론 대상 프레임(일부) | worker |
+| 3. 추론 | 프레임 | 탐지 결과(객체·좌표·신뢰도) | deeplearning |
+| 4. 해석 | 탐지 결과 | 업무 의미가 부여된 이벤트 | fastapi |
+| 5. 저장 | 이벤트 | 저장된 레코드 | fastapi |
+| 6. 조회 | 조회 요청 | 응답 데이터 | fastapi |
+| 7. 표시 | 응답 데이터 | Jinja2 렌더링 화면 | fastapi |
 
 각 단계에서 지켜야 할 경계는 다음과 같다.
 
@@ -62,7 +62,7 @@
 | 2→3 프레임 전달 | 동기 호출 / 공유 저장소 / 큐 | 지연과 유실 허용치에 따라 다름 |
 | 3→4 결과 전달 | 동기 응답 / 큐 | 추론 지연이 API 응답을 막지 않아야 함 |
 | 6→7 갱신 방식 | 폴링 / WebSocket / SSE | 필요한 실시간성 수준 미정 |
-| 5 영상 저장 주체 | stream-server / backend | 저장 범위 합의 후 결정 |
+| 5 영상 저장 주체 | worker / fastapi | 저장 범위 합의 후 결정 |
 
 ## 실패 시 동작
 
@@ -81,4 +81,4 @@
 - [아키텍처 개요](./overview.md)
 - [시스템 컨텍스트](./system-context.md)
 - [결정 기록(ADR)](./decisions/README.md)
-- [inference README](../../webapps/inference/README.md) · [stream-server README](../../webapps/stream-server/README.md)
+- [deeplearning README](../../deeplearning/README.md) · [worker README](../../worker/README.md)

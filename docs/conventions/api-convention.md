@@ -1,6 +1,6 @@
 # API 규칙
 
-**목적**: backend가 제공하는 HTTP API의 형태를 통일한다.
+**목적**: fastapi가 제공하는 HTTP API의 형태를 통일한다.
 **대상 독자**: API를 만드는 사람과 소비하는 사람, AI 에이전트.
 
 > 아직 구현된 엔드포인트가 없다. 이 문서는 첫 엔드포인트를 만들 때 적용할 기준이다.
@@ -140,6 +140,6 @@ GET /events?limit=50&offset=0
 ## 관련 문서
 
 - [FastAPI 기능 추가 Skill](../skills/create-fastapi-feature/SKILL.md)
-- [backend-agent](../agents/backend-agent.md)
+- [fastapi-agent](../agents/fastapi-agent.md)
 - [코딩 규칙](./coding-convention.md)
-- [backend README](../../webapps/backend/README.md)
+- [fastapi README](../../webapps/fastapi/README.md)

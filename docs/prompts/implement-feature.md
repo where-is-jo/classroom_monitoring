@@ -13,7 +13,7 @@
 
 | 변수 | 설명 | 예 |
 | --- | --- | --- |
-| `{{TARGET_SERVICE}}` | 대상 서비스 디렉터리 | `webapps/backend` |
+| `{{TARGET_SERVICE}}` | 대상 서비스 디렉터리 | `webapps/fastapi` |
 | `{{FEATURE_NAME}}` | 기능 이름 | `탐지 이벤트 목록 조회` |
 | `{{REQUIREMENT}}` | 무엇이 필요한지 | |
 | `{{ACCEPTANCE_CRITERIA}}` | 무엇이 되면 완료인지 | |
@@ -38,15 +38,13 @@
 ## 참고할 Agent
 - `docs/agents/AGENTS.md` (공통 계약, 반드시 먼저 읽는다)
 - 대상 영역의 Agent 문서
-  - 프론트엔드: `docs/agents/frontend-agent.md`
-  - 백엔드: `docs/agents/backend-agent.md`
+  - API·화면: `docs/agents/fastapi-agent.md`
   - 추론·스트림: `docs/agents/ai-agent.md`
   - RPA: `docs/agents/rpa-agent.md`
 - 여러 영역에 걸치면 해당 문서를 모두 읽고, 규칙이 충돌하면 엄격한 쪽을 따른다.
 
 ## 참고할 Skill
 - 백엔드 API: `docs/skills/create-fastapi-feature/SKILL.md`
-- 프론트엔드 화면: `docs/skills/create-frontend-feature/SKILL.md`
 - RPA 워크플로: `docs/skills/create-rpa-workflow/SKILL.md`
 - 지표 추가가 포함되면: `docs/skills/add-monitoring-metric/SKILL.md`
 
