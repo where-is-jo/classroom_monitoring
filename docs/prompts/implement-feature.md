@@ -1,0 +1,89 @@
+# 기능 구현 프롬프트
+
+기존 서비스에 기능을 추가할 때 사용한다.
+
+## 사용법
+
+1. 아래 변수 값을 정한다. 특히 완료 조건은 비워두지 않는다.
+2. `## 프롬프트` 블록을 복사해 변수를 치환한 뒤 에이전트에게 전달한다.
+
+관련 문서: [AGENTS.md](../agents/AGENTS.md) · [Skill 목록](../skills/README.md)
+
+## 변수
+
+| 변수 | 설명 | 예 |
+| --- | --- | --- |
+| `{{TARGET_SERVICE}}` | 대상 서비스 디렉터리 | `webapps/backend` |
+| `{{FEATURE_NAME}}` | 기능 이름 | `탐지 이벤트 목록 조회` |
+| `{{REQUIREMENT}}` | 무엇이 필요한지 | |
+| `{{ACCEPTANCE_CRITERIA}}` | 무엇이 되면 완료인지 | |
+| `{{CONSTRAINTS}}` | 지켜야 할 제약 | `기존 응답 형식 유지` |
+| `{{RELATED_FILES}}` | 알고 있는 관련 파일 | |
+
+## 프롬프트
+
+```text
+{{TARGET_SERVICE}}에 기능을 추가한다.
+
+## 작업 목적
+{{FEATURE_NAME}}
+{{REQUIREMENT}}
+
+## 입력 정보
+- 대상 서비스: {{TARGET_SERVICE}}
+- 완료 조건: {{ACCEPTANCE_CRITERIA}}
+- 제약: {{CONSTRAINTS}}
+- 관련 파일(참고): {{RELATED_FILES}}
+
+## 참고할 Agent
+- `docs/agents/AGENTS.md` (공통 계약, 반드시 먼저 읽는다)
+- 대상 영역의 Agent 문서
+  - 프론트엔드: `docs/agents/frontend-agent.md`
+  - 백엔드: `docs/agents/backend-agent.md`
+  - 추론·스트림: `docs/agents/ai-agent.md`
+  - RPA: `docs/agents/rpa-agent.md`
+- 여러 영역에 걸치면 해당 문서를 모두 읽고, 규칙이 충돌하면 엄격한 쪽을 따른다.
+
+## 참고할 Skill
+- 백엔드 API: `docs/skills/create-fastapi-feature/SKILL.md`
+- 프론트엔드 화면: `docs/skills/create-frontend-feature/SKILL.md`
+- RPA 워크플로: `docs/skills/create-rpa-workflow/SKILL.md`
+- 지표 추가가 포함되면: `docs/skills/add-monitoring-metric/SKILL.md`
+
+해당하는 Skill이 있으면 그 절차를 그대로 따른다.
+
+## 작업 절차
+1. `{{TARGET_SERVICE}}/README.md`와 위 Agent 문서를 읽는다.
+2. 기존 구현에서 유사한 기능을 찾는다. 새로 만들기 전에 재사용 가능성을 확인한다.
+3. 변경 범위를 정리한다. 다른 서비스의 계약이 바뀌는지 먼저 판단하고,
+   바뀐다면 구현 전에 멈추고 영향을 보고한다.
+4. 해당 Skill의 Procedure를 따라 구현한다.
+5. 요청된 범위만 구현한다. 눈에 띄는 다른 문제는 고치지 말고 보고에 적는다.
+6. 테스트를 작성하고 실행한다.
+7. 문서 갱신이 필요한지 확인한다.
+
+## 금지 사항
+- 요청하지 않은 리팩터링과 파일 이동을 함께 수행하지 않는다.
+- 기존 API 계약(필드 삭제·이름 변경·타입 변경·필수화)을 승인 없이 바꾸지 않는다.
+- 테스트를 삭제하거나 조건을 약화시켜 통과시키지 않는다.
+- 근거 없이 새 의존성을 추가하지 않는다.
+- 설정값·주소·임계값을 코드에 하드코딩하지 않는다.
+- 비밀값을 저장소나 로그에 남기지 않는다.
+- 실행하지 않은 테스트를 실행했다고 보고하지 않는다.
+- 확정되지 않은 기술 결정을 임의로 확정하지 않는다.
+
+## 검증 방법
+- 완료 조건 {{ACCEPTANCE_CRITERIA}}을 하나씩 확인한다.
+- 해당 Skill의 Validation 절에 적힌 검증을 실제로 실행한다.
+- 실패 케이스(잘못된 입력, 권한 없음, 대상 없음)를 확인한다.
+- 기존 테스트가 여전히 통과하는지 확인한다.
+- 실행하지 못한 검증은 그대로 보고한다.
+
+## 완료 보고 형식
+## 작업 요약
+## 생성 또는 변경한 파일
+## 주요 설계 판단
+## 실행한 검증
+## 실행하지 못한 검증
+## 남은 위험 또는 후속 작업
+```
