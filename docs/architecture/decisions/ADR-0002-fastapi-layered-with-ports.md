@@ -140,5 +140,6 @@ MinIO는 S3 호환이므로 실제 S3로 옮길 가능성도 남아 있다.
 - [x] fastapi-agent에 포트 규칙 추가
 - [x] create-fastapi-feature SKILL의 절차 갱신
 - [x] decisions/README.md 기록 목록에 추가
-- [ ] 의존성 주입을 FastAPI `Depends`로 할지 별도 컨테이너를 쓸지는 첫 엔드포인트 구현 시 결정
+- [x] 의존성 주입은 FastAPI `Depends`를 쓴다. 별도 컨테이너를 두지 않고
+      조립은 `app/shared/dependencies.py` 한 곳에서만 한다 (첫 구현 시 결정)
 - [ ] 도메인 규칙이 복잡해지면 구조 재검토

@@ -10,12 +10,17 @@
 
 ## 현재 단계
 
-**부트스트랩 단계다.** 서비스 코드는 아직 없다.
-지금 저장소에 있는 것은 디렉터리 구조와 팀·AI 에이전트가 함께 쓸 문서 체계다.
+문서 체계가 갖춰졌고, **`webapps/fastapi`에 최소 동작 골격이 있다.**
+이벤트 목록·상세 화면과 JSON API가 인메모리 샘플 데이터로 동작한다.
 
-문서 체계는 모두 갖춰졌다. 다음 단계는 서비스 구현이며,
-그에 앞서 [미결정 항목](#아직-결정되지-않은-항목)을 확정해야 한다.
+```bash
+cd webapps/fastapi
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
+```
 
+`deeplearning`, `worker`, `monitoring`, `RPAs`에는 아직 코드가 없다.
+MongoDB·MinIO 연동, 인증, 실시간 갱신, 추론도 구현되지 않았다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}스마트 오피스 모니터링{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-title" href="/events">스마트 오피스 모니터링</a>
+    <nav>
+      <a href="/events">탐지 이벤트</a>
+    </nav>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>현재 인메모리 샘플 데이터로 동작합니다. 실제 탐지 결과가 아닙니다.</p>
+  </footer>
+</body>
+</html>

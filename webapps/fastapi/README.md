@@ -2,8 +2,43 @@
 
 FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
 
-> 현재 상태: 구현 전. 이 문서는 구현이 시작될 때 지켜야 할 책임 범위를 정의한다.
-> 아직 존재하지 않는 엔드포인트, 화면, 실행 명령은 여기에 적지 않는다.
+> 현재 상태: **최소 골격 동작**. 이벤트 목록·상세 화면과 JSON API가 실행된다.
+> 데이터는 인메모리 샘플이며 MongoDB·MinIO 어댑터는 아직 없다.
+> 인증·권한, 실시간 갱신, 추론 연동도 구현되지 않았다.
+
+## 실행 방법
+
+```bash
+cd webapps/fastapi
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+브라우저에서 `http://127.0.0.1:8000`을 열면 이벤트 목록으로 이동한다.
+외부 의존 서비스가 필요 없다. `.env`도 없어도 기동한다(모든 설정에 기본값이 있다).
+
+설정을 바꾸려면 `.env.example`을 `.env`로 복사해 값을 채운다.
+
+### 엔드포인트
+
+| 경로 | 설명 |
+| --- | --- |
+| `GET /` | `/events`로 리다이렉트 |
+| `GET /events?limit=&offset=` | 이벤트 목록 화면 |
+| `GET /events/{event_id}` | 이벤트 상세 화면 |
+| `GET /health` | 기동 확인 |
+| `GET /api/v1/events?limit=&offset=` | 이벤트 목록 JSON |
+| `GET /api/v1/events/{event_id}` | 이벤트 상세 JSON |
+| `GET /docs` | 자동 생성 API 문서 |
+
+### 테스트
+
+```bash
+cd webapps/fastapi
+python -m pytest
+```
+
+외부 의존성 없이 실행된다.
 
 ## 서비스 목적
 
@@ -28,25 +63,31 @@ API 응답 또는 Jinja2 템플릿으로 렌더링한 화면으로 제공한다.
 
 ```text
 app/
+├─ main.py                 앱 조립. 라우터 등록, 정적 마운트, 예외 핸들러
 ├─ events/                 탐지 이벤트
-│  ├─ router.py            HTTP 관심사. API 응답과 템플릿 렌더링
+│  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
 │  ├─ schemas.py           Pydantic 요청·응답 스키마
 │  ├─ models.py            도메인 모델(dataclass)
 │  ├─ ports.py             외부 I/O 인터페이스(Protocol)
 │  └─ adapters/            포트 구현체
-│     └─ mongo_repository.py
-├─ cameras/                카메라 관리 (동일 구조)
-├─ auth/                   인증·권한 (동일 구조)
+│     └─ memory_repository.py    인메모리. mongo_repository.py는 다음 단계
 └─ shared/                 공통 설정·예외·의존성 조립
+   ├─ config.py            pydantic-settings
+   ├─ errors.py            도메인 예외와 오류 응답 형식
+   ├─ dependencies.py      어댑터 조립. 저장소 교체 시 고치는 유일한 파일
+   └─ templating.py        Jinja2 설정
 
 templates/                 Jinja2 템플릿
 ├─ base.html               공통 레이아웃
 ├─ events/                 기능별 템플릿
-└─ components/             재사용 조각
+└─ errors/                 오류 화면
 
 static/                    css, 브라우저 스크립트, 이미지
+tests/                     외부 의존성 없이 실행되는 테스트
 ```
+
+기능이 늘어나면 `app/cameras/`, `app/auth/`처럼 같은 구조의 디렉터리를 추가한다.
 
 호출 방향은 `router → service → port ← adapter`다.
 **서비스 계층은 어댑터를 직접 import하지 않는다.**

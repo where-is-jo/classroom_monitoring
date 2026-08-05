@@ -1,0 +1,117 @@
+/* 최소 스타일. 디자인 시스템이 정해지면 교체한다. */
+
+:root {
+  --fg: #1c1c1e;
+  --muted: #6b6b70;
+  --line: #d8d8dc;
+  --bg: #ffffff;
+  --accent: #1f5fbf;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #ececef;
+    --muted: #9c9ca3;
+    --line: #3a3a3e;
+    --bg: #17171a;
+    --accent: #79aaff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--fg);
+  background: var(--bg);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.site-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.site-title { font-weight: 600; text-decoration: none; color: var(--fg); }
+
+a { color: var(--accent); }
+
+.content { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+
+h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+
+.summary, .muted { color: var(--muted); font-size: 0.9rem; }
+
+/* 넓은 표는 페이지가 아니라 표 안에서 가로 스크롤한다. */
+.table-scroll { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; }
+
+th, td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+
+/* 상태를 색으로만 구분하지 않는다. 문구를 함께 표시하고 테두리로 구분한다. */
+.level {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.level--high { color: #b23c17; }
+.level--medium { color: #8a6d1f; }
+.level--low { color: var(--muted); }
+
+.pagination { display: flex; gap: 1rem; margin-top: 1.25rem; }
+.pagination .disabled { color: var(--muted); }
+
+.empty {
+  padding: 2rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.detail { display: grid; grid-template-columns: 10rem 1fr; gap: 0.5rem 1rem; }
+.detail dt { color: var(--muted); font-size: 0.9rem; }
+.detail dd { margin: 0; }
+
+code {
+  padding: 0.1rem 0.35rem;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.site-footer {
+  max-width: 60rem;
+  margin: 2rem auto 3rem;
+  padding: 0 1.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .detail { grid-template-columns: 1fr; }
+  .detail dd { margin-bottom: 0.5rem; }
+}

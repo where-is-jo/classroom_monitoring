@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+jinja2
+pydantic-settings
+
+# 테스트
+pytest
+httpx

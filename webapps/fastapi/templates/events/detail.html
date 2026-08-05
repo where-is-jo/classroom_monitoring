@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}{{ summary.event.id }} — 탐지 이벤트{% endblock %}
+
+{% block content %}
+<p><a href="/events">← 목록으로</a></p>
+
+<h1>탐지 이벤트 {{ summary.event.id }}</h1>
+
+<dl class="detail">
+  <dt>탐지 시각 (UTC)</dt>
+  <dd>{{ summary.event.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+
+  <dt>카메라</dt>
+  <dd>{{ summary.event.camera_id }}</dd>
+
+  <dt>라벨</dt>
+  <dd>{{ summary.event.label }}</dd>
+
+  <dt>신뢰도</dt>
+  <dd>
+    <span class="level level--{{ summary.confidence_level }}">
+      {% if summary.confidence_level == 'high' %}높음
+      {% elif summary.confidence_level == 'medium' %}보통
+      {% else %}낮음{% endif %}
+    </span>
+    <span class="muted">{{ '%.2f'|format(summary.event.confidence) }}</span>
+  </dd>
+
+  <dt>스냅샷 경로</dt>
+  <dd>
+    {% if summary.event.snapshot_key %}
+      <code>{{ summary.event.snapshot_key }}</code>
+      <p class="muted">객체 저장소 연동 전이라 이미지는 표시하지 않습니다.</p>
+    {% else %}
+      <span class="muted">없음</span>
+    {% endif %}
+  </dd>
+</dl>
+{% endblock %}
