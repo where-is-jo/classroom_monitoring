@@ -27,8 +27,9 @@ RPAs/        업무 자동화 프로젝트
 README.md    이 문서
 ```
 
-최상위에는 위 네 항목만 둔다. 빌드 설정, 인프라 파일, 에이전트 문서를
-최상위에 새로 만들지 않는다.
+최상위에는 위 네 항목과 `.gitignore`만 둔다. 빌드 설정, 인프라 파일, 에이전트 문서를
+최상위에 새로 만들지 않는다. 자세한 예외 범위는
+[AGENTS.md의 Repository Structure](./docs/agents/AGENTS.md#repository-structure)에 있다.
 
 ### webapps
 
