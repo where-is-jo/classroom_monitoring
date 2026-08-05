@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}요청 처리 오류{% endblock %}
+
+{% block content %}
+<section class="empty-state" role="alert">
+  <h1>요청을 처리할 수 없습니다</h1>
+  <p>상태 코드 {{ status_code }}</p>
+  <p>{{ message }}</p>
+  <a class="button" href="/events">이벤트 목록으로 돌아가기</a>
+</section>
+{% endblock %}

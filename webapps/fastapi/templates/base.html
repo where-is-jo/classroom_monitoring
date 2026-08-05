@@ -5,13 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}스마트 오피스 모니터링{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+  <script src="{{ url_for('static', path='/forms.js') }}" defer></script>
 </head>
 <body>
   <header class="site-header">
     <a class="site-title" href="/events">스마트 오피스 모니터링</a>
     <nav>
       <a href="/events">탐지 이벤트</a>
+      {% if can_view_employees %}
+        <a href="/employees">직원 상태</a>
+      {% endif %}
+      {% if can_manage_employees %}
+        <a href="/admin/employees">직원 관리</a>
+      {% endif %}
+      {% if show_employee_dev_tools %}
+        <a href="/admin/dev-tools">개발 도구</a>
+      {% endif %}
+      {% if can_manage_users %}
+        <a href="/admin/users">사용자 관리</a>
+      {% endif %}
     </nav>
+    <div class="account-nav">
+      {% if current_user %}
+        <span>{{ current_user.name }} · {{ current_user.role.value }}</span>
+        <form method="post" action="/logout" data-submit-state>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" data-pending-label="로그아웃 중…">로그아웃</button>
+        </form>
+      {% else %}
+        <a href="/login">로그인</a>
+      {% endif %}
+    </div>
   </header>
 
   <main class="content">
@@ -19,7 +43,7 @@
   </main>
 
   <footer class="site-footer">
-    <p>현재 인메모리 샘플 데이터로 동작합니다. 실제 탐지 결과가 아닙니다.</p>
+    <p>데이터 갱신은 페이지 이동 또는 명시적 새로고침으로 확인합니다.</p>
   </footer>
 </body>
 </html>

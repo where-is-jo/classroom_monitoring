@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}직원 관리 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <h1>직원 관리</h1>
+  <p class="summary">직원 프로필과 STAFF 계정 연결을 관리합니다. 삭제는 비활성화로 처리합니다.</p>
+
+  {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
+  {% if evaluated is not none %}<div class="alert alert--success" role="status">{{ evaluated }}명을 평가했고 {{ changed }}명의 상태가 변경됐습니다.</div>{% endif %}
+
+  <section class="panel" aria-labelledby="evaluation-title">
+    <h2 id="evaluation-title">시간 정책 평가</h2>
+    <p class="muted">명시적으로 실행할 때만 3분 부재·60분 외근 정책과 override 만료를 반영합니다.</p>
+    <form method="post" action="/admin/employees/evaluate" data-submit-state>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="operation_id" value="{{ evaluate_operation_id }}">
+      <button type="submit" data-pending-label="평가 중…">현재 시각으로 상태 평가</button>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="create-employee-title">
+    <h2 id="create-employee-title">직원 생성</h2>
+    <form method="post" action="/admin/employees" class="form-grid" data-submit-state>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="operation_id" value="{{ create_operation_id }}">
+      <label>사번<input name="employee_no" required maxlength="50"></label>
+      <label>표시 이름<input name="display_name" required maxlength="100"></label>
+      <label>부서<input name="department" required maxlength="100"></label>
+      <label>직급<input name="position" required maxlength="100"></label>
+      <label>사무 구역<input name="office_zone" required maxlength="100"></label>
+      <label>STAFF 계정
+        <select name="user_id"><option value="">연결 안 함</option>{% for staff in staff_users %}<option value="{{ staff.id }}">{{ staff.name }} ({{ staff.email }})</option>{% endfor %}</select>
+      </label>
+      <button type="submit" data-pending-label="생성 중…">생성</button>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="managed-employees-title">
+    <h2 id="managed-employees-title">직원 목록 <span class="summary">총 {{ page.total }}명</span></h2>
+    {% if page.items %}
+      <div class="employee-cards">
+        {% for employee in page.items %}
+          <article class="employee-card">
+            <p><a href="/employees/{{ employee.id }}">{{ employee.display_name }}</a> · <span class="status-label status-label--{{ employee.current_status.status.value|lower|replace('_', '-') }}">{{ employee.current_status.status.value }}</span> · {{ '활성' if employee.is_active else '비활성' }}</p>
+            <form method="post" action="/admin/employees/{{ employee.id }}/update" class="form-grid" data-submit-state>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="operation_id" value="{{ row_operation_ids[employee.id] }}">
+              <input type="hidden" name="expected_version" value="{{ employee.version }}">
+              <label>사번<input name="employee_no" value="{{ employee.employee_no }}" required maxlength="50"></label>
+              <label>표시 이름<input name="display_name" value="{{ employee.display_name }}" required maxlength="100"></label>
+              <label>부서<input name="department" value="{{ employee.department }}" required maxlength="100"></label>
+              <label>직급<input name="position" value="{{ employee.position }}" required maxlength="100"></label>
+              <label>사무 구역<input name="office_zone" value="{{ employee.office_zone }}" required maxlength="100"></label>
+              <label>STAFF 계정
+                <select name="user_id"><option value="">연결 안 함</option>{% for staff in staff_users %}<option value="{{ staff.id }}"{% if employee.user_id == staff.id %} selected{% endif %}>{{ staff.name }} ({{ staff.email }})</option>{% endfor %}</select>
+              </label>
+              <button type="submit" data-pending-label="저장 중…">수정 저장</button>
+            </form>
+            <form method="post" action="/admin/employees/{{ employee.id }}/deactivate" data-submit-state>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="operation_id" value="{{ deactivate_operation_ids[employee.id] }}">
+              <input type="hidden" name="expected_version" value="{{ employee.version }}">
+              <button type="submit" class="danger" data-pending-label="비활성화 중…"{% if not employee.is_active %} disabled{% endif %}>비활성화</button>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty" role="status">등록된 직원이 없습니다.</div>
+    {% endif %}
+  </section>
+{% endblock %}

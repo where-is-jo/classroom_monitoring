@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}{{ employee.display_name }} · 직원 상태{% endblock %}
+
+{% block content %}
+  <p><a href="/employees">← 직원 목록</a></p>
+  <h1>{{ employee.display_name }} <span class="summary">{{ employee.employee_no }}</span></h1>
+
+  {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
+
+  <section class="panel" aria-labelledby="current-status-title">
+    <h2 id="current-status-title">현재 상태</h2>
+    <dl class="detail">
+      <dt>상태</dt><dd><span class="status-label status-label--{{ employee.current_status.status.value|lower|replace('_', '-') }}">{{ employee.current_status.status.value }}</span></dd>
+      <dt>출처</dt><dd>{{ employee.current_status.source.value }}</dd>
+      <dt>사유</dt><dd>{{ employee.current_status.reason }}</dd>
+      <dt>적용 시각</dt><dd>{{ employee.current_status.effective_at|kst_datetime }}</dd>
+      <dt>마지막 사람 있음</dt><dd>{{ employee.current_status.last_person_seen_at|kst_datetime }}</dd>
+      <dt>부서·직급</dt><dd>{{ employee.department }} · {{ employee.position }}</dd>
+      <dt>사무 구역</dt><dd>{{ employee.office_zone }}</dd>
+      <dt>활성 여부</dt><dd>{{ '활성' if employee.is_active else '비활성' }}</dd>
+    </dl>
+  </section>
+
+  <section class="panel" aria-labelledby="override-title">
+    <h2 id="override-title">수동 override</h2>
+    {% if employee.active_override %}
+      <dl class="detail">
+        <dt>상태</dt><dd>{{ employee.active_override.status.value }}</dd>
+        <dt>사유</dt><dd>{{ employee.active_override.reason }}</dd>
+        <dt>시작</dt><dd>{{ employee.active_override.starts_at|kst_datetime }}</dd>
+        <dt>종료</dt><dd>{{ employee.active_override.ends_at|kst_datetime }}</dd>
+      </dl>
+    {% else %}
+      <p class="muted">활성 override가 없습니다.</p>
+    {% endif %}
+
+    {% if can_override and employee.is_active %}
+      <form method="post" action="/employees/{{ employee.id }}/status-override" class="form-grid" data-submit-state>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="operation_id" value="{{ set_operation_id }}">
+        <input type="hidden" name="expected_version" value="{{ employee.version }}">
+        <label>상태
+          <select name="status" required>{% for status in override_statuses %}<option value="{{ status.value }}">{{ status.value }}</option>{% endfor %}</select>
+        </label>
+        <label>사유<input name="reason" required maxlength="500"></label>
+        <label>종료 시각(ISO 8601 UTC)<input name="ends_at" placeholder="2026-08-06T09:00:00+00:00"></label>
+        <button type="submit" data-pending-label="설정 중…">override 설정</button>
+      </form>
+      {% if employee.active_override %}
+        <form method="post" action="/employees/{{ employee.id }}/status-override/clear" data-submit-state>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="operation_id" value="{{ clear_operation_id }}">
+          <input type="hidden" name="expected_version" value="{{ employee.version }}">
+          <button type="submit" data-pending-label="해제 중…">override 해제 후 즉시 재평가</button>
+        </form>
+      {% endif %}
+    {% else %}
+      <p class="muted">이 직원의 override를 변경할 권한이 없습니다.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel" aria-labelledby="history-title">
+    <h2 id="history-title">최근 상태 이력</h2>
+    {% if history.items %}
+      <div class="table-scroll"><table>
+        <thead><tr><th>변경</th><th>출처</th><th>사유</th><th>시각</th></tr></thead>
+        <tbody>{% for item in history.items %}<tr>
+          <td>{{ item.from_status.value if item.from_status else '최초' }} → {{ item.to_status.value }}</td>
+          <td>{{ item.source.value }}</td><td>{{ item.reason }}</td><td>{{ item.occurred_at|kst_datetime }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}
+      <div class="empty" role="status">상태 이력이 없습니다.</div>
+    {% endif %}
+  </section>
+{% endblock %}

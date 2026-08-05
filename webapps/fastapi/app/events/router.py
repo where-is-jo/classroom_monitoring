@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from ..auth.dependencies import CSRF_COOKIE, can_manage_users, get_optional_page_user
 from ..shared.config import Settings
 from ..shared.dependencies import get_event_service, get_settings
 from ..shared.templating import templates
 from .schemas import EventListResponse, EventResponse
 from .service import EventService
+from ..users.models import User
 
 page_router = APIRouter(tags=["events-pages"])
 api_router = APIRouter(prefix="/api/v1/events", tags=["events"])
@@ -44,6 +46,7 @@ def events_page(
     offset: int = Query(default=0, ge=0),
     service: EventService = Depends(get_event_service),
     settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_optional_page_user),
 ):
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_events(limit=resolved_limit, offset=resolved_offset)
@@ -56,6 +59,11 @@ def events_page(
             "offset": resolved_offset,
             "has_prev": resolved_offset > 0,
             "has_next": resolved_offset + resolved_limit < page.total,
+            "current_user": current_user,
+            "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
+            "can_manage_users": can_manage_users(current_user),
+            "can_view_employees": current_user is not None,
+            "can_manage_employees": can_manage_users(current_user),
         },
     )
 
@@ -65,13 +73,21 @@ def event_detail_page(
     request: Request,
     event_id: str,
     service: EventService = Depends(get_event_service),
+    current_user: User | None = Depends(get_optional_page_user),
 ):
     # 대상이 없으면 EventNotFoundError가 올라가고 main.py의 핸들러가 404 화면을 낸다.
     summary = service.get_event(event_id)
     return templates.TemplateResponse(
         request=request,
         name="events/detail.html",
-        context={"summary": summary},
+        context={
+            "summary": summary,
+            "current_user": current_user,
+            "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
+            "can_manage_users": can_manage_users(current_user),
+            "can_view_employees": current_user is not None,
+            "can_manage_employees": can_manage_users(current_user),
+        },
     )
 
 

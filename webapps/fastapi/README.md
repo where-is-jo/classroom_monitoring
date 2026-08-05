@@ -2,22 +2,27 @@
 
 FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
 
-> 현재 상태: **최소 골격 동작**. 이벤트 목록·상세 화면과 JSON API가 실행된다.
-> 데이터는 인메모리 샘플이며 MongoDB·MinIO 어댑터는 아직 없다.
-> 인증·권한, 실시간 갱신, 추론 연동도 구현되지 않았다.
+> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태 동작**. 기존 이벤트 화면/API는
+> 공개 범위를 유지한다. 직원 프로필, 저장된 현재 상태와 이력, 수동 override, 명시적 시간
+> 정책 평가를 제공하며 local 인메모리 mode와 MongoDB mode가 같은 저장소 계약을 구현한다.
 
 ## 실행 방법
 
 ```bash
 cd webapps/fastapi
 python -m pip install -r requirements.txt
+cp .env.example .env
+# .env의 네 보안 비밀값을 각각 32자 이상의 서로 다른 무작위 값으로 채운다.
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
 브라우저에서 `http://127.0.0.1:8000`을 열면 이벤트 목록으로 이동한다.
-외부 의존 서비스가 필요 없다. `.env`도 없어도 기동한다(모든 설정에 기본값이 있다).
+예제 설정은 `APP_ENV=local`, `DATABASE_MODE=memory`를 명시하므로 보안 비밀값을 채우면
+외부 서비스 없이 기동한다. `WEB_ORIGIN`은 브라우저에서 접속하는 origin과 정확히 같아야 한다.
 
-설정을 바꾸려면 `.env.example`을 `.env`로 복사해 값을 채운다.
+MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_NAME`을
+주입한다. 앱은 시작할 때 연결과 index 초기화를 확인하며 실패하면 요청을 받기 전에
+종료한다. memory mode는 local에서만 허용한다.
 
 ### 엔드포인트
 
@@ -27,9 +32,31 @@ python -m uvicorn app.main:app --reload --port 8000
 | `GET /events?limit=&offset=` | 이벤트 목록 화면 |
 | `GET /events/{event_id}` | 이벤트 상세 화면 |
 | `GET /health` | 기동 확인 |
+| `GET /health/ready` | 현재 저장소 mode 준비 상태 확인 |
 | `GET /api/v1/events?limit=&offset=` | 이벤트 목록 JSON |
 | `GET /api/v1/events/{event_id}` | 이벤트 상세 JSON |
+| `GET/POST /login` | 로그인 화면·제출 |
+| `POST /logout` | CSRF 검증 후 화면 세션 종료 |
+| `GET /admin/users` | `ADMIN`, `SYSTEM_OPERATOR` 사용자 관리 화면 |
+| `GET /employees` | 로그인 사용자 직원 상태 목록 화면 |
+| `GET /employees/{employee_id}` | 현재 상태·override·최근 이력 화면 |
+| `GET /admin/employees` | `ADMIN` 이상 직원 CRUD·명시적 정책 평가 화면 |
+| `GET /admin/dev-tools` | mock 입력 허용 환경의 구조화 관측 화면 |
+| `POST /api/v1/auth/login` | access/refresh `HttpOnly` cookie 발급 |
+| `POST /api/v1/auth/refresh` | refresh rotation |
+| `POST /api/v1/auth/logout` | 현재 refresh family 폐기와 cookie 제거 |
+| `GET /api/v1/auth/me` | 현재 사용자 조회 |
+| `PATCH /api/v1/auth/me/password` | 본인 비밀번호 변경과 refresh 전체 폐기 |
+| `GET/POST /api/v1/users` | `ADMIN` 이상 사용자 목록·생성 |
+| `GET/PATCH/DELETE /api/v1/users/{user_id}` | `ADMIN` 이상 조회·수정·soft deactivate |
+| `GET/POST /api/v1/employees` | 로그인 목록·`ADMIN` 이상 직원 생성 |
+| `GET/PATCH/DELETE /api/v1/employees/{employee_id}` | 로그인 상세·`ADMIN` 이상 수정·비활성화 |
+| `GET /api/v1/employees/{employee_id}/status-history` | 로그인 상태 이력 조회 |
+| `PUT/DELETE /api/v1/employees/{employee_id}/status-override` | 본인 STAFF 또는 `ADMIN` 이상 override 설정·해제 |
+| `POST /api/v1/employee-status-evaluations` | 모든 환경의 `ADMIN` 이상 명시적 시간 정책 평가 |
+| `POST /api/v1/mock-employee-observations` | mock 입력 허용 환경의 `ADMIN` 이상 구조화 관측 |
 | `GET /docs` | 자동 생성 API 문서 |
+| `GET /openapi.json` | OpenAPI JSON |
 
 ### 테스트
 
@@ -38,12 +65,21 @@ cd webapps/fastapi
 python -m pytest
 ```
 
-외부 의존성 없이 실행된다.
+기본 실행은 memory mode를 명시해 외부 의존성 없이 동작하며 MongoDB 통합 테스트는
+`TEST_DATABASE_URL`이 없으면 건너뛴다.
+
+실제 MongoDB 통합 테스트를 실행하려면 `TEST_DATABASE_URL` 경로에 `test_`로 시작하는
+database 이름을 명시한 뒤 다음 marker를 사용한다. fixture는 이름을 검증하며 database나
+컬렉션을 삭제하지 않는다.
+
+```bash
+python -m pytest -m mongodb
+```
 
 ## 서비스 목적
 
 외부 클라이언트 요청의 유일한 진입점이다.
-인증과 권한을 판정하고, 비즈니스 로직을 수행하고, 저장된 데이터와 추론 결과를
+인증과 권한을 판정하고, 비즈니스 로직을 수행하고, 저장된 데이터를
 API 응답 또는 Jinja2 템플릿으로 렌더링한 화면으로 제공한다.
 
 ## 책임
@@ -52,7 +88,6 @@ API 응답 또는 Jinja2 템플릿으로 렌더링한 화면으로 제공한다.
 - Jinja2 템플릿 렌더링과 화면 구성
 - 인증 및 권한 판정
 - 비즈니스 로직 조정(여러 서비스 호출의 순서와 실패 처리)
-- deeplearning·worker 등 내부 서비스 연동
 - 데이터 저장소 접근
 - 오류 처리와 오류 응답·오류 화면
 
@@ -64,6 +99,10 @@ API 응답 또는 Jinja2 템플릿으로 렌더링한 화면으로 제공한다.
 ```text
 app/
 ├─ main.py                 앱 조립. 라우터 등록, 정적 마운트, 예외 핸들러
+├─ auth/                   로그인, JWT 검증, refresh rotation, 공통 인증 dependency
+├─ users/                  사용자 CRUD, RBAC, memory/MongoDB 저장소
+├─ audit/                  민감정보를 제거한 사용자·역할·상태 변경 감사 로그
+├─ employees/              직원 CRUD, 상태 정책, override, memory/MongoDB 저장소
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
@@ -71,29 +110,39 @@ app/
 │  ├─ models.py            도메인 모델(dataclass)
 │  ├─ ports.py             외부 I/O 인터페이스(Protocol)
 │  └─ adapters/            포트 구현체
-│     └─ memory_repository.py    인메모리. mongo_repository.py는 다음 단계
+│     ├─ memory_repository.py    외부 의존 없는 local·테스트 구현체
+│     └─ mongo_repository.py     같은 포트를 구현하는 PyMongo 구현체
 └─ shared/                 공통 설정·예외·의존성 조립
    ├─ config.py            pydantic-settings
+   ├─ database.py          PyMongo client·database 선택, ping, index 초기화
    ├─ errors.py            도메인 예외와 오류 응답 형식
    ├─ dependencies.py      어댑터 조립. 저장소 교체 시 고치는 유일한 파일
+   ├─ schemas.py           health/readiness 응답 스키마
+   ├─ security.py          Argon2, JWT, CSRF, IP HMAC fingerprint
    └─ templating.py        Jinja2 설정
 
 templates/                 Jinja2 템플릿
 ├─ base.html               공통 레이아웃
+├─ auth/                   로그인 화면
+├─ users/                  사용자 관리 화면
+├─ employees/              직원 목록·상세 화면
+├─ admin/employees/        직원 관리·명시적 정책 평가 화면
+├─ admin/dev_tools/        환경별로 등록되는 구조화 mock 관측 화면
 ├─ events/                 기능별 템플릿
 └─ errors/                 오류 화면
 
 static/                    css, 브라우저 스크립트, 이미지
-tests/                     외부 의존성 없이 실행되는 테스트
+tests/                     기본 테스트와 선택적 integration/ MongoDB 테스트
 ```
 
-기능이 늘어나면 `app/cameras/`, `app/auth/`처럼 같은 구조의 디렉터리를 추가한다.
+기능이 늘어나면 같은 구조의 기능 디렉터리를 추가한다.
 
 호출 방향은 `router → service → port ← adapter`다.
 **서비스 계층은 어댑터를 직접 import하지 않는다.**
 어댑터를 서비스에 연결하는 조립 코드는 `shared/`에 한 곳으로 모은다.
 
-포트는 프로세스 외부 I/O 경계 4곳(저장소·추론 클라이언트·객체 저장소·알림)에만 만든다.
+현재 포트는 프로세스 밖 I/O인 저장소 경계에만 만든다. mock HTTP 입력과 같은 프로세스의
+서비스 호출에는 포트를 만들지 않는다.
 선택 배경과 포트 판단 기준은 [ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)에 있다.
 
 템플릿은 기능별로 나누되 `app/` 밖에 둔다. Python 코드와 템플릿 파일을 섞지 않는다.
@@ -103,7 +152,7 @@ tests/                     외부 의존성 없이 실행되는 테스트
 - 라우터 계층(HTTP 관심사만 담당)
 - 서비스 계층(비즈니스 로직, 프레임워크 비의존)
 - Pydantic 스키마(요청·응답 검증)
-- 포트 정의와 어댑터 구현(저장소, 추론 클라이언트, 객체 저장소, 알림)
+- 포트 정의와 어댑터 구현(현재 범위에서는 저장소)
 - Jinja2 템플릿과 정적 자산
 - 의존성 조립 지점
 - 오류 핸들러와 로깅
@@ -133,41 +182,90 @@ tests/                     외부 의존성 없이 실행되는 테스트
 | 웹 프레임워크 | FastAPI | 프로젝트 전제 |
 | 템플릿 | Jinja2 | 화면을 서버에서 렌더링 |
 | 검증 | Pydantic | 요청·응답 스키마 |
-| 메타데이터 저장소 | MongoDB ([ADR-0003](../../docs/architecture/decisions/ADR-0003-metadata-store-mongodb.md)) | 저장소 포트 뒤에 격리 |
-| 객체 저장소 | MinIO ([ADR-0004](../../docs/architecture/decisions/ADR-0004-object-storage-minio.md)) | S3 호환 범위에서만 사용 |
-| 캐시·큐 | 결정 필요 | Redis 후보 |
+| 메타데이터 저장소 | MongoDB ([ADR-0003](../../docs/architecture/decisions/ADR-0003-metadata-store-mongodb.md)) | 동기 PyMongo, 저장소 포트 뒤에 격리 |
 | 내부 구조 | 계층형 + 경계 포트 ([ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)) | |
-| 실시간 화면 갱신 | 결정 필요 | 폴링 / SSE / WebSocket 후보 |
+
+동기 service/repository 계약과 맞는 공식 드라이버가 필요해 `pymongo>=4.17,<5`를 사용한다.
+현재 4.x 범위 안의 호환 업데이트는 허용하고, breaking change 검토가 필요한 다음 major는
+자동으로 설치하지 않는다. ORM이나 별도 MongoDB mock 패키지는 사용하지 않는다.
+
+비밀번호는 FastAPI의 현재 보안 가이드와 맞는 `pwdlib[argon2]`, JWT는 고정 `HS256`
+algorithm과 필수 claim을 검증하는 `PyJWT`를 사용한다. 원문 비밀번호와 refresh token은
+저장하지 않으며 브라우저 JavaScript에 access/refresh token을 노출하지 않는다.
 
 ## 다른 서비스와의 관계
 
-- [deeplearning](../../deeplearning/README.md): 추론 요청을 보내고 결과를 받는다. 통신 방식은 **결정 필요**.
-- [worker](../../worker/README.md): 스트림 연결 상태와 메타데이터를 주고받는다.
-- [monitoring](../../monitoring/README.md): 지표 노출 엔드포인트를 제공한다. 지표 이름은 `smart_office_` 접두사를 사용한다.
-- [RPAs](../../RPAs/README.md): 자동화 워크플로가 API를 호출할 수 있다. 일반 클라이언트와 같은 계약을 따른다.
+현재 MVP 직원 상태 기능은 다른 서비스와 연동하지 않는다. mock 관측은 사람이 입력한
+boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 정의하지 않는다.
 
-브라우저는 이 서비스만 호출한다. deeplearning과 worker를 직접 호출하지 않는다.
-
-## 향후 구현 시 필요한 환경변수
+## 환경변수
 
 값의 취급과 명명 규칙, 필수값 검증 방식은 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
 | `APP_ENV` | 실행 환경 구분 | `local` / `dev` / `prod` |
-| `DATABASE_URL` | MongoDB 접속 정보 | 비밀값. 기본값 없이 주입 |
-| `INFERENCE_SERVICE_URL` | deeplearning 서비스 주소 | 통신 방식 확정 후 필요 여부 재검토 |
-| `WORKER_URL` | worker 주소 | 동일 |
-| `OBJECT_STORAGE_ENDPOINT` | MinIO 주소 | |
-| `OBJECT_STORAGE_ACCESS_KEY` | MinIO 접근 키 | 비밀값 |
-| `OBJECT_STORAGE_SECRET_KEY` | MinIO 비밀 키 | 비밀값 |
-| `JWT_SECRET` | 토큰 서명 키 | 값은 항상 외부 주입 |
+| `DATABASE_MODE` | 저장소 구현 선택 | `memory` / `mongodb`, memory는 local 전용 |
+| `DATABASE_URL` | MongoDB 접속 정보 | MongoDB mode 필수, 비밀값, 응답·로그 비노출 |
+| `DATABASE_NAME` | MongoDB database 이름 | MongoDB mode 필수 |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | MongoDB 연결 제한 시간 | 기본 5초 |
+| `MOCK_INPUTS_ENABLED` | mock 직원 관측 API·개발 도구 등록 | 기본 false, prod에서 true 금지 |
+| `EMPLOYEE_AWAY_AFTER_SECONDS` | 마지막 사람 있음 후 AWAY 기준 | 기본 180초 |
+| `EMPLOYEE_OFFSITE_AFTER_SECONDS` | 마지막 사람 있음 후 OFFSITE 기준 | 기본 3600초, AWAY보다 커야 함 |
+| `JWT_ACCESS_SECRET` | access JWT 서명 | 필수 비밀값, 32자 이상, 기본값 없음 |
+| `JWT_REFRESH_SECRET` | refresh JWT 서명 | 필수 비밀값, 32자 이상, access와 분리 |
+| `CSRF_SECRET` | CSRF token 서명 | 필수 비밀값, 32자 이상 |
+| `AUDIT_IP_HASH_SECRET` | audit·rate limit IP HMAC | 필수 비밀값, 32자 이상 |
+| `WEB_ORIGIN` | 브라우저 쓰기 요청 허용 origin | 필수, exact match |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS` | access token 유효기간 | 기본 900초 |
+| `AUTH_REFRESH_TOKEN_TTL_SECONDS` | refresh token 유효기간 | 기본 604800초 |
+| `AUTH_LOGIN_MAX_FAILURES` / `AUTH_LOCKOUT_SECONDS` | 계정 실패 제한·잠금 | 기본 5회·900초 |
+| `AUTH_IP_MAX_FAILURES` / `AUTH_IP_WINDOW_SECONDS` | IP 지문 실패 제한 | 기본 20회·300초 |
+| `AUTH_PASSWORD_MIN_LENGTH` | 비밀번호 최소 길이 | 기본 12자, 대·소문자/숫자/기호 필요 |
+| `AUTH_SEED_ENABLED` | 네 역할 가상 사용자 seed | 기본 false, local/dev에서 명시적으로 사용 |
+| `AUTH_SEED_*_PASSWORD` | 역할별 seed 비밀번호 | seed 활성화 시 환경 주입, 문서·로그 비노출 |
+| `HIGH_CONFIDENCE_THRESHOLD` | 기존 이벤트 신뢰도 high 기준 | 0.0~1.0 |
+| `MEDIUM_CONFIDENCE_THRESHOLD` | 기존 이벤트 신뢰도 medium 기준 | 0.0~1.0, high 이하 |
+| `PAGE_SIZE_DEFAULT` | 목록 기본 크기 | 기본 50 |
+| `PAGE_SIZE_MAX` | 목록 최대 크기 | 최대 200 |
+| `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트 접속 정보 | URL 경로 DB 이름은 `test_` 접두사 필수 |
+
+MongoDB mode는 시작 시 ping한 뒤 events, users, refresh_tokens, audit_logs, employees,
+employee_status_history, employee_observations의 고정 이름 index를 초기화한다. email,
+employee_no, STAFF 연결, refresh hash, operation/event ID는 unique index로 중복을 막고
+사용자·직원 갱신은 compare-and-set으로 경합을 감지한다. multi-document transaction을
+가정하지 않는다.
+
+직원 조회 GET은 저장된 상태만 반환하고 상태·이력·version을 변경하지 않는다. 3분 부재와
+60분 외근, override 만료는 `POST /api/v1/employee-status-evaluations` 또는 관련 쓰기에서만
+평가한다. override는 `AWAY`와 `OFFSITE`만 허용하며 해제 시 최신 유효 mock 관측으로 즉시
+재평가한다. 시각은 API에서 ISO 8601 UTC로 주고받고 화면에서는 KST로 표시한다.
+
+### 가상 사용자 seed
+
+`AUTH_SEED_ENABLED=true`일 때만 아래 네 가상 이메일을 idempotent하게 만든다. 비밀번호는
+대응하는 `AUTH_SEED_*_PASSWORD` 환경변수에서만 받으며 소스·문서·로그에 기록하지 않는다.
+
+| 이메일 | 역할 |
+| --- | --- |
+| `student@example.invalid` | `STUDENT` |
+| `staff@example.invalid` | `STAFF` |
+| `admin@example.invalid` | `ADMIN` |
+| `operator@example.invalid` | `SYSTEM_OPERATOR` |
+
+쓰기 API는 로그인 뒤 발급된 `som_csrf` cookie 값을 `X-CSRF-Token` header로 보내고
+`Origin`을 `WEB_ORIGIN`과 일치시켜야 한다. Jinja2 form은 같은 검증을 hidden field로 처리한다.
 
 ## 테스트 전략
 
-- 서비스 계층은 포트를 테스트 대역으로 대체해 단위 테스트한다. 실제 MongoDB와 MinIO가 필요 없다.
+- 서비스 계층은 포트를 memory fake로 대체해 단위 테스트한다. 실제 MongoDB가 필요 없다.
 - 라우터는 상태 코드, 검증 실패, 오류 응답 형식을 API 테스트로 검증한다.
 - 템플릿 렌더링은 정상·빈 상태·오류 상태가 각각 렌더링되는지 확인한다.
+- 인증 테스트는 hash/policy, 잠금·rate limit, refresh rotation·재사용, CSRF와 네 역할 권한표를 확인한다.
+- 사용자 여정 테스트는 관리자 로그인→사용자 생성→수정→비활성화를 수행한다.
+- 직원 테스트는 CRUD·STAFF 연결, 2분59초/3분/59분59초/60분 경계, GET 무부작용,
+  중복·역전 관측, CAS 재시도, override 권한·만료·해제 사용자 여정을 확인한다.
+- MongoDB 연결·index는 `mongodb` marker 통합 테스트로 분리한다.
 - 계약 변경 시 기존 응답 스키마 테스트를 함께 갱신한다.
 
 ## 관련 문서

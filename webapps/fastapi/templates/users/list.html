@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}사용자 관리 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <h1>사용자 관리</h1>
+  <p class="summary">사용자를 생성·수정하거나 계정을 비활성화합니다. 비활성화는 물리 삭제가 아닙니다.</p>
+
+  {% if error %}
+    <div class="alert alert--error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  <section class="panel" aria-labelledby="filters-title">
+    <h2 id="filters-title">검색과 필터</h2>
+    <form method="get" action="/admin/users" class="form-grid">
+      <label>검색
+        <input name="search" value="{{ search }}" maxlength="100" placeholder="이름 또는 이메일">
+      </label>
+      <label>역할
+        <select name="role">
+          <option value="">전체</option>
+          {% for role in roles %}
+            <option value="{{ role.value }}"{% if selected_role == role %} selected{% endif %}>{{ role.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>상태
+        <select name="status">
+          <option value="">전체</option>
+          {% for status in statuses %}
+            <option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">조회</button>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="create-title">
+    <h2 id="create-title">사용자 생성</h2>
+    <form method="post" action="/admin/users" class="form-grid" data-submit-state>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="operation_id" value="{{ create_operation_id }}">
+      <label>이메일<input name="email" type="email" required maxlength="254"></label>
+      <label>이름<input name="name" required maxlength="100"></label>
+      <label>역할
+        <select name="role" required>
+          {% for role in roles %}<option value="{{ role.value }}">{{ role.value }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>초기 비밀번호<input name="password" type="password" autocomplete="new-password" required maxlength="128"></label>
+      <button type="submit" data-pending-label="생성 중…">생성</button>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="list-title">
+    <h2 id="list-title">사용자 목록 <span class="summary">총 {{ page.total }}명</span></h2>
+    {% if page.items %}
+      <div class="user-cards">
+        {% for user in page.items %}
+          <article class="user-card" data-user-id="{{ user.id }}">
+            <form method="post" action="/admin/users/{{ user.id }}/update" class="form-grid" data-submit-state>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="operation_id" value="{{ row_operation_ids[user.id] }}">
+              <input type="hidden" name="expected_version" value="{{ user.version }}">
+              <label>이메일<input name="email" type="email" value="{{ user.email }}" required maxlength="254"></label>
+              <label>이름<input name="name" value="{{ user.name }}" required maxlength="100"></label>
+              <label>역할
+                <select name="role">
+                  {% for role in roles %}<option value="{{ role.value }}"{% if user.role == role %} selected{% endif %}>{{ role.value }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>상태
+                <select name="status">
+                  {% for status in statuses %}<option value="{{ status.value }}"{% if user.status == status %} selected{% endif %}>{{ status.value }}</option>{% endfor %}
+                </select>
+              </label>
+              <button type="submit" data-pending-label="저장 중…">수정 저장</button>
+            </form>
+            <form method="post" action="/admin/users/{{ user.id }}/deactivate" data-submit-state>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="operation_id" value="{{ row_deactivate_operation_ids[user.id] }}">
+              <button type="submit" class="danger" data-pending-label="비활성화 중…"{% if user.status.value == 'INACTIVE' %} disabled{% endif %}>비활성화</button>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+      <nav class="pagination" aria-label="사용자 목록 페이지">
+        {% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset-limit]|max }}&search={{ search|urlencode }}{% if selected_role %}&role={{ selected_role.value }}{% endif %}{% if selected_status %}&status={{ selected_status.value }}{% endif %}">이전</a>{% else %}<span class="disabled">이전</span>{% endif %}
+        {% if has_next %}<a href="?limit={{ limit }}&offset={{ offset+limit }}&search={{ search|urlencode }}{% if selected_role %}&role={{ selected_role.value }}{% endif %}{% if selected_status %}&status={{ selected_status.value }}{% endif %}">다음</a>{% else %}<span class="disabled">다음</span>{% endif %}
+      </nav>
+    {% else %}
+      <div class="empty" role="status">조건에 맞는 사용자가 없습니다.</div>
+    {% endif %}
+  </section>
+{% endblock %}

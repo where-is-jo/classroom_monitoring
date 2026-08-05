@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}직원 상태 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <h1>직원 상태</h1>
+  <p class="summary">저장된 현재 상태를 조회합니다. 조회만으로 상태나 이력은 변경되지 않습니다.</p>
+
+  <section class="panel" aria-labelledby="employee-filters-title">
+    <h2 id="employee-filters-title">검색과 필터</h2>
+    <form method="get" action="/employees" class="form-grid">
+      <label>이름 또는 사번
+        <input name="search" value="{{ search }}" maxlength="100">
+      </label>
+      <label>부서
+        <input name="department" value="{{ department }}" maxlength="100">
+      </label>
+      <label>상태
+        <select name="status">
+          <option value="">전체</option>
+          {% for status in statuses %}
+            <option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">조회</button>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="employee-list-title">
+    <h2 id="employee-list-title">목록 <span class="summary">총 {{ page.total }}명</span></h2>
+    {% if page.items %}
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>직원</th><th>부서</th><th>위치</th><th>현재 상태</th><th>마지막 갱신</th></tr></thead>
+          <tbody>
+            {% for employee in page.items %}
+              <tr>
+                <td><a href="/employees/{{ employee.id }}">{{ employee.display_name }} ({{ employee.employee_no }})</a></td>
+                <td>{{ employee.department }} · {{ employee.position }}</td>
+                <td>{{ employee.office_zone }}</td>
+                <td><span class="status-label status-label--{{ employee.current_status.status.value|lower|replace('_', '-') }}">{{ employee.current_status.status.value }}</span></td>
+                <td>{{ employee.updated_at|kst_datetime }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <nav class="pagination" aria-label="직원 목록 페이지">
+        {% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset-limit]|max }}&search={{ search|urlencode }}&department={{ department|urlencode }}{% if selected_status %}&status={{ selected_status.value }}{% endif %}">이전</a>{% else %}<span class="disabled">이전</span>{% endif %}
+        {% if has_next %}<a href="?limit={{ limit }}&offset={{ offset+limit }}&search={{ search|urlencode }}&department={{ department|urlencode }}{% if selected_status %}&status={{ selected_status.value }}{% endif %}">다음</a>{% else %}<span class="disabled">다음</span>{% endif %}
+      </nav>
+    {% else %}
+      <div class="empty" role="status">조건에 맞는 활성 직원이 없습니다.</div>
+    {% endif %}
+  </section>
+{% endblock %}

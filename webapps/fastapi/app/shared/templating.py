@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
@@ -16,3 +17,14 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+KST = timezone(timedelta(hours=9), name="KST")
+
+
+def format_kst(value: datetime | None) -> str:
+    """저장된 UTC 시각을 화면 표시용 KST로 변환한다."""
+    if value is None:
+        return "-"
+    return value.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+
+
+templates.env.filters["kst_datetime"] = format_kst
