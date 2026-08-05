@@ -109,7 +109,11 @@ README.md    이 문서
 - 서비스 간 통신 방식(동기 HTTP / 메시지 큐)
 - 사용할 모델과 버전, GPU·Jetson 실행 범위
 - 영상 수신 프로토콜(RTSP / WebRTC / HTTP 푸시)
-- 메타데이터 저장소와 객체 저장소(MongoDB, MinIO, Redis는 후보)
-- 영상·메타데이터 보존 기간 정책
+- 캐시·큐 도입 여부(Redis는 후보)
+- 영상 저장 범위·보존 기간·접근 권한 — 개인정보가 걸린 합의 사항
+- 영상을 저장하는 주체(stream-server / backend)
 - 배포 환경과 배포 방식
 - 알림 채널
+
+확정된 결정은 [ADR](./docs/architecture/decisions/README.md)에 기록되어 있다.
+메타데이터 저장소(MongoDB), 영상 저장소(MinIO), backend 내부 구조가 여기에 해당한다.

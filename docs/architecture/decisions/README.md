@@ -56,8 +56,11 @@ ADR은 그 반복을 막기 위한 기록이다.
 
 | 번호 | 제목 | 상태 |
 | --- | --- | --- |
-| — | 아직 확정된 결정이 없다 | — |
+| [0002](./ADR-0002-backend-layered-with-ports.md) | backend 계층형 구조와 경계 포트 | Accepted |
+| [0003](./ADR-0003-metadata-store-mongodb.md) | 메타데이터 저장소로 MongoDB 채택 | Accepted |
+| [0004](./ADR-0004-object-storage-minio.md) | 영상·스냅샷 저장소로 MinIO 채택 | Accepted |
 
+0001은 템플릿이므로 목록에 넣지 않는다.
 새 ADR을 추가하면 이 표에 한 줄 추가한다.
 
 ## 관련 문서

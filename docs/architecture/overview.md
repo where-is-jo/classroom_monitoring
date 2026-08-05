@@ -37,27 +37,30 @@ flowchart LR
         WEB[frontend]
     end
 
-    STORE[(데이터 저장소<br/>결정 필요)]
-    OBJ[(객체 저장소<br/>후보: MinIO)]
+    STORE[(MongoDB<br/>메타데이터)]
+    OBJ[(MinIO<br/>영상·스냅샷)]
     MON[monitoring]
     RPA[RPAs]
 
     CAM -->|영상 스트림| STREAM
     STREAM -->|프레임| INFER
     INFER -->|탐지 결과| API
-    API --> STORE
-    STREAM -.->|영상·스냅샷 저장 여부 결정 필요| OBJ
+    API -->|메타데이터| STORE
+    API -.->|저장 주체·정책 결정 필요| OBJ
+    STREAM -.->|저장 주체·정책 결정 필요| OBJ
     WEB -->|조회| API
     RPA -->|API 호출| API
     MON -.->|지표 수집| STREAM
     MON -.->|지표 수집| INFER
     MON -.->|지표 수집| API
-
-    classDef undecided stroke-dasharray: 4 3
-    class STORE,OBJ undecided
 ```
 
 실선은 확정된 호출 방향이고, 점선은 존재 여부나 방식이 아직 결정되지 않은 경로다.
+
+저장소는 [MongoDB](./decisions/ADR-0003-metadata-store-mongodb.md)와
+[MinIO](./decisions/ADR-0004-object-storage-minio.md)로 확정됐다.
+다만 **영상을 누가 어떤 범위로 저장할지는 아직 정해지지 않았다.**
+backend 내부 구조는 [ADR-0002](./decisions/ADR-0002-backend-layered-with-ports.md)를 따른다.
 
 ## 관계 규칙
 
@@ -87,8 +90,9 @@ inference의 출력은 "사람 1명 탐지, 신뢰도 0.87"까지다.
 영상 바이트와 탐지 메타데이터는 보존 기간, 용량, 접근 권한이 전혀 다르다.
 한 서비스가 둘 다 소유하지 않는다.
 
-- 메타데이터: backend가 데이터 저장소에 기록 (`예정`)
-- 영상·스냅샷: 저장 여부와 주체 모두 **결정 필요**
+- 메타데이터: backend가 MongoDB에 기록 (`예정`)
+- 영상·스냅샷: MinIO에 보관하고 메타데이터에는 참조만 기록한다.
+  다만 **저장 주체와 저장 범위·보존 기간은 결정 필요** 상태다.
 
 ### 서비스 간 계약
 
@@ -105,12 +109,12 @@ inference의 출력은 "사람 1명 탐지, 신뢰도 0.87"까지다.
 | 서비스 간 통신 방식(동기 HTTP / 메시지 큐) | 결정 필요 | backend·inference·stream-server 구조 |
 | 프레임 전달 방식(직접 전달 / 공유 저장소 / 큐) | 결정 필요 | stream-server, inference |
 | 실시간 전달 방식(WebSocket / SSE / 폴링) | 결정 필요 | frontend, backend |
-| 메타데이터 저장소 | 후보: MongoDB | backend |
-| 객체 저장소 도입 여부 | 후보: MinIO | stream-server, backend |
 | 캐시·큐 도입 여부 | 후보: Redis | backend |
+| 영상 저장 주체(stream-server / backend) | 결정 필요 | stream-server, backend |
+| 영상 저장 범위·접근 권한 | 결정 필요 | 개인정보 관련, 합의 사항 |
 | 모델 종류와 버전 | 후보: YOLO 계열 | inference |
 | 영상 수신 프로토콜 | 후보: RTSP / WebRTC / HTTP 푸시 | stream-server |
-| 영상·메타데이터 보존 기간 | 결정 필요 | 저장소 선택 |
+| 영상·메타데이터 보존 기간 | 결정 필요 | 저장 정책 |
 | 배포 환경과 방식 | 결정 필요 | 전체 |
 
 이 중 하나를 확정하면 [ADR](./decisions/README.md)로 남기고

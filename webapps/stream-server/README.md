@@ -53,8 +53,11 @@ CCTV 또는 Jetson 장치에서 영상을 수신하고, 추론 가능한 형태�
 ## 영상 데이터와 메타데이터의 분리
 
 영상 바이트와 탐지 메타데이터는 저장 책임을 분리한다.
-stream-server는 어느 쪽도 장기 저장하지 않으며, 저장이 필요하면 담당 서비스로 넘긴다.
-저장 대상과 보존 기간 정책은 **결정 필요** 항목이다.
+메타데이터는 MongoDB, 영상·스냅샷은 MinIO에 보관한다([ADR-0003](../../docs/architecture/decisions/ADR-0003-metadata-store-mongodb.md), [ADR-0004](../../docs/architecture/decisions/ADR-0004-object-storage-minio.md)).
+
+**stream-server가 MinIO에 직접 쓸지, backend를 거칠지는 결정 필요 항목이다.**
+저장 범위와 보존 기간도 아직 합의되지 않았다.
+확정 전까지 영상을 저장하는 기능을 만들지 않는다.
 
 ## 향후 구현 시 필요한 환경변수
 

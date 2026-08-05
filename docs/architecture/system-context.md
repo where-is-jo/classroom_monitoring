@@ -20,8 +20,8 @@ flowchart TB
     SYS[스마트 오피스 모니터링 시스템]
 
     CAM[CCTV / Jetson 장치]
-    OBJSTORE[(외부 객체 저장소<br/>후보: MinIO)]
-    DB[(데이터베이스<br/>후보: MongoDB)]
+    OBJSTORE[(MinIO<br/>영상·스냅샷)]
+    DB[(MongoDB<br/>메타데이터)]
     NOTIFY[알림 채널<br/>결정 필요]
     BIZ[사내 업무 시스템<br/>RPA 대상]
 
@@ -31,7 +31,7 @@ flowchart TB
 
     CAM -->|영상 스트림| SYS
     SYS <-->|메타데이터 읽기·쓰기| DB
-    SYS <-.->|영상·스냅샷 저장 여부 결정 필요| OBJSTORE
+    SYS <-.->|영상·스냅샷 저장 범위 결정 필요| OBJSTORE
     SYS -.->|이벤트 알림| NOTIFY
     SYS -.->|자동화 작업| BIZ
 ```
@@ -54,8 +54,8 @@ flowchart TB
 | 외부 시스템 | 관계 | 상태 |
 | --- | --- | --- |
 | CCTV / Jetson 장치 | 영상 스트림을 시스템에 공급한다 | 예정 (프로토콜 결정 필요) |
-| 데이터베이스 | 탐지 메타데이터와 설정을 보관한다 | 후보: MongoDB |
-| 외부 객체 저장소 | 영상·스냅샷을 보관한다 | 후보: MinIO, 도입 여부 결정 필요 |
+| MongoDB | 탐지 메타데이터와 설정을 보관한다 | 확정 ([ADR-0003](./decisions/ADR-0003-metadata-store-mongodb.md)) |
+| MinIO | 영상·스냅샷을 보관한다 | 확정 ([ADR-0004](./decisions/ADR-0004-object-storage-minio.md)), 저장 범위 결정 필요 |
 | 알림 채널 | 이벤트 발생 시 담당자에게 알린다 | 결정 필요 |
 | 사내 업무 시스템 | RPA가 접근해 업무를 대행한다 | 대상 시스템 미확정 |
 
