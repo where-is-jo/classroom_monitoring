@@ -13,7 +13,8 @@ from ..audit.service import AuditService
 from ..auth.errors import PermissionDeniedError
 from ..notifications.models import CreateNotificationCommand
 from ..notifications.service import NotificationService
-from ..users.models import ADMIN_ROLES, User, UserStatus
+from ..users.models import ADMIN_ROLES, User, UserRole, UserStatus
+from ..users.ports import UserRepository
 from .errors import (
     AfterHoursAlertNotFoundError,
     AfterHoursAlertTransitionError,
@@ -55,10 +56,93 @@ from .models import (
 from .ports import ClassroomRepository
 
 
+class ClassroomStaffAssignmentService:
+    def __init__(
+        self,
+        repository: ClassroomRepository,
+        audit_service: AuditService,
+        *,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._repository = repository
+        self._audit = audit_service
+        self._clock = clock
+
+    def unlink_staff_user(
+        self,
+        actor: User,
+        user_id: str,
+        *,
+        operation_id: str,
+        ip_fingerprint: str | None,
+    ) -> None:
+        classrooms: list[Classroom] = []
+        offset = 0
+        while True:
+            page = self._repository.list_classrooms(
+                include_inactive=True, limit=200, offset=offset
+            )
+            classrooms.extend(page.items)
+            offset += len(page.items)
+            if offset >= page.total or not page.items:
+                break
+        for classroom in classrooms:
+            if user_id not in classroom.responsible_staff_user_ids:
+                continue
+            assignment_operation_id = (
+                f"responsible-staff-unlink:{operation_id}:{classroom.id}"
+            )
+            for _ in range(3):
+                current = self._repository.get_classroom(classroom.id)
+                if current is None or user_id not in current.responsible_staff_user_ids:
+                    break
+                updated = replace(
+                    current,
+                    responsible_staff_user_ids=tuple(
+                        value
+                        for value in current.responsible_staff_user_ids
+                        if value != user_id
+                    ),
+                    updated_at=self._clock(),
+                    version=current.version + 1,
+                    last_operation_id=assignment_operation_id,
+                    operation_ids=ClassroomService._append_operation(
+                        current.operation_ids, assignment_operation_id
+                    ),
+                )
+                saved = self._repository.replace_classroom(
+                    updated, expected_version=current.version
+                )
+                if saved is None:
+                    continue
+                self._audit.record(
+                    operation_id=f"classroom-audit:{assignment_operation_id}",
+                    actor_user_id=actor.id,
+                    action="CLASSROOM_RESPONSIBLE_STAFF_UNLINKED",
+                    resource_type="classroom",
+                    resource_id=saved.id,
+                    before={
+                        "responsible_staff_user_ids": list(
+                            current.responsible_staff_user_ids
+                        )
+                    },
+                    after={
+                        "responsible_staff_user_ids": list(
+                            saved.responsible_staff_user_ids
+                        )
+                    },
+                    ip_fingerprint=ip_fingerprint,
+                )
+                break
+            else:
+                raise ClassroomConcurrentUpdateError()
+
+
 class ClassroomService:
     def __init__(
         self,
         repository: ClassroomRepository,
+        user_repository: UserRepository,
         notification_service: NotificationService,
         audit_service: AuditService,
         *,
@@ -66,6 +150,7 @@ class ClassroomService:
         clock: Callable[[], datetime],
     ) -> None:
         self._repository = repository
+        self._users = user_repository
         self._notifications = notification_service
         self._audit = audit_service
         self._threshold = occupancy_confidence_threshold
@@ -85,6 +170,9 @@ class ClassroomService:
         location = self._text(command.location, "강의실 위치")
         timezone = self._timezone(command.timezone)
         grace = self._grace(command.after_hours_grace_minutes)
+        responsible_staff_user_ids = self._responsible_staff_user_ids(
+            command.responsible_staff_user_ids
+        )
         existing = self._repository.get_classroom_by_operation_id(operation_id)
         if existing is not None:
             if (
@@ -93,6 +181,7 @@ class ClassroomService:
                 or existing.location != location
                 or existing.timezone != timezone
                 or existing.after_hours_grace_minutes != grace
+                or existing.responsible_staff_user_ids != responsible_staff_user_ids
             ):
                 raise ClassroomOperationConflictError()
             return existing
@@ -112,6 +201,7 @@ class ClassroomService:
             created_operation_id=operation_id,
             last_operation_id=operation_id,
             operation_ids=(operation_id,),
+            responsible_staff_user_ids=responsible_staff_user_ids,
         )
         saved = self._repository.create_classroom(classroom)
         self._audit_change(
@@ -162,6 +252,9 @@ class ClassroomService:
         location = self._text(command.location, "강의실 위치")
         timezone = self._timezone(command.timezone)
         grace = self._grace(command.after_hours_grace_minutes)
+        responsible_staff_user_ids = self._responsible_staff_user_ids(
+            command.responsible_staff_user_ids
+        )
         existing = self._repository.get_classroom_by_operation_id(operation_id)
         if existing is not None:
             if (
@@ -171,6 +264,7 @@ class ClassroomService:
                 or existing.location != location
                 or existing.timezone != timezone
                 or existing.after_hours_grace_minutes != grace
+                or existing.responsible_staff_user_ids != responsible_staff_user_ids
             ):
                 raise ClassroomOperationConflictError()
             return existing
@@ -182,6 +276,7 @@ class ClassroomService:
             location=location,
             timezone=timezone,
             after_hours_grace_minutes=grace,
+            responsible_staff_user_ids=responsible_staff_user_ids,
             updated_at=self._clock(),
             version=current.version + 1,
             last_operation_id=operation_id,
@@ -586,7 +681,7 @@ class ClassroomService:
                 )
                 if belongs_to_event:
                     alert_count += 1
-                self._ensure_alert_notification(claimed.actor_user_id, classroom, current, alert)
+                self._ensure_alert_notifications(classroom, current, alert)
 
         completed = replace(
             claimed,
@@ -762,31 +857,76 @@ class ClassroomService:
         stored, _ = self._repository.create_alert(alert)
         return stored, stored.created_operation_id == operation_id
 
-    def _ensure_alert_notification(
-        self,
-        recipient_user_id: str,
-        classroom: Classroom,
-        seat: Seat,
-        alert: AfterHoursAlert,
+    def _ensure_alert_notifications(
+        self, classroom: Classroom, seat: Seat, alert: AfterHoursAlert
     ) -> None:
         if alert.status != AfterHoursAlertStatus.OPEN:
             return
-        self._notifications.create(
-            CreateNotificationCommand(
-                recipient_user_id=recipient_user_id,
-                type="AFTER_HOURS_SEAT_OCCUPIED",
-                title="마감 후 점유 좌석이 확인됐습니다",
-                body=f"{classroom.name} {seat.label} 좌석을 확인해 주세요.",
-                data={
-                    "target_route": "/admin/alerts",
-                    "alert_id": alert.id,
-                    "classroom_id": classroom.id,
-                    "seat_id": seat.id,
-                },
-                operation_id=f"after-hours-alert-notification:{alert.id}",
-                dedupe_key=alert.dedupe_key,
+        recipients = {
+            user.id: user
+            for user in self._active_users(UserRole.STAFF)
+            if user.id in classroom.responsible_staff_user_ids
+        }
+        recipients.update({user.id: user for user in self._active_users(UserRole.ADMIN)})
+        for recipient in recipients.values():
+            dedupe_key = f"after_hours_seat:{alert.id}:{recipient.id}"
+            self._notifications.create(
+                CreateNotificationCommand(
+                    recipient_user_id=recipient.id,
+                    type="AFTER_HOURS_SEAT",
+                    title="마감 후 점유 좌석이 확인됐습니다",
+                    body=f"{classroom.name} {seat.label} 좌석을 확인해 주세요.",
+                    data={
+                        "target_route": (
+                            "/admin"
+                            if recipient.role == UserRole.ADMIN
+                            else f"/classrooms/{classroom.id}"
+                        ),
+                        "alert_id": alert.id,
+                        "classroom_id": classroom.id,
+                        "seat_id": seat.id,
+                    },
+                    operation_id=f"after-hours-seat-notification:{alert.id}:{recipient.id}",
+                    dedupe_key=dedupe_key,
+                )
             )
-        )
+
+    def list_responsible_staff_candidates(self, actor: User) -> list[User]:
+        self._require_admin(actor)
+        return self._active_users(UserRole.STAFF)
+
+    def _active_users(self, role: UserRole) -> list[User]:
+        users: list[User] = []
+        offset = 0
+        page_size = 200
+        while True:
+            page = self._users.list_users(
+                limit=page_size,
+                offset=offset,
+                role=role,
+                status=UserStatus.ACTIVE,
+                search=None,
+            )
+            users.extend(page.items)
+            offset += len(page.items)
+            if offset >= page.total or not page.items:
+                return users
+
+    def _responsible_staff_user_ids(self, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(values) > 50:
+            raise ClassroomInputError("담당 직원은 최대 50명까지 지정할 수 있습니다.")
+        normalized = tuple(sorted({value.strip() for value in values if value.strip()}))
+        if len(normalized) != len(values):
+            raise ClassroomInputError("담당 직원 식별자가 올바르지 않습니다.")
+        for user_id in normalized:
+            user = self._users.get_user(user_id)
+            if (
+                user is None
+                or user.role != UserRole.STAFF
+                or user.status != UserStatus.ACTIVE
+            ):
+                raise ClassroomInputError("담당 직원은 활성 STAFF 계정이어야 합니다.")
+        return normalized
 
     def _is_operating(self, classroom: Classroom, instant: datetime) -> bool:
         local = instant.astimezone(ZoneInfo(classroom.timezone))
@@ -977,6 +1117,7 @@ class ClassroomService:
             "location": item.location,
             "timezone": item.timezone,
             "after_hours_grace_minutes": item.after_hours_grace_minutes,
+            "responsible_staff_user_ids": list(item.responsible_staff_user_ids),
             "is_active": item.is_active,
             "version": item.version,
         }

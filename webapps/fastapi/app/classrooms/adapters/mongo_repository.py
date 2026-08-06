@@ -444,6 +444,7 @@ class MongoClassroomRepository:
             "created_operation_id": item.created_operation_id,
             "last_operation_id": item.last_operation_id,
             "operation_ids": list(item.operation_ids),
+            "responsible_staff_user_ids": list(item.responsible_staff_user_ids),
         }
 
     @staticmethod
@@ -478,6 +479,9 @@ class MongoClassroomRepository:
                 created_operation_id=_string(document, "created_operation_id"),
                 last_operation_id=_string(document, "last_operation_id"),
                 operation_ids=_string_tuple(document, "operation_ids"),
+                responsible_staff_user_ids=_optional_string_tuple(
+                    document, "responsible_staff_user_ids"
+                ),
             )
         except (KeyError, TypeError, ValueError):
             raise RepositoryDataError() from None
@@ -758,6 +762,13 @@ def _optional_aware_datetime(document: MongoDocument, field: str) -> datetime | 
 
 def _string_tuple(document: MongoDocument, field: str) -> tuple[str, ...]:
     value = document[field]
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise TypeError
+    return tuple(value)
+
+
+def _optional_string_tuple(document: MongoDocument, field: str) -> tuple[str, ...]:
+    value = document.get(field, [])
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise TypeError
     return tuple(value)

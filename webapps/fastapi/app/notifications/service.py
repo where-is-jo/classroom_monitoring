@@ -52,6 +52,7 @@ _ALLOWED_TARGET_PREFIXES = (
     "/staff/interview-waits",
     "/classrooms",
     "/notifications",
+    "/admin",
     "/admin/alerts",
 )
 

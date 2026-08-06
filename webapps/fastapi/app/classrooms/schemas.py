@@ -55,6 +55,7 @@ class ClassroomResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     version: int
+    responsible_staff_user_ids: list[str]
 
     @classmethod
     def from_domain(cls, item: Classroom) -> ClassroomResponse:
@@ -77,6 +78,7 @@ class ClassroomResponse(BaseModel):
             created_at=item.created_at,
             updated_at=item.updated_at,
             version=item.version,
+            responsible_staff_user_ids=list(item.responsible_staff_user_ids),
         )
 
 
@@ -103,6 +105,7 @@ class CreateClassroomRequest(BaseModel):
     timezone: str = Field(min_length=1, max_length=100)
     after_hours_grace_minutes: int = Field(default=10, ge=0, le=1440)
     operation_id: UUID
+    responsible_staff_user_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class UpdateClassroomRequest(CreateClassroomRequest):
@@ -378,6 +381,7 @@ class ClassroomCreateForm(BaseModel):
     timezone: str = Field(min_length=1, max_length=100)
     after_hours_grace_minutes: int = Field(ge=0, le=1440)
     operation_id: UUID
+    responsible_staff_user_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class ClassroomUpdateForm(ClassroomCreateForm):

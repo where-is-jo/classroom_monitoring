@@ -33,7 +33,7 @@ from ..auth.service import AuthService, LoginRateLimiter
 from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
-from ..classrooms.service import ClassroomService
+from ..classrooms.service import ClassroomService, ClassroomStaffAssignmentService
 from ..employees.adapters.memory_repository import InMemoryEmployeeRepository
 from ..employees.adapters.mongo_repository import MongoEmployeeRepository
 from ..employees.ports import EmployeeRepository
@@ -290,11 +290,21 @@ def get_audit_service(
     return AuditService(repository, clock=utc_now)
 
 
+def get_classroom_staff_assignment_service(
+    repository: ClassroomRepository = Depends(get_classroom_repository),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> ClassroomStaffAssignmentService:
+    return ClassroomStaffAssignmentService(repository, audit_service, clock=utc_now)
+
+
 def get_user_service(
     repository: UserRepository = Depends(get_user_repository),
     auth_repository: AuthRepository = Depends(get_auth_repository),
     audit_service: AuditService = Depends(get_audit_service),
     password_security: PasswordSecurity = Depends(get_password_security),
+    staff_assignment_policy: ClassroomStaffAssignmentService = Depends(
+        get_classroom_staff_assignment_service
+    ),
     settings: Settings = Depends(get_settings),
 ) -> UserService:
     return UserService(
@@ -304,6 +314,7 @@ def get_user_service(
         password_security,
         password_min_length=settings.auth_password_min_length,
         clock=utc_now,
+        staff_assignment_policy=staff_assignment_policy,
     )
 
 
@@ -398,12 +409,14 @@ def get_employee_interview_coordinator(
 
 def get_classroom_service(
     repository: ClassroomRepository = Depends(get_classroom_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
     notification_service: NotificationService = Depends(get_notification_service),
     audit_service: AuditService = Depends(get_audit_service),
     settings: Settings = Depends(get_settings),
 ) -> ClassroomService:
     return ClassroomService(
         repository,
+        user_repository,
         notification_service,
         audit_service,
         occupancy_confidence_threshold=(settings.seat_occupancy_confidence_threshold),
@@ -446,12 +459,16 @@ def _seed_users(settings: Settings) -> None:
     assert settings.auth_seed_staff_password is not None
     assert settings.auth_seed_admin_password is not None
     assert settings.auth_seed_system_operator_password is not None
+    audit_service = get_audit_service(get_audit_repository(settings))
     user_service = get_user_service(
-        get_user_repository(settings),
-        get_auth_repository(settings),
-        get_audit_service(get_audit_repository(settings)),
-        get_password_security(),
-        settings,
+        repository=get_user_repository(settings),
+        auth_repository=get_auth_repository(settings),
+        audit_service=audit_service,
+        password_security=get_password_security(),
+        staff_assignment_policy=get_classroom_staff_assignment_service(
+            get_classroom_repository(settings), audit_service
+        ),
+        settings=settings,
     )
     seed_virtual_users(
         user_service,

@@ -27,7 +27,7 @@ from app.shared.dependencies import (
     get_settings,
     get_user_service,
 )
-from app.users.models import User
+from app.users.models import User, UserRole
 from tests.classroom_helpers import ClassroomStack, build_classroom_stack
 from tests.settings_helpers import make_settings
 
@@ -162,6 +162,44 @@ def test_admin_crud_student_read_and_write_denial(
     assert denied.status_code == 403
 
 
+def test_admin_classroom_form_assigns_multiple_responsible_staff(
+    classroom_client: TestClient,
+    classroom_stack: ClassroomStack,
+) -> None:
+    first_staff = classroom_stack.auth.seed(
+        UserRole.STAFF, email="form-staff-1@example.invalid"
+    )
+    second_staff = classroom_stack.auth.seed(
+        UserRole.STAFF, email="form-staff-2@example.invalid"
+    )
+    _login(classroom_client, classroom_stack.admin)
+
+    response = classroom_client.post(
+        "/admin/classrooms",
+        headers={"Origin": ORIGIN},
+        data={
+            "csrf_token": classroom_client.cookies[CSRF_COOKIE],
+            "code": "ROOM-FORM-STAFF",
+            "name": "담당자 폼 강의실",
+            "location": "Building C",
+            "timezone": "Asia/Seoul",
+            "after_hours_grace_minutes": "10",
+            "operation_id": str(uuid4()),
+            "responsible_staff_user_ids": [first_staff.id, second_staff.id],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    page = classroom_stack.repository.list_classrooms(
+        include_inactive=True, limit=50, offset=0
+    )
+    created = next(item for item in page.items if item.code == "ROOM-FORM-STAFF")
+    assert created.responsible_staff_user_ids == tuple(
+        sorted((first_staff.id, second_staff.id))
+    )
+
+
 def test_after_hours_http_journey_and_pages(
     classroom_client: TestClient,
     classroom_stack: ClassroomStack,
@@ -207,7 +245,7 @@ def test_after_hours_http_journey_and_pages(
     alert_page = classroom_client.get("/admin/alerts")
     assert alerts.status_code == 200 and alerts.json()["total"] == 1
     assert notifications.status_code == 200 and notifications.json()["total"] == 1
-    assert notifications.json()["items"][0]["target_route"] == "/admin/alerts"
+    assert notifications.json()["items"][0]["target_route"] == "/admin"
     assert "Classroom ROOM-JOURNEY" in public_page.text
     assert "OCCUPIED" in detail_page.text
     assert "좌석 생성" in admin_page.text

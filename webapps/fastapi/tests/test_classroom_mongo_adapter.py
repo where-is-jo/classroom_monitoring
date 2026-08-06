@@ -64,6 +64,7 @@ def _values() -> tuple[
         created_operation_id="classroom-create",
         last_operation_id="classroom-update",
         operation_ids=("classroom-create", "classroom-update"),
+        responsible_staff_user_ids=("staff-id",),
     )
     seat = Seat(
         id="seat-id",
@@ -181,6 +182,16 @@ def test_all_classroom_documents_roundtrip() -> None:
         )
         == alert
     )
+
+
+def test_legacy_classroom_document_defaults_responsible_staff_to_empty() -> None:
+    classroom, _, _, _, _ = _values()
+    document = MongoClassroomRepository._classroom_to_document(classroom)
+    document.pop("responsible_staff_user_ids")
+
+    restored = MongoClassroomRepository._classroom_to_domain(document)
+
+    assert restored.responsible_staff_user_ids == ()
 
 
 def test_invalid_nested_document_and_naive_datetime_raise_repository_error() -> None:

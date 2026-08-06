@@ -51,6 +51,7 @@ class Classroom:
     created_operation_id: str
     last_operation_id: str
     operation_ids: tuple[str, ...]
+    responsible_staff_user_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,7 @@ class CreateClassroomCommand:
     timezone: str
     after_hours_grace_minutes: int
     operation_id: str
+    responsible_staff_user_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -206,6 +208,7 @@ class UpdateClassroomCommand:
     after_hours_grace_minutes: int
     expected_version: int
     operation_id: str
+    responsible_staff_user_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

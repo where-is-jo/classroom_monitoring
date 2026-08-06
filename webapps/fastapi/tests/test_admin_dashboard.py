@@ -53,6 +53,7 @@ def dashboard_stack() -> DashboardStack:
     classrooms = InMemoryClassroomRepository()
     classroom_service = ClassroomService(
         classrooms,
+        waits.employees.auth.users,
         waits.notification_service,
         AuditService(waits.employees.auth.audit, clock=waits.employees.auth.clock),
         occupancy_confidence_threshold=0.6,

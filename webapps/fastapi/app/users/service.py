@@ -39,7 +39,7 @@ from .models import (
     UserRole,
     UserStatus,
 )
-from .ports import UserRepository
+from .ports import StaffAssignmentPolicy, UserRepository
 
 
 class UserService:
@@ -52,6 +52,7 @@ class UserService:
         *,
         password_min_length: int,
         clock: Callable[[], datetime],
+        staff_assignment_policy: StaffAssignmentPolicy | None = None,
     ) -> None:
         self._repository = repository
         self._auth_repository = auth_repository
@@ -59,6 +60,7 @@ class UserService:
         self._password_security = password_security
         self._password_min_length = password_min_length
         self._clock = clock
+        self._staff_assignments = staff_assignment_policy
 
     def list_users(
         self,
@@ -122,6 +124,12 @@ class UserService:
         self._require_admin(actor)
         idempotent_user = self._idempotent_result(command.operation_id, command.user_id)
         if idempotent_user is not None:
+            self._unlink_invalid_staff(
+                actor,
+                idempotent_user,
+                operation_id=command.operation_id,
+                ip_fingerprint=ip_fingerprint,
+            )
             return idempotent_user
 
         current = self._get_required_user(command.user_id)
@@ -165,6 +173,12 @@ class UserService:
             after=saved,
             ip_fingerprint=ip_fingerprint,
         )
+        self._unlink_invalid_staff(
+            actor,
+            saved,
+            operation_id=command.operation_id,
+            ip_fingerprint=ip_fingerprint,
+        )
         return saved
 
     def deactivate_user(
@@ -178,9 +192,21 @@ class UserService:
         self._require_admin(actor)
         idempotent_user = self._idempotent_result(operation_id, user_id)
         if idempotent_user is not None:
+            self._unlink_invalid_staff(
+                actor,
+                idempotent_user,
+                operation_id=operation_id,
+                ip_fingerprint=ip_fingerprint,
+            )
             return idempotent_user
         current = self._get_required_user(user_id)
         if current.status == UserStatus.INACTIVE:
+            self._unlink_invalid_staff(
+                actor,
+                current,
+                operation_id=operation_id,
+                ip_fingerprint=ip_fingerprint,
+            )
             return current
         self._protect_operator_and_self(
             actor,
@@ -208,7 +234,31 @@ class UserService:
             after=saved,
             ip_fingerprint=ip_fingerprint,
         )
+        self._unlink_invalid_staff(
+            actor,
+            saved,
+            operation_id=operation_id,
+            ip_fingerprint=ip_fingerprint,
+        )
         return saved
+
+    def _unlink_invalid_staff(
+        self,
+        actor: User,
+        user: User,
+        *,
+        operation_id: str,
+        ip_fingerprint: str | None,
+    ) -> None:
+        if self._staff_assignments is not None and (
+            user.role != UserRole.STAFF or user.status != UserStatus.ACTIVE
+        ):
+            self._staff_assignments.unlink_staff_user(
+                actor,
+                user.id,
+                operation_id=operation_id,
+                ip_fingerprint=ip_fingerprint,
+            )
 
     def change_password(
         self,

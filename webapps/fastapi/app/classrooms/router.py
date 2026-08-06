@@ -126,6 +126,7 @@ def create_classroom(
             timezone=payload.timezone,
             after_hours_grace_minutes=payload.after_hours_grace_minutes,
             operation_id=str(payload.operation_id),
+            responsible_staff_user_ids=tuple(payload.responsible_staff_user_ids),
         ),
         ip_fingerprint=ip_fingerprint,
     )
@@ -163,6 +164,7 @@ def update_classroom(
                 after_hours_grace_minutes=payload.after_hours_grace_minutes,
                 expected_version=payload.expected_version,
                 operation_id=str(payload.operation_id),
+                responsible_staff_user_ids=tuple(payload.responsible_staff_user_ids),
             ),
             ip_fingerprint=ip_fingerprint,
         )
@@ -520,6 +522,7 @@ def create_classroom_page(
                 timezone=form.timezone,
                 after_hours_grace_minutes=form.after_hours_grace_minutes,
                 operation_id=str(form.operation_id),
+                responsible_staff_user_ids=tuple(form.responsible_staff_user_ids),
             ),
             ip_fingerprint=ip_fingerprint,
         )
@@ -593,6 +596,7 @@ def update_classroom_page(
                 after_hours_grace_minutes=form.after_hours_grace_minutes,
                 expected_version=form.expected_version,
                 operation_id=str(form.operation_id),
+                responsible_staff_user_ids=tuple(form.responsible_staff_user_ids),
             ),
             ip_fingerprint=ip_fingerprint,
         )
@@ -892,6 +896,7 @@ def _render_admin_classrooms(
             request,
             actor,
             entries=entries,
+            staff_users=service.list_responsible_staff_candidates(actor),
             create_operation_id=str(uuid4()),
             error=error,
         ),
