@@ -2,6 +2,9 @@
 
 포트는 프로세스 외부 I/O 경계에만 만든다. 판단 기준은 ADR-0002에 있다.
 서비스 계층은 이 Protocol에만 의존하고 어댑터 구현체를 직접 import하지 않는다.
+
+`EventRepository`는 흔히 Repository 패턴이라 부르는 것과 같다. 다만 이 저장소는
+코드와 문서에서 "저장소 포트"라는 이름만 쓴다. 어휘 대응표는 ADR-0005에 있다.
 """
 
 from __future__ import annotations

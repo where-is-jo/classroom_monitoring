@@ -5,6 +5,9 @@
 
 저장소를 MongoDB로 바꿀 때 고치는 파일도 여기다.
 `get_event_repository`가 반환하는 구현체만 교체하면 서비스와 라우터는 그대로다.
+
+조립을 한곳에 모은 이 파일이 흔히 Composition Root라 부르는 것에 해당한다.
+어휘 대응표는 ADR-0005에 있다.
 """
 
 from __future__ import annotations

@@ -67,6 +67,7 @@ app/
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
+│  ├─ rules.py             탐지 결과를 업무 의미로 바꾸는 순수 함수
 │  ├─ schemas.py           Pydantic 요청·응답 스키마
 │  ├─ models.py            도메인 모델(dataclass)
 │  ├─ ports.py             외부 I/O 인터페이스(Protocol)
@@ -95,6 +96,10 @@ tests/                     외부 의존성 없이 실행되는 테스트
 
 포트는 프로세스 외부 I/O 경계 4곳(저장소·추론 클라이언트·객체 저장소·알림)에만 만든다.
 선택 배경과 포트 판단 기준은 [ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)에 있다.
+
+포트 외의 설계 패턴(파사드·Strategy·Observer 등)을 언제 만들어도 되는지는
+[ADR-0005](../../docs/architecture/decisions/ADR-0005-design-pattern-scope.md)의 판정 질문으로 정한다.
+현재는 모두 "아직 만들지 않는다" 상태이며, `service.py`가 라우터에 대한 파사드 역할을 겸한다.
 
 템플릿은 기능별로 나누되 `app/` 밖에 둔다. Python 코드와 템플릿 파일을 섞지 않는다.
 
