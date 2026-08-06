@@ -40,6 +40,28 @@ python -m pytest
 
 외부 의존성 없이 실행된다.
 
+### 린트와 타입 검사
+
+```bash
+cd webapps/fastapi
+python -m ruff check .        # 린트
+python -m ruff format .       # 포매팅
+python -m mypy                # 타입 검사 (대상은 pyproject.toml에 있다)
+```
+
+`ruff check --fix`로 자동 수정할 수 있는 지적은 `[*]` 표시가 붙는다.
+병합 전에는 세 명령과 `python -m pytest`가 모두 통과해야 한다.
+
+설정은 [`pyproject.toml`](./pyproject.toml)에 있다. 저장소 최상위가 아니라 이 디렉터리에
+두는 이유와 각 규칙을 켠 이유는 그 파일의 주석에 적혀 있다.
+
+**mypy는 `strict` 모드다.** 공개 함수의 인자와 반환값에 타입 힌트를 붙이라는
+[코딩 규칙](../../docs/conventions/coding-convention.md#python)을 도구로 강제하는 것이며,
+새 제약을 더하는 것이 아니다.
+
+Scripts 디렉터리가 PATH에 없을 수 있어 `ruff`·`mypy`를 직접 부르지 않고
+`python -m` 형태로 적었다. `python -m pytest`, `python -m uvicorn`과 같은 방식이다.
+
 ## 서비스 목적
 
 외부 클라이언트 요청의 유일한 진입점이다.
