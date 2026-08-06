@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # 앱 시작 전에 외부 의존 없는 local memory mode를 명시한다.
 os.environ["APP_ENV"] = "local"
