@@ -59,7 +59,8 @@ def test_login_API는_cookie를_발급하고_me에서_민감정보를_제외한�
 
     assert response.status_code == 200
     assert response.json()["user"]["email"] == user.email
-    assert "password" not in response.text
+    assert "password_hash" not in response.text
+    assert PASSWORD not in response.text
     assert "token" not in response.text
     set_cookie = response.headers.get_list("set-cookie")
     assert any(f"{ACCESS_COOKIE}=" in value and "HttpOnly" in value for value in set_cookie)
@@ -78,6 +79,8 @@ def test_login_API는_cookie를_발급하고_me에서_민감정보를_제외한�
         "created_at",
         "updated_at",
         "version",
+        "must_change_password",
+        "password_changed_at",
     }
 
 

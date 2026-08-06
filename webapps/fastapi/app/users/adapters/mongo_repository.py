@@ -146,6 +146,8 @@ class MongoUserRepository:
             "version": user.version,
             "created_operation_id": user.created_operation_id,
             "last_operation_id": user.last_operation_id,
+            "must_change_password": user.must_change_password,
+            "password_changed_at": user.password_changed_at,
             "operation_ids": list(
                 dict.fromkeys([user.created_operation_id, user.last_operation_id])
             ),
@@ -160,7 +162,7 @@ class MongoUserRepository:
                 for field in datetime_fields
             ):
                 raise ValueError("user timestamps must be aware")
-            for optional_field in ("locked_until", "last_login_at"):
+            for optional_field in ("locked_until", "last_login_at", "password_changed_at"):
                 value = document.get(optional_field)
                 if value is not None and (not isinstance(value, datetime) or value.tzinfo is None):
                     raise ValueError("optional user timestamp must be aware")
@@ -179,6 +181,8 @@ class MongoUserRepository:
                 version=_required_int(document, "version"),
                 created_operation_id=_required_string(document, "created_operation_id"),
                 last_operation_id=_required_string(document, "last_operation_id"),
+                must_change_password=_optional_bool(document, "must_change_password", False),
+                password_changed_at=document.get("password_changed_at"),
             )
         except (KeyError, TypeError, ValueError):
             raise RepositoryDataError() from None
@@ -195,4 +199,11 @@ def _required_int(document: MongoDocument, field: str) -> int:
     value = document[field]
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError(f"{field} must be an integer")
+    return value
+
+
+def _optional_bool(document: MongoDocument, field: str, default: bool) -> bool:
+    value = document.get(field, default)
+    if not isinstance(value, bool):
+        raise TypeError(f"{field} must be a boolean")
     return value

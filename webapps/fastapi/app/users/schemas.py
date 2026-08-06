@@ -21,6 +21,8 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     version: int
+    must_change_password: bool
+    password_changed_at: datetime | None
 
     @classmethod
     def from_user(cls, user: User) -> UserResponse:
@@ -35,6 +37,8 @@ class UserResponse(BaseModel):
             created_at=user.created_at,
             updated_at=user.updated_at,
             version=user.version,
+            must_change_password=user.must_change_password,
+            password_changed_at=user.password_changed_at,
         )
 
 

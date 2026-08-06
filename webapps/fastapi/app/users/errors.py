@@ -72,6 +72,22 @@ class CurrentPasswordMismatchError(DomainError):
         super().__init__("현재 비밀번호가 올바르지 않습니다.")
 
 
+class PasswordUnchangedError(DomainError):
+    code = "PASSWORD_UNCHANGED"
+    status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__("새 비밀번호는 현재 비밀번호와 달라야 합니다.")
+
+
+class UnsupportedUserRoleError(DomainError):
+    code = "UNSUPPORTED_USER_ROLE"
+    status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__("학생, 직원, 관리자 역할만 선택할 수 있습니다.")
+
+
 class SelfDeactivationError(DomainError):
     code = "SELF_DEACTIVATION_FORBIDDEN"
     status_code = 409

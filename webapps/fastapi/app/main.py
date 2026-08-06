@@ -10,6 +10,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .admin.router import api_router as admin_dashboard_api_router
 from .admin.router import page_router as admin_dashboard_page_router
 from .auth.dependencies import get_optional_page_user, login_redirect, product_home_path
-from .auth.errors import PageAuthenticationRequired
+from .auth.errors import PageAuthenticationRequired, PagePasswordChangeRequired
 from .auth.router import api_router as auth_api_router
 from .auth.router import page_router as auth_page_router
 from .classrooms.router import admin_page_router as classrooms_admin_page_router
@@ -244,6 +245,17 @@ def handle_page_authentication_required(
     return RedirectResponse(url=login_redirect(exc.return_to), status_code=303)
 
 
+@app.exception_handler(PagePasswordChangeRequired)
+def handle_page_password_change_required(
+    _: Request,
+    exc: PagePasswordChangeRequired,
+) -> RedirectResponse:
+    return RedirectResponse(
+        url="/account/password?" + urlencode({"next": exc.return_to}),
+        status_code=303,
+    )
+
+
 @app.exception_handler(RequestValidationError)
 def handle_validation_error(request: Request, exc: RequestValidationError) -> Response:
     message = "요청 값이 올바르지 않습니다."
@@ -296,7 +308,11 @@ def handle_unexpected_error(request: Request, exc: Exception) -> Response:
 
 @app.get("/", include_in_schema=False)
 def index(user: User | None = Depends(get_optional_page_user)) -> RedirectResponse:
-    return RedirectResponse(url="/login" if user is None else product_home_path(user.role))
+    if user is None:
+        return RedirectResponse(url="/login")
+    if user.must_change_password:
+        return RedirectResponse(url="/account/password")
+    return RedirectResponse(url=product_home_path(user.role))
 
 
 @app.get("/health", tags=["system"], response_model=HealthResponse)

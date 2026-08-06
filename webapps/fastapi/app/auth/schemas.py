@@ -38,3 +38,9 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=1, max_length=128)
     operation_id: UUID = Field(default_factory=uuid4)
+
+
+class ChangePasswordForm(ChangePasswordRequest):
+    new_password_confirm: str = Field(min_length=1, max_length=128)
+    next: str = Field(default="", max_length=500)
+    csrf_token: str = Field(min_length=1)

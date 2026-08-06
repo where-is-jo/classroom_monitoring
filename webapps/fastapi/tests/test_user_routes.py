@@ -8,7 +8,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth.dependencies import CSRF_COOKIE
+from app.auth.dependencies import ACCESS_COOKIE, CSRF_COOKIE, REFRESH_COOKIE
+from app.auth.errors import InvalidRefreshTokenError
 from app.main import app
 from app.shared.dependencies import get_auth_service, get_user_service
 from app.users.models import UserRole
@@ -67,7 +68,8 @@ def test_관리자_로그인_생성_수정_비활성화_사용자_여정(
     created = created_response.json()
     assert created["email"] == "journey.user@example.invalid"
     assert created_response.headers["location"].endswith(created["id"])
-    assert "password" not in created_response.text
+    assert "password_hash" not in created_response.text
+    assert "JourneyPassword1!" not in created_response.text
 
     updated_response = user_client.patch(
         f"/api/v1/users/{created['id']}",
@@ -186,6 +188,7 @@ def test_본인_비밀번호_변경_API는_refresh를_폐기하고_민감정보�
     user_stack: AuthStack,
 ) -> None:
     login_admin(user_client, user_stack)
+    old_refresh = user_client.cookies[REFRESH_COOKIE]
     response = user_client.patch(
         "/api/v1/auth/me/password",
         headers=write_headers(user_client),
@@ -197,12 +200,13 @@ def test_본인_비밀번호_변경_API는_refresh를_폐기하고_민감정보�
     )
 
     assert response.status_code == 200
-    assert "password" not in response.text
-    refresh = user_client.post(
-        "/api/v1/auth/refresh",
-        headers=write_headers(user_client),
-    )
-    assert refresh.status_code == 401
+    assert "password_hash" not in response.text
+    assert "ChangedPassword2!" not in response.text
+    assert ACCESS_COOKIE not in user_client.cookies
+    assert REFRESH_COOKIE not in user_client.cookies
+    assert CSRF_COOKIE not in user_client.cookies
+    with pytest.raises(InvalidRefreshTokenError):
+        user_stack.auth_service.refresh(old_refresh)
 
 
 def test_OpenAPI는_auth_user_계약과_공통_오류_model을_노출한다(

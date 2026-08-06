@@ -37,6 +37,14 @@ class PermissionDeniedError(DomainError):
         super().__init__("이 요청을 수행할 권한이 없습니다.")
 
 
+class PasswordChangeRequiredError(DomainError):
+    code = "PASSWORD_CHANGE_REQUIRED"
+    status_code = 403
+
+    def __init__(self) -> None:
+        super().__init__("임시 비밀번호를 먼저 변경해야 합니다.")
+
+
 class InvalidRefreshTokenError(DomainError):
     code = "INVALID_REFRESH_TOKEN"
     status_code = 401
@@ -78,6 +86,12 @@ class CsrfValidationError(DomainError):
 
 
 class PageAuthenticationRequired(Exception):
+    def __init__(self, return_to: str) -> None:
+        super().__init__(return_to)
+        self.return_to = return_to
+
+
+class PagePasswordChangeRequired(Exception):
     def __init__(self, return_to: str) -> None:
         super().__init__(return_to)
         self.return_to = return_to

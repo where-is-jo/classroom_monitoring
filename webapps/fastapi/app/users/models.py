@@ -39,6 +39,8 @@ class User:
     version: int
     created_operation_id: str
     last_operation_id: str
+    must_change_password: bool = False
+    password_changed_at: datetime | None = None
 
 
 @dataclass(frozen=True)

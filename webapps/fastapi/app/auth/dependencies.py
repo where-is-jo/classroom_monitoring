@@ -20,6 +20,8 @@ from .errors import (
     CsrfValidationError,
     InvalidOriginError,
     PageAuthenticationRequired,
+    PagePasswordChangeRequired,
+    PasswordChangeRequiredError,
     PermissionDeniedError,
 )
 from .service import AuthService
@@ -58,11 +60,17 @@ async def require_csrf(
         raise CsrfValidationError()
 
 
-def get_current_user(
+def get_authenticated_user(
     request: Request,
     service: AuthService = Depends(get_auth_service),
 ) -> User:
     return service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+
+
+def get_current_user(user: User = Depends(get_authenticated_user)) -> User:
+    if user.must_change_password:
+        raise PasswordChangeRequiredError()
+    return user
 
 
 def get_current_page_user(
@@ -73,6 +81,11 @@ def get_current_page_user(
 ) -> User:
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+        if user.must_change_password:
+            path = request.url.path
+            if request.url.query:
+                path = f"{path}?{request.url.query}"
+            raise PagePasswordChangeRequired(path)
         _set_page_navigation_state(
             request,
             user=user,
@@ -85,6 +98,25 @@ def get_current_page_user(
         if request.url.query:
             path = f"{path}?{request.url.query}"
         raise PageAuthenticationRequired(path) from None
+
+
+def get_password_change_page_user(
+    request: Request,
+    service: AuthService = Depends(get_auth_service),
+    notification_service: NotificationService = Depends(get_notification_service),
+    settings: Settings = Depends(get_settings),
+) -> User:
+    try:
+        user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+    except AuthenticationRequiredError:
+        raise PageAuthenticationRequired(request.url.path) from None
+    _set_page_navigation_state(
+        request,
+        user=user,
+        settings=settings,
+        notification_unread_count=notification_service.unread_count(user),
+    )
+    return user
 
 
 def get_optional_page_user(

@@ -71,6 +71,7 @@
           </button>
           <span class="account-avatar" aria-hidden="true">{{ current_user.name[:1] }}</span>
           <span class="account-copy"><strong>{{ current_user.name }}</strong><small>{{ current_user.role.value|display_label }}</small></span>
+          <a class="icon-button" href="/account/password" aria-label="비밀번호 변경" title="비밀번호 변경">⚙</a>
           <form method="post" action="/logout" data-submit-state>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="icon-button" type="submit" data-pending-label="…" aria-label="로그아웃" title="로그아웃">↪</button>

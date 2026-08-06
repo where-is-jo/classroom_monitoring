@@ -314,7 +314,7 @@ def _render_users_page(
             "can_manage_employees": True,
             "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
             "page": page,
-            "roles": list(UserRole),
+            "roles": [UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN],
             "statuses": list(UserStatus),
             "selected_role": role,
             "selected_status": status_filter,

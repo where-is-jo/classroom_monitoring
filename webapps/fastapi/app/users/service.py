@@ -22,7 +22,9 @@ from .errors import (
     InvalidUserNameError,
     LastSystemOperatorError,
     PasswordPolicyError,
+    PasswordUnchangedError,
     SelfDeactivationError,
+    UnsupportedUserRoleError,
     UserConcurrentUpdateError,
     UserNotFoundError,
     UserOperationConflictError,
@@ -89,11 +91,13 @@ class UserService:
         ip_fingerprint: str | None,
     ) -> User:
         self._require_admin(actor)
+        self._require_product_role(command.role)
         return self._create(
             command,
             actor_user_id=actor.id,
             action="USER_CREATED",
             ip_fingerprint=ip_fingerprint,
+            must_change_password=True,
         )
 
     def seed_user(self, command: CreateUserCommand) -> User:
@@ -105,6 +109,7 @@ class UserService:
             actor_user_id=None,
             action="USER_SEEDED",
             ip_fingerprint=None,
+            must_change_password=False,
         )
 
     def update_user(
@@ -129,6 +134,8 @@ class UserService:
         if not name:
             raise InvalidUserNameError()
         role = current.role if command.role is None else command.role
+        if command.role is not None:
+            self._require_product_role(command.role)
         status = current.status if command.status is None else command.status
         self._protect_operator_and_self(actor, current, role=role, status=status)
 
@@ -218,11 +225,15 @@ class UserService:
             command.current_password, current.password_hash
         ):
             raise CurrentPasswordMismatchError()
+        if self._password_security.verify_password(command.new_password, current.password_hash):
+            raise PasswordUnchangedError()
         self._validate_password(command.new_password)
         now = self._clock()
         changed = replace(
             current,
             password_hash=self._password_security.hash_password(command.new_password),
+            must_change_password=False,
+            password_changed_at=now,
             updated_at=now,
             version=current.version + 1,
             last_operation_id=command.operation_id,
@@ -248,6 +259,7 @@ class UserService:
         actor_user_id: str | None,
         action: str,
         ip_fingerprint: str | None,
+        must_change_password: bool,
     ) -> User:
         existing_operation = self._repository.get_user_by_operation_id(command.operation_id)
         if existing_operation is not None:
@@ -272,6 +284,8 @@ class UserService:
             version=0,
             created_operation_id=command.operation_id,
             last_operation_id=command.operation_id,
+            must_change_password=must_change_password,
+            password_changed_at=None,
         )
         if not user.name:
             raise InvalidUserNameError()
@@ -360,6 +374,11 @@ class UserService:
         )
         if violations:
             raise PasswordPolicyError(violations)
+
+    @staticmethod
+    def _require_product_role(role: UserRole) -> None:
+        if role not in {UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN}:
+            raise UnsupportedUserRoleError()
 
 
 def _audit_user_state(user: User | None) -> dict[str, str]:
