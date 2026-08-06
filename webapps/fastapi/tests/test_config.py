@@ -114,3 +114,23 @@ def test_직원_AWAY_기준은_OFFSITE_기준보다_작아야_한다() -> None:
         )
 
     assert "EMPLOYEE_AWAY_AFTER_SECONDS" in str(raised.value)
+
+
+def test_mock_delivery_mode와_최대시도는_제한된_설정만_허용한다() -> None:
+    settings = Settings(
+        _env_file=None,
+        app_env="local",
+        database_mode="memory",
+        notification_mock_delivery_mode="always_fail",
+        notification_mock_delivery_max_attempts=1,
+    )
+    assert settings.notification_mock_delivery_mode == "always_fail"
+    assert settings.notification_mock_delivery_max_attempts == 1
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            notification_mock_delivery_mode="network",  # type: ignore[arg-type]
+        )

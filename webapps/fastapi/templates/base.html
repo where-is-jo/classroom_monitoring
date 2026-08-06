@@ -15,11 +15,21 @@
       {% if can_view_employees %}
         <a href="/employees">직원 상태</a>
       {% endif %}
+      {% if current_user %}
+        <a href="/notifications">
+          알림
+          {% set unread_count = request.state.notification_unread_count | default(0) %}
+          {% if unread_count %}<span class="badge" aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>{% endif %}
+        </a>
+      {% endif %}
       {% if can_manage_employees %}
         <a href="/admin/employees">직원 관리</a>
       {% endif %}
       {% if show_employee_dev_tools %}
         <a href="/admin/dev-tools">개발 도구</a>
+      {% endif %}
+      {% if show_notification_dev_tools | default(false) %}
+        <a href="/admin/mock-deliveries">Mock delivery</a>
       {% endif %}
       {% if can_manage_users %}
         <a href="/admin/users">사용자 관리</a>

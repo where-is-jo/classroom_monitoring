@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}알림함 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h1>알림함</h1>
+        <p>페이지 이동이나 새로고침으로 최신 인앱 알림을 확인합니다.</p>
+      </div>
+      <a class="button-link" href="/notifications">새로고침</a>
+    </div>
+
+    {% if error %}
+      <div class="message error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="get" action="/notifications" class="filter-form">
+      <label>
+        읽음 상태
+        <select name="is_read">
+          <option value="" {% if is_read is none %}selected{% endif %}>전체</option>
+          <option value="false" {% if is_read is sameas false %}selected{% endif %}>읽지 않음</option>
+          <option value="true" {% if is_read is sameas true %}selected{% endif %}>읽음</option>
+        </select>
+      </label>
+      <label>
+        알림 유형
+        <input name="type" value="{{ notification_type }}" maxlength="64" placeholder="예: INTERVIEW_READY">
+      </label>
+      <button type="submit">필터 적용</button>
+    </form>
+
+    {% if page.items %}
+      <form method="post" action="/notifications/read-all" data-submit-state>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="operation_id" value="{{ batch_operation_id }}">
+        <button type="submit" data-pending-label="처리 중…">모두 읽음</button>
+      </form>
+
+      <ul class="card-list" aria-label="알림 목록">
+        {% for notification in page.items %}
+          <li class="panel {% if not notification.is_read %}notification-unread{% endif %}">
+            <div class="section-heading">
+              <div>
+                <p><strong>{{ notification.title }}</strong></p>
+                <p>{{ notification.body }}</p>
+                <p class="muted">
+                  {{ notification.type }} · {{ notification.created_at | kst_datetime }} ·
+                  {% if notification.is_read %}읽음{% else %}읽지 않음{% endif %}
+                </p>
+              </div>
+              <div class="inline-actions">
+                {% if target_routes[notification.id] %}
+                  <a href="{{ target_routes[notification.id] }}">연결 화면 열기</a>
+                {% endif %}
+                {% if not notification.is_read %}
+                  <form method="post" action="/notifications/{{ notification.id }}/read" data-submit-state>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="operation_id" value="{{ row_operation_ids[notification.id] }}">
+                    <button type="submit" data-pending-label="처리 중…">읽음 처리</button>
+                  </form>
+                {% endif %}
+              </div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <nav class="pagination" aria-label="알림 페이지 이동">
+        {% if has_prev %}
+          <a href="?limit={{ limit }}&offset={{ [0, offset - limit] | max }}{% if is_read is not none %}&is_read={{ 'true' if is_read else 'false' }}{% endif %}{% if notification_type %}&type={{ notification_type | urlencode }}{% endif %}">이전</a>
+        {% endif %}
+        <span>{{ offset + 1 }}–{{ [offset + limit, page.total] | min }} / {{ page.total }}</span>
+        {% if has_next %}
+          <a href="?limit={{ limit }}&offset={{ offset + limit }}{% if is_read is not none %}&is_read={{ 'true' if is_read else 'false' }}{% endif %}{% if notification_type %}&type={{ notification_type | urlencode }}{% endif %}">다음</a>
+        {% endif %}
+      </nav>
+    {% else %}
+      <div class="empty-state">
+        <h2>표시할 알림이 없습니다</h2>
+        <p>선택한 조건에 해당하는 인앱 알림이 생기면 여기에 표시됩니다.</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

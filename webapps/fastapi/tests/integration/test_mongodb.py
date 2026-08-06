@@ -22,6 +22,8 @@ from app.employees.models import (
     EmployeeStatusHistory,
     StatusSource,
 )
+from app.notifications.adapters.mongo_repository import MongoNotificationRepository
+from app.notifications.models import MockDelivery, MockDeliveryStatus, Notification
 from app.shared.database import initialize_indexes
 from app.users.adapters.mongo_repository import MongoUserRepository
 from app.users.models import User, UserRole, UserStatus
@@ -40,6 +42,7 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         MongoAuthRepository.ensure_indexes,
         MongoAuditRepository.ensure_indexes,
         MongoEmployeeRepository.ensure_indexes,
+        MongoNotificationRepository.ensure_indexes,
     ]
     initialize_indexes(mongodb_database, initializers)
     initialize_indexes(mongodb_database, initializers)
@@ -62,6 +65,70 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         in mongodb_database["audit_logs"].index_information()
     )
     assert "employees_number_unique" in mongodb_database["employees"].index_information()
+    assert (
+        "notifications_dedupe_unique"
+        in mongodb_database["notifications"].index_information()
+    )
+    assert (
+        "notification_deliveries_notification_attempt_unique"
+        in mongodb_database["notification_deliveries"].index_information()
+    )
+
+
+def test_알림과_mock_delivery_Mongo_adapter_계약(mongodb_database) -> None:
+    initialize_indexes(
+        mongodb_database, [MongoNotificationRepository.ensure_indexes]
+    )
+    current_time = datetime.now(UTC)
+    now = current_time.replace(microsecond=(current_time.microsecond // 1000) * 1000)
+    suffix = str(uuid4())
+    notification = Notification(
+        id=f"notification-{suffix}",
+        recipient_user_id=f"user-{suffix}",
+        type="INTEGRATION_TEST",
+        title="통합 테스트 알림",
+        body="외부 발송 없는 인앱 알림",
+        data={"target_route": "/notifications"},
+        is_read=False,
+        read_at=None,
+        dedupe_key=f"integration:{suffix}",
+        created_at=now,
+        created_operation_id=f"notification-create-{suffix}",
+    )
+    delivery = MockDelivery(
+        id=f"delivery-{suffix}",
+        notification_id=notification.id,
+        provider="mock",
+        status=MockDeliveryStatus.SUCCESS,
+        attempt=1,
+        operation_id=f"delivery-attempt-{suffix}",
+        request_payload={"notification_id": notification.id},
+        result_payload={"outcome": "accepted"},
+        error=None,
+        attempted_at=now,
+    )
+    repository = MongoNotificationRepository(mongodb_database)
+    try:
+        assert repository.create_notification(notification) == notification
+        assert repository.create_notification(notification) == notification
+        assert repository.count_unread(notification.recipient_user_id) == 1
+        assert repository.append_delivery(delivery) == delivery
+        assert repository.append_delivery(delivery) == delivery
+        assert repository.list_notification_deliveries(notification.id) == [delivery]
+
+        marked = repository.mark_read(
+            notification.id,
+            recipient_user_id=notification.recipient_user_id,
+            read_at=now,
+            operation_id=f"notification-read-{suffix}",
+        )
+        assert marked is not None and marked.is_read
+        assert repository.count_unread(notification.recipient_user_id) == 0
+    finally:
+        mongodb_database["notification_deliveries"].delete_many(
+            {"notification_id": notification.id}
+        )
+        mongodb_database["notifications"].delete_one({"_id": notification.id})
 
 
 def test_사용자_refresh_audit_Mongo_adapter_계약(mongodb_database) -> None:

@@ -2,9 +2,10 @@
 
 FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
 
-> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태 동작**. 기존 이벤트 화면/API는
+> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림 동작**. 기존 이벤트 화면/API는
 > 공개 범위를 유지한다. 직원 프로필, 저장된 현재 상태와 이력, 수동 override, 명시적 시간
-> 정책 평가를 제공하며 local 인메모리 mode와 MongoDB mode가 같은 저장소 계약을 구현한다.
+> 정책 평가와 사용자별 알림함을 제공하며 local 인메모리 mode와 MongoDB mode가 같은
+> 저장소 계약을 구현한다. 개발환경에서는 외부 네트워크 없는 mock delivery 결과를 기록한다.
 
 ## 실행 방법
 
@@ -42,6 +43,8 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET /employees/{employee_id}` | 현재 상태·override·최근 이력 화면 |
 | `GET /admin/employees` | `ADMIN` 이상 직원 CRUD·명시적 정책 평가 화면 |
 | `GET /admin/dev-tools` | mock 입력 허용 환경의 구조화 관측 화면 |
+| `GET /notifications` | 로그인 사용자의 읽음 상태·유형 필터 인앱 알림함 |
+| `GET /admin/mock-deliveries` | mock 입력 허용 환경의 정제된 delivery 기록·명시적 재시도 화면 |
 | `POST /api/v1/auth/login` | access/refresh `HttpOnly` cookie 발급 |
 | `POST /api/v1/auth/refresh` | refresh rotation |
 | `POST /api/v1/auth/logout` | 현재 refresh family 폐기와 cookie 제거 |
@@ -55,6 +58,12 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `PUT/DELETE /api/v1/employees/{employee_id}/status-override` | 본인 STAFF 또는 `ADMIN` 이상 override 설정·해제 |
 | `POST /api/v1/employee-status-evaluations` | 모든 환경의 `ADMIN` 이상 명시적 시간 정책 평가 |
 | `POST /api/v1/mock-employee-observations` | mock 입력 허용 환경의 `ADMIN` 이상 구조화 관측 |
+| `GET /api/v1/notifications` | 본인 알림 목록, 읽음 상태·유형·페이지 필터 |
+| `GET /api/v1/notifications/unread-count` | 본인 미읽음 알림 수 |
+| `PATCH /api/v1/notifications/{notification_id}` | 본인 알림 읽음 처리 |
+| `POST /api/v1/notification-read-batches` | 본인 알림 전체 읽음 처리 |
+| `GET /api/v1/admin/mock-deliveries` | mock 입력 허용 환경의 `ADMIN` 이상 delivery 기록 |
+| `POST /api/v1/admin/mock-delivery-attempts` | 실패한 mock delivery의 명시적 멱등 재시도 |
 | `GET /docs` | 자동 생성 API 문서 |
 | `GET /openapi.json` | OpenAPI JSON |
 
@@ -103,6 +112,7 @@ app/
 ├─ users/                  사용자 CRUD, RBAC, memory/MongoDB 저장소
 ├─ audit/                  민감정보를 제거한 사용자·역할·상태 변경 감사 로그
 ├─ employees/              직원 CRUD, 상태 정책, override, memory/MongoDB 저장소
+├─ notifications/          사용자별 인앱 알림, 읽음, dedupe, mock delivery 저장소
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
@@ -128,6 +138,8 @@ templates/                 Jinja2 템플릿
 ├─ employees/              직원 목록·상세 화면
 ├─ admin/employees/        직원 관리·명시적 정책 평가 화면
 ├─ admin/dev_tools/        환경별로 등록되는 구조화 mock 관측 화면
+├─ admin/mock_deliveries/  환경별로 등록되는 정제된 mock delivery 화면
+├─ notifications/          사용자별 알림함
 ├─ events/                 기능별 템플릿
 └─ errors/                 오류 화면
 
@@ -212,6 +224,8 @@ boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 �
 | `MOCK_INPUTS_ENABLED` | mock 직원 관측 API·개발 도구 등록 | 기본 false, prod에서 true 금지 |
 | `EMPLOYEE_AWAY_AFTER_SECONDS` | 마지막 사람 있음 후 AWAY 기준 | 기본 180초 |
 | `EMPLOYEE_OFFSITE_AFTER_SECONDS` | 마지막 사람 있음 후 OFFSITE 기준 | 기본 3600초, AWAY보다 커야 함 |
+| `NOTIFICATION_MOCK_DELIVERY_MODE` | mock 입력 허용 환경의 기록 결과 | `success` / `fail_once` / `always_fail` |
+| `NOTIFICATION_MOCK_DELIVERY_MAX_ATTEMPTS` | 명시적 mock delivery 최대 시도 | 기본 3, 최대 10 |
 | `JWT_ACCESS_SECRET` | access JWT 서명 | 필수 비밀값, 32자 이상, 기본값 없음 |
 | `JWT_REFRESH_SECRET` | refresh JWT 서명 | 필수 비밀값, 32자 이상, access와 분리 |
 | `CSRF_SECRET` | CSRF token 서명 | 필수 비밀값, 32자 이상 |
@@ -231,10 +245,17 @@ boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 �
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트 접속 정보 | URL 경로 DB 이름은 `test_` 접두사 필수 |
 
 MongoDB mode는 시작 시 ping한 뒤 events, users, refresh_tokens, audit_logs, employees,
-employee_status_history, employee_observations의 고정 이름 index를 초기화한다. email,
-employee_no, STAFF 연결, refresh hash, operation/event ID는 unique index로 중복을 막고
+employee_status_history, employee_observations, notifications, notification_deliveries의
+고정 이름 index를 초기화한다. email, employee_no, STAFF 연결, refresh hash,
+operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로 중복을 막고
 사용자·직원 갱신은 compare-and-set으로 경합을 감지한다. multi-document transaction을
 가정하지 않는다.
+
+`NotificationService.create()`는 후속 같은-process 기능이 호출하는 생성 API다. 일반 사용자가
+알림을 임의 생성하는 HTTP API는 없다. 알림 `data`는 제한된 구조화 값과 허용된 내부 route만
+저장하며 token·cookie·비밀번호·영상·이미지 관련 키를 거부한다. mock delivery는
+`MOCK_INPUTS_ENABLED=true`에서만 기록·조회하고 외부 SDK, 네트워크, background worker를
+사용하지 않는다. `fail_once`와 `always_fail` 재시도는 HTTP 요청 안에서만 명시적으로 실행한다.
 
 직원 조회 GET은 저장된 상태만 반환하고 상태·이력·version을 변경하지 않는다. 3분 부재와
 60분 외근, override 만료는 `POST /api/v1/employee-status-evaluations` 또는 관련 쓰기에서만
@@ -265,6 +286,8 @@ employee_no, STAFF 연결, refresh hash, operation/event ID는 unique index로 �
 - 사용자 여정 테스트는 관리자 로그인→사용자 생성→수정→비활성화를 수행한다.
 - 직원 테스트는 CRUD·STAFF 연결, 2분59초/3분/59분59초/60분 경계, GET 무부작용,
   중복·역전 관측, CAS 재시도, override 권한·만료·해제 사용자 여정을 확인한다.
+- 알림 테스트는 사용자 격리, dedupe, 개별·전체 읽음, badge, 민감 데이터 제거,
+  mock delivery 실패·최대 시도·동일 attempt 방지와 production 라우터 미등록을 확인한다.
 - MongoDB 연결·index는 `mongodb` marker 통합 테스트로 분리한다.
 - 계약 변경 시 기존 응답 스키마 테스트를 함께 갱신한다.
 

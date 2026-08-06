@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Mock delivery 기록 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h1>Mock delivery 기록</h1>
+        <p>외부 네트워크를 사용하지 않은 개발용 처리 결과입니다.</p>
+      </div>
+      <a class="button-link" href="/admin/mock-deliveries">새로고침</a>
+    </div>
+
+    {% if error %}
+      <div class="message error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="get" action="/admin/mock-deliveries" class="filter-form">
+      <label>
+        상태
+        <select name="status">
+          <option value="">전체</option>
+          {% for delivery_status in statuses %}
+            <option value="{{ delivery_status.value }}" {% if selected_status == delivery_status %}selected{% endif %}>{{ delivery_status.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">필터 적용</button>
+    </form>
+
+    {% if page.items %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">알림</th>
+              <th scope="col">provider / 시도</th>
+              <th scope="col">상태</th>
+              <th scope="col">정제된 요청·결과</th>
+              <th scope="col">시각 / 작업</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for delivery in page.items %}
+              <tr>
+                <td><code>{{ delivery.notification_id }}</code></td>
+                <td>{{ delivery.provider }} / {{ delivery.attempt }}</td>
+                <td>{{ delivery.status.value }}</td>
+                <td>
+                  <code>{{ delivery.request_payload }}</code><br>
+                  <code>{{ delivery.result_payload }}</code>
+                  {% if delivery.error %}<p role="alert">{{ delivery.error }}</p>{% endif %}
+                </td>
+                <td>
+                  {{ delivery.attempted_at | kst_datetime }}
+                  {% if delivery.status.value == "TEMPORARY_FAILURE" %}
+                    <form method="post" action="/admin/mock-deliveries/retry" data-submit-state>
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="notification_id" value="{{ delivery.notification_id }}">
+                      <input type="hidden" name="operation_id" value="{{ retry_operation_ids[delivery.id] }}">
+                      <button type="submit" data-pending-label="재시도 중…">명시적 재시도</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <nav class="pagination" aria-label="delivery 페이지 이동">
+        {% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset - limit] | max }}">이전</a>{% endif %}
+        <span>{{ offset + 1 }}–{{ [offset + limit, page.total] | min }} / {{ page.total }}</span>
+        {% if has_next %}<a href="?limit={{ limit }}&offset={{ offset + limit }}">다음</a>{% endif %}
+      </nav>
+    {% else %}
+      <div class="empty-state">
+        <h2>기록된 mock delivery가 없습니다</h2>
+        <p>개발환경에서 인앱 알림이 생성되면 정제된 처리 결과가 표시됩니다.</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

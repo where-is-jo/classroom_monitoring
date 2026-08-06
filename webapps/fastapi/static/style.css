@@ -107,6 +107,17 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 .employee-card { padding: 1rem; border: 1px solid var(--line); border-radius: 6px; }
 .employee-card > form + form { margin-top: 0.75rem; }
 
+.section-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
+.section-heading h1, .section-heading p { margin-top: 0; }
+.filter-form, .inline-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+.card-list { display: grid; gap: 0.75rem; padding: 0; list-style: none; }
+.notification-unread { border-left: 4px solid var(--accent); padding-left: 1rem; }
+.badge { display: inline-block; min-width: 1.4rem; padding: 0 0.35rem; border: 1px solid currentColor; border-radius: 999px; text-align: center; font-size: 0.8rem; }
+.button-link { display: inline-block; padding: 0.35rem 0.6rem; border: 1px solid currentColor; border-radius: 4px; }
+.table-wrap { overflow-x: auto; }
+.empty-state { padding: 2rem; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); text-align: center; }
+.message.error { padding: 0.75rem 1rem; margin: 1rem 0; border: 1px solid #a12727; border-radius: 4px; color: #a12727; }
+
 .status-label {
   display: inline-block;
   padding: 0.05rem 0.45rem;
@@ -153,4 +164,5 @@ code {
   .account-nav { width: 100%; margin-left: 0; }
   .detail { grid-template-columns: 1fr; }
   .detail dd { margin-bottom: 0.5rem; }
+  .section-heading { display: block; }
 }

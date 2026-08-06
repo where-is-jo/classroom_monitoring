@@ -24,6 +24,10 @@ from ..employees.adapters.memory_repository import InMemoryEmployeeRepository
 from ..employees.adapters.mongo_repository import MongoEmployeeRepository
 from ..employees.ports import EmployeeRepository
 from ..employees.service import EmployeeService
+from ..notifications.adapters.memory_repository import InMemoryNotificationRepository
+from ..notifications.adapters.mongo_repository import MongoNotificationRepository
+from ..notifications.ports import NotificationRepository
+from ..notifications.service import NotificationService
 from ..users.adapters.memory_repository import InMemoryUserRepository
 from ..users.adapters.mongo_repository import MongoUserRepository
 from ..users.ports import UserRepository
@@ -78,6 +82,11 @@ def _employee_repository() -> InMemoryEmployeeRepository:
 
 
 @lru_cache
+def _notification_repository() -> InMemoryNotificationRepository:
+    return InMemoryNotificationRepository()
+
+
+@lru_cache
 def _mongo_client() -> MongoClient[MongoDocument]:
     settings = get_settings()
     if settings.database_url is None:
@@ -121,6 +130,11 @@ def _mongo_employee_repository() -> MongoEmployeeRepository:
     return MongoEmployeeRepository(_mongo_database())
 
 
+@lru_cache
+def _mongo_notification_repository() -> MongoNotificationRepository:
+    return MongoNotificationRepository(_mongo_database())
+
+
 def get_event_repository(settings: Settings = Depends(get_settings)) -> EventRepository:
     if settings.database_mode == "memory":
         return _event_repository()
@@ -151,6 +165,14 @@ def get_employee_repository(
     if settings.database_mode == "memory":
         return _employee_repository()
     return _mongo_employee_repository()
+
+
+def get_notification_repository(
+    settings: Settings = Depends(get_settings),
+) -> NotificationRepository:
+    if settings.database_mode == "memory":
+        return _notification_repository()
+    return _mongo_notification_repository()
 
 
 @lru_cache
@@ -252,6 +274,26 @@ def get_employee_service(
     )
 
 
+def get_notification_service(
+    repository: NotificationRepository = Depends(get_notification_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+    settings: Settings = Depends(get_settings),
+) -> NotificationService:
+    return NotificationService(
+        repository,
+        user_repository,
+        clock=utc_now,
+        mock_delivery_mode=(
+            settings.notification_mock_delivery_mode
+            if settings.mock_inputs_enabled
+            else None
+        ),
+        mock_delivery_max_attempts=(
+            settings.notification_mock_delivery_max_attempts
+        ),
+    )
+
+
 def initialize_data_store() -> None:
     """시작 시 연결·index를 검증하고 opt-in 가상 사용자를 seed한다."""
     settings = get_settings()
@@ -266,6 +308,7 @@ def initialize_data_store() -> None:
                 MongoAuthRepository.ensure_indexes,
                 MongoAuditRepository.ensure_indexes,
                 MongoEmployeeRepository.ensure_indexes,
+                MongoNotificationRepository.ensure_indexes,
             ],
         )
     if settings.auth_seed_enabled:
@@ -302,6 +345,7 @@ def close_data_store() -> None:
         _mongo_client().close()
     _mongo_audit_repository.cache_clear()
     _mongo_employee_repository.cache_clear()
+    _mongo_notification_repository.cache_clear()
     _mongo_auth_repository.cache_clear()
     _mongo_user_repository.cache_clear()
     _mongo_event_repository.cache_clear()

@@ -7,7 +7,12 @@ from urllib.parse import urlencode
 from fastapi import Depends, Request
 
 from ..shared.config import Settings
-from ..shared.dependencies import get_auth_service, get_settings
+from ..notifications.service import NotificationService
+from ..shared.dependencies import (
+    get_auth_service,
+    get_notification_service,
+    get_settings,
+)
 from ..shared.security import fingerprint_ip, verify_csrf_token
 from ..users.models import ADMIN_ROLES, User
 from .errors import (
@@ -63,9 +68,12 @@ def get_current_user(
 def get_current_page_user(
     request: Request,
     service: AuthService = Depends(get_auth_service),
+    notification_service: NotificationService = Depends(get_notification_service),
 ) -> User:
     try:
-        return service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+        user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+        request.state.notification_unread_count = notification_service.unread_count(user)
+        return user
     except AuthenticationRequiredError:
         path = request.url.path
         if request.url.query:
@@ -76,10 +84,14 @@ def get_current_page_user(
 def get_optional_page_user(
     request: Request,
     service: AuthService = Depends(get_auth_service),
+    notification_service: NotificationService = Depends(get_notification_service),
 ) -> User | None:
     try:
-        return service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+        user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
+        request.state.notification_unread_count = notification_service.unread_count(user)
+        return user
     except AuthenticationRequiredError:
+        request.state.notification_unread_count = 0
         return None
 
 

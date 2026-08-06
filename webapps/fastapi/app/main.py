@@ -31,6 +31,17 @@ from .employees.router import (
 )
 from .employees.router import evaluation_api_router as employee_evaluation_api_router
 from .employees.router import page_router as employees_page_router
+from .notifications.router import api_router as notifications_api_router
+from .notifications.router import (
+    development_api_router as notification_development_api_router,
+)
+from .notifications.router import (
+    development_page_router as notification_development_page_router,
+)
+from .notifications.router import page_router as notifications_page_router
+from .notifications.router import (
+    read_batch_api_router as notification_read_batch_api_router,
+)
 from .shared.config import Settings
 from .shared.dependencies import (
     close_data_store,
@@ -91,6 +102,23 @@ app.include_router(auth_api_router, responses=_AUTH_ERROR_RESPONSES)
 app.include_router(users_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 
+def include_notification_routers(application: FastAPI, settings: Settings) -> None:
+    """인앱 알림은 항상, mock delivery 관리 경계는 허용 환경에만 등록한다."""
+    application.include_router(notifications_page_router)
+    application.include_router(
+        notifications_api_router, responses=_AUTH_ERROR_RESPONSES
+    )
+    application.include_router(
+        notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES
+    )
+    if settings.mock_inputs_enabled:
+        application.include_router(notification_development_page_router)
+        application.include_router(
+            notification_development_api_router,
+            responses=_AUTH_ERROR_RESPONSES,
+        )
+
+
 def include_employee_routers(application: FastAPI, settings: Settings) -> None:
     """일반 직원 기능은 항상, mock 입력 기능은 허용 환경에만 등록한다."""
     application.include_router(employees_page_router)
@@ -109,6 +137,7 @@ def include_employee_routers(application: FastAPI, settings: Settings) -> None:
 
 
 include_employee_routers(app, get_settings())
+include_notification_routers(app, get_settings())
 
 
 def _wants_json(request: Request) -> bool:
