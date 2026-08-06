@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -35,7 +37,9 @@ class EventNotFoundError(DomainError):
 class ErrorDetail(BaseModel):
     code: str
     message: str
-    details: dict = {}
+
+    # 오류마다 담을 값이 달라 형태를 고정할 수 없다. API 규칙이 정한 자유 형식 필드다.
+    details: dict[str, Any] = {}
 
 
 class ErrorResponse(BaseModel):

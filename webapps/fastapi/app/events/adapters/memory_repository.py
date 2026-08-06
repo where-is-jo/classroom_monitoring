@@ -9,7 +9,7 @@ MongoDB 어댑터를 추가할 때 이 파일을 고치지 않는다. 같은 포
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..models import Event
 
@@ -20,9 +20,7 @@ _SAMPLE_EVENTS: list[Event] = [
         camera_id=f"cam-demo-{(index % 3) + 1:02d}",
         label=label,
         confidence=confidence,
-        detected_at=datetime(2026, 8, 5, 9, 0, 0, tzinfo=timezone.utc).replace(
-            minute=(index * 7) % 60
-        ),
+        detected_at=datetime(2026, 8, 5, 9, 0, 0, tzinfo=UTC).replace(minute=(index * 7) % 60),
         snapshot_key=f"snapshots/demo/evt-demo-{index:03d}.jpg",
     )
     for index, (label, confidence) in enumerate(

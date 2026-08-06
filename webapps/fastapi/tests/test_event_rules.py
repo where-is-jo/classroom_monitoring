@@ -23,9 +23,7 @@ from app.events.rules import classify_confidence
         (0.0, "low"),
     ],
 )
-def test_신뢰도_등급은_임계값_경계를_포함해_정해진다(
-    confidence: float, expected: str
-) -> None:
+def test_신뢰도_등급은_임계값_경계를_포함해_정해진다(confidence: float, expected: str) -> None:
     """경계값(0.80, 0.50)은 위쪽 등급에 포함된다."""
     level = classify_confidence(confidence, high_threshold=0.80, medium_threshold=0.50)
 

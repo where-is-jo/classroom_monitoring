@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,7 +31,7 @@ def _wants_json(request: Request) -> bool:
 
 
 @app.exception_handler(DomainError)
-def handle_domain_error(request: Request, exc: DomainError):
+def handle_domain_error(request: Request, exc: DomainError) -> Response:
     """서비스 계층의 예외를 HTTP 응답으로 바꾼다.
 
     내부 정보(스택 트레이스, 내부 경로)를 응답에 넣지 않는다.

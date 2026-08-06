@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse
 
 from ..shared.config import Settings
 from ..shared.dependencies import get_event_service, get_settings
@@ -44,7 +45,7 @@ def events_page(
     offset: int = Query(default=0, ge=0),
     service: EventService = Depends(get_event_service),
     settings: Settings = Depends(get_settings),
-):
+) -> HTMLResponse:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_events(limit=resolved_limit, offset=resolved_offset)
     return templates.TemplateResponse(
@@ -65,7 +66,7 @@ def event_detail_page(
     request: Request,
     event_id: str,
     service: EventService = Depends(get_event_service),
-):
+) -> HTMLResponse:
     # 대상이 없으면 EventNotFoundError가 올라가고 main.py의 핸들러가 404 화면을 낸다.
     summary = service.get_event(event_id)
     return templates.TemplateResponse(

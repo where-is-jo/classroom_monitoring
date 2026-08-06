@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,7 +29,7 @@ def make_event(
         camera_id=camera_id,
         label=label,
         confidence=confidence,
-        detected_at=datetime(2026, 8, 5, 9, 0, 0, tzinfo=timezone.utc),
+        detected_at=datetime(2026, 8, 5, 9, 0, 0, tzinfo=UTC),
         snapshot_key=f"snapshots/test/{event_id}.jpg",
     )
 
@@ -45,7 +46,7 @@ class FakeEventRepository:
     def list_events(self, *, limit: int, offset: int) -> tuple[list[Event], int]:
         return self.events[offset : offset + limit], len(self.events)
 
-    def get_event(self, event_id: str):
+    def get_event(self, event_id: str) -> Event | None:
         return next((e for e in self.events if e.id == event_id), None)
 
 
@@ -64,7 +65,7 @@ def service(repository: FakeEventRepository) -> EventService:
 
 
 @pytest.fixture
-def client(repository: FakeEventRepository):
+def client(repository: FakeEventRepository) -> Iterator[TestClient]:
     """라우터 테스트용 클라이언트. 저장소만 대역으로 바꿔 끼운다."""
     app.dependency_overrides[get_event_repository] = lambda: repository
     with TestClient(app) as test_client:
