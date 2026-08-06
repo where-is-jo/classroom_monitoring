@@ -167,6 +167,9 @@ def test_OpenAPI와_docs_경로를_유지한다(client: TestClient) -> None:
     assert openapi_response.status_code == 200
     assert client.get("/docs").status_code == 200
     paths = openapi_response.json()["paths"]
+    assert openapi_response.json()["info"]["version"] == "0.2.0"
+    assert "/login" not in paths
+    assert "/admin" not in paths
     assert "/api/v1/events" not in paths
     assert "/api/v1/events/{event_id}" not in paths
     assert "/api/v1/admin/audit-logs" not in paths

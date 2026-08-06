@@ -90,21 +90,23 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Smart Office Monitoring",
-    description="이벤트 조회, 인증·사용자 관리, 직원 상태 API와 화면",
-    version="0.1.0",
+    description=(
+        "학생·직원·관리자용 직원 상태, 면담 대기, 강의실 좌석, 알림, 운영 대시보드 API와 화면"
+    ),
+    version="0.2.0",
     lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.include_router(auth_page_router)
-app.include_router(events_page_router)
+app.include_router(auth_page_router, include_in_schema=False)
+app.include_router(events_page_router, include_in_schema=False)
 _EVENT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
     500: {"model": ErrorResponse},
     503: {"model": ErrorResponse},
 }
-app.include_router(users_page_router)
+app.include_router(users_page_router, include_in_schema=False)
 app.include_router(
     events_api_router,
     responses=_EVENT_ERROR_RESPONSES,
@@ -129,7 +131,10 @@ def include_notification_routers(application: FastAPI, settings: Settings) -> No
     application.include_router(notifications_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:
-        application.include_router(notification_development_page_router)
+        application.include_router(
+            notification_development_page_router,
+            include_in_schema=False,
+        )
         application.include_router(
             notification_development_api_router,
             responses=_AUTH_ERROR_RESPONSES,
@@ -138,15 +143,15 @@ def include_notification_routers(application: FastAPI, settings: Settings) -> No
 
 def include_employee_routers(application: FastAPI, settings: Settings) -> None:
     """일반 직원 기능은 항상, mock 입력 기능은 허용 환경에만 등록한다."""
-    application.include_router(employees_page_router)
-    application.include_router(employees_admin_page_router)
+    application.include_router(employees_page_router, include_in_schema=False)
+    application.include_router(employees_admin_page_router, include_in_schema=False)
     application.include_router(employees_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(
         employee_evaluation_api_router,
         responses=_AUTH_ERROR_RESPONSES,
     )
     if settings.mock_inputs_enabled:
-        application.include_router(employee_development_page_router)
+        application.include_router(employee_development_page_router, include_in_schema=False)
         application.include_router(
             employee_development_api_router,
             responses=_AUTH_ERROR_RESPONSES,
@@ -155,13 +160,13 @@ def include_employee_routers(application: FastAPI, settings: Settings) -> None:
 
 def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
     """강의실 기능은 항상, 구조화 mock 좌석 입력은 허용 환경에만 등록한다."""
-    application.include_router(classrooms_page_router)
-    application.include_router(classrooms_admin_page_router)
+    application.include_router(classrooms_page_router, include_in_schema=False)
+    application.include_router(classrooms_admin_page_router, include_in_schema=False)
     application.include_router(classroom_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(seat_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:
-        application.include_router(classroom_development_page_router)
+        application.include_router(classroom_development_page_router, include_in_schema=False)
         application.include_router(
             classroom_development_api_router,
             responses=_AUTH_ERROR_RESPONSES,
@@ -177,7 +182,7 @@ def include_video_demo_routers(application: FastAPI, settings: Settings) -> None
         StaticFiles(directory=str(DEMO_ASSET_DIR)),
         name="demo-assets",
     )
-    application.include_router(video_demo_page_router)
+    application.include_router(video_demo_page_router, include_in_schema=False)
     application.include_router(video_demo_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 
@@ -185,14 +190,14 @@ include_employee_routers(app, get_settings())
 include_notification_routers(app, get_settings())
 include_classroom_routers(app, get_settings())
 include_video_demo_routers(app, get_settings())
-app.include_router(interview_waits_my_page_router)
-app.include_router(interview_waits_staff_page_router)
+app.include_router(interview_waits_my_page_router, include_in_schema=False)
+app.include_router(interview_waits_staff_page_router, include_in_schema=False)
 app.include_router(interview_waits_api_router, responses=_AUTH_ERROR_RESPONSES)
 app.include_router(
     interview_wait_expiration_api_router,
     responses=_AUTH_ERROR_RESPONSES,
 )
-app.include_router(admin_dashboard_page_router)
+app.include_router(admin_dashboard_page_router, include_in_schema=False)
 app.include_router(admin_dashboard_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 
