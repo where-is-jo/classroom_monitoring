@@ -129,6 +129,7 @@ class CreateEmployeeCommand:
     position: str
     office_zone: str
     operation_id: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)

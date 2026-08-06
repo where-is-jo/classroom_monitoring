@@ -315,7 +315,7 @@ class UserService:
         self._validate_password(command.password)
         now = self._clock()
         user = User(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             email=email,
             password_hash=self._password_security.hash_password(command.password),
             name=command.name.strip(),

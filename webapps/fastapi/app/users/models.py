@@ -57,6 +57,7 @@ class CreateUserCommand:
     name: str
     role: UserRole
     operation_id: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)

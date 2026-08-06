@@ -127,7 +127,7 @@ class EmployeeService:
         user_id = self._validate_staff_link(command.user_id)
         now = self._clock()
         employee = Employee(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             employee_no=self._normalize_employee_no(command.employee_no),
             user_id=user_id,
             display_name=self._required_text(command.display_name),

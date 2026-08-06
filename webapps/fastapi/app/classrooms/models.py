@@ -196,6 +196,7 @@ class CreateClassroomCommand:
     after_hours_grace_minutes: int
     operation_id: str
     responsible_staff_user_ids: tuple[str, ...] = ()
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ class CreateSeatCommand:
     label: str
     geometry: SeatGeometry | None
     operation_id: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)

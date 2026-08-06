@@ -34,6 +34,7 @@ from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService, ClassroomStaffAssignmentService
+from ..demo_seed import DemoSeedServices, seed_demo_data
 from ..employees.adapters.memory_repository import InMemoryEmployeeRepository
 from ..employees.adapters.mongo_repository import MongoEmployeeRepository
 from ..employees.ports import EmployeeRepository
@@ -52,6 +53,7 @@ from ..notifications.ports import NotificationRepository
 from ..notifications.service import NotificationService
 from ..users.adapters.memory_repository import InMemoryUserRepository
 from ..users.adapters.mongo_repository import MongoUserRepository
+from ..users.models import User
 from ..users.ports import UserRepository
 from ..users.seed import VirtualSeedPasswords, seed_virtual_users
 from ..users.service import UserService
@@ -434,7 +436,7 @@ def get_video_demo_service() -> VideoDemoService:
 
 
 def initialize_data_store() -> None:
-    """시작 시 연결·index를 검증하고 opt-in 가상 사용자를 seed한다."""
+    """시작 시 저장소를 검증하고 opt-in 사용자·demo 데이터를 seed한다."""
     settings = get_settings()
     if settings.database_mode == "mongodb":
         database = _mongo_database()
@@ -453,11 +455,14 @@ def initialize_data_store() -> None:
                 MongoAdminDashboardRepository.ensure_indexes,
             ],
         )
+    seeded_users: list[User] = []
     if settings.auth_seed_enabled:
-        _seed_users(settings)
+        seeded_users = _seed_users(settings)
+    if settings.database_mode == "memory" and settings.demo_mode_enabled and seeded_users:
+        _seed_demo_memory_data(settings, seeded_users)
 
 
-def _seed_users(settings: Settings) -> None:
+def _seed_users(settings: Settings) -> list[User]:
     assert settings.auth_seed_student_password is not None
     assert settings.auth_seed_staff_password is not None
     assert settings.auth_seed_admin_password is not None
@@ -472,13 +477,49 @@ def _seed_users(settings: Settings) -> None:
         ),
         settings=settings,
     )
-    seed_virtual_users(
+    return seed_virtual_users(
         user_service,
         VirtualSeedPasswords(
             student=settings.auth_seed_student_password.get_secret_value(),
             staff=settings.auth_seed_staff_password.get_secret_value(),
             admin=settings.auth_seed_admin_password.get_secret_value(),
         ),
+    )
+
+
+def _seed_demo_memory_data(settings: Settings, users: list[User]) -> None:
+    user_repository = get_user_repository(settings)
+    audit_service = get_audit_service(get_audit_repository(settings))
+    notification_service = get_notification_service(
+        get_notification_repository(settings),
+        user_repository,
+        settings,
+    )
+    seed_demo_data(
+        users,
+        DemoSeedServices(
+            employees=get_employee_service(
+                get_employee_repository(settings),
+                user_repository,
+                audit_service,
+                settings,
+            ),
+            interview_waits=get_interview_wait_service(
+                get_interview_wait_repository(settings),
+                get_employee_repository(settings),
+                user_repository,
+                notification_service,
+                settings,
+            ),
+            classrooms=get_classroom_service(
+                get_classroom_repository(settings),
+                user_repository,
+                notification_service,
+                audit_service,
+                settings,
+            ),
+        ),
+        now=utc_now(),
     )
 
 

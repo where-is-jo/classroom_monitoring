@@ -94,7 +94,7 @@ class InterviewWaitService:
             else InterviewWaitStatus.WAITING
         )
         wait = InterviewWait(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             requester_user_id=actor.id,
             employee_id=employee.id,
             status=initial_status,

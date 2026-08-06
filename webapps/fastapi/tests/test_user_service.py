@@ -42,9 +42,11 @@ def test_환경_주입_password로_세_제품_역할의_가상_사용자를_idem
 
     first = seed_virtual_users(stack.user_service, passwords)
     second = seed_virtual_users(stack.user_service, passwords)
+    fresh = seed_virtual_users(build_auth_stack().user_service, passwords)
 
     assert {user.role for user in first} == PRODUCT_ROLES
     assert [user.id for user in first] == [user.id for user in second]
+    assert [user.id for user in first] == [user.id for user in fresh]
     assert all(user.email.endswith("@example.invalid") for user in first)
 
 
@@ -135,12 +137,8 @@ def test_허용_필드만_CAS로_수정하고_중복_operation은_같은_결과�
 def test_soft_deactivate는_본인을_보호하고_legacy_operator_정리를_허용한다() -> None:
     stack = build_auth_stack()
     admin = stack.seed(UserRole.ADMIN)
-    operator = stack.seed(
-        UserRole.SYSTEM_OPERATOR, email="legacy-operator@example.invalid"
-    )
-    migrating = stack.seed(
-        UserRole.SYSTEM_OPERATOR, email="migrating-operator@example.invalid"
-    )
+    operator = stack.seed(UserRole.SYSTEM_OPERATOR, email="legacy-operator@example.invalid")
+    migrating = stack.seed(UserRole.SYSTEM_OPERATOR, email="migrating-operator@example.invalid")
 
     with pytest.raises(SelfDeactivationError):
         stack.user_service.deactivate_user(

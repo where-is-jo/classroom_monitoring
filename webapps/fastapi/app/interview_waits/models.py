@@ -68,6 +68,7 @@ class CreateInterviewWaitCommand:
     employee_id: str
     message: str | None
     operation_id: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)

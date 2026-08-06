@@ -79,9 +79,7 @@ class ClassroomStaffAssignmentService:
         classrooms: list[Classroom] = []
         offset = 0
         while True:
-            page = self._repository.list_classrooms(
-                include_inactive=True, limit=200, offset=offset
-            )
+            page = self._repository.list_classrooms(include_inactive=True, limit=200, offset=offset)
             classrooms.extend(page.items)
             offset += len(page.items)
             if offset >= page.total or not page.items:
@@ -89,9 +87,7 @@ class ClassroomStaffAssignmentService:
         for classroom in classrooms:
             if user_id not in classroom.responsible_staff_user_ids:
                 continue
-            assignment_operation_id = (
-                f"responsible-staff-unlink:{operation_id}:{classroom.id}"
-            )
+            assignment_operation_id = f"responsible-staff-unlink:{operation_id}:{classroom.id}"
             for _ in range(3):
                 current = self._repository.get_classroom(classroom.id)
                 if current is None or user_id not in current.responsible_staff_user_ids:
@@ -99,9 +95,7 @@ class ClassroomStaffAssignmentService:
                 updated = replace(
                     current,
                     responsible_staff_user_ids=tuple(
-                        value
-                        for value in current.responsible_staff_user_ids
-                        if value != user_id
+                        value for value in current.responsible_staff_user_ids if value != user_id
                     ),
                     updated_at=self._clock(),
                     version=current.version + 1,
@@ -121,16 +115,8 @@ class ClassroomStaffAssignmentService:
                     action="CLASSROOM_RESPONSIBLE_STAFF_UNLINKED",
                     resource_type="classroom",
                     resource_id=saved.id,
-                    before={
-                        "responsible_staff_user_ids": list(
-                            current.responsible_staff_user_ids
-                        )
-                    },
-                    after={
-                        "responsible_staff_user_ids": list(
-                            saved.responsible_staff_user_ids
-                        )
-                    },
+                    before={"responsible_staff_user_ids": list(current.responsible_staff_user_ids)},
+                    after={"responsible_staff_user_ids": list(saved.responsible_staff_user_ids)},
                     ip_fingerprint=ip_fingerprint,
                 )
                 break
@@ -187,7 +173,7 @@ class ClassroomService:
             return existing
         now = self._clock()
         classroom = Classroom(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             code=code,
             name=name,
             location=location,
@@ -407,7 +393,7 @@ class ClassroomService:
             return existing
         now = self._clock()
         seat = Seat(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             classroom_id=classroom.id,
             code=code,
             label=label,
@@ -920,11 +906,7 @@ class ClassroomService:
             raise ClassroomInputError("담당 직원 식별자가 올바르지 않습니다.")
         for user_id in normalized:
             user = self._users.get_user(user_id)
-            if (
-                user is None
-                or user.role != UserRole.STAFF
-                or user.status != UserStatus.ACTIVE
-            ):
+            if user is None or user.role != UserRole.STAFF or user.status != UserStatus.ACTIVE:
                 raise ClassroomInputError("담당 직원은 활성 STAFF 계정이어야 합니다.")
         return normalized
 
