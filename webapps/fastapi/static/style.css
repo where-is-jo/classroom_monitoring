@@ -234,6 +234,33 @@ a:hover { color: #173bab; }
 .account-copy small { color: var(--color-text-muted); font-size: 11px; }
 .account-card form { margin: 0; }
 .profile-popover { position: relative; min-width: 0; flex: 1; }
+.notification-popover { position: relative; flex: 0 0 auto; }
+.notification-popover > summary { position: relative; list-style: none; }
+.notification-popover > summary::-webkit-details-marker { display: none; }
+.notification-popover > summary .nav-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; min-height: 18px; padding: 2px 4px; }
+.notification-popover-panel {
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 40px));
+  padding: 18px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.notification-popover-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.notification-popover-heading h2 { margin: 0; font-size: 20px; }
+.notification-popover-list { display: grid; gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.notification-popover-item { display: grid; gap: 5px; padding: 14px; background: var(--color-surface-low); border: 1px solid var(--color-outline-soft); border-radius: var(--radius-md); }
+.notification-popover-item.is-read { opacity: 0.72; }
+.notification-popover-item p, .notification-popover-item time { margin: 0; }
+.notification-popover-item time { color: var(--color-text-muted); font-size: 12px; }
+.notification-popover-item button { justify-self: start; }
+.notification-popover-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .profile-trigger {
   display: flex;
   min-width: 0;
@@ -761,7 +788,7 @@ code {
   .nav-enhanced .side-nav, .nav-enhanced .account-card { display: none; }
   .nav-enhanced.nav-open .side-nav, .nav-enhanced.nav-open .account-card { display: flex; }
   .nav-enhanced.nav-open .side-nav { display: block; }
-  .profile-popover-panel { position: fixed; inset: auto 16px 16px; width: auto; max-height: calc(100dvh - 32px); }
+  .profile-popover-panel, .notification-popover-panel { position: fixed; inset: auto 16px 16px; width: auto; max-height: calc(100dvh - 32px); }
   .workspace { margin-left: 0; }
   .content { min-height: auto; padding: 24px 16px 40px; }
   .site-footer { padding: 0 16px 24px; }

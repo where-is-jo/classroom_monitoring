@@ -9,7 +9,7 @@ from math import isfinite
 from typing import Literal
 from uuid import uuid4
 
-from ..users.models import User, UserStatus
+from ..users.models import User, UserRole, UserStatus
 from ..users.ports import UserRepository
 from .errors import (
     MockDeliveryDisabledError,
@@ -135,6 +135,26 @@ class NotificationService:
 
     def unread_count(self, actor: User) -> int:
         return self._repository.count_unread(actor.id)
+
+    def popover_unread_count(self, actor: User) -> int:
+        notification_type = self.product_notification_type(actor)
+        if notification_type is None:
+            return 0
+        return self._repository.list_notifications(
+            recipient_user_id=actor.id,
+            is_read=False,
+            notification_type=notification_type,
+            limit=1,
+            offset=0,
+        ).total
+
+    @staticmethod
+    def product_notification_type(actor: User) -> str | None:
+        if actor.role == UserRole.STUDENT:
+            return "INTERVIEW_WAIT_READY"
+        if actor.role in {UserRole.STAFF, UserRole.ADMIN}:
+            return "AFTER_HOURS_SEAT"
+        return None
 
     def mark_read(self, actor: User, notification_id: str, *, operation_id: str) -> Notification:
         notification = self._repository.mark_read(

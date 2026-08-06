@@ -17,6 +17,7 @@ from ..shared.dependencies import (
     get_notification_service,
     get_settings,
 )
+from ..shared.errors import RepositoryUnavailableError
 from ..shared.security import fingerprint_ip, verify_csrf_token
 from ..users.models import ADMIN_ROLES, User, UserRole
 from .errors import (
@@ -95,7 +96,9 @@ def get_current_page_user(
             request,
             user=user,
             settings=settings,
-            notification_unread_count=notification_service.unread_count(user),
+            notification_unread_count=_popover_unread_count(
+                request, user=user, notification_service=notification_service
+            ),
         )
         _set_profile_state(request, user=user, employee_service=employee_service)
         return user
@@ -121,7 +124,9 @@ def get_password_change_page_user(
         request,
         user=user,
         settings=settings,
-        notification_unread_count=notification_service.unread_count(user),
+        notification_unread_count=_popover_unread_count(
+            request, user=user, notification_service=notification_service
+        ),
     )
     _set_profile_state(request, user=user, employee_service=employee_service)
     return user
@@ -140,7 +145,9 @@ def get_optional_page_user(
             request,
             user=user,
             settings=settings,
-            notification_unread_count=notification_service.unread_count(user),
+            notification_unread_count=_popover_unread_count(
+                request, user=user, notification_service=notification_service
+            ),
         )
         _set_profile_state(request, user=user, employee_service=employee_service)
         return user
@@ -167,6 +174,20 @@ def _set_profile_state(
     request.state.profile_set_operation_id = str(uuid4())
     request.state.profile_clear_operation_id = str(uuid4())
     request.state.profile_statuses = list(EmployeeStatus)
+
+
+def _popover_unread_count(
+    request: Request,
+    *,
+    user: User,
+    notification_service: NotificationService,
+) -> int:
+    try:
+        request.state.notification_load_failed = False
+        return notification_service.popover_unread_count(user)
+    except RepositoryUnavailableError:
+        request.state.notification_load_failed = True
+        return 0
 
 
 def _set_page_navigation_state(

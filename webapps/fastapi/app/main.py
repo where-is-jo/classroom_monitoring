@@ -58,7 +58,6 @@ from .notifications.router import (
 from .notifications.router import (
     development_page_router as notification_development_page_router,
 )
-from .notifications.router import page_router as notifications_page_router
 from .notifications.router import (
     read_batch_api_router as notification_read_batch_api_router,
 )
@@ -126,7 +125,6 @@ app.include_router(users_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 def include_notification_routers(application: FastAPI, settings: Settings) -> None:
     """인앱 알림은 항상, mock delivery 관리 경계는 허용 환경에만 등록한다."""
-    application.include_router(notifications_page_router)
     application.include_router(notifications_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:

@@ -80,12 +80,12 @@ def _create(service: NotificationService, user_id: str, suffix: str = "1") -> No
     return service.create(
         CreateNotificationCommand(
             recipient_user_id=user_id,
-            type="INTERVIEW_READY",
+            type="INTERVIEW_WAIT_READY",
             title=f"면담 준비 완료 {suffix}",
             body="담당 직원이 복귀했습니다.",
             data={"target_route": "/my/interview-waits", "wait_id": f"wait-{suffix}"},
             operation_id=f"create-{suffix}",
-            dedupe_key=f"wait-ready:{suffix}",
+            dedupe_key=f"interview_wait_ready:{suffix}",
         )
     )
 
@@ -101,7 +101,7 @@ def test_알림_API는_본인목록_filter_paging_개별과_전체읽음을_제�
     _login(notification_client, user)
 
     page = notification_client.get(
-        "/api/v1/notifications?type=INTERVIEW_READY&is_read=false&limit=1&offset=0"
+        "/api/v1/notifications?type=INTERVIEW_WAIT_READY&is_read=false&limit=1&offset=0"
     )
     unread = notification_client.get("/api/v1/notifications/unread-count")
 
@@ -151,7 +151,7 @@ def test_다른사용자의_알림읽음은_존재를_숨긴_404다(
     assert response.json()["error"]["code"] == "NOTIFICATION_NOT_FOUND"
 
 
-def test_알림화면은_빈상태_badge_읽음여정을_표현한다(
+def test_알림은_독립화면없이_최근10건_popover와_읽음여정을_제공한다(
     notification_client: TestClient,
     notification_stack: NotificationStack,
 ) -> None:
@@ -159,16 +159,20 @@ def test_알림화면은_빈상태_badge_읽음여정을_표현한다(
     user = auth.seed(UserRole.STUDENT)
     _login(notification_client, user)
 
-    empty = notification_client.get("/notifications")
-    assert empty.status_code == 200
-    assert "표시할 알림이 없습니다" in empty.text
+    assert notification_client.get("/notifications").status_code == 404
+    empty_shell = notification_client.get("/employees")
+    assert empty_shell.status_code == 200
+    assert "data-notification-popover" in empty_shell.text
+    assert 'data-notification-type="INTERVIEW_WAIT_READY"' in empty_shell.text
 
     notification = _create(service, user.id)
     event_page = notification_client.get("/events")
-    inbox = notification_client.get("/notifications")
+    inbox = notification_client.get(
+        "/api/v1/notifications?type=INTERVIEW_WAIT_READY&limit=10&offset=0"
+    )
     assert 'aria-label="읽지 않은 알림 1개"' in event_page.text
-    assert notification.title in inbox.text
-    assert "연결 화면 열기" in inbox.text
+    assert inbox.json()["items"][0]["title"] == notification.title
+    assert inbox.json()["limit"] == 10
 
     marked = notification_client.patch(
         f"/api/v1/notifications/{notification.id}",
@@ -176,10 +180,15 @@ def test_알림화면은_빈상태_badge_읽음여정을_표현한다(
         json={"operation_id": str(uuid4())},
     )
     assert marked.status_code == 200
-    assert 'aria-label="읽지 않은 알림' not in notification_client.get("/events").text
+    refreshed_shell = notification_client.get("/events")
+    assert "data-notification-badge hidden" in refreshed_shell.text
+    script = notification_client.get("/static/forms.js").text
+    assert "표시할 알림이 없습니다" in script
+    assert "알림을 불러오지 못했습니다" in script
+    assert "notification-read-batches" in script
 
 
-def test_알림저장소_오류는_내부정보없는_오류화면이_된다(
+def test_알림저장소_오류는_본문을_유지하고_popover_재시도를_제공한다(
     notification_client: TestClient,
     notification_stack: NotificationStack,
 ) -> None:
@@ -188,7 +197,7 @@ def test_알림저장소_오류는_내부정보없는_오류화면이_된다(
     _login(notification_client, user)
 
     class FailingRepository:
-        def count_unread(self, recipient_user_id: str) -> int:
+        def list_notifications(self, **_: object) -> NoReturn:
             raise RepositoryUnavailableError()
 
     failing_service = NotificationService(
@@ -199,10 +208,14 @@ def test_알림저장소_오류는_내부정보없는_오류화면이_된다(
     )
     app.dependency_overrides[get_notification_service] = lambda: failing_service
 
-    response = notification_client.get("/notifications")
+    response = notification_client.get("/employees")
+    failed_api = notification_client.get(
+        "/api/v1/notifications?type=INTERVIEW_WAIT_READY&limit=10&offset=0"
+    )
 
-    assert response.status_code == 503
-    assert "데이터 저장소를 일시적으로 사용할 수 없습니다" in response.text
+    assert response.status_code == 200
+    assert "data-notification-retry" in response.text
+    assert failed_api.status_code == 503
     assert "Traceback" not in response.text
 
 

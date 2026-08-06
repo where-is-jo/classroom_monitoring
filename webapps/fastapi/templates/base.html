@@ -64,11 +64,26 @@
         </nav>
 
         <div class="account-card">
-          <button class="icon-button" type="button" aria-label="알림" title="알림">
-            <span aria-hidden="true">□</span>
-            {% set unread_count = request.state.notification_unread_count | default(0) %}
-            {% if unread_count %}<span class="nav-badge" aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>{% endif %}
-          </button>
+          {% set product_notification_type = 'INTERVIEW_WAIT_READY' if request.state.is_student | default(false) else 'AFTER_HOURS_SEAT' %}
+          <details class="notification-popover" data-notification-popover data-notification-type="{{ product_notification_type }}" data-csrf-token="{{ csrf_token }}">
+            <summary class="icon-button" aria-label="알림 열기" title="알림">
+              <span aria-hidden="true">□</span>
+              {% set unread_count = request.state.notification_unread_count | default(0) %}
+              <span class="nav-badge" data-notification-badge{% if not unread_count %} hidden{% endif %} aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>
+            </summary>
+            <section class="notification-popover-panel" role="dialog" aria-label="최근 알림" aria-live="polite">
+              <div class="notification-popover-heading">
+                <div><p class="eyebrow">최근 알림</p><h2>알림</h2></div>
+                <button class="icon-button" type="button" data-notification-close aria-label="알림 닫기">×</button>
+              </div>
+              <div data-notification-status role="status">알림을 불러오는 중입니다.</div>
+              <ul class="notification-popover-list" data-notification-list aria-label="최근 알림 목록"></ul>
+              <div class="notification-popover-actions">
+                <button type="button" class="secondary" data-notification-retry hidden>다시 시도</button>
+                <button type="button" class="secondary" data-notification-read-all hidden>모두 읽음</button>
+              </div>
+            </section>
+          </details>
           <details class="profile-popover">
             <summary class="profile-trigger" aria-label="프로필 열기">
               <span class="account-avatar" aria-hidden="true">{{ current_user.name[:1] }}</span>
