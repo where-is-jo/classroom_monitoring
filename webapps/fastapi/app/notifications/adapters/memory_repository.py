@@ -36,6 +36,13 @@ class InMemoryNotificationRepository:
         with self._lock:
             return self._notifications.get(notification_id)
 
+    def dashboard_snapshot(
+        self,
+    ) -> tuple[list[Notification], list[MockDelivery]]:
+        """Return an immutable-value snapshot for the local admin read model."""
+        with self._lock:
+            return list(self._notifications.values()), list(self._deliveries.values())
+
     def get_notification_by_operation_id(
         self, operation_id: str
     ) -> Notification | None:

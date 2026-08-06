@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.admin.adapters.mongo_repository import MongoAdminDashboardRepository
 from app.audit.adapters.mongo_repository import MongoAuditRepository
 from app.audit.models import AuditLog
 from app.auth.adapters.mongo_repository import MongoAuthRepository
@@ -66,6 +67,7 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         MongoNotificationRepository.ensure_indexes,
         MongoInterviewWaitRepository.ensure_indexes,
         MongoClassroomRepository.ensure_indexes,
+        MongoAdminDashboardRepository.ensure_indexes,
     ]
     initialize_indexes(mongodb_database, initializers)
     initialize_indexes(mongodb_database, initializers)
@@ -113,6 +115,37 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         "after_hours_alerts_dedupe_unique"
         in mongodb_database["after_hours_alerts"].index_information()
     )
+    assert (
+        "notifications_dashboard_recent"
+        in mongodb_database["notifications"].index_information()
+    )
+
+
+def test_dashboard_recent_query_explain_uses_bounded_sort_index(
+    mongodb_database,
+) -> None:
+    initialize_indexes(
+        mongodb_database, [MongoAdminDashboardRepository.ensure_indexes]
+    )
+    plan = (
+        mongodb_database["notifications"]
+        .find({"created_at": {"$gte": datetime.now(UTC) - timedelta(days=1)}})
+        .sort([("created_at", -1), ("_id", 1)])
+        .hint("notifications_dashboard_recent")
+        .limit(50)
+        .explain()
+    )
+
+    def contains_ixscan(value) -> bool:
+        if isinstance(value, dict):
+            return value.get("stage") == "IXSCAN" or any(
+                contains_ixscan(item) for item in value.values()
+            )
+        if isinstance(value, list):
+            return any(contains_ixscan(item) for item in value)
+        return False
+
+    assert contains_ixscan(plan["queryPlanner"]["winningPlan"])
 
 
 def test_classroom_seat_history_batch_and_alert_mongo_contract(

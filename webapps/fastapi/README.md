@@ -2,7 +2,7 @@
 
 FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
 
-> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림, 면담 대기, 강의실 좌석 동작**. 기존 이벤트 화면/API는
+> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림, 면담 대기, 강의실 좌석, 관리자 대시보드 동작**. 기존 이벤트 화면/API는
 > 공개 범위를 유지한다. 직원 프로필, 저장된 현재 상태와 이력, 수동 override, 명시적 시간
 > 정책 평가, 사용자별 알림함, 직원 복귀 연계 면담 대기와 mock 좌석 점유·마감 후 경고를 제공하며 local 인메모리 mode와 MongoDB mode가 같은
 > 저장소 계약을 구현한다. 개발환경에서는 외부 네트워크 없는 mock delivery 결과를 기록한다.
@@ -51,6 +51,8 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET /classrooms/{classroom_id}` | geometry 배치 또는 code 순 좌석 상세 |
 | `GET /admin/classrooms` | `ADMIN` 이상 강의실·일정·좌석 관리 화면 |
 | `GET /admin/alerts` | `ADMIN` 이상 마감 후 경고·해결 화면 |
+| `GET /admin` | `ADMIN`, `SYSTEM_OPERATOR` 읽기 전용 운영 요약·최근 활동 화면 |
+| `GET /admin/audit-logs` | `ADMIN`, `SYSTEM_OPERATOR` 마스킹된 감사 로그 조회 화면 |
 | `GET /admin/mock-deliveries` | mock 입력 허용 환경의 정제된 delivery 기록·명시적 재시도 화면 |
 | `POST /api/v1/auth/login` | access/refresh `HttpOnly` cookie 발급 |
 | `POST /api/v1/auth/refresh` | refresh rotation |
@@ -81,6 +83,9 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET /api/v1/classrooms/{classroom_id}/occupancy-history` | `ADMIN` 이상 기간·좌석 이력 |
 | `POST /api/v1/mock-seat-observations` | mock 입력 허용 환경의 구조화 좌석 batch |
 | `GET/PATCH /api/v1/after-hours-alerts[/{alert_id}]` | `ADMIN` 이상 경고 목록·해결 |
+| `GET /api/v1/admin/dashboard-summary` | 부서·강의실 필터가 있는 읽기 전용 운영 요약 |
+| `GET /api/v1/admin/dashboard-activities` | 유형·기간·페이지 필터가 있는 최근 활동 |
+| `GET /api/v1/admin/audit-logs` | 작업자·작업·리소스·기간별 마스킹 감사 로그 |
 | `GET /api/v1/admin/mock-deliveries` | mock 입력 허용 환경의 `ADMIN` 이상 delivery 기록 |
 | `POST /api/v1/admin/mock-delivery-attempts` | 실패한 mock delivery의 명시적 멱등 재시도 |
 | `GET /docs` | 자동 생성 API 문서 |
@@ -134,6 +139,7 @@ app/
 ├─ notifications/          사용자별 인앱 알림, 읽음, dedupe, mock delivery 저장소
 ├─ interview_waits/        면담 대기 상태·이력, 직원 복귀 연계, memory/MongoDB 저장소
 ├─ classrooms/             강의실·일정·좌석 점유·마감 후 경고, memory/MongoDB 저장소
+├─ admin/                  기존 원본 컬렉션의 읽기 전용 운영 집계·감사 로그 조회
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
@@ -165,6 +171,8 @@ templates/                 Jinja2 템플릿
 ├─ classrooms/             강의실 목록과 geometry/code 순 좌석 상세
 ├─ admin/classrooms/       강의실·요일 일정·좌석 숫자 geometry 관리
 ├─ admin/alerts/           OPEN 우선 마감 후 경고와 해결 action
+├─ admin/dashboard.html    운영 요약 카드와 최근 활동
+├─ admin/audit_logs.html   필터·페이지가 있는 마스킹 감사 로그
 ├─ events/                 기능별 템플릿
 └─ errors/                 오류 화면
 
@@ -280,6 +288,11 @@ operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로
 사용자·직원 갱신은 compare-and-set으로 경합을 감지한다. multi-document transaction을
 가정하지 않는다.
 
+관리자 대시보드는 별도 제품 컬렉션이나 materialized view를 만들지 않고 위 원본 컬렉션을
+제한된 쿼리로 집계한다. 최근 활동은 시각 내림차순·ID 오름차순으로 안정 정렬하며 기본 범위는
+최근 24시간이다. 원본 쿼리 하나라도 실패하면 불완전한 수치를 섞지 않고 요청 전체를 503으로
+처리한다. 조회 API와 화면에는 자동 polling, background 갱신, 쓰기 동작이 없다.
+
 `NotificationService.create()`는 후속 같은-process 기능이 호출하는 생성 API다. 일반 사용자가
 알림을 임의 생성하는 HTTP API는 없다. 알림 `data`는 제한된 구조화 값과 허용된 내부 route만
 저장하며 token·cookie·비밀번호·영상·이미지 관련 키를 거부한다. mock delivery는
@@ -334,6 +347,8 @@ operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로
   알림 dedupe와 신청→복귀→알림 읽음→완료 사용자 여정을 확인한다.
 - 강의실 테스트는 일정·timezone·geometry 검증, confidence 0.599/0.6, 오래된 관측 보호,
   batch 멱등·전체 검증, 마감·grace 경계, 경고 dedupe·해결과 좌석→경고→알림 사용자 여정을 확인한다.
+- 관리자 대시보드 테스트는 비활성 원본 제외, 0건, 안정 정렬, 역할 권한, 전체 503,
+  감사 필드 마스킹, 경고 해결 후 요약 감소와 MongoDB bounded query/index explain을 확인한다.
 - MongoDB 연결·index는 `mongodb` marker 통합 테스트로 분리한다.
 - 계약 변경 시 기존 응답 스키마 테스트를 함께 갱신한다.
 

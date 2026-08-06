@@ -49,6 +49,17 @@ class InMemoryClassroomRepository:
         with self._lock:
             return self._classrooms.get(classroom_id)
 
+    def dashboard_snapshot(
+        self,
+    ) -> tuple[list[Classroom], list[Seat], list[AfterHoursAlert]]:
+        """Return an immutable-value snapshot for the local admin read model."""
+        with self._lock:
+            return (
+                list(self._classrooms.values()),
+                list(self._seats.values()),
+                list(self._alerts.values()),
+            )
+
     def get_classroom_by_code(self, code: str) -> Classroom | None:
         with self._lock:
             return next(

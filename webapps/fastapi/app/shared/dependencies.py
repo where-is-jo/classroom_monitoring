@@ -8,6 +8,10 @@ from functools import lru_cache
 from fastapi import Depends
 from pymongo import MongoClient
 
+from ..admin.adapters.memory_repository import InMemoryAdminDashboardRepository
+from ..admin.adapters.mongo_repository import MongoAdminDashboardRepository
+from ..admin.ports import AdminDashboardRepository
+from ..admin.service import AdminDashboardService
 from ..audit.adapters.memory_repository import InMemoryAuditRepository
 from ..audit.adapters.mongo_repository import MongoAuditRepository
 from ..audit.ports import AuditRepository
@@ -105,6 +109,17 @@ def _classroom_repository() -> InMemoryClassroomRepository:
 
 
 @lru_cache
+def _admin_dashboard_repository() -> InMemoryAdminDashboardRepository:
+    return InMemoryAdminDashboardRepository(
+        _employee_repository(),
+        _interview_wait_repository(),
+        _classroom_repository(),
+        _notification_repository(),
+        _audit_repository(),
+    )
+
+
+@lru_cache
 def _mongo_client() -> MongoClient[MongoDocument]:
     settings = get_settings()
     if settings.database_url is None:
@@ -163,6 +178,11 @@ def _mongo_classroom_repository() -> MongoClassroomRepository:
     return MongoClassroomRepository(_mongo_database())
 
 
+@lru_cache
+def _mongo_admin_dashboard_repository() -> MongoAdminDashboardRepository:
+    return MongoAdminDashboardRepository(_mongo_database())
+
+
 def get_event_repository(settings: Settings = Depends(get_settings)) -> EventRepository:
     if settings.database_mode == "memory":
         return _event_repository()
@@ -217,6 +237,14 @@ def get_classroom_repository(
     if settings.database_mode == "memory":
         return _classroom_repository()
     return _mongo_classroom_repository()
+
+
+def get_admin_dashboard_repository(
+    settings: Settings = Depends(get_settings),
+) -> AdminDashboardRepository:
+    if settings.database_mode == "memory":
+        return _admin_dashboard_repository()
+    return _mongo_admin_dashboard_repository()
 
 
 @lru_cache
@@ -379,6 +407,12 @@ def get_classroom_service(
     )
 
 
+def get_admin_dashboard_service(
+    repository: AdminDashboardRepository = Depends(get_admin_dashboard_repository),
+) -> AdminDashboardService:
+    return AdminDashboardService(repository, clock=utc_now)
+
+
 def initialize_data_store() -> None:
     """시작 시 연결·index를 검증하고 opt-in 가상 사용자를 seed한다."""
     settings = get_settings()
@@ -396,6 +430,7 @@ def initialize_data_store() -> None:
                 MongoNotificationRepository.ensure_indexes,
                 MongoInterviewWaitRepository.ensure_indexes,
                 MongoClassroomRepository.ensure_indexes,
+                MongoAdminDashboardRepository.ensure_indexes,
             ],
         )
     if settings.auth_seed_enabled:
@@ -435,6 +470,7 @@ def close_data_store() -> None:
     _mongo_notification_repository.cache_clear()
     _mongo_interview_wait_repository.cache_clear()
     _mongo_classroom_repository.cache_clear()
+    _mongo_admin_dashboard_repository.cache_clear()
     _mongo_auth_repository.cache_clear()
     _mongo_user_repository.cache_clear()
     _mongo_event_repository.cache_clear()

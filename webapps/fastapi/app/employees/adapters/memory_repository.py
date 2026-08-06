@@ -79,6 +79,16 @@ class InMemoryEmployeeRepository:
         with self._lock:
             return self._employees.get(employee_id)
 
+    def dashboard_snapshot(
+        self,
+    ) -> tuple[list[Employee], list[EmployeeStatusHistory]]:
+        """Return an immutable-value snapshot for the local admin read model."""
+        with self._lock:
+            return (
+                list(self._employees.values()),
+                list(self._history_by_operation.values()),
+            )
+
     def get_employee_by_number(self, employee_no: str) -> Employee | None:
         with self._lock:
             return next(

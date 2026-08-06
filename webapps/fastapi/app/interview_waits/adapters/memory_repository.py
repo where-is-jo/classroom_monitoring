@@ -47,6 +47,13 @@ class InMemoryInterviewWaitRepository:
         with self._lock:
             return self._waits.get(wait_id)
 
+    def dashboard_snapshot(
+        self,
+    ) -> tuple[list[InterviewWait], list[InterviewWaitHistory]]:
+        """Return an immutable-value snapshot for the local admin read model."""
+        with self._lock:
+            return list(self._waits.values()), list(self._history.values())
+
     def get_wait_by_operation_id(self, operation_id: str) -> InterviewWait | None:
         with self._lock:
             return next(

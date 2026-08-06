@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .admin.router import api_router as admin_dashboard_api_router
+from .admin.router import page_router as admin_dashboard_page_router
 from .auth.dependencies import login_redirect
 from .auth.errors import PageAuthenticationRequired
 from .auth.router import api_router as auth_api_router
@@ -182,6 +184,8 @@ app.include_router(
     interview_wait_expiration_api_router,
     responses=_AUTH_ERROR_RESPONSES,
 )
+app.include_router(admin_dashboard_page_router)
+app.include_router(admin_dashboard_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 
 def _wants_json(request: Request) -> bool:
