@@ -441,7 +441,7 @@ def test_production에는_mock_router가_없고_평가_endpoint는_있다() -> N
     include_employee_routers(development_app, development)
     development_paths = set(development_app.openapi()["paths"])
     assert "/api/v1/mock-employee-observations" in development_paths
-    assert "/admin/dev-tools" in development_paths
+    assert "/admin/dev-tools" not in development_paths
 
 
 def test_OpenAPI에_직원_요청응답과_표준_오류_contract가_노출된다(

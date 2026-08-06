@@ -169,11 +169,7 @@ class AuthService:
             raise InvalidRefreshTokenError()
 
         user = self._users.get_user(current.user_id)
-        if (
-            user is None
-            or user.status != UserStatus.ACTIVE
-            or user.role not in PRODUCT_ROLES
-        ):
+        if user is None or user.status != UserStatus.ACTIVE or user.role not in PRODUCT_ROLES:
             self._auth.revoke_family(current.family_id, now=now)
             raise InvalidRefreshTokenError()
 
@@ -228,11 +224,7 @@ class AuthService:
         except (TokenExpiredError, TokenValidationError):
             raise AuthenticationRequiredError() from None
         user = self._users.get_user(claims.user_id)
-        if (
-            user is None
-            or user.status != UserStatus.ACTIVE
-            or user.role not in PRODUCT_ROLES
-        ):
+        if user is None or user.status != UserStatus.ACTIVE or user.role not in PRODUCT_ROLES:
             raise AuthenticationRequiredError()
         return user
 

@@ -252,7 +252,5 @@ def test_OpenAPI는_auth_user_계약과_공통_오류_model을_노출한다(
     user_properties = schema["components"]["schemas"]["UserResponse"]["properties"]
     assert "password_hash" not in user_properties
     assert "access_token" not in user_properties
-    create_role = schema["components"]["schemas"]["CreateUserRequest"]["properties"][
-        "role"
-    ]
+    create_role = schema["components"]["schemas"]["CreateUserRequest"]["properties"]["role"]
     assert create_role["enum"] == ["STUDENT", "STAFF", "ADMIN"]

@@ -157,9 +157,7 @@ class VideoDemoService:
                 )
             )
         matches.sort(key=lambda item: (item.clip.started_at, item.clip.id), reverse=True)
-        return VideoSearchResultPage(
-            items=matches[:limit], total=len(matches), limit=limit
-        )
+        return VideoSearchResultPage(items=matches[:limit], total=len(matches), limit=limit)
 
     def classroom_options(self) -> list[tuple[str, str]]:
         return list(

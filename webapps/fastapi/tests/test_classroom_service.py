@@ -385,9 +385,7 @@ def test_responsible_staff_validation_and_after_hours_fanout_dedupe(
     )
     seat = stack.create_seat(classroom.id)
     observed_at = datetime(2026, 8, 5, 8, 0, tzinfo=UTC)
-    first = _observe(
-        stack, classroom.id, seat.id, confidence=0.9, observed_at=observed_at
-    )
+    first = _observe(stack, classroom.id, seat.id, confidence=0.9, observed_at=observed_at)
     assert first.alert_count == 1
     assert stack.notifications.count_unread(responsible.id) == 1
     assert stack.notifications.count_unread(stack.admin.id) == 1

@@ -78,25 +78,17 @@ def test_korean_metadata_search_room_time_tags_and_empty_result(
         limit=20,
     )
 
-    assert [item.clip.id for item in remaining.items] == [
-        "demo-clip-a101-after-hours"
-    ]
-    assert [item.clip.id for item in equipment.items] == [
-        "demo-clip-b203-equipment"
-    ]
+    assert [item.clip.id for item in remaining.items] == ["demo-clip-a101-after-hours"]
+    assert [item.clip.id for item in equipment.items] == ["demo-clip-b203-equipment"]
     assert "고정 메타데이터 일치" in remaining.items[0].match_reason
     assert empty.total == 0
 
 
 def test_search_rejects_blank_long_naive_and_inverted_time(service: VideoDemoService) -> None:
     with pytest.raises(VideoSearchInputError):
-        service.search_videos(
-            " ", classroom_id=None, from_at=None, to_at=None, limit=20
-        )
+        service.search_videos(" ", classroom_id=None, from_at=None, to_at=None, limit=20)
     with pytest.raises(VideoSearchInputError):
-        service.search_videos(
-            "x" * 201, classroom_id=None, from_at=None, to_at=None, limit=20
-        )
+        service.search_videos("x" * 201, classroom_id=None, from_at=None, to_at=None, limit=20)
     with pytest.raises(VideoSearchInputError, match="timezone"):
         service.search_videos(
             "A101",
@@ -172,9 +164,7 @@ def test_staff_and_admin_can_use_demo_pages_and_api(role: UserRole) -> None:
 
 
 def test_student_is_denied_and_api_validation_is_422() -> None:
-    student = build_auth_stack().seed(
-        UserRole.STUDENT, email="video-student@example.invalid"
-    )
+    student = build_auth_stack().seed(UserRole.STUDENT, email="video-student@example.invalid")
     application = _demo_application(student)
 
     with TestClient(application, raise_server_exceptions=False) as client:

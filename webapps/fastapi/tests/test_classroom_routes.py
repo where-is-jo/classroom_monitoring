@@ -166,12 +166,8 @@ def test_admin_classroom_form_assigns_multiple_responsible_staff(
     classroom_client: TestClient,
     classroom_stack: ClassroomStack,
 ) -> None:
-    first_staff = classroom_stack.auth.seed(
-        UserRole.STAFF, email="form-staff-1@example.invalid"
-    )
-    second_staff = classroom_stack.auth.seed(
-        UserRole.STAFF, email="form-staff-2@example.invalid"
-    )
+    first_staff = classroom_stack.auth.seed(UserRole.STAFF, email="form-staff-1@example.invalid")
+    second_staff = classroom_stack.auth.seed(UserRole.STAFF, email="form-staff-2@example.invalid")
     _login(classroom_client, classroom_stack.admin)
 
     response = classroom_client.post(
@@ -191,13 +187,9 @@ def test_admin_classroom_form_assigns_multiple_responsible_staff(
     )
 
     assert response.status_code == 303
-    page = classroom_stack.repository.list_classrooms(
-        include_inactive=True, limit=50, offset=0
-    )
+    page = classroom_stack.repository.list_classrooms(include_inactive=True, limit=50, offset=0)
     created = next(item for item in page.items if item.code == "ROOM-FORM-STAFF")
-    assert created.responsible_staff_user_ids == tuple(
-        sorted((first_staff.id, second_staff.id))
-    )
+    assert created.responsible_staff_user_ids == tuple(sorted((first_staff.id, second_staff.id)))
 
 
 def test_after_hours_http_journey_and_pages(

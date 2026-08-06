@@ -51,9 +51,7 @@ def list_video_streams(
     _: User = Depends(require_video_user),
     service: VideoDemoService = Depends(get_video_demo_service),
 ) -> DemoStreamListResponse:
-    items = service.list_streams(
-        search=q, classroom_id=classroom_id, status=stream_status
-    )
+    items = service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
     return DemoStreamListResponse(
         items=[DemoStreamResponse.from_domain(item) for item in items], total=len(items)
     )
@@ -95,9 +93,7 @@ def monitoring_page(
     actor: User = Depends(require_video_page_user),
     service: VideoDemoService = Depends(get_video_demo_service),
 ) -> Response:
-    feeds = service.list_streams(
-        search=q, classroom_id=classroom_id, status=stream_status
-    )
+    feeds = service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
     return templates.TemplateResponse(
         request=request,
         name="video_monitoring/monitoring.html",
