@@ -101,7 +101,10 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         "after_hours_alerts_dedupe_unique"
         in mongodb_database["after_hours_alerts"].index_information()
     )
-    assert "notifications_dashboard_recent" in mongodb_database["notifications"].index_information()
+    assert (
+        "seat_history_dashboard_recent"
+        in mongodb_database["seat_occupancy_history"].index_information()
+    )
 
 
 def test_dashboard_recent_query_explain_uses_bounded_sort_index(
@@ -109,10 +112,15 @@ def test_dashboard_recent_query_explain_uses_bounded_sort_index(
 ) -> None:
     initialize_indexes(mongodb_database, [MongoAdminDashboardRepository.ensure_indexes])
     plan = (
-        mongodb_database["notifications"]
-        .find({"created_at": {"$gte": datetime.now(UTC) - timedelta(days=1)}})
-        .sort([("created_at", -1), ("_id", 1)])
-        .hint("notifications_dashboard_recent")
+        mongodb_database["seat_occupancy_history"]
+        .find(
+            {
+                "observed_at": {"$gte": datetime.now(UTC) - timedelta(days=1)},
+                "state_changed": True,
+            }
+        )
+        .sort([("observed_at", -1), ("_id", 1)])
+        .hint("seat_history_dashboard_recent")
         .limit(50)
         .explain()
     )

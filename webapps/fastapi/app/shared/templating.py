@@ -51,6 +51,7 @@ DISPLAY_LABELS = {
     "PERMANENT_FAILURE": "영구 실패",
     "PROCESSING": "처리 중",
     "EMPLOYEE_STATUS": "직원 상태",
+    "SEAT_OCCUPANCY": "좌석 상태",
     "INTERVIEW_WAIT": "면담 대기",
     "AFTER_HOURS_ALERT": "마감 후 경고",
     "NOTIFICATION": "알림",

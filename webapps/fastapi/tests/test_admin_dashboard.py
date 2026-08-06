@@ -16,7 +16,7 @@ from app.admin.models import AuditLogPage, DashboardActivityType
 from app.admin.service import AdminDashboardService
 from app.audit.models import AuditLog
 from app.audit.service import AuditService
-from app.auth.dependencies import require_admin, require_page_admin
+from app.auth.dependencies import require_admin, require_csrf, require_page_admin
 from app.auth.errors import PermissionDeniedError
 from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from app.classrooms.models import (
@@ -34,7 +34,7 @@ from app.classrooms.service import ClassroomService
 from app.main import app
 from app.notifications.models import CreateNotificationCommand
 from app.notifications.service import NotificationService
-from app.shared.dependencies import get_admin_dashboard_service
+from app.shared.dependencies import get_admin_dashboard_service, get_classroom_service
 from app.shared.errors import RepositoryUnavailableError
 from tests.interview_wait_helpers import InterviewWaitStack, build_interview_wait_stack
 
@@ -61,9 +61,7 @@ def dashboard_stack() -> DashboardStack:
     )
     repository = InMemoryAdminDashboardRepository(
         waits.employees.employees,
-        waits.waits,
         classrooms,
-        waits.notifications,
         waits.employees.auth.audit,
     )
     return DashboardStack(
@@ -178,12 +176,12 @@ def test_summary_excludes_inactive_sources_and_alert_resolution_decrements(
 
     summary = stack.service.get_summary(stack.waits.employees.admin)
     assert summary.employees.total == 1
-    assert summary.interview_waits.waiting == 1
     assert summary.classrooms.active == 1
+    assert summary.classrooms.active_seats == 1
     assert summary.classrooms.occupied_seats == 1
     assert summary.alerts.open_after_hours == 1
-    assert summary.notifications.failed_mock_deliveries_24h == 1
-    assert summary.notifications.unread >= 1
+    assert not hasattr(summary, "interview_waits")
+    assert not hasattr(summary, "notifications")
 
     alert = stack.classrooms.list_alerts(
         status=None, classroom_id=classroom.id, business_date=None, limit=10, offset=0
@@ -207,37 +205,26 @@ def test_activity_order_filter_permissions_and_zero_state(
     with pytest.raises(PermissionDeniedError):
         stack.service.get_summary(stack.waits.employees.student)
 
-    employee = stack.waits.employees.create_employee()
-    stack.waits.create_wait(employee.id)
-    fail_service = NotificationService(
-        stack.waits.notifications,
-        stack.waits.employees.auth.users,
-        clock=stack.waits.employees.auth.clock,
-        mock_delivery_mode=None,
-    )
-    fail_service.create(
-        CreateNotificationCommand(
-            recipient_user_id=stack.waits.employees.admin.id,
-            type="ACTIVITY",
-            title="활동",
-            body="본문",
-            data={},
-            operation_id=str(uuid4()),
-        )
-    )
+    stack.waits.employees.create_employee()
+    _create_classroom_fixture(stack)
     page = stack.service.list_activities(stack.waits.employees.admin, limit=50)
     assert page.total >= 3
     assert [(item.occurred_at, item.id) for item in page.items] == sorted(
         [(item.occurred_at, item.id) for item in page.items],
         key=lambda value: (-value[0].timestamp(), value[1]),
     )
-    only_notifications = stack.service.list_activities(
+    only_seats = stack.service.list_activities(
         stack.waits.employees.admin,
-        activity_type=DashboardActivityType.NOTIFICATION,
+        activity_type=DashboardActivityType.SEAT_OCCUPANCY,
         limit=50,
     )
-    assert only_notifications.items
-    assert all(item.type == DashboardActivityType.NOTIFICATION for item in only_notifications.items)
+    assert only_seats.items
+    assert all(item.type == DashboardActivityType.SEAT_OCCUPANCY for item in only_seats.items)
+    assert {item.type for item in page.items} <= {
+        DashboardActivityType.EMPLOYEE_STATUS,
+        DashboardActivityType.SEAT_OCCUPANCY,
+        DashboardActivityType.AFTER_HOURS_ALERT,
+    }
     with pytest.raises(AdminQueryInputError):
         stack.service.list_activities(
             stack.waits.employees.admin,
@@ -276,6 +263,43 @@ def test_audit_filters_and_masks_sensitive_values(
     assert page.items[0].after == {"access_token": "[masked]", "name": "safe"}
 
 
+def test_dashboard_lists_and_resolves_open_alert(
+    dashboard_stack: DashboardStack,
+) -> None:
+    actor = dashboard_stack.waits.employees.admin
+    classroom, _ = _create_classroom_fixture(dashboard_stack)
+    alert = dashboard_stack.classrooms.list_alerts(
+        status=None,
+        classroom_id=classroom.id,
+        business_date=None,
+        limit=10,
+        offset=0,
+    ).items[0]
+    app.dependency_overrides[require_page_admin] = lambda: actor
+    app.dependency_overrides[require_csrf] = lambda: None
+    app.dependency_overrides[get_admin_dashboard_service] = lambda: dashboard_stack.service
+    app.dependency_overrides[get_classroom_service] = lambda: dashboard_stack.classroom_service
+    try:
+        with TestClient(app) as client:
+            page = client.get("/admin")
+            resolved = client.post(
+                f"/admin/alerts/{alert.id}/resolve",
+                data={
+                    "expected_version": str(alert.version),
+                    "operation_id": str(uuid4()),
+                },
+                follow_redirects=False,
+            )
+        assert page.status_code == 200
+        assert "Dashboard Room" in page.text
+        assert "최근 열린 마감 후 경고" in page.text
+        assert resolved.status_code == 303
+        assert resolved.headers["location"].endswith("/admin#open-alerts")
+        assert dashboard_stack.service.get_summary(actor).alerts.open_after_hours == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_dashboard_api_page_and_full_503_policy(
     dashboard_stack: DashboardStack,
 ) -> None:
@@ -283,15 +307,23 @@ def test_dashboard_api_page_and_full_503_policy(
     app.dependency_overrides[require_admin] = lambda: actor
     app.dependency_overrides[require_page_admin] = lambda: actor
     app.dependency_overrides[get_admin_dashboard_service] = lambda: dashboard_stack.service
+    app.dependency_overrides[get_classroom_service] = lambda: dashboard_stack.classroom_service
     try:
         with TestClient(app) as client:
             response = client.get("/api/v1/admin/dashboard-summary")
             page = client.get("/admin")
             audit = client.get("/admin/audit-logs")
-        assert response.status_code == page.status_code == audit.status_code == 200
+        assert response.status_code == page.status_code == 200
+        assert audit.status_code == 404
         assert response.json()["employees"]["total"] == 0
+        assert "interview_waits" not in response.json()
+        assert "notifications" not in response.json()
         assert "관리자 대시보드" in page.text
         assert "0" in page.text
+        assert "활성 면담 대기" not in page.text
+        assert "Mock 전달 실패" not in page.text
+        assert "운영 보조 지표" not in page.text
+        assert "읽지 않은 알림</dt>" not in page.text
     finally:
         app.dependency_overrides.clear()
 

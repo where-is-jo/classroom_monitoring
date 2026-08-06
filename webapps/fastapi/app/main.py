@@ -26,7 +26,6 @@ from .auth.router import api_router as auth_api_router
 from .auth.router import page_router as auth_page_router
 from .classrooms.router import admin_page_router as classrooms_admin_page_router
 from .classrooms.router import alert_api_router as classroom_alert_api_router
-from .classrooms.router import alert_page_router as classroom_alert_page_router
 from .classrooms.router import classroom_api_router, seat_api_router
 from .classrooms.router import development_api_router as classroom_development_api_router
 from .classrooms.router import (
@@ -158,7 +157,6 @@ def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
     """강의실 기능은 항상, 구조화 mock 좌석 입력은 허용 환경에만 등록한다."""
     application.include_router(classrooms_page_router)
     application.include_router(classrooms_admin_page_router)
-    application.include_router(classroom_alert_page_router)
     application.include_router(classroom_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(seat_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES)

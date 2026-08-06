@@ -123,9 +123,7 @@ def _classroom_repository() -> InMemoryClassroomRepository:
 def _admin_dashboard_repository() -> InMemoryAdminDashboardRepository:
     return InMemoryAdminDashboardRepository(
         _employee_repository(),
-        _interview_wait_repository(),
         _classroom_repository(),
-        _notification_repository(),
         _audit_repository(),
     )
 

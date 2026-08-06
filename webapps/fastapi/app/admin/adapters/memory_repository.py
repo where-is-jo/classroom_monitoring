@@ -9,12 +9,6 @@ from ...classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from ...classrooms.models import AfterHoursAlertStatus, SeatOccupancy
 from ...employees.adapters.memory_repository import InMemoryEmployeeRepository
 from ...employees.models import EmployeeStatus
-from ...interview_waits.adapters.memory_repository import (
-    InMemoryInterviewWaitRepository,
-)
-from ...interview_waits.models import InterviewWaitStatus
-from ...notifications.adapters.memory_repository import InMemoryNotificationRepository
-from ...notifications.models import MockDeliveryStatus
 from ..models import (
     AlertSummary,
     AuditLogPage,
@@ -25,8 +19,6 @@ from ..models import (
     DashboardActivityType,
     DashboardSnapshot,
     EmployeeSummary,
-    InterviewWaitSummary,
-    NotificationSummary,
 )
 
 
@@ -34,15 +26,11 @@ class InMemoryAdminDashboardRepository:
     def __init__(
         self,
         employees: InMemoryEmployeeRepository,
-        interview_waits: InMemoryInterviewWaitRepository,
         classrooms: InMemoryClassroomRepository,
-        notifications: InMemoryNotificationRepository,
         audit: InMemoryAuditRepository,
     ) -> None:
         self._employees = employees
-        self._interview_waits = interview_waits
         self._classrooms = classrooms
-        self._notifications = notifications
         self._audit = audit
 
     def get_snapshot(
@@ -50,24 +38,14 @@ class InMemoryAdminDashboardRepository:
         *,
         department: str | None,
         classroom_id: str | None,
-        delivery_failure_since: datetime,
     ) -> DashboardSnapshot:
         employees, _ = self._employees.dashboard_snapshot()
-        waits, _ = self._interview_waits.dashboard_snapshot()
-        classrooms, seats, alerts = self._classrooms.dashboard_snapshot()
-        notifications, deliveries = self._notifications.dashboard_snapshot()
+        classrooms, seats, _, alerts = self._classrooms.dashboard_snapshot()
 
         active_employees = [
             item
             for item in employees
             if item.is_active and (department is None or item.department == department)
-        ]
-        employee_ids = {item.id for item in active_employees}
-        active_waits = [
-            item
-            for item in waits
-            if item.status in {InterviewWaitStatus.WAITING, InterviewWaitStatus.READY}
-            and (department is None or item.employee_id in employee_ids)
         ]
         active_classrooms = [
             item
@@ -95,12 +73,9 @@ class InMemoryAdminDashboardRepository:
                 away=counts[EmployeeStatus.AWAY],
                 offsite=counts[EmployeeStatus.OFFSITE],
             ),
-            interview_waits=InterviewWaitSummary(
-                waiting=sum(item.status == InterviewWaitStatus.WAITING for item in active_waits),
-                ready=sum(item.status == InterviewWaitStatus.READY for item in active_waits),
-            ),
             classrooms=ClassroomSummary(
                 active=len(active_classrooms),
+                active_seats=len(active_seats),
                 occupied_seats=sum(
                     item.current_occupancy.state == SeatOccupancy.OCCUPIED for item in active_seats
                 ),
@@ -109,18 +84,6 @@ class InMemoryAdminDashboardRepository:
                 ),
             ),
             alerts=AlertSummary(open_after_hours=len(scoped_alerts)),
-            notifications=NotificationSummary(
-                unread=sum(not item.is_read for item in notifications),
-                failed_mock_deliveries_24h=sum(
-                    item.status
-                    in {
-                        MockDeliveryStatus.TEMPORARY_FAILURE,
-                        MockDeliveryStatus.PERMANENT_FAILURE,
-                    }
-                    and item.attempted_at >= delivery_failure_since
-                    for item in deliveries
-                ),
-            ),
         )
 
     def list_activities(
@@ -133,9 +96,7 @@ class InMemoryAdminDashboardRepository:
         offset: int,
     ) -> DashboardActivityPage:
         _, employee_history = self._employees.dashboard_snapshot()
-        _, wait_history = self._interview_waits.dashboard_snapshot()
-        _, _, alerts = self._classrooms.dashboard_snapshot()
-        notifications, _ = self._notifications.dashboard_snapshot()
+        _, _, seat_history, alerts = self._classrooms.dashboard_snapshot()
         items: list[DashboardActivity] = []
 
         if activity_type in (None, DashboardActivityType.EMPLOYEE_STATUS):
@@ -152,19 +113,20 @@ class InMemoryAdminDashboardRepository:
                 )
                 for item in employee_history
             )
-        if activity_type in (None, DashboardActivityType.INTERVIEW_WAIT):
+        if activity_type in (None, DashboardActivityType.SEAT_OCCUPANCY):
             items.extend(
                 DashboardActivity(
-                    id=f"wait:{item.id}",
-                    type=DashboardActivityType.INTERVIEW_WAIT,
-                    occurred_at=item.occurred_at,
-                    title="면담 대기 변경",
-                    description=f"{item.from_status.value if item.from_status else '-'} → {item.to_status.value}",
-                    resource_type="interview_wait",
-                    resource_id=item.wait_id,
-                    target_route=f"/my/interview-waits/{item.wait_id}",
+                    id=f"seat:{item.id}",
+                    type=DashboardActivityType.SEAT_OCCUPANCY,
+                    occurred_at=item.observed_at,
+                    title="좌석 상태 변경",
+                    description=f"{item.from_state.value} → {item.to_state.value}",
+                    resource_type="seat",
+                    resource_id=item.seat_id,
+                    target_route=f"/classrooms/{item.classroom_id}",
                 )
-                for item in wait_history
+                for item in seat_history
+                if item.state_changed
             )
         if activity_type in (None, DashboardActivityType.AFTER_HOURS_ALERT):
             items.extend(
@@ -176,23 +138,9 @@ class InMemoryAdminDashboardRepository:
                     description=f"좌석 {item.seat_id} · {item.status.value}",
                     resource_type="after_hours_alert",
                     resource_id=item.id,
-                    target_route="/admin/alerts",
+                    target_route="/admin#open-alerts",
                 )
                 for item in alerts
-            )
-        if activity_type in (None, DashboardActivityType.NOTIFICATION):
-            items.extend(
-                DashboardActivity(
-                    id=f"notification:{item.id}",
-                    type=DashboardActivityType.NOTIFICATION,
-                    occurred_at=item.created_at,
-                    title=item.title,
-                    description=f"알림 유형 {item.type}",
-                    resource_type="notification",
-                    resource_id=item.id,
-                    target_route="/notifications",
-                )
-                for item in notifications
             )
         items = [item for item in items if from_time <= item.occurred_at < to_time]
         items.sort(key=lambda item: (-item.occurred_at.timestamp(), item.id))

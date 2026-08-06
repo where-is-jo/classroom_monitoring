@@ -19,7 +19,6 @@ class AdminDashboardRepository(Protocol):
         *,
         department: str | None,
         classroom_id: str | None,
-        delivery_failure_since: datetime,
     ) -> DashboardSnapshot: ...
 
     def list_activities(

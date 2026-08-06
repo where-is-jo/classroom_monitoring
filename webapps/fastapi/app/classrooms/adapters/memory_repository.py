@@ -49,12 +49,18 @@ class InMemoryClassroomRepository:
 
     def dashboard_snapshot(
         self,
-    ) -> tuple[list[Classroom], list[Seat], list[AfterHoursAlert]]:
+    ) -> tuple[
+        list[Classroom],
+        list[Seat],
+        list[SeatOccupancyHistory],
+        list[AfterHoursAlert],
+    ]:
         """Return an immutable-value snapshot for the local admin read model."""
         with self._lock:
             return (
                 list(self._classrooms.values()),
                 list(self._seats.values()),
+                list(self._history.values()),
                 list(self._alerts.values()),
             )
 

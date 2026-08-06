@@ -249,7 +249,7 @@ def test_after_hours_http_journey_and_pages(
     assert "Classroom ROOM-JOURNEY" in public_page.text
     assert "OCCUPIED" in detail_page.text
     assert "좌석 생성" in admin_page.text
-    assert "⚠ OPEN" in alert_page.text
+    assert alert_page.status_code == 404
 
     alert = alerts.json()["items"][0]
     resolved = classroom_client.patch(
@@ -333,9 +333,8 @@ def test_classroom_pages_render_empty_and_permission_states(
     assert empty.status_code == 200
     assert "표시할 활성 강의실이 없습니다" in empty.text
     assert denied_classrooms.status_code == 403
-    assert denied_alerts.status_code == 403
+    assert denied_alerts.status_code == 404
 
     _login(classroom_client, classroom_stack.admin)
     alerts = classroom_client.get("/admin/alerts")
-    assert alerts.status_code == 200
-    assert "조건에 맞는 경고가 없습니다" in alerts.text
+    assert alerts.status_code == 404
