@@ -121,10 +121,11 @@ def _set_page_navigation_state(
 ) -> None:
     """모든 Jinja 화면이 같은 역할·환경 기반 탐색 상태를 사용하게 한다."""
     is_admin = user is not None and user.role in ADMIN_ROLES
+    request.state.is_student = user is not None and user.role == UserRole.STUDENT
+    request.state.is_staff = user is not None and user.role == UserRole.STAFF
+    request.state.is_admin = is_admin
     request.state.notification_unread_count = notification_unread_count
-    request.state.can_view_staff_waits = user is not None and (
-        user.role == UserRole.STAFF or is_admin
-    )
+    request.state.can_view_staff_waits = user is not None and user.role == UserRole.STAFF
     request.state.show_employee_dev_tools = settings.mock_inputs_enabled and is_admin
     request.state.show_notification_dev_tools = settings.mock_inputs_enabled and is_admin
 
@@ -147,6 +148,15 @@ def can_manage_users(user: User | None) -> bool:
 
 def login_redirect(return_to: str) -> str:
     return "/login?" + urlencode({"next": return_to})
+
+
+def product_home_path(role: UserRole) -> str:
+    """제품 역할별 로그인 홈. 레거시 운영자 데이터는 관리자 홈으로 격리한다."""
+    if role == UserRole.STUDENT:
+        return "/employees"
+    if role == UserRole.STAFF:
+        return "/staff/interview-waits"
+    return "/admin"
 
 
 def request_ip_fingerprint(

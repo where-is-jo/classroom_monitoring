@@ -17,7 +17,7 @@ class LoginRequest(BaseModel):
 
 
 class LoginForm(LoginRequest):
-    next: str = Field(default="/events", max_length=500)
+    next: str = Field(default="", max_length=500)
 
 
 class SessionResponse(BaseModel):

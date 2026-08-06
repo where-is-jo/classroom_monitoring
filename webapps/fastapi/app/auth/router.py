@@ -11,7 +11,7 @@ from ..shared.config import Settings
 from ..shared.dependencies import get_auth_service, get_settings, get_user_service
 from ..shared.security import issue_csrf_token
 from ..shared.templating import templates
-from ..users.models import ChangePasswordCommand, User
+from ..users.models import ChangePasswordCommand, User, UserRole
 from ..users.schemas import UserResponse
 from ..users.service import UserService
 from .dependencies import (
@@ -19,6 +19,7 @@ from .dependencies import (
     CSRF_COOKIE,
     REFRESH_COOKIE,
     get_current_user,
+    product_home_path,
     request_ip_fingerprint,
     require_csrf,
     require_origin,
@@ -179,7 +180,7 @@ def change_password(
 
 
 @page_router.get("/login")
-def login_page(request: Request, next: str = "/events") -> Response:
+def login_page(request: Request, next: str = "") -> Response:
     return templates.TemplateResponse(
         request=request,
         name="auth/login.html",
@@ -216,7 +217,7 @@ def login_page_submit(
             status_code=exc.status_code,
         )
     response = RedirectResponse(
-        url=_safe_return_to(form.next),
+        url=_return_to_for(session.user, form.next),
         status_code=status.HTTP_303_SEE_OTHER,
     )
     _set_session_cookies(response, session, settings=settings)
@@ -237,5 +238,32 @@ def logout_page(
 
 def _safe_return_to(value: str) -> str:
     if not value.startswith("/") or value.startswith("//"):
-        return "/events"
+        return ""
     return value
+
+
+def _return_to_for(user: User, value: str) -> str:
+    candidate = _safe_return_to(value)
+    allowed_prefixes = {
+        UserRole.STUDENT: ("/employees", "/my/interview-waits", "/classrooms", "/account"),
+        UserRole.STAFF: (
+            "/employees",
+            "/staff/interview-waits",
+            "/classrooms",
+            "/monitoring",
+            "/video-search",
+            "/account",
+        ),
+        UserRole.ADMIN: (
+            "/admin",
+            "/employees",
+            "/classrooms",
+            "/monitoring",
+            "/video-search",
+            "/account",
+        ),
+        UserRole.SYSTEM_OPERATOR: ("/admin", "/employees", "/classrooms", "/account"),
+    }
+    if candidate and candidate.startswith(allowed_prefixes[user.role]):
+        return candidate
+    return product_home_path(user.role)

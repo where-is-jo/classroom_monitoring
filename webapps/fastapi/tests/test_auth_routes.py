@@ -245,7 +245,7 @@ def test_인증된_모든_역할은_events_공통_shell을_렌더링한다(
     assert 'aria-label="주 탐색"' in response.text
 
 
-def test_mock_입력_허용_환경은_관리자_운영_메뉴를_모든_page에_표시한다(
+def test_mock_입력_허용_환경도_개발용_메뉴를_제품_탐색에_표시하지_않는다(
     auth_client: TestClient,
     auth_stack: AuthStack,
 ) -> None:
@@ -257,8 +257,8 @@ def test_mock_입력_허용_환경은_관리자_운영_메뉴를_모든_page에_
     response = auth_client.get("/events")
 
     assert response.status_code == 200
-    assert 'href="/admin/dev-tools"' in response.text
-    assert 'href="/admin/mock-deliveries"' in response.text
+    assert 'href="/admin/dev-tools"' not in response.text
+    assert 'href="/admin/mock-deliveries"' not in response.text
 
 
 def test_보호_page는_원래_경로와_함께_login으로_보낸다(

@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .admin.router import api_router as admin_dashboard_api_router
 from .admin.router import page_router as admin_dashboard_page_router
-from .auth.dependencies import login_redirect
+from .auth.dependencies import get_optional_page_user, login_redirect, product_home_path
 from .auth.errors import PageAuthenticationRequired
 from .auth.router import api_router as auth_api_router
 from .auth.router import page_router as auth_page_router
@@ -71,6 +71,7 @@ from .shared.dependencies import (
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.schemas import HealthResponse, ReadinessResponse
 from .shared.templating import STATIC_DIR, templates
+from .users.models import User
 from .users.router import api_router as users_api_router
 from .users.router import page_router as users_page_router
 
@@ -294,8 +295,8 @@ def handle_unexpected_error(request: Request, exc: Exception) -> Response:
 
 
 @app.get("/", include_in_schema=False)
-def index() -> RedirectResponse:
-    return RedirectResponse(url="/events")
+def index(user: User | None = Depends(get_optional_page_user)) -> RedirectResponse:
+    return RedirectResponse(url="/login" if user is None else product_home_path(user.role))
 
 
 @app.get("/health", tags=["system"], response_model=HealthResponse)
