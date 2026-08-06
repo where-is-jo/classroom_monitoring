@@ -1,25 +1,31 @@
 {% extends "base.html" %}
 
-{% block title %}직원 상태 · 스마트 오피스 모니터링{% endblock %}
+{% block title %}직원 상태 · 캠퍼스 운영 포털{% endblock %}
 
 {% block content %}
-  <h1>직원 상태</h1>
-  <p class="summary">저장된 현재 상태를 조회합니다. 조회만으로 상태나 이력은 변경되지 않습니다.</p>
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">나의 업무</p>
+      <h1>직원 상태</h1>
+      <p class="summary">직원을 찾고 현재 업무 상태와 면담 가능 여부를 확인합니다. 조회만으로 상태나 이력은 변경되지 않습니다.</p>
+    </div>
+    <span class="state-chip status-label--active" aria-label="검색 결과 총 {{ page.total }}명">{{ page.total }}명</span>
+  </header>
 
-  <section class="panel" aria-labelledby="employee-filters-title">
+  <section class="panel filter-panel" aria-labelledby="employee-filters-title">
     <h2 id="employee-filters-title">검색과 필터</h2>
     <form method="get" action="/employees" class="form-grid">
-      <label>이름 또는 사번
-        <input name="search" value="{{ search }}" maxlength="100">
+      <label for="employee-search">이름 또는 사번
+        <input id="employee-search" name="search" value="{{ search }}" maxlength="100" placeholder="예: 홍길동 또는 EMP-001">
       </label>
-      <label>부서
-        <input name="department" value="{{ department }}" maxlength="100">
+      <label for="employee-department">부서
+        <input id="employee-department" name="department" value="{{ department }}" maxlength="100" placeholder="예: 학생지원팀">
       </label>
-      <label>상태
-        <select name="status">
-          <option value="">전체</option>
+      <label for="employee-status">상태
+        <select id="employee-status" name="status">
+          <option value="">전체 상태</option>
           {% for status in statuses %}
-            <option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value }}</option>
+            <option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value|display_label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -28,21 +34,26 @@
   </section>
 
   <section class="panel" aria-labelledby="employee-list-title">
-    <h2 id="employee-list-title">목록 <span class="summary">총 {{ page.total }}명</span></h2>
+    <div class="section-heading">
+      <div><h2 id="employee-list-title">직원 목록</h2><p class="summary">총 {{ page.total }}명의 활성 직원</p></div>
+    </div>
     {% if page.items %}
-      <div class="table-scroll">
+      <div class="table-scroll" tabindex="0" role="region" aria-label="직원 상태 목록 표">
         <table>
-          <thead><tr><th>직원</th><th>부서</th><th>위치</th><th>현재 상태</th><th>면담</th><th>마지막 갱신</th></tr></thead>
+          <thead><tr><th scope="col">직원</th><th scope="col">부서·직급</th><th scope="col">위치</th><th scope="col">현재 상태</th><th scope="col">면담 가능성</th><th scope="col">마지막 갱신</th></tr></thead>
           <tbody>
             {% for employee in page.items %}
               <tr>
-                <td><a href="/employees/{{ employee.id }}">{{ employee.display_name }} ({{ employee.employee_no }})</a></td>
-                <td>{{ employee.department }} · {{ employee.position }}</td>
-                <td>{{ employee.office_zone }}</td>
-                <td><span class="status-label status-label--{{ employee.current_status.status.value|lower|replace('_', '-') }}">{{ employee.current_status.status.value }}</span></td>
                 <td>
-                  <a href="/employees/{{ employee.id }}#interview-wait">면담 대기</a>
-                  <span class="muted">{% if employee.id in present_employee_ids %}즉시 READY{% else %}복귀 시 READY{% endif %}</span>
+                  <span class="cell-primary"><a href="/employees/{{ employee.id }}">{{ employee.display_name }}</a></span>
+                  <span class="cell-secondary">사번 {{ employee.employee_no }}</span>
+                </td>
+                <td><span class="cell-primary">{{ employee.department }}</span><span class="cell-secondary">{{ employee.position }}</span></td>
+                <td>{{ employee.office_zone }}</td>
+                <td><span class="status-label status-label--{{ employee.current_status.status.value|lower|replace('_', '-') }}" title="{{ employee.current_status.status.value }}">{{ employee.current_status.status.value|display_label }}</span></td>
+                <td>
+                  <a href="/employees/{{ employee.id }}#interview-wait">{% if employee.id in present_employee_ids %}지금 면담 가능{% else %}복귀 시 알림{% endif %}</a>
+                  <span class="cell-secondary">면담 대기 등록</span>
                 </td>
                 <td>{{ employee.updated_at|kst_datetime }}</td>
               </tr>

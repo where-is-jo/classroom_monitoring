@@ -69,12 +69,15 @@ def get_current_page_user(
     request: Request,
     service: AuthService = Depends(get_auth_service),
     notification_service: NotificationService = Depends(get_notification_service),
+    settings: Settings = Depends(get_settings),
 ) -> User:
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
-        request.state.notification_unread_count = notification_service.unread_count(user)
-        request.state.can_view_staff_waits = (
-            user.role == UserRole.STAFF or user.role in ADMIN_ROLES
+        _set_page_navigation_state(
+            request,
+            user=user,
+            settings=settings,
+            notification_unread_count=notification_service.unread_count(user),
         )
         return user
     except AuthenticationRequiredError:
@@ -88,18 +91,44 @@ def get_optional_page_user(
     request: Request,
     service: AuthService = Depends(get_auth_service),
     notification_service: NotificationService = Depends(get_notification_service),
+    settings: Settings = Depends(get_settings),
 ) -> User | None:
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
-        request.state.notification_unread_count = notification_service.unread_count(user)
-        request.state.can_view_staff_waits = (
-            user.role == UserRole.STAFF or user.role in ADMIN_ROLES
+        _set_page_navigation_state(
+            request,
+            user=user,
+            settings=settings,
+            notification_unread_count=notification_service.unread_count(user),
         )
         return user
     except AuthenticationRequiredError:
-        request.state.notification_unread_count = 0
-        request.state.can_view_staff_waits = False
+        _set_page_navigation_state(
+            request,
+            user=None,
+            settings=settings,
+            notification_unread_count=0,
+        )
         return None
+
+
+def _set_page_navigation_state(
+    request: Request,
+    *,
+    user: User | None,
+    settings: Settings,
+    notification_unread_count: int,
+) -> None:
+    """모든 Jinja 화면이 같은 역할·환경 기반 탐색 상태를 사용하게 한다."""
+    is_admin = user is not None and user.role in ADMIN_ROLES
+    request.state.notification_unread_count = notification_unread_count
+    request.state.can_view_staff_waits = user is not None and (
+        user.role == UserRole.STAFF or is_admin
+    )
+    request.state.show_employee_dev_tools = settings.mock_inputs_enabled and is_admin
+    request.state.show_notification_dev_tools = (
+        settings.mock_inputs_enabled and is_admin
+    )
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

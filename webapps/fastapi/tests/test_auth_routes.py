@@ -217,6 +217,48 @@ def test_역할별_API와_page_권한표(
     ).status_code == 204
 
 
+@pytest.mark.parametrize(
+    "role",
+    [
+        UserRole.STUDENT,
+        UserRole.STAFF,
+        UserRole.ADMIN,
+        UserRole.SYSTEM_OPERATOR,
+    ],
+)
+def test_인증된_모든_역할은_events_공통_shell을_렌더링한다(
+    auth_client: TestClient,
+    auth_stack: AuthStack,
+    role: UserRole,
+) -> None:
+    user = auth_stack.seed(role)
+    assert login(auth_client, user.email).status_code == 200
+
+    response = auth_client.get("/events")
+
+    assert response.status_code == 200
+    assert user.name in response.text
+    assert 'aria-label="주 탐색"' in response.text
+
+
+def test_mock_입력_허용_환경은_관리자_운영_메뉴를_모든_page에_표시한다(
+    auth_client: TestClient,
+    auth_stack: AuthStack,
+) -> None:
+    development_settings = get_settings().model_copy(
+        update={"mock_inputs_enabled": True}
+    )
+    app.dependency_overrides[get_settings] = lambda: development_settings
+    operator = auth_stack.seed(UserRole.SYSTEM_OPERATOR)
+    assert login(auth_client, operator.email).status_code == 200
+
+    response = auth_client.get("/events")
+
+    assert response.status_code == 200
+    assert 'href="/admin/dev-tools"' in response.text
+    assert 'href="/admin/mock-deliveries"' in response.text
+
+
 def test_보호_page는_원래_경로와_함께_login으로_보낸다(
     auth_client: TestClient,
 ) -> None:

@@ -3,34 +3,37 @@
 {% block title %}Mock delivery 기록 · 스마트 오피스 모니터링{% endblock %}
 
 {% block content %}
-  <section class="panel">
-    <div class="section-heading">
-      <div>
-        <h1>Mock delivery 기록</h1>
-        <p>외부 네트워크를 사용하지 않은 개발용 처리 결과입니다.</p>
-      </div>
-      <a class="button-link" href="/admin/mock-deliveries">새로고침</a>
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">운영 도구 · 개발 전용</p>
+      <h1>Mock delivery 기록</h1>
+      <p class="summary">외부 네트워크를 사용하지 않은 개발용 처리 결과입니다.</p>
     </div>
+    <a class="button-link" href="/admin/mock-deliveries">새로고침</a>
+  </header>
 
-    {% if error %}
-      <div class="message error" role="alert">{{ error }}</div>
-    {% endif %}
+  {% if error %}<div class="message error" role="alert">{{ error }}</div>{% endif %}
 
+  <section class="panel filter-panel" aria-labelledby="delivery-filter-title">
+    <h2 id="delivery-filter-title">기록 필터</h2>
     <form method="get" action="/admin/mock-deliveries" class="filter-form">
       <label>
         상태
         <select name="status">
           <option value="">전체</option>
           {% for delivery_status in statuses %}
-            <option value="{{ delivery_status.value }}" {% if selected_status == delivery_status %}selected{% endif %}>{{ delivery_status.value }}</option>
+            <option value="{{ delivery_status.value }}" {% if selected_status == delivery_status %}selected{% endif %}>{{ delivery_status.value|display_label }} ({{ delivery_status.value }})</option>
           {% endfor %}
         </select>
       </label>
       <button type="submit">필터 적용</button>
     </form>
+  </section>
 
+  <section class="panel" aria-labelledby="delivery-list-title">
+    <h2 id="delivery-list-title">전달 기록</h2>
     {% if page.items %}
-      <div class="table-wrap">
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Mock delivery 기록 표">
         <table>
           <thead>
             <tr>
@@ -46,7 +49,7 @@
               <tr>
                 <td><code>{{ delivery.notification_id }}</code></td>
                 <td>{{ delivery.provider }} / {{ delivery.attempt }}</td>
-                <td>{{ delivery.status.value }}</td>
+                <td><span class="status-label status-label--{{ delivery.status.value|lower|replace('_', '-') }}">{{ delivery.status.value|display_label }}</span><br><span class="enum-code">{{ delivery.status.value }}</span></td>
                 <td>
                   <code>{{ delivery.request_payload }}</code><br>
                   <code>{{ delivery.result_payload }}</code>
@@ -59,7 +62,7 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <input type="hidden" name="notification_id" value="{{ delivery.notification_id }}">
                       <input type="hidden" name="operation_id" value="{{ retry_operation_ids[delivery.id] }}">
-                      <button type="submit" data-pending-label="재시도 중…">명시적 재시도</button>
+                      <button type="submit" class="secondary" data-pending-label="재시도 중…">명시적 재시도</button>
                     </form>
                   {% endif %}
                 </td>

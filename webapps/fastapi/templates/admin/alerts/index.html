@@ -1,10 +1,19 @@
 {% extends "base.html" %}
 
-{% block title %}마감 후 경고 · 스마트 오피스 모니터링{% endblock %}
+{% block title %}마감 후 경고 · 캠퍼스 운영 포털{% endblock %}
 
 {% block content %}
-  <div class="section-heading"><div><h1>마감 후 점유 경고</h1><p class="muted">OPEN 경고를 먼저 표시하며 해결 후 같은 영업일에는 다시 열지 않습니다.</p></div><a class="button-link" href="/admin/alerts">새로고침</a></div>
+  <header class="page-header">
+    <div><p class="eyebrow">관리</p><h1>마감 후 점유 경고</h1><p class="summary">OPEN 경고를 먼저 표시하며 해결 후 같은 영업일에는 다시 열지 않습니다.</p></div>
+    <a class="button-link" href="/admin/alerts">새로고침</a>
+  </header>
   {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
-  <form method="get" action="/admin/alerts" class="filter-form"><label>상태<select name="status"><option value="">전체</option><option value="OPEN"{% if selected_status and selected_status.value == 'OPEN' %} selected{% endif %}>OPEN</option><option value="RESOLVED"{% if selected_status and selected_status.value == 'RESOLVED' %} selected{% endif %}>RESOLVED</option></select></label><button type="submit">필터 적용</button></form>
-  {% if page.items %}<div class="table-scroll"><table><thead><tr><th>상태</th><th>강의실</th><th>seat_id</th><th>영업일</th><th>감지</th><th>작업</th></tr></thead><tbody>{% for alert in page.items %}<tr><td><strong>{% if alert.status.value == 'OPEN' %}⚠ OPEN{% else %}✓ RESOLVED{% endif %}</strong></td><td>{{ classrooms[alert.classroom_id].name if alert.classroom_id in classrooms else alert.classroom_id }}</td><td>{{ alert.seat_id }}</td><td>{{ alert.business_date }}</td><td>{{ alert.detected_at|kst_datetime }}</td><td>{% if alert.status.value == 'OPEN' %}<form method="post" action="/admin/alerts/{{ alert.id }}/resolve" data-submit-state><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_version" value="{{ alert.version }}"><input type="hidden" name="operation_id" value="{{ resolve_operation_ids[alert.id] }}"><button type="submit" data-pending-label="해결 중…">해결</button></form>{% else %}<span class="muted">{{ alert.resolved_at|kst_datetime }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty" role="status">조건에 맞는 경고가 없습니다.</div>{% endif %}
+  <section class="panel filter-panel" aria-labelledby="alert-filter-title">
+    <h2 id="alert-filter-title">경고 필터</h2>
+    <form method="get" action="/admin/alerts" class="filter-form"><label>상태<select name="status"><option value="">전체 상태</option><option value="OPEN"{% if selected_status and selected_status.value == 'OPEN' %} selected{% endif %}>조치 필요 (OPEN)</option><option value="RESOLVED"{% if selected_status and selected_status.value == 'RESOLVED' %} selected{% endif %}>해결됨 (RESOLVED)</option></select></label><button type="submit">필터 적용</button></form>
+  </section>
+  <section class="panel" aria-labelledby="alert-list-title">
+    <h2 id="alert-list-title">경고 목록</h2>
+    {% if page.items %}<div class="table-scroll" tabindex="0" role="region" aria-label="마감 후 점유 경고 표"><table><thead><tr><th scope="col">상태</th><th scope="col">강의실</th><th scope="col">좌석 ID</th><th scope="col">영업일</th><th scope="col">감지 시각</th><th scope="col">작업</th></tr></thead><tbody>{% for alert in page.items %}<tr><td>{% if alert.status.value == 'OPEN' %}<span class="status-label status-label--open">조치 필요</span> <span class="enum-code">⚠ OPEN</span>{% else %}<span class="status-label status-label--resolved">해결됨</span> <span class="enum-code">✓ RESOLVED</span>{% endif %}</td><td>{{ classrooms[alert.classroom_id].name if alert.classroom_id in classrooms else alert.classroom_id }}</td><td><code>{{ alert.seat_id }}</code></td><td>{{ alert.business_date }}</td><td>{{ alert.detected_at|kst_datetime }}</td><td>{% if alert.status.value == 'OPEN' %}<form method="post" action="/admin/alerts/{{ alert.id }}/resolve" data-submit-state><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_version" value="{{ alert.version }}"><input type="hidden" name="operation_id" value="{{ resolve_operation_ids[alert.id] }}"><button type="submit" data-pending-label="해결 중…">해결</button></form>{% else %}<span class="muted">{{ alert.resolved_at|kst_datetime }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty" role="status">조건에 맞는 경고가 없습니다.</div>{% endif %}
+  </section>
 {% endblock %}

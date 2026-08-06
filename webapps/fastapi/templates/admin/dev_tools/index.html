@@ -1,34 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}개발 도구 · 스마트 오피스 모니터링{% endblock %}
+{% block title %}개발 도구 · 캠퍼스 운영 포털{% endblock %}
 
 {% block content %}
-  <h1>직원 mock 관측 개발 도구</h1>
-  <p class="summary">사람이 작성한 구조화 값만 입력합니다. 이 화면과 API는 mock 입력이 허용된 환경에만 등록됩니다.</p>
+  <header class="page-header"><div><p class="eyebrow">운영 도구 · 개발 전용</p><h1>직원 mock 관측 개발 도구</h1><p class="summary">사람이 작성한 구조화 값만 입력합니다. 이 화면과 API는 mock 입력이 허용된 환경에만 등록됩니다.</p></div></header>
   {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
   {% if success %}<div class="alert alert--success" role="status">{{ success }}</div>{% endif %}
   {% if seat_result %}<div class="alert alert--success" role="status">{{ seat_result }}</div>{% endif %}
 
-  {% if employees %}
-    <form method="post" action="/admin/dev-tools" class="form-grid" data-submit-state>
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>event_id<input name="event_id" value="{{ event_id }}" required></label>
-      <label>직원
-        <select name="employee_id" required>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.display_name }} ({{ employee.employee_no }})</option>{% endfor %}</select>
-      </label>
-      <label>사람 있음
-        <select name="person_present"><option value="true">true</option><option value="false">false</option></select>
-      </label>
-      <label>통화 감지
-        <select name="phone_detected"><option value="false">false</option><option value="true">true</option></select>
-      </label>
-      <label>confidence<input name="confidence" type="number" value="1" min="0" max="1" step="0.01" required></label>
-      <label>observed_at (ISO 8601 UTC)<input name="observed_at" value="{{ observed_at }}" required></label>
-      <button type="submit" data-pending-label="반영 중…">mock 관측 반영</button>
-    </form>
-  {% else %}
-    <div class="empty" role="status">mock 관측을 입력할 활성 직원이 없습니다.</div>
-  {% endif %}
+  <section class="panel" aria-labelledby="employee-observation-title">
+    <h2 id="employee-observation-title">직원 mock 관측</h2>
+    {% if employees %}
+      <form method="post" action="/admin/dev-tools" class="form-grid" data-submit-state>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>event_id<input name="event_id" value="{{ event_id }}" required></label>
+        <label>직원<select name="employee_id" required>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.display_name }} ({{ employee.employee_no }})</option>{% endfor %}</select></label>
+        <label>사람 있음<select name="person_present"><option value="true">true</option><option value="false">false</option></select></label>
+        <label>통화 감지<select name="phone_detected"><option value="false">false</option><option value="true">true</option></select></label>
+        <label>confidence<input name="confidence" type="number" value="1" min="0" max="1" step="0.01" required></label>
+        <label>observed_at (ISO 8601 UTC)<input name="observed_at" value="{{ observed_at }}" required></label>
+        <button type="submit" data-pending-label="반영 중…">mock 관측 반영</button>
+      </form>
+    {% else %}<div class="empty" role="status">mock 관측을 입력할 활성 직원이 없습니다.</div>{% endif %}
+  </section>
 
   {% include "admin/dev_tools/seat_observations.html" %}
 {% endblock %}

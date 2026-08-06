@@ -1,60 +1,30 @@
 {% extends "base.html" %}
 
-{% block title %}탐지 이벤트 — 스마트 오피스 모니터링{% endblock %}
+{% block title %}탐지 이벤트 · 캠퍼스 운영 포털{% endblock %}
 
 {% block content %}
-<h1>탐지 이벤트</h1>
-
-{% if page.items %}
-  <p class="summary">전체 {{ page.total }}건 중 {{ offset + 1 }}–{{ offset + page.items|length }}건</p>
-
-  <div class="table-scroll">
-    <table>
-      <caption class="visually-hidden">탐지 이벤트 목록</caption>
-      <thead>
-        <tr>
-          <th scope="col">탐지 시각 (UTC)</th>
-          <th scope="col">카메라</th>
-          <th scope="col">라벨</th>
-          <th scope="col">신뢰도</th>
-          <th scope="col">상세</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for summary in page.items %}
-        <tr>
-          <td>{{ summary.event.detected_at.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td>{{ summary.event.camera_id }}</td>
-          <td>{{ summary.event.label }}</td>
-          <td>
-            {# 등급 판정은 서비스 계층에서 끝났다. 여기서는 표시만 한다. #}
-            <span class="level level--{{ summary.confidence_level }}">
-              {% if summary.confidence_level == 'high' %}높음
-              {% elif summary.confidence_level == 'medium' %}보통
-              {% else %}낮음{% endif %}
-            </span>
-            <span class="muted">{{ '%.2f'|format(summary.event.confidence) }}</span>
-          </td>
-          <td><a href="/events/{{ summary.event.id }}">보기</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <nav class="pagination" aria-label="페이지 이동">
-    {% if has_prev %}
-      <a href="/events?limit={{ limit }}&offset={{ [offset - limit, 0]|max }}">이전</a>
-    {% else %}
-      <span class="disabled">이전</span>
-    {% endif %}
-    {% if has_next %}
-      <a href="/events?limit={{ limit }}&offset={{ offset + limit }}">다음</a>
-    {% else %}
-      <span class="disabled">다음</span>
-    {% endif %}
-  </nav>
-{% else %}
-  <p class="empty">표시할 탐지 이벤트가 없습니다.</p>
-{% endif %}
+  <header class="page-header"><div><p class="eyebrow">운영 도구</p><h1>탐지 이벤트</h1><p class="summary">저장된 탐지 메타데이터를 조회합니다.</p></div></header>
+  <section class="panel" aria-labelledby="event-list-title">
+    <h2 id="event-list-title">이벤트 목록</h2>
+    {% if page.items %}
+      <p class="summary">전체 {{ page.total }}건 중 {{ offset + 1 }}–{{ offset + page.items|length }}건</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="탐지 이벤트 목록 표">
+        <table>
+          <caption class="visually-hidden">탐지 이벤트 목록</caption>
+          <thead><tr><th scope="col">탐지 시각 (UTC)</th><th scope="col">카메라</th><th scope="col">라벨</th><th scope="col">신뢰도</th><th scope="col">상세</th></tr></thead>
+          <tbody>
+            {% for summary in page.items %}<tr>
+              <td>{{ summary.event.detected_at.strftime('%Y-%m-%d %H:%M') }}</td><td><code>{{ summary.event.camera_id }}</code></td><td>{{ summary.event.label }}</td>
+              <td><span class="level level--{{ summary.confidence_level }}">{% if summary.confidence_level == 'high' %}높음{% elif summary.confidence_level == 'medium' %}보통{% else %}낮음{% endif %}</span> <span class="muted">{{ '%.2f'|format(summary.event.confidence) }}</span></td>
+              <td><a href="/events/{{ summary.event.id }}">보기</a></td>
+            </tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <nav class="pagination" aria-label="페이지 이동">
+        {% if has_prev %}<a href="/events?limit={{ limit }}&offset={{ [offset - limit, 0]|max }}">이전</a>{% else %}<span class="disabled">이전</span>{% endif %}
+        {% if has_next %}<a href="/events?limit={{ limit }}&offset={{ offset + limit }}">다음</a>{% else %}<span class="disabled">다음</span>{% endif %}
+      </nav>
+    {% else %}<div class="empty" role="status">표시할 탐지 이벤트가 없습니다.</div>{% endif %}
+  </section>
 {% endblock %}

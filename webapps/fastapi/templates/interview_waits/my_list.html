@@ -1,39 +1,46 @@
 {% extends "base.html" %}
 
-{% block title %}내 면담 대기 · 스마트 오피스 모니터링{% endblock %}
+{% block title %}내 면담 대기 · 캠퍼스 운영 포털{% endblock %}
 
 {% block content %}
-  <div class="section-heading">
-    <div><h1>내 면담 대기</h1><p class="muted">조회는 상태나 이력을 변경하지 않습니다.</p></div>
+  <header class="page-header">
+    <div><p class="eyebrow">나의 업무</p><h1>내 면담 대기</h1><p class="summary">신청한 면담의 준비 상태와 가능한 작업을 확인합니다. 조회는 상태나 이력을 변경하지 않습니다.</p></div>
     <a class="button-link" href="/my/interview-waits">새로고침</a>
-  </div>
+  </header>
   {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
 
-  <form method="get" action="/my/interview-waits" class="filter-form">
-    <label>상태
-      <select name="status"><option value="">전체</option>{% for status in statuses %}<option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value }}</option>{% endfor %}</select>
-    </label>
-    <button type="submit">필터 적용</button>
-  </form>
+  <section class="panel filter-panel" aria-labelledby="wait-filter-title">
+    <h2 id="wait-filter-title">상태 필터</h2>
+    <form method="get" action="/my/interview-waits" class="filter-form">
+      <label for="my-wait-status">상태
+        <select id="my-wait-status" name="status"><option value="">전체 상태</option>{% for status in statuses %}<option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value|display_label }}</option>{% endfor %}</select>
+      </label>
+      <button type="submit">필터 적용</button>
+    </form>
+  </section>
 
   {% if displays %}
     <ul class="card-list" aria-label="내 면담 대기 목록">
       {% for display in displays %}
-        <li class="user-card">
-          <h2><a href="/my/interview-waits/{{ display.wait.id }}">{{ display.employee_name }}</a></h2>
-          <p>
-            <strong>{{ '활성' if display.wait.status.value in ['WAITING', 'READY'] else '종료' }}</strong>
-            <span class="status-label">{{ display.wait.status.value }}</span>
-          </p>
+        <li class="user-card{% if display.wait.status.value == 'READY' %} user-card--ready{% endif %}">
+          <div class="section-heading">
+            <div>
+              <span class="status-label status-label--{{ display.wait.status.value|lower|replace('_', '-') }}" title="{{ display.wait.status.value }}">{{ display.wait.status.value|display_label }}</span>
+              <h2><a href="/my/interview-waits/{{ display.wait.id }}">{{ display.employee_name }}</a></h2>
+            </div>
+            <strong class="summary">{{ '활성 대기' if display.wait.status.value in ['WAITING', 'READY'] else '종료된 대기' }}</strong>
+          </div>
+          {% if display.wait.status.value == 'READY' %}<p class="ready-callout">지금 면담 가능합니다. 대상 직원에게 방문해 주세요.</p>{% endif %}
           <p>{{ display.wait.message or '요청 메시지 없음' }}</p>
-          <p class="muted">요청 {{ display.wait.requested_at|kst_datetime }} · 만료 {{ display.wait.expires_at|kst_datetime }}</p>
-          <div class="inline-actions">
+          <p class="card-meta"><span>요청 {{ display.wait.requested_at|kst_datetime }}</span><span>만료 {{ display.wait.expires_at|kst_datetime }}</span></p>
+          <div class="inline-actions card-footer">
+            <a class="button button--ghost" href="/my/interview-waits/{{ display.wait.id }}">상세 보기</a>
             {% if can_cancel[display.wait.id] %}
               <form method="post" action="/my/interview-waits/{{ display.wait.id }}/transition" data-submit-state>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="operation_id" value="{{ cancel_operation_ids[display.wait.id] }}">
                 <input type="hidden" name="status" value="CANCELLED">
-                <button type="submit" data-pending-label="취소 중…">대기 취소</button>
+                <button type="submit" class="secondary" data-pending-label="취소 중…">대기 취소</button>
               </form>
             {% endif %}
             {% if can_complete[display.wait.id] %}

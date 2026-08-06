@@ -3,66 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}스마트 오피스 모니터링{% endblock %}</title>
+  <meta name="theme-color" content="#00685f">
+  <title>{% block title %}캠퍼스 운영 포털{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300685f'/%3E%3Cpath d='M6 10l10-5 10 5-10 5L6 10zm4 3l6 3 6-3v8l-6 3-6-3v-8z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
   <script src="{{ url_for('static', path='/forms.js') }}" defer></script>
 </head>
-<body>
-  <header class="site-header">
-    <a class="site-title" href="/events">스마트 오피스 모니터링</a>
-    <nav>
-      <a href="/events">탐지 이벤트</a>
-      {% if can_view_employees %}
-        <a href="/employees">직원 상태</a>
-      {% endif %}
-      {% if current_user %}
-        <a href="/classrooms">강의실 좌석</a>
-        <a href="/notifications">
-          알림
-          {% set unread_count = request.state.notification_unread_count | default(0) %}
-          {% if unread_count %}<span class="badge" aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>{% endif %}
-        </a>
-        <a href="/my/interview-waits">내 면담 대기</a>
-        {% if request.state.can_view_staff_waits | default(false) %}
-          <a href="/staff/interview-waits">직원 대상 대기</a>
-        {% endif %}
-      {% endif %}
-      {% if can_manage_employees %}
-        <a href="/admin">대시보드</a>
-        <a href="/admin/employees">직원 관리</a>
-        <a href="/admin/classrooms">강의실 관리</a>
-        <a href="/admin/alerts">마감 후 경고</a>
-        <a href="/admin/audit-logs">감사 로그</a>
-      {% endif %}
-      {% if show_employee_dev_tools %}
-        <a href="/admin/dev-tools">개발 도구</a>
-      {% endif %}
-      {% if show_notification_dev_tools | default(false) %}
-        <a href="/admin/mock-deliveries">Mock delivery</a>
-      {% endif %}
-      {% if can_manage_users %}
-        <a href="/admin/users">사용자 관리</a>
-      {% endif %}
-    </nav>
-    <div class="account-nav">
-      {% if current_user %}
-        <span>{{ current_user.name }} · {{ current_user.role.value }}</span>
-        <form method="post" action="/logout" data-submit-state>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" data-pending-label="로그아웃 중…">로그아웃</button>
-        </form>
-      {% else %}
-        <a href="/login">로그인</a>
-      {% endif %}
-    </div>
-  </header>
+<body class="{% if current_user %}app-body{% else %}guest-body{% endif %}">
+  <a class="skip-link" href="#main-content">본문으로 바로가기</a>
 
-  <main class="content">
-    {% block content %}{% endblock %}
-  </main>
+  {% set current_path = request.url.path %}
+  {% set show_employee_tools = request.state.show_employee_dev_tools | default(show_employee_dev_tools | default(false)) %}
+  {% set show_notification_tools = request.state.show_notification_dev_tools | default(show_notification_dev_tools | default(false)) %}
+  {% if current_user %}
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="주 탐색">
+        <div class="sidebar-brand">
+          <a class="brand" href="/employees" aria-label="캠퍼스 운영 포털 홈">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" focusable="false"><path d="M5 9.5 16 4l11 5.5L16 15 5 9.5Zm4 3.2 7 3.5 7-3.5V21l-7 3.5L9 21v-8.3Z"/></svg>
+            </span>
+            <span><strong>캠퍼스 운영</strong><small>학생·직원 포털</small></span>
+          </a>
+          <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">
+            <span class="nav-toggle-icon" aria-hidden="true"></span>
+            <span class="nav-toggle-label">메뉴</span>
+          </button>
+        </div>
 
-  <footer class="site-footer">
-    <p>데이터 갱신은 페이지 이동 또는 명시적 새로고침으로 확인합니다.</p>
-  </footer>
+        <nav id="primary-navigation" class="side-nav">
+          <div class="nav-group">
+            <p class="nav-group-title">나의 업무</p>
+            {% if can_view_employees %}
+              <a href="/employees"{% if current_path.startswith('/employees') %} aria-current="page"{% endif %}>
+                <span class="nav-icon" aria-hidden="true">⌕</span><span>직원 찾기</span>
+              </a>
+            {% endif %}
+            <a href="/my/interview-waits"{% if current_path.startswith('/my/interview-waits') %} aria-current="page"{% endif %}>
+              <span class="nav-icon" aria-hidden="true">◷</span><span>내 면담 대기</span>
+            </a>
+            <a href="/classrooms"{% if current_path.startswith('/classrooms') %} aria-current="page"{% endif %}>
+              <span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석</span>
+            </a>
+            <a href="/notifications"{% if current_path.startswith('/notifications') %} aria-current="page"{% endif %}>
+              <span class="nav-icon" aria-hidden="true">□</span><span>알림</span>
+              {% set unread_count = request.state.notification_unread_count | default(0) %}
+              {% if unread_count %}<span class="nav-badge" aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>{% endif %}
+            </a>
+          </div>
+
+          {% if request.state.can_view_staff_waits | default(false) %}
+            <div class="nav-group">
+              <p class="nav-group-title">직원 업무</p>
+              <a href="/staff/interview-waits"{% if current_path.startswith('/staff/interview-waits') %} aria-current="page"{% endif %}>
+                <span class="nav-icon" aria-hidden="true">⇄</span><span>직원 대상 면담 대기</span>
+              </a>
+            </div>
+          {% endif %}
+
+          {% if can_manage_employees or can_manage_users %}
+            <div class="nav-group">
+              <p class="nav-group-title">관리</p>
+              {% if can_manage_employees %}
+                <a href="/admin"{% if current_path == '/admin' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▤</span><span>대시보드</span></a>
+              {% endif %}
+              {% if can_manage_users %}
+                <a href="/admin/users"{% if current_path.startswith('/admin/users') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>사용자 관리</span></a>
+              {% endif %}
+              {% if can_manage_employees %}
+                <a href="/admin/employees"{% if current_path.startswith('/admin/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span><span>직원 관리</span></a>
+                <a href="/admin/classrooms"{% if current_path.startswith('/admin/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 관리</span></a>
+                <a href="/admin/alerts"{% if current_path.startswith('/admin/alerts') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">!</span><span>마감 후 경고</span></a>
+                <a href="/admin/audit-logs"{% if current_path.startswith('/admin/audit-logs') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">≡</span><span>감사 로그</span></a>
+              {% endif %}
+            </div>
+          {% endif %}
+
+          <div class="nav-group nav-group--utility">
+            <p class="nav-group-title">운영 도구</p>
+            <a href="/events"{% if current_path.startswith('/events') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">·</span><span>탐지 이벤트</span></a>
+            {% if show_employee_tools %}
+              <a href="/admin/dev-tools"{% if current_path.startswith('/admin/dev-tools') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">{ }</span><span>개발 도구</span></a>
+            {% endif %}
+            {% if show_notification_tools %}
+              <a href="/admin/mock-deliveries"{% if current_path.startswith('/admin/mock-deliveries') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↻</span><span>Mock delivery</span></a>
+            {% endif %}
+          </div>
+        </nav>
+
+        <div class="account-card">
+          <span class="account-avatar" aria-hidden="true">{{ current_user.name[:1] }}</span>
+          <span class="account-copy"><strong>{{ current_user.name }}</strong><small>{{ current_user.role.value|display_label }}</small></span>
+          <form method="post" action="/logout" data-submit-state>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="icon-button" type="submit" data-pending-label="…" aria-label="로그아웃" title="로그아웃">↪</button>
+          </form>
+        </div>
+      </aside>
+
+  {% else %}
+    <header class="guest-header">
+      <a class="brand" href="/events">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M5 9.5 16 4l11 5.5L16 15 5 9.5Zm4 3.2 7 3.5 7-3.5V21l-7 3.5L9 21v-8.3Z"/></svg></span>
+        <span><strong>캠퍼스 운영</strong><small>학생·직원 포털</small></span>
+      </a>
+      <nav aria-label="보조 탐색"><a href="/events">탐지 이벤트</a>{% if current_path != '/login' %}<a class="button button--small" href="/login">로그인</a>{% endif %}</nav>
+    </header>
+  {% endif %}
+
+  {% if current_user %}<div class="workspace">{% endif %}
+    <main id="main-content" class="content{% if not current_user %} guest-content{% endif %}" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+  {% if current_user %}
+    <footer class="site-footer"><p>데이터는 페이지 이동 또는 명시적 새로고침으로 갱신됩니다.</p></footer>
+    </div></div>
+  {% else %}
+    <footer class="site-footer site-footer--guest"><p>학생과 직원의 일상 업무를 한곳에서 안전하게 연결합니다.</p></footer>
+  {% endif %}
 </body>
 </html>
