@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DomainError(Exception):
@@ -20,9 +20,10 @@ class DomainError(Exception):
     code = "INTERNAL_ERROR"
     status_code = 500
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.details = details or {}
 
 
 class EventNotFoundError(DomainError):
@@ -34,12 +35,34 @@ class EventNotFoundError(DomainError):
         self.event_id = event_id
 
 
+class RepositoryUnavailableError(DomainError):
+    code = "REPOSITORY_UNAVAILABLE"
+    status_code = 503
+
+    def __init__(self) -> None:
+        super().__init__("데이터 저장소를 일시적으로 사용할 수 없습니다.")
+
+
+class RepositoryDataError(DomainError):
+    code = "REPOSITORY_DATA_INVALID"
+    status_code = 500
+
+    def __init__(self) -> None:
+        super().__init__("저장된 데이터를 처리할 수 없습니다.")
+
+
+class DatabaseUnavailableError(DomainError):
+    code = "DATABASE_UNAVAILABLE"
+    status_code = 503
+
+    def __init__(self) -> None:
+        super().__init__("데이터 저장소 준비 상태를 확인할 수 없습니다.")
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str
-
-    # 오류마다 담을 값이 달라 형태를 고정할 수 없다. API 규칙이 정한 자유 형식 필드다.
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ErrorResponse(BaseModel):

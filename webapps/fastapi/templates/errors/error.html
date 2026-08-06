@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block title %}요청 처리 오류 · 캠퍼스 운영 포털{% endblock %}
+
+{% block content %}
+  <section class="empty-state" role="alert">
+    <p class="eyebrow">오류 {{ status_code }}</p><h1>요청을 처리할 수 없습니다</h1><p>{{ message }}</p><p>잠시 후 다시 시도하거나 목록 화면으로 돌아가 주세요.</p><a class="button" href="/events">이벤트 목록으로 돌아가기</a>
+  </section>
+{% endblock %}

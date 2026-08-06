@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}알림함 · 캠퍼스 운영 포털{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">나의 업무</p><h1>알림함</h1><p class="summary">면담 준비와 운영 변경 등 나에게 필요한 인앱 알림을 확인합니다.</p></div>
+    <a class="button-link" href="/notifications">새로고침</a>
+  </header>
+
+  {% if error %}<div class="message error" role="alert">{{ error }}</div>{% endif %}
+
+  <section class="panel filter-panel" aria-labelledby="notification-filter-title">
+    <h2 id="notification-filter-title">알림 필터</h2>
+    <form method="get" action="/notifications" class="filter-form">
+      <label for="notification-read-filter">읽음 상태
+        <select id="notification-read-filter" name="is_read">
+          <option value="" {% if is_read is none %}selected{% endif %}>전체</option>
+          <option value="false" {% if is_read is sameas false %}selected{% endif %}>읽지 않음</option>
+          <option value="true" {% if is_read is sameas true %}selected{% endif %}>읽음</option>
+        </select>
+      </label>
+      <label for="notification-type-filter">알림 유형
+        <input id="notification-type-filter" name="type" value="{{ notification_type }}" maxlength="64" placeholder="예: INTERVIEW_READY">
+      </label>
+      <button type="submit">필터 적용</button>
+    </form>
+  </section>
+
+  {% if page.items %}
+    <section aria-labelledby="notification-list-title">
+      <div class="section-heading">
+        <div><h2 id="notification-list-title">알림 목록</h2><p class="summary">총 {{ page.total }}건</p></div>
+        <form method="post" action="/notifications/read-all" data-submit-state>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="operation_id" value="{{ batch_operation_id }}">
+          <button type="submit" class="secondary" data-pending-label="처리 중…">모두 읽음</button>
+        </form>
+      </div>
+
+      <ul class="notification-list" aria-label="알림 목록">
+        {% for notification in page.items %}
+          <li class="notification-item {% if not notification.is_read %}notification-unread{% endif %}">
+            <div>
+              <p class="notification-title">{{ notification.title }}</p>
+              <p>{{ notification.body }}</p>
+              <p class="card-meta"><span class="enum-code">{{ notification.type }}</span><span>{{ notification.created_at | kst_datetime }}</span><span>{{ '읽음' if notification.is_read else '읽지 않음' }}</span></p>
+            </div>
+            <div class="inline-actions notification-actions">
+              {% if target_routes[notification.id] %}<a class="button button--ghost" href="{{ target_routes[notification.id] }}">연결 화면 열기</a>{% endif %}
+              {% if not notification.is_read %}
+                <form method="post" action="/notifications/{{ notification.id }}/read" data-submit-state>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="operation_id" value="{{ row_operation_ids[notification.id] }}">
+                  <button type="submit" class="secondary" data-pending-label="처리 중…">읽음 처리</button>
+                </form>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <nav class="pagination" aria-label="알림 페이지 이동">
+        {% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset - limit] | max }}{% if is_read is not none %}&is_read={{ 'true' if is_read else 'false' }}{% endif %}{% if notification_type %}&type={{ notification_type | urlencode }}{% endif %}">이전</a>{% endif %}
+        <span>{{ offset + 1 }}–{{ [offset + limit, page.total] | min }} / {{ page.total }}</span>
+        {% if has_next %}<a href="?limit={{ limit }}&offset={{ offset + limit }}{% if is_read is not none %}&is_read={{ 'true' if is_read else 'false' }}{% endif %}{% if notification_type %}&type={{ notification_type | urlencode }}{% endif %}">다음</a>{% endif %}
+      </nav>
+    </section>
+  {% else %}
+    <div class="empty-state" role="status">
+      <h2>표시할 알림이 없습니다</h2>
+      <p>선택한 조건에 해당하는 인앱 알림이 생기면 여기에 표시됩니다.</p>
+      {% if is_read is not none or notification_type %}<a href="/notifications">필터 초기화</a>{% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

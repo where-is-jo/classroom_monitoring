@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}강의실 좌석 · 캠퍼스 운영 포털{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">나의 업무</p><h1>강의실 좌석 현황</h1><p class="summary">저장된 현재 점유와 운영 여부를 확인합니다. 화면은 자동으로 갱신되지 않습니다.</p></div>
+    <a class="button-link" href="/classrooms">새로고침</a>
+  </header>
+  {% if summaries %}
+    <ul class="classroom-grid" aria-label="강의실 현황 목록">
+      {% for summary in summaries %}
+        <li class="classroom-card">
+          <div class="section-heading">
+            <div><p class="eyebrow">{{ summary.classroom.code }}</p><h2><a href="/classrooms/{{ summary.classroom.id }}">{{ summary.classroom.name }}</a></h2></div>
+            <span class="status-label status-label--{{ 'active' if summary.is_operating else 'offsite' }}">{{ '운영 중' if summary.is_operating else '운영 시간 외' }}</span>
+          </div>
+          <p class="muted">{{ summary.classroom.location }}</p>
+          <div class="card-meta"><span><strong>점유 {{ summary.occupied_count }}</strong> / 전체 {{ summary.total }}</span><span>확인 필요 {{ summary.unknown_count }}</span></div>
+          {% set occupancy_percent = ((summary.occupied_count / summary.total) * 100) if summary.total else 0 %}
+          <div class="progress-track" role="progressbar" aria-label="{{ summary.classroom.name }} 좌석 점유율" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ occupancy_percent|round|int }}"><div class="progress-value" style="width:{{ occupancy_percent }}%"></div></div>
+          <p class="help-text">마지막 관측 {{ summary.last_observed_at|kst_datetime }}</p>
+          <div class="card-footer"><a href="/classrooms/{{ summary.classroom.id }}">좌석 상세 보기 →</a></div>
+        </li>
+      {% endfor %}
+    </ul>
+    <nav class="pagination" aria-label="강의실 목록 페이지">
+      {% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset-limit]|max }}">이전</a>{% endif %}
+      <span>{{ offset + 1 }}–{{ [offset + limit, page.total]|min }} / {{ page.total }}</span>
+      {% if has_next %}<a href="?limit={{ limit }}&offset={{ offset+limit }}">다음</a>{% endif %}
+    </nav>
+  {% else %}
+    <div class="empty" role="status">표시할 활성 강의실이 없습니다.</div>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}직원 대상 면담 대기 · 캠퍼스 운영 포털{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">직원 업무</p><h1>직원 대상 면담 대기</h1><p class="summary">연결된 직원에게 들어온 요청자 최소 정보와 처리 가능한 작업만 표시합니다.</p></div>
+    <a class="button-link" href="/staff/interview-waits">새로고침</a>
+  </header>
+  {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
+  <section class="panel filter-panel" aria-labelledby="staff-wait-filter-title">
+    <h2 id="staff-wait-filter-title">업무 대기열 필터</h2>
+    <form method="get" action="/staff/interview-waits" class="filter-form">
+      <label for="staff-wait-status">상태<select id="staff-wait-status" name="status"><option value="">전체 상태</option>{% for status in statuses %}<option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value|display_label }}</option>{% endfor %}</select></label>
+      <button type="submit">필터 적용</button>
+    </form>
+  </section>
+  <section class="panel" aria-labelledby="staff-wait-list-title">
+    <h2 id="staff-wait-list-title">면담 요청 대기열</h2>
+    {% if displays %}
+      <div class="table-scroll" tabindex="0" role="region" aria-label="직원 대상 면담 대기 표"><table><thead><tr><th scope="col">요청자</th><th scope="col">대상</th><th scope="col">상태</th><th scope="col">메시지</th><th scope="col">요청 시각</th><th scope="col">작업</th></tr></thead><tbody>
+        {% for display in displays %}<tr>
+          <td>{{ display.requester_name }}</td><td>{{ display.employee_name }}</td><td><span class="status-label status-label--{{ display.wait.status.value|lower|replace('_', '-') }}">{{ display.wait.status.value|display_label }}</span></td><td>{{ display.wait.message or '없음' }}</td><td>{{ display.wait.requested_at|kst_datetime }}</td>
+          <td>{% if can_complete[display.wait.id] %}<form method="post" action="/staff/interview-waits/{{ display.wait.id }}/complete" data-submit-state><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ complete_operation_ids[display.wait.id] }}"><button type="submit" data-pending-label="완료 중…">면담 완료</button></form>{% else %}<span class="muted">가능한 작업 없음</span>{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody></table></div>
+      <nav class="pagination" aria-label="직원 대상 대기 페이지">{% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset-limit]|max }}">이전</a>{% endif %}<span>{{ offset + 1 }}–{{ [offset + limit, page.total]|min }} / {{ page.total }}</span>{% if has_next %}<a href="?limit={{ limit }}&offset={{ offset+limit }}">다음</a>{% endif %}</nav>
+    {% else %}<div class="empty" role="status">표시할 직원 대상 면담 대기가 없습니다.</div>{% endif %}
+  </section>
+{% endblock %}

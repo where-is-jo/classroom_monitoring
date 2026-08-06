@@ -5,8 +5,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from datetime import UTC, datetime
+import os
+from datetime import datetime, timezone
+
+# 앱 시작 전에 외부 의존 없는 local memory mode를 명시한다.
+os.environ["APP_ENV"] = "local"
+os.environ["DATABASE_MODE"] = "memory"
+os.environ["MOCK_INPUTS_ENABLED"] = "false"
+os.environ["JWT_ACCESS_SECRET"] = "test-access-secret-at-least-32-characters"
+os.environ["JWT_REFRESH_SECRET"] = "test-refresh-secret-at-least-32-characters"
+os.environ["CSRF_SECRET"] = "test-csrf-secret-at-least-32-characters"
+os.environ["AUDIT_IP_HASH_SECRET"] = "test-audit-secret-at-least-32-characters"
+os.environ["WEB_ORIGIN"] = "http://testserver"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +25,13 @@ from app.events.models import Event
 from app.events.service import EventService
 from app.main import app
 from app.shared.dependencies import get_event_repository
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "mongodb: TEST_DATABASE_URL이 있을 때만 실행하는 MongoDB 통합 테스트",
+    )
 
 
 def make_event(
