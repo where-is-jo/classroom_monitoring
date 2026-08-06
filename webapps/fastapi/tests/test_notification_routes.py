@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import NoReturn
 from uuid import uuid4
 
 import pytest
@@ -17,10 +19,9 @@ from app.auth.dependencies import (
 )
 from app.main import app, handle_domain_error, include_notification_routers
 from app.notifications.adapters.memory_repository import InMemoryNotificationRepository
-from app.notifications.models import CreateNotificationCommand
+from app.notifications.models import CreateNotificationCommand, Notification
 from app.notifications.router import development_page_router
 from app.notifications.service import NotificationService
-from app.shared.config import Settings
 from app.shared.dependencies import (
     get_auth_service,
     get_notification_service,
@@ -29,15 +30,17 @@ from app.shared.dependencies import (
 )
 from app.shared.errors import DomainError, RepositoryUnavailableError
 from app.shared.templating import STATIC_DIR
-from app.users.models import UserRole
+from app.users.models import User, UserRole
 from tests.auth_helpers import AuthStack, build_auth_stack
+from tests.settings_helpers import make_settings
 
 ORIGIN = "http://testserver"
 PASSWORD = "ValidPassword1!"
+type NotificationStack = tuple[AuthStack, InMemoryNotificationRepository, NotificationService]
 
 
 @pytest.fixture
-def notification_stack():
+def notification_stack() -> NotificationStack:
     auth = build_auth_stack()
     repository = InMemoryNotificationRepository()
     service = NotificationService(
@@ -50,7 +53,7 @@ def notification_stack():
 
 
 @pytest.fixture
-def notification_client(notification_stack):
+def notification_client(notification_stack: NotificationStack) -> Iterator[TestClient]:
     auth, _, service = notification_stack
     app.dependency_overrides[get_auth_service] = lambda: auth.auth_service
     app.dependency_overrides[get_user_service] = lambda: auth.user_service
@@ -60,7 +63,7 @@ def notification_client(notification_stack):
     app.dependency_overrides.clear()
 
 
-def _login(client: TestClient, user) -> None:
+def _login(client: TestClient, user: User) -> None:
     response = client.post(
         "/api/v1/auth/login",
         headers={"Origin": ORIGIN},
@@ -73,7 +76,7 @@ def _csrf_headers(client: TestClient) -> dict[str, str]:
     return {"Origin": ORIGIN, "X-CSRF-Token": client.cookies[CSRF_COOKIE]}
 
 
-def _create(service: NotificationService, user_id: str, suffix: str = "1"):
+def _create(service: NotificationService, user_id: str, suffix: str = "1") -> Notification:
     return service.create(
         CreateNotificationCommand(
             recipient_user_id=user_id,
@@ -89,7 +92,7 @@ def _create(service: NotificationService, user_id: str, suffix: str = "1"):
 
 def test_알림_API는_본인목록_filter_paging_개별과_전체읽음을_제공한다(
     notification_client: TestClient,
-    notification_stack,
+    notification_stack: NotificationStack,
 ) -> None:
     auth, _, service = notification_stack
     user = auth.seed(UserRole.STUDENT)
@@ -123,12 +126,14 @@ def test_알림_API는_본인목록_filter_paging_개별과_전체읽음을_제�
     assert marked.json()["is_read"] is True
     assert batch.status_code == 200
     assert batch.json() == {"updated_count": 1}
-    assert notification_client.get("/api/v1/notifications/unread-count").json() == {"unread_count": 0}
+    assert notification_client.get("/api/v1/notifications/unread-count").json() == {
+        "unread_count": 0
+    }
 
 
 def test_다른사용자의_알림읽음은_존재를_숨긴_404다(
     notification_client: TestClient,
-    notification_stack,
+    notification_stack: NotificationStack,
 ) -> None:
     auth, _, service = notification_stack
     owner = auth.seed(UserRole.STUDENT)
@@ -148,7 +153,7 @@ def test_다른사용자의_알림읽음은_존재를_숨긴_404다(
 
 def test_알림화면은_빈상태_badge_읽음여정을_표현한다(
     notification_client: TestClient,
-    notification_stack,
+    notification_stack: NotificationStack,
 ) -> None:
     auth, _, service = notification_stack
     user = auth.seed(UserRole.STUDENT)
@@ -176,7 +181,7 @@ def test_알림화면은_빈상태_badge_읽음여정을_표현한다(
 
 def test_알림저장소_오류는_내부정보없는_오류화면이_된다(
     notification_client: TestClient,
-    notification_stack,
+    notification_stack: NotificationStack,
 ) -> None:
     auth, _, _ = notification_stack
     user = auth.seed(UserRole.STUDENT)
@@ -202,7 +207,7 @@ def test_알림저장소_오류는_내부정보없는_오류화면이_된다(
 
 
 def test_mock_delivery_API는_개발환경_ADMIN에만_등록되고_명시적_재시도한다(
-    notification_stack,
+    notification_stack: NotificationStack,
 ) -> None:
     auth, _, _ = notification_stack
     admin = auth.seed(UserRole.ADMIN)
@@ -214,7 +219,7 @@ def test_mock_delivery_API는_개발환경_ADMIN에만_등록되고_명시적_�
         mock_delivery_mode="fail_once",
     )
     notification = _create(service, admin.id)
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -248,7 +253,7 @@ def test_mock_delivery_API는_개발환경_ADMIN에만_등록되고_명시적_�
 
 
 def test_production에는_mock_delivery_router가_등록되지_않는다() -> None:
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="prod",
         database_mode="mongodb",
@@ -267,10 +272,12 @@ def test_production에는_mock_delivery_router가_등록되지_않는다() -> No
     assert "/admin/mock-deliveries" not in paths
 
 
-def test_mock_delivery_화면은_권한없음을_명시한다(notification_stack) -> None:
+def test_mock_delivery_화면은_권한없음을_명시한다(
+    notification_stack: NotificationStack,
+) -> None:
     auth, _, service = notification_stack
     student = auth.seed(UserRole.STUDENT)
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -280,7 +287,10 @@ def test_mock_delivery_화면은_권한없음을_명시한다(notification_stack
     application = FastAPI()
     application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     application.include_router(development_page_router)
-    application.add_exception_handler(DomainError, handle_domain_error)
+    application.add_exception_handler(
+        DomainError,
+        handle_domain_error,  # type: ignore[arg-type]
+    )
     application.dependency_overrides[get_current_page_user] = lambda: student
     application.dependency_overrides[get_notification_service] = lambda: service
     application.dependency_overrides[get_settings] = lambda: settings
@@ -293,7 +303,7 @@ def test_mock_delivery_화면은_권한없음을_명시한다(notification_stack
 
 
 def test_mock_delivery_화면은_빈상태_정상상태_저장소오류를_구분한다(
-    notification_stack,
+    notification_stack: NotificationStack,
 ) -> None:
     auth, _, _ = notification_stack
     admin = auth.seed(UserRole.ADMIN)
@@ -304,7 +314,7 @@ def test_mock_delivery_화면은_빈상태_정상상태_저장소오류를_구�
         clock=auth.clock,
         mock_delivery_mode="fail_once",
     )
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -314,7 +324,10 @@ def test_mock_delivery_화면은_빈상태_정상상태_저장소오류를_구�
     application = FastAPI()
     application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     application.include_router(development_page_router)
-    application.add_exception_handler(DomainError, handle_domain_error)
+    application.add_exception_handler(
+        DomainError,
+        handle_domain_error,  # type: ignore[arg-type]
+    )
     application.dependency_overrides[get_current_page_user] = lambda: admin
     application.dependency_overrides[get_notification_service] = lambda: service
     application.dependency_overrides[get_settings] = lambda: settings
@@ -325,7 +338,7 @@ def test_mock_delivery_화면은_빈상태_정상상태_저장소오류를_구�
         normal = client.get("/admin/mock-deliveries")
 
         class FailingRepository:
-            def list_deliveries(self, **kwargs):
+            def list_deliveries(self, **kwargs: object) -> NoReturn:
                 raise RepositoryUnavailableError()
 
         failing_service = NotificationService(
@@ -334,9 +347,7 @@ def test_mock_delivery_화면은_빈상태_정상상태_저장소오류를_구�
             clock=auth.clock,
             mock_delivery_mode="success",
         )
-        application.dependency_overrides[get_notification_service] = (
-            lambda: failing_service
-        )
+        application.dependency_overrides[get_notification_service] = lambda: failing_service
         failed = client.get("/admin/mock-deliveries")
 
     assert empty.status_code == 200

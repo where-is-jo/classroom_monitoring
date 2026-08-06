@@ -22,7 +22,6 @@ from app.users.models import (
     CreateUserCommand,
     UpdateUserCommand,
     UserRole,
-    UserStatus,
 )
 from app.users.seed import VirtualSeedPasswords, seed_virtual_users
 from tests.auth_helpers import build_auth_stack
@@ -114,12 +113,8 @@ def test_허용_필드만_CAS로_수정하고_중복_operation은_같은_결과�
         role=UserRole.ADMIN,
     )
 
-    updated = stack.user_service.update_user(
-        admin, command, ip_fingerprint="fingerprint"
-    )
-    repeated = stack.user_service.update_user(
-        admin, command, ip_fingerprint="fingerprint"
-    )
+    updated = stack.user_service.update_user(admin, command, ip_fingerprint="fingerprint")
+    repeated = stack.user_service.update_user(admin, command, ip_fingerprint="fingerprint")
 
     assert updated == repeated
     assert updated.role == UserRole.ADMIN
@@ -161,9 +156,7 @@ def test_soft_deactivate는_본인과_마지막_SYSTEM_OPERATOR를_보호한다(
 def test_비밀번호_변경은_기존값을_확인하고_전체_refresh를_폐기한다() -> None:
     stack = build_auth_stack()
     user = stack.seed(UserRole.STAFF)
-    session = stack.auth_service.login(
-        LoginCommand(user.email, "ValidPassword1!", "fingerprint-a")
-    )
+    session = stack.auth_service.login(LoginCommand(user.email, "ValidPassword1!", "fingerprint-a"))
     with pytest.raises(CurrentPasswordMismatchError):
         stack.user_service.change_password(
             session.user,
@@ -173,9 +166,7 @@ def test_비밀번호_변경은_기존값을_확인하고_전체_refresh를_폐�
 
     changed = stack.user_service.change_password(
         session.user,
-        ChangePasswordCommand(
-            "ValidPassword1!", "NewValidPassword2!", operation_id()
-        ),
+        ChangePasswordCommand("ValidPassword1!", "NewValidPassword2!", operation_id()),
         ip_fingerprint="fingerprint-a",
     )
     assert stack.passwords.verify_password("NewValidPassword2!", changed.password_hash)

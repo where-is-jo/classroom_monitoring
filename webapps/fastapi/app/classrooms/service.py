@@ -231,9 +231,7 @@ class ClassroomService:
             last_operation_id=operation_id,
             operation_ids=self._append_operation(current.operation_ids, operation_id),
         )
-        saved = self._repository.replace_classroom(
-            updated, expected_version=expected_version
-        )
+        saved = self._repository.replace_classroom(updated, expected_version=expected_version)
         if saved is None:
             raise ClassroomConcurrentUpdateError()
         self._audit_change(
@@ -399,9 +397,7 @@ class ClassroomService:
             last_operation_id=operation_id,
             operation_ids=self._append_operation(current.operation_ids, operation_id),
         )
-        saved = self._repository.replace_seat(
-            updated, expected_version=command.expected_version
-        )
+        saved = self._repository.replace_seat(updated, expected_version=command.expected_version)
         if saved is None:
             raise ClassroomConcurrentUpdateError()
         self._audit_change(
@@ -443,9 +439,7 @@ class ClassroomService:
             last_operation_id=operation_id,
             operation_ids=self._append_operation(current.operation_ids, operation_id),
         )
-        saved = self._repository.replace_seat(
-            updated, expected_version=expected_version
-        )
+        saved = self._repository.replace_seat(updated, expected_version=expected_version)
         if saved is None:
             raise ClassroomConcurrentUpdateError()
         self._audit_change(
@@ -460,9 +454,7 @@ class ClassroomService:
         )
         return saved
 
-    def occupancy_summary(
-        self, actor: User, classroom_id: str
-    ) -> ClassroomOccupancySummary:
+    def occupancy_summary(self, actor: User, classroom_id: str) -> ClassroomOccupancySummary:
         classroom = self.get_classroom(actor, classroom_id)
         page = self._repository.list_seats(
             classroom.id, include_inactive=False, limit=200, offset=0
@@ -539,8 +531,7 @@ class ClassroomService:
                 )
             seats[item.seat_id] = seat
         if any(seat.classroom_id != classroom.id for seat in seats.values()) or (
-            existing_batch is None
-            and any(not seat.is_active for seat in seats.values())
+            existing_batch is None and any(not seat.is_active for seat in seats.values())
         ):
             raise ClassroomInputError(
                 "batch의 모든 좌석은 요청한 강의실 소속의 활성 좌석이어야 합니다."
@@ -595,9 +586,7 @@ class ClassroomService:
                 )
                 if belongs_to_event:
                     alert_count += 1
-                self._ensure_alert_notification(
-                    claimed.actor_user_id, classroom, current, alert
-                )
+                self._ensure_alert_notification(claimed.actor_user_id, classroom, current, alert)
 
         completed = replace(
             claimed,
@@ -607,9 +596,7 @@ class ClassroomService:
             alert_count=alert_count,
             completed_at=self._clock(),
         )
-        return self._batch_result(
-            self._repository.complete_observation_batch(completed)
-        )
+        return self._batch_result(self._repository.complete_observation_batch(completed))
 
     def list_alerts(
         self,
@@ -658,9 +645,7 @@ class ClassroomService:
             operation_ids=self._append_operation(current.operation_ids, operation_id),
             version=current.version + 1,
         )
-        saved = self._repository.replace_alert(
-            updated, expected_version=command.expected_version
-        )
+        saved = self._repository.replace_alert(updated, expected_version=command.expected_version)
         if saved is None:
             raise ClassroomConcurrentUpdateError()
         self._audit_change(
@@ -684,9 +669,7 @@ class ClassroomService:
         observed_at: datetime,
         received_at: datetime,
     ) -> SeatOccupancyHistory:
-        existing = self._repository.get_history_by_event_and_seat(
-            event_id, observation.seat_id
-        )
+        existing = self._repository.get_history_by_event_and_seat(event_id, observation.seat_id)
         if existing is not None:
             self._repair_current_from_history(existing)
             return existing
@@ -742,13 +725,9 @@ class ClassroomService:
                 updated_at=self._clock(),
                 version=current.version + 1,
                 last_operation_id=operation_id,
-                operation_ids=self._append_operation(
-                    current.operation_ids, operation_id
-                ),
+                operation_ids=self._append_operation(current.operation_ids, operation_id),
             )
-            saved = self._repository.replace_seat(
-                updated, expected_version=current.version
-            )
+            saved = self._repository.replace_seat(updated, expected_version=current.version)
             if saved is not None:
                 return
         raise ClassroomConcurrentUpdateError()
@@ -763,9 +742,7 @@ class ClassroomService:
         observed_at: datetime,
     ) -> tuple[AfterHoursAlert, bool]:
         business_date = observed_at.astimezone(ZoneInfo(classroom.timezone)).date()
-        dedupe_key = (
-            f"{classroom.id}:{seat.id}:{business_date.isoformat()}:after_hours"
-        )
+        dedupe_key = f"{classroom.id}:{seat.id}:{business_date.isoformat()}:after_hours"
         operation_id = f"after-hours-alert:{event_id}:{seat.id}"
         alert = AfterHoursAlert(
             id=str(uuid5(NAMESPACE_URL, f"after-hours-alert:{dedupe_key}")),
@@ -814,11 +791,7 @@ class ClassroomService:
     def _is_operating(self, classroom: Classroom, instant: datetime) -> bool:
         local = instant.astimezone(ZoneInfo(classroom.timezone))
         schedule = next(
-            (
-                item
-                for item in classroom.schedules
-                if item.day_of_week == local.weekday()
-            ),
+            (item for item in classroom.schedules if item.day_of_week == local.weekday()),
             None,
         )
         return bool(
@@ -829,11 +802,7 @@ class ClassroomService:
     def _is_after_hours(self, classroom: Classroom, instant: datetime) -> bool:
         local = instant.astimezone(ZoneInfo(classroom.timezone))
         schedule = next(
-            (
-                item
-                for item in classroom.schedules
-                if item.day_of_week == local.weekday()
-            ),
+            (item for item in classroom.schedules if item.day_of_week == local.weekday()),
             None,
         )
         if schedule is None:
@@ -927,18 +896,14 @@ class ClassroomService:
         return value
 
     @staticmethod
-    def _schedules(
-        values: tuple[ClassroomSchedule, ...]
-    ) -> tuple[ClassroomSchedule, ...]:
+    def _schedules(values: tuple[ClassroomSchedule, ...]) -> tuple[ClassroomSchedule, ...]:
         if len(values) > 7 or len({item.day_of_week for item in values}) != len(values):
             raise ClassroomInputError("요일별 일정은 하루에 하나만 등록할 수 있습니다.")
         for item in values:
             if item.day_of_week < 0 or item.day_of_week > 6:
                 raise ClassroomInputError("요일은 월요일 0부터 일요일 6까지입니다.")
             if item.closes_at <= item.opens_at:
-                raise ClassroomInputError(
-                    "당일 일정은 종료 시각이 시작 시각보다 늦어야 합니다."
-                )
+                raise ClassroomInputError("당일 일정은 종료 시각이 시작 시각보다 늦어야 합니다.")
         return tuple(sorted(values, key=lambda item: item.day_of_week))
 
     @staticmethod
@@ -960,11 +925,7 @@ class ClassroomService:
     def _occupancy(self, observation: SeatObservation) -> SeatOccupancy:
         if observation.confidence < self._threshold:
             return SeatOccupancy.UNKNOWN
-        return (
-            SeatOccupancy.OCCUPIED
-            if observation.occupied
-            else SeatOccupancy.VACANT
-        )
+        return SeatOccupancy.OCCUPIED if observation.occupied else SeatOccupancy.VACANT
 
     @staticmethod
     def _aware_datetime(value: datetime) -> datetime:
@@ -1041,9 +1002,7 @@ class ClassroomService:
         }
 
     @staticmethod
-    def _schedule_audit(
-        schedules: tuple[ClassroomSchedule, ...]
-    ) -> list[dict[str, object]]:
+    def _schedule_audit(schedules: tuple[ClassroomSchedule, ...]) -> list[dict[str, object]]:
         return [
             {
                 "day_of_week": item.day_of_week,

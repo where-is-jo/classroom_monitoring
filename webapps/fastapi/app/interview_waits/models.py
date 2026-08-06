@@ -15,9 +15,7 @@ class InterviewWaitStatus(StrEnum):
     EXPIRED = "EXPIRED"
 
 
-ACTIVE_WAIT_STATUSES = frozenset(
-    {InterviewWaitStatus.WAITING, InterviewWaitStatus.READY}
-)
+ACTIVE_WAIT_STATUSES = frozenset({InterviewWaitStatus.WAITING, InterviewWaitStatus.READY})
 TERMINAL_WAIT_STATUSES = frozenset(
     {
         InterviewWaitStatus.COMPLETED,

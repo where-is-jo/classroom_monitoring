@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import time
+from typing import NoReturn
 from uuid import uuid4
 
 import pytest
@@ -19,12 +20,14 @@ from app.auth.dependencies import require_admin, require_page_admin
 from app.auth.errors import PermissionDeniedError
 from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from app.classrooms.models import (
+    Classroom,
     ClassroomSchedule,
     CreateClassroomCommand,
     CreateSeatCommand,
     RecordSeatObservationBatchCommand,
     ReplaceSchedulesCommand,
     ResolveAfterHoursAlertCommand,
+    Seat,
     SeatObservation,
 )
 from app.classrooms.service import ClassroomService
@@ -70,7 +73,7 @@ def dashboard_stack() -> DashboardStack:
     )
 
 
-def _create_classroom_fixture(stack: DashboardStack):
+def _create_classroom_fixture(stack: DashboardStack) -> tuple[Classroom, Seat]:
     actor = stack.waits.employees.admin
     service = stack.classroom_service
     classroom = service.create_classroom(
@@ -89,9 +92,7 @@ def _create_classroom_fixture(stack: DashboardStack):
         actor,
         ReplaceSchedulesCommand(
             classroom_id=classroom.id,
-            schedules=(
-                ClassroomSchedule(day_of_week=2, opens_at=time(9), closes_at=time(17)),
-            ),
+            schedules=(ClassroomSchedule(day_of_week=2, opens_at=time(9), closes_at=time(17)),),
             expected_version=classroom.version,
             operation_id=str(uuid4()),
         ),
@@ -114,9 +115,7 @@ def _create_classroom_fixture(stack: DashboardStack):
             event_id=str(uuid4()),
             classroom_id=classroom.id,
             observed_at=stack.waits.employees.auth.clock(),
-            observations=(
-                SeatObservation(seat_id=seat.id, occupied=True, confidence=0.9),
-            ),
+            observations=(SeatObservation(seat_id=seat.id, occupied=True, confidence=0.9),),
         ),
     )
     assert result.alert_count == 1
@@ -195,10 +194,7 @@ def test_summary_excludes_inactive_sources_and_alert_resolution_decrements(
         ),
         ip_fingerprint="test",
     )
-    assert (
-        stack.service.get_summary(stack.waits.employees.admin).alerts.open_after_hours
-        == 0
-    )
+    assert stack.service.get_summary(stack.waits.employees.admin).alerts.open_after_hours == 0
 
 
 def test_activity_order_filter_permissions_and_zero_state(
@@ -240,10 +236,7 @@ def test_activity_order_filter_permissions_and_zero_state(
         limit=50,
     )
     assert only_notifications.items
-    assert all(
-        item.type == DashboardActivityType.NOTIFICATION
-        for item in only_notifications.items
-    )
+    assert all(item.type == DashboardActivityType.NOTIFICATION for item in only_notifications.items)
     with pytest.raises(AdminQueryInputError):
         stack.service.list_activities(
             stack.waits.employees.admin,
@@ -288,9 +281,7 @@ def test_dashboard_api_page_and_full_503_policy(
     actor = dashboard_stack.waits.employees.admin
     app.dependency_overrides[require_admin] = lambda: actor
     app.dependency_overrides[require_page_admin] = lambda: actor
-    app.dependency_overrides[get_admin_dashboard_service] = lambda: (
-        dashboard_stack.service
-    )
+    app.dependency_overrides[get_admin_dashboard_service] = lambda: dashboard_stack.service
     try:
         with TestClient(app) as client:
             response = client.get("/api/v1/admin/dashboard-summary")
@@ -304,10 +295,10 @@ def test_dashboard_api_page_and_full_503_policy(
         app.dependency_overrides.clear()
 
     class FailingRepository:
-        def get_snapshot(self, **_: object):
+        def get_snapshot(self, **_: object) -> NoReturn:
             raise RepositoryUnavailableError()
 
-        def list_activities(self, **_: object):
+        def list_activities(self, **_: object) -> NoReturn:
             raise RepositoryUnavailableError()
 
         def list_audit_logs(self, **_: object) -> AuditLogPage:
@@ -315,7 +306,7 @@ def test_dashboard_api_page_and_full_503_policy(
 
     failing = AdminDashboardService(
         FailingRepository(), clock=dashboard_stack.waits.employees.auth.clock
-    )  # type: ignore[arg-type]
+    )
     app.dependency_overrides[require_admin] = lambda: actor
     app.dependency_overrides[get_admin_dashboard_service] = lambda: failing
     try:

@@ -30,7 +30,7 @@ class MeResponse(BaseModel):
     user: UserResponse
 
     @classmethod
-    def from_user(cls, user: User) -> "MeResponse":
+    def from_user(cls, user: User) -> MeResponse:
         return cls(user=UserResponse.from_user(user))
 
 

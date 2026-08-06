@@ -87,8 +87,7 @@ class MongoAdminDashboardRepository:
             if department is not None:
                 employee_match["department"] = department
             employee_ids = [
-                _string(item, "_id")
-                for item in self._employees.find(employee_match, {"_id": 1})
+                _string(item, "_id") for item in self._employees.find(employee_match, {"_id": 1})
             ]
             employee_counts = self._group_counts(
                 self._employees,
@@ -105,8 +104,7 @@ class MongoAdminDashboardRepository:
             if classroom_id is not None:
                 classroom_match["_id"] = classroom_id
             classroom_ids = [
-                _string(item, "_id")
-                for item in self._classrooms.find(classroom_match, {"_id": 1})
+                _string(item, "_id") for item in self._classrooms.find(classroom_match, {"_id": 1})
             ]
             seat_match: MongoDocument = {
                 "is_active": True,
@@ -142,14 +140,10 @@ class MongoAdminDashboardRepository:
                     occupied_seats=seat_counts.get("OCCUPIED", 0),
                     unknown_seats=seat_counts.get("UNKNOWN", 0),
                 ),
-                alerts=AlertSummary(
-                    open_after_hours=self._alerts.count_documents(alert_match)
-                ),
+                alerts=AlertSummary(open_after_hours=self._alerts.count_documents(alert_match)),
                 notifications=NotificationSummary(
                     unread=self._notifications.count_documents({"is_read": False}),
-                    failed_mock_deliveries_24h=self._deliveries.count_documents(
-                        failures
-                    ),
+                    failed_mock_deliveries_24h=self._deliveries.count_documents(failures),
                 ),
             )
         except PyMongoError:
@@ -158,9 +152,7 @@ class MongoAdminDashboardRepository:
             raise RepositoryDataError() from None
 
     @staticmethod
-    def _group_counts(
-        collection: Any, match: MongoDocument, group_field: str
-    ) -> dict[str, int]:
+    def _group_counts(collection: Any, match: MongoDocument, group_field: str) -> dict[str, int]:
         documents = collection.aggregate(
             [
                 {"$match": match},
@@ -192,9 +184,7 @@ class MongoAdminDashboardRepository:
             if activity_type in (None, DashboardActivityType.AFTER_HOURS_ALERT):
                 items.extend(self._alert_activities(from_time, to_time, fetch_limit))
             if activity_type in (None, DashboardActivityType.NOTIFICATION):
-                items.extend(
-                    self._notification_activities(from_time, to_time, fetch_limit)
-                )
+                items.extend(self._notification_activities(from_time, to_time, fetch_limit))
             total = sum(
                 self._activity_count(kind, from_time, to_time)
                 for kind in DashboardActivityType
@@ -211,7 +201,7 @@ class MongoAdminDashboardRepository:
         self, kind: DashboardActivityType, from_time: datetime, to_time: datetime
     ) -> int:
         collection, field = self._activity_source(kind)
-        return collection.count_documents({field: {"$gte": from_time, "$lt": to_time}})
+        return int(collection.count_documents({field: {"$gte": from_time, "$lt": to_time}}))
 
     def _activity_source(self, kind: DashboardActivityType) -> tuple[Any, str]:
         return {
@@ -245,9 +235,7 @@ class MongoAdminDashboardRepository:
                 resource_id=_string(item, "employee_id"),
                 target_route=f"/employees/{_string(item, 'employee_id')}",
             )
-            for item in self._recent(
-                self._employee_history, "occurred_at", start, end, limit
-            )
+            for item in self._recent(self._employee_history, "occurred_at", start, end, limit)
         ]
 
     def _wait_activities(
@@ -264,9 +252,7 @@ class MongoAdminDashboardRepository:
                 resource_id=_string(item, "wait_id"),
                 target_route=f"/my/interview-waits/{_string(item, 'wait_id')}",
             )
-            for item in self._recent(
-                self._wait_history, "occurred_at", start, end, limit
-            )
+            for item in self._recent(self._wait_history, "occurred_at", start, end, limit)
         ]
 
     def _alert_activities(
@@ -300,9 +286,7 @@ class MongoAdminDashboardRepository:
                 resource_id=_string(item, "_id"),
                 target_route="/notifications",
             )
-            for item in self._recent(
-                self._notifications, "created_at", start, end, limit
-            )
+            for item in self._recent(self._notifications, "created_at", start, end, limit)
         ]
 
     def list_audit_logs(

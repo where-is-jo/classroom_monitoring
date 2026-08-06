@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
@@ -23,7 +24,7 @@ def user_stack() -> AuthStack:
 
 
 @pytest.fixture
-def user_client(user_stack: AuthStack):
+def user_client(user_stack: AuthStack) -> Iterator[TestClient]:
     app.dependency_overrides[get_auth_service] = lambda: user_stack.auth_service
     app.dependency_overrides[get_user_service] = lambda: user_stack.user_service
     with TestClient(app) as client:

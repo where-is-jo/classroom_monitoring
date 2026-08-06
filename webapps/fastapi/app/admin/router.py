@@ -106,9 +106,7 @@ def audit_logs(
         limit=resolved_limit,
         offset=resolved_offset,
     )
-    return AuditLogListResponse.from_page(
-        page, limit=resolved_limit, offset=resolved_offset
-    )
+    return AuditLogListResponse.from_page(page, limit=resolved_limit, offset=resolved_offset)
 
 
 @page_router.get("", response_class=Response, include_in_schema=False)
@@ -119,9 +117,7 @@ def dashboard_page(
     actor: User = Depends(require_page_admin),
     service: AdminDashboardService = Depends(get_admin_dashboard_service),
 ) -> Response:
-    summary = service.get_summary(
-        actor, department=department, classroom_id=classroom_id
-    )
+    summary = service.get_summary(actor, department=department, classroom_id=classroom_id)
     activities = service.list_activities(actor, limit=10, offset=0)
     return templates.TemplateResponse(
         request=request,

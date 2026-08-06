@@ -249,9 +249,7 @@ class UserService:
         action: str,
         ip_fingerprint: str | None,
     ) -> User:
-        existing_operation = self._repository.get_user_by_operation_id(
-            command.operation_id
-        )
+        existing_operation = self._repository.get_user_by_operation_id(command.operation_id)
         if existing_operation is not None:
             if existing_operation.email != canonicalize_email(command.email):
                 raise UserOperationConflictError()
@@ -328,12 +326,9 @@ class UserService:
         if actor.id == current.id and status != UserStatus.ACTIVE:
             raise SelfDeactivationError()
         was_active_operator = (
-            current.role == UserRole.SYSTEM_OPERATOR
-            and current.status == UserStatus.ACTIVE
+            current.role == UserRole.SYSTEM_OPERATOR and current.status == UserStatus.ACTIVE
         )
-        remains_active_operator = (
-            role == UserRole.SYSTEM_OPERATOR and status == UserStatus.ACTIVE
-        )
+        remains_active_operator = role == UserRole.SYSTEM_OPERATOR and status == UserStatus.ACTIVE
         if (
             was_active_operator
             and not remains_active_operator

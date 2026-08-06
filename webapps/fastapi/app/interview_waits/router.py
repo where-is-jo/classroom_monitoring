@@ -42,17 +42,11 @@ api_router = APIRouter(prefix="/api/v1/interview-waits", tags=["interview-waits"
 expiration_api_router = APIRouter(
     prefix="/api/v1/interview-wait-expirations", tags=["interview-waits"]
 )
-my_page_router = APIRouter(
-    prefix="/my/interview-waits", tags=["interview-wait-pages"]
-)
-staff_page_router = APIRouter(
-    prefix="/staff/interview-waits", tags=["interview-wait-pages"]
-)
+my_page_router = APIRouter(prefix="/my/interview-waits", tags=["interview-wait-pages"])
+staff_page_router = APIRouter(prefix="/staff/interview-waits", tags=["interview-wait-pages"])
 
 
-def _resolve_paging(
-    limit: int | None, offset: int, settings: Settings
-) -> tuple[int, int]:
+def _resolve_paging(limit: int | None, offset: int, settings: Settings) -> tuple[int, int]:
     return min(limit or settings.page_size_default, settings.page_size_max), offset
 
 
@@ -143,9 +137,7 @@ def evaluate_interview_wait_expirations(
 ) -> InterviewWaitExpirationResponse:
     result = service.evaluate_expirations(
         actor,
-        EvaluateInterviewWaitExpirationsCommand(
-            operation_id=str(payload.operation_id)
-        ),
+        EvaluateInterviewWaitExpirationsCommand(operation_id=str(payload.operation_id)),
     )
     return InterviewWaitExpirationResponse.from_result(result)
 
@@ -159,7 +151,7 @@ def my_interview_waits_page(
     actor: User = Depends(get_current_page_user),
     service: InterviewWaitService = Depends(get_interview_wait_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_my_waits(
         request,
         actor=actor,
@@ -179,7 +171,7 @@ def create_interview_wait_page(
     actor: User = Depends(get_current_page_user),
     service: InterviewWaitService = Depends(get_interview_wait_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         wait = service.create_wait(
             actor,
@@ -210,10 +202,8 @@ def interview_wait_detail_page(
     wait_id: str,
     actor: User = Depends(get_current_page_user),
     service: InterviewWaitService = Depends(get_interview_wait_service),
-):
-    return _render_wait_detail(
-        request, actor=actor, service=service, wait_id=wait_id
-    )
+) -> Response:
+    return _render_wait_detail(request, actor=actor, service=service, wait_id=wait_id)
 
 
 @my_page_router.post("/{wait_id}/transition")
@@ -224,7 +214,7 @@ def transition_interview_wait_page(
     _: None = Depends(require_csrf),
     actor: User = Depends(get_current_page_user),
     service: InterviewWaitService = Depends(get_interview_wait_service),
-):
+) -> Response:
     try:
         service.transition_wait(
             actor,
@@ -258,7 +248,7 @@ def staff_interview_waits_page(
     actor: User = Depends(get_current_page_user),
     service: InterviewWaitService = Depends(get_interview_wait_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_staff_waits(
         request,
         actor=actor,
@@ -279,7 +269,7 @@ def complete_staff_interview_wait_page(
     actor: User = Depends(get_current_page_user),
     service: InterviewWaitService = Depends(get_interview_wait_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.transition_wait(
             actor,
@@ -298,9 +288,7 @@ def complete_staff_interview_wait_page(
             error=exc.message,
             status_code=exc.status_code,
         )
-    return RedirectResponse(
-        url="/staff/interview-waits", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(url="/staff/interview-waits", status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _render_my_waits(
@@ -314,7 +302,7 @@ def _render_my_waits(
     offset: int = 0,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_requester_waits(
         actor,
@@ -358,7 +346,7 @@ def _render_staff_waits(
     offset: int = 0,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_staff_waits(
         actor,
@@ -397,7 +385,7 @@ def _render_wait_detail(
     wait_id: str,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     wait = service.get_wait(actor, wait_id)
     return templates.TemplateResponse(
         request=request,

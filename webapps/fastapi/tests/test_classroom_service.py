@@ -11,12 +11,14 @@ from app.auth.errors import PermissionDeniedError
 from app.classrooms.errors import ClassroomInputError, SeatBatchConflictError
 from app.classrooms.models import (
     AfterHoursAlertStatus,
+    Classroom,
     ClassroomSchedule,
     RecordSeatObservationBatchCommand,
     ReplaceSchedulesCommand,
     ResolveAfterHoursAlertCommand,
     SeatGeometry,
     SeatObservation,
+    SeatObservationBatchResult,
     SeatOccupancy,
     UpdateClassroomCommand,
     UpdateSeatCommand,
@@ -29,18 +31,14 @@ def stack() -> ClassroomStack:
     return build_classroom_stack()
 
 
-def _schedule(stack: ClassroomStack, classroom_id: str, *, closes: time = time(17)):
+def _schedule(stack: ClassroomStack, classroom_id: str, *, closes: time = time(17)) -> Classroom:
     classroom = stack.repository.get_classroom(classroom_id)
     assert classroom is not None
     return stack.service.replace_schedules(
         stack.admin,
         ReplaceSchedulesCommand(
             classroom_id=classroom.id,
-            schedules=(
-                ClassroomSchedule(
-                    day_of_week=2, opens_at=time(9), closes_at=closes
-                ),
-            ),
+            schedules=(ClassroomSchedule(day_of_week=2, opens_at=time(9), closes_at=closes),),
             expected_version=classroom.version,
             operation_id=str(uuid4()),
         ),
@@ -57,7 +55,7 @@ def _observe(
     occupied: bool = True,
     observed_at: datetime | None = None,
     event_id: str | None = None,
-):
+) -> SeatObservationBatchResult:
     return stack.service.record_mock_observation_batch(
         stack.admin,
         RecordSeatObservationBatchCommand(
@@ -244,14 +242,17 @@ def test_after_hours_timezone_grace_dedupe_resolve_and_no_reopen(
         confidence=0.9,
         observed_at=before_grace,
     )
-    assert stack.service.list_alerts(
-        stack.admin,
-        status=None,
-        classroom_id=None,
-        business_date=None,
-        limit=50,
-        offset=0,
-    ).total == 0
+    assert (
+        stack.service.list_alerts(
+            stack.admin,
+            status=None,
+            classroom_id=None,
+            business_date=None,
+            limit=50,
+            offset=0,
+        ).total
+        == 0
+    )
 
     _observe(
         stack,
@@ -309,14 +310,17 @@ def test_after_hours_timezone_grace_dedupe_resolve_and_no_reopen(
     )
     assert repeated.alert_count == 0
     assert stack.notifications.count_unread(stack.admin.id) == 1
-    assert stack.service.list_alerts(
-        stack.admin,
-        status=None,
-        classroom_id=classroom.id,
-        business_date=None,
-        limit=50,
-        offset=0,
-    ).total == 1
+    assert (
+        stack.service.list_alerts(
+            stack.admin,
+            status=None,
+            classroom_id=classroom.id,
+            business_date=None,
+            limit=50,
+            offset=0,
+        ).total
+        == 1
+    )
 
 
 def test_batch_membership_active_validation_idempotency_and_conflict(

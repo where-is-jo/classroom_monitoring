@@ -70,6 +70,7 @@ class ClassroomStack:
             ip_fingerprint="test-ip",
         )
 
+
 def build_classroom_stack() -> ClassroomStack:
     from app.users.models import UserRole
 

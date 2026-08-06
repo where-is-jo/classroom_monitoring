@@ -23,7 +23,7 @@ class RecordingCollection:
     def __init__(self) -> None:
         self.indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
 
-    def create_index(self, fields, **options):
+    def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
 
 
@@ -77,16 +77,22 @@ def test_직원_Mongo_index는_unique_sparse_CAS_조회에_필요한_구성을_�
     employees = database.collections["employees"].indexes
     history = database.collections["employee_status_history"].indexes
     observations = database.collections["employee_observations"].indexes
-    assert any(fields == [("employee_no", 1)] and options.get("unique") for fields, options in employees)
     assert any(
-        fields == [("user_id", 1)]
-        and options.get("unique")
-        and options.get("sparse")
+        fields == [("employee_no", 1)] and options.get("unique") for fields, options in employees
+    )
+    assert any(
+        fields == [("user_id", 1)] and options.get("unique") and options.get("sparse")
         for fields, options in employees
     )
-    assert any(fields == [("operation_ids", 1)] and options.get("unique") for fields, options in employees)
-    assert any(fields == [("operation_id", 1)] and options.get("unique") for fields, options in history)
-    assert any(fields == [("event_id", 1)] and options.get("unique") for fields, options in observations)
+    assert any(
+        fields == [("operation_ids", 1)] and options.get("unique") for fields, options in employees
+    )
+    assert any(
+        fields == [("operation_id", 1)] and options.get("unique") for fields, options in history
+    )
+    assert any(
+        fields == [("event_id", 1)] and options.get("unique") for fields, options in observations
+    )
     assert any(fields[0] == ("employee_id", 1) for fields, _ in history)
 
 

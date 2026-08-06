@@ -38,9 +38,7 @@ class Settings(BaseSettings):
 
     employee_away_after_seconds: int = Field(default=180, ge=1, le=86400)
     employee_offsite_after_seconds: int = Field(default=3600, ge=1, le=604800)
-    notification_mock_delivery_mode: Literal[
-        "success", "fail_once", "always_fail"
-    ] = "success"
+    notification_mock_delivery_mode: Literal["success", "fail_once", "always_fail"] = "success"
     notification_mock_delivery_max_attempts: int = Field(default=3, ge=1, le=10)
     interview_wait_expires_after_hours: int = Field(default=24, ge=1, le=168)
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
@@ -79,8 +77,7 @@ class Settings(BaseSettings):
             ]
             if missing_names:
                 raise ValueError(
-                    "MongoDB mode에 필요한 환경변수가 없습니다: "
-                    + ", ".join(missing_names)
+                    "MongoDB mode에 필요한 환경변수가 없습니다: " + ", ".join(missing_names)
                 )
 
         if self.app_env == "prod" and self.mock_inputs_enabled:
@@ -96,16 +93,19 @@ class Settings(BaseSettings):
             )
             if secret is None or len(secret.get_secret_value()) < 32
         ]
-        if not self.web_origin:
+        web_origin = self.web_origin
+        if not web_origin:
             missing_security_names.append("WEB_ORIGIN")
         if missing_security_names:
             raise ValueError(
                 "인증에 필요한 환경변수가 없거나 너무 짧습니다: "
                 + ", ".join(missing_security_names)
             )
-        if not self.web_origin.startswith(("http://", "https://")):
+        if not web_origin:
+            raise ValueError("WEB_ORIGIN이 필요합니다.")
+        if not web_origin.startswith(("http://", "https://")):
             raise ValueError("WEB_ORIGIN은 http 또는 https origin이어야 합니다.")
-        self.web_origin = self.web_origin.rstrip("/")
+        self.web_origin = web_origin.rstrip("/")
 
         if self.auth_seed_enabled:
             if self.app_env == "prod":

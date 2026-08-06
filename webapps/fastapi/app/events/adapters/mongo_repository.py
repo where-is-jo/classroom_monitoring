@@ -32,10 +32,7 @@ class MongoEventRepository:
     def list_events(self, *, limit: int, offset: int) -> tuple[list[Event], int]:
         try:
             cursor = (
-                self._collection.find({})
-                .sort("detected_at", DESCENDING)
-                .skip(offset)
-                .limit(limit)
+                self._collection.find({}).sort("detected_at", DESCENDING).skip(offset).limit(limit)
             )
             events = [self._to_domain(document) for document in cursor]
             total = self._collection.count_documents({})

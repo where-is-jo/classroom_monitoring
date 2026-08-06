@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from app.admin.adapters.mongo_repository import MongoAdminDashboardRepository
 from app.admin.models import DashboardActivityType
@@ -14,13 +16,13 @@ class RecordingCollection:
         self.documents = list(documents or [])
         self.limits: list[int] = []
 
-    def create_index(self, fields, **options):
+    def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
 
-    def find(self, *_args, **_kwargs):
+    def find(self, *_args: object, **_kwargs: object) -> RecordingCursor:
         return RecordingCursor(self)
 
-    def count_documents(self, _query):
+    def count_documents(self, _query: object) -> int:
         return len(self.documents)
 
 
@@ -29,18 +31,21 @@ class RecordingCursor:
         self.collection = collection
         self.documents = list(collection.documents)
 
-    def sort(self, fields):
+    def sort(self, fields: list[tuple[str, int]]) -> RecordingCursor:
         self.documents.sort(
-            key=lambda item: (-item[fields[0][0]].timestamp(), str(item["_id"]))
+            key=lambda item: (
+                -cast(datetime, item[fields[0][0]]).timestamp(),
+                str(item["_id"]),
+            )
         )
         return self
 
-    def limit(self, value: int):
+    def limit(self, value: int) -> RecordingCursor:
         self.collection.limits.append(value)
         self.documents = self.documents[:value]
         return self
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[dict[str, object]]:
         return iter(self.documents)
 
 

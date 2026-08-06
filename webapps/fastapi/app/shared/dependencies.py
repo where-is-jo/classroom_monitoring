@@ -34,14 +34,14 @@ from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
-from ..events.adapters.memory_repository import InMemoryEventRepository
-from ..events.adapters.mongo_repository import MongoEventRepository
-from ..events.ports import EventRepository
-from ..events.service import EventService
 from ..employees.adapters.memory_repository import InMemoryEmployeeRepository
 from ..employees.adapters.mongo_repository import MongoEmployeeRepository
 from ..employees.ports import EmployeeRepository
 from ..employees.service import EmployeeService
+from ..events.adapters.memory_repository import InMemoryEventRepository
+from ..events.adapters.mongo_repository import MongoEventRepository
+from ..events.ports import EventRepository
+from ..events.service import EventService
 from ..interview_waits.adapters.memory_repository import InMemoryInterviewWaitRepository
 from ..interview_waits.adapters.mongo_repository import MongoInterviewWaitRepository
 from ..interview_waits.ports import InterviewWaitRepository
@@ -75,7 +75,7 @@ def utc_now() -> datetime:
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
 
 
 @lru_cache
@@ -366,13 +366,9 @@ def get_notification_service(
         user_repository,
         clock=utc_now,
         mock_delivery_mode=(
-            settings.notification_mock_delivery_mode
-            if settings.mock_inputs_enabled
-            else None
+            settings.notification_mock_delivery_mode if settings.mock_inputs_enabled else None
         ),
-        mock_delivery_max_attempts=(
-            settings.notification_mock_delivery_max_attempts
-        ),
+        mock_delivery_max_attempts=(settings.notification_mock_delivery_max_attempts),
     )
 
 
@@ -410,9 +406,7 @@ def get_classroom_service(
         repository,
         notification_service,
         audit_service,
-        occupancy_confidence_threshold=(
-            settings.seat_occupancy_confidence_threshold
-        ),
+        occupancy_confidence_threshold=(settings.seat_occupancy_confidence_threshold),
         clock=utc_now,
     )
 
@@ -465,9 +459,7 @@ def _seed_users(settings: Settings) -> None:
             student=settings.auth_seed_student_password.get_secret_value(),
             staff=settings.auth_seed_staff_password.get_secret_value(),
             admin=settings.auth_seed_admin_password.get_secret_value(),
-            system_operator=(
-                settings.auth_seed_system_operator_password.get_secret_value()
-            ),
+            system_operator=(settings.auth_seed_system_operator_password.get_secret_value()),
         ),
     )
 

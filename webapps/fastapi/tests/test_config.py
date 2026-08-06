@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.shared.config import Settings
+from tests.settings_helpers import make_settings
 
 
 def test_memory_mode는_local에서_명시적으로_선택할_수_있다() -> None:
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -32,7 +32,7 @@ def test_인증_비밀값과_WEB_ORIGIN은_기본값_없이_필수다(
         monkeypatch.delenv(name, raising=False)
 
     with pytest.raises(ValidationError) as raised:
-        Settings(_env_file=None, app_env="local", database_mode="memory")
+        make_settings(_env_file=None, app_env="local", database_mode="memory")
 
     message = str(raised.value)
     assert "JWT_ACCESS_SECRET" in message
@@ -41,14 +41,14 @@ def test_인증_비밀값과_WEB_ORIGIN은_기본값_없이_필수다(
 
 def test_database_mode가_없으면_시작_설정_검증이_실패한다() -> None:
     with pytest.raises(ValidationError) as raised:
-        Settings(_env_file=None, app_env="local", database_mode=None)
+        make_settings(_env_file=None, app_env="local", database_mode=None)
 
     assert "database_mode" in str(raised.value)
 
 
 def test_mongodb_mode는_URL과_database_이름이_필수다() -> None:
     with pytest.raises(ValidationError) as raised:
-        Settings(_env_file=None, app_env="dev", database_mode="mongodb")
+        make_settings(_env_file=None, app_env="dev", database_mode="mongodb")
 
     message = str(raised.value)
     assert "DATABASE_URL" in message
@@ -57,12 +57,12 @@ def test_mongodb_mode는_URL과_database_이름이_필수다() -> None:
 
 def test_memory_mode는_dev와_prod에서_거부된다() -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, app_env="dev", database_mode="memory")
+        make_settings(_env_file=None, app_env="dev", database_mode="memory")
 
 
 def test_prod에서는_mock_입력을_활성화할_수_없다() -> None:
     with pytest.raises(ValidationError) as raised:
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="prod",
             database_mode="mongodb",
@@ -76,7 +76,7 @@ def test_prod에서는_mock_입력을_활성화할_수_없다() -> None:
 
 def test_prod에서는_가상_사용자_seed를_활성화할_수_없다() -> None:
     with pytest.raises(ValidationError) as raised:
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="prod",
             database_mode="mongodb",
@@ -94,7 +94,7 @@ def test_prod에서는_가상_사용자_seed를_활성화할_수_없다() -> Non
 
 def test_페이지네이션_기본값은_최댓값을_넘을_수_없다() -> None:
     with pytest.raises(ValidationError):
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="local",
             database_mode="memory",
@@ -105,7 +105,7 @@ def test_페이지네이션_기본값은_최댓값을_넘을_수_없다() -> Non
 
 def test_직원_AWAY_기준은_OFFSITE_기준보다_작아야_한다() -> None:
     with pytest.raises(ValidationError) as raised:
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="local",
             database_mode="memory",
@@ -117,7 +117,7 @@ def test_직원_AWAY_기준은_OFFSITE_기준보다_작아야_한다() -> None:
 
 
 def test_mock_delivery_mode와_최대시도는_제한된_설정만_허용한다() -> None:
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -128,16 +128,16 @@ def test_mock_delivery_mode와_최대시도는_제한된_설정만_허용한다(
     assert settings.notification_mock_delivery_max_attempts == 1
 
     with pytest.raises(ValidationError):
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="local",
             database_mode="memory",
-            notification_mock_delivery_mode="network",  # type: ignore[arg-type]
+            notification_mock_delivery_mode="network",
         )
 
 
 def test_interview_wait_expiration_hours_has_safe_bounds() -> None:
-    settings = Settings(
+    settings = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -146,7 +146,7 @@ def test_interview_wait_expiration_hours_has_safe_bounds() -> None:
     assert settings.interview_wait_expires_after_hours == 24
 
     with pytest.raises(ValidationError):
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="local",
             database_mode="memory",
@@ -154,7 +154,7 @@ def test_interview_wait_expiration_hours_has_safe_bounds() -> None:
         )
 
     with pytest.raises(ValidationError):
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="local",
             database_mode="memory",
@@ -163,15 +163,18 @@ def test_interview_wait_expiration_hours_has_safe_bounds() -> None:
 
 
 def test_seat_occupancy_confidence_threshold_is_bounded() -> None:
-    assert Settings(
-        _env_file=None,
-        app_env="local",
-        database_mode="memory",
-        seat_occupancy_confidence_threshold=0.6,
-    ).seat_occupancy_confidence_threshold == 0.6
+    assert (
+        make_settings(
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            seat_occupancy_confidence_threshold=0.6,
+        ).seat_occupancy_confidence_threshold
+        == 0.6
+    )
 
     with pytest.raises(ValidationError):
-        Settings(
+        make_settings(
             _env_file=None,
             app_env="local",
             database_mode="memory",

@@ -258,11 +258,7 @@ class AuthService:
         now: datetime,
         ip_fingerprint: str,
     ) -> User:
-        if (
-            user.status != UserStatus.LOCKED
-            or user.locked_until is None
-            or user.locked_until > now
-        ):
+        if user.status != UserStatus.LOCKED or user.locked_until is None or user.locked_until > now:
             return user
         unlocked = replace(
             user,

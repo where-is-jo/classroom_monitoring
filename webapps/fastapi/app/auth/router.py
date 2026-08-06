@@ -179,7 +179,7 @@ def change_password(
 
 
 @page_router.get("/login")
-def login_page(request: Request, next: str = "/events"):
+def login_page(request: Request, next: str = "/events") -> Response:
     return templates.TemplateResponse(
         request=request,
         name="auth/login.html",
@@ -195,7 +195,7 @@ def login_page_submit(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: AuthService = Depends(get_auth_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         session = service.login(
             LoginCommand(
@@ -228,7 +228,7 @@ def logout_page(
     request: Request,
     _: None = Depends(require_csrf),
     service: AuthService = Depends(get_auth_service),
-):
+) -> Response:
     service.logout(request.cookies.get(REFRESH_COOKIE))
     response = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     _clear_session_cookies(response)

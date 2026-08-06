@@ -6,8 +6,8 @@ from urllib.parse import urlencode
 
 from fastapi import Depends, Request
 
-from ..shared.config import Settings
 from ..notifications.service import NotificationService
+from ..shared.config import Settings
 from ..shared.dependencies import (
     get_auth_service,
     get_notification_service,
@@ -126,9 +126,7 @@ def _set_page_navigation_state(
         user.role == UserRole.STAFF or is_admin
     )
     request.state.show_employee_dev_tools = settings.mock_inputs_enabled and is_admin
-    request.state.show_notification_dev_tools = (
-        settings.mock_inputs_enabled and is_admin
-    )
+    request.state.show_notification_dev_tools = settings.mock_inputs_enabled and is_admin
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

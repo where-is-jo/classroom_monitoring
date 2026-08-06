@@ -42,7 +42,7 @@ class EmployeeOverrideResponse(BaseModel):
     ends_at: datetime | None
 
     @classmethod
-    def from_override(cls, override: EmployeeOverride) -> "EmployeeOverrideResponse":
+    def from_override(cls, override: EmployeeOverride) -> EmployeeOverrideResponse:
         return cls(
             status=override.status,
             reason=override.reason,
@@ -68,7 +68,7 @@ class EmployeeResponse(BaseModel):
     version: int
 
     @classmethod
-    def from_employee(cls, employee: Employee) -> "EmployeeResponse":
+    def from_employee(cls, employee: Employee) -> EmployeeResponse:
         return cls(
             id=employee.id,
             employee_no=employee.employee_no,
@@ -109,7 +109,7 @@ class EmployeeListResponse(BaseModel):
         *,
         limit: int,
         offset: int,
-    ) -> "EmployeeListResponse":
+    ) -> EmployeeListResponse:
         return cls(
             items=[EmployeeResponse.from_employee(item) for item in page.items],
             total=page.total,
@@ -133,7 +133,7 @@ class EmployeeStatusHistoryResponse(BaseModel):
     def from_history(
         cls,
         history: EmployeeStatusHistory,
-    ) -> "EmployeeStatusHistoryResponse":
+    ) -> EmployeeStatusHistoryResponse:
         return cls(**history.__dict__)
 
 
@@ -150,12 +150,9 @@ class EmployeeStatusHistoryListResponse(BaseModel):
         *,
         limit: int,
         offset: int,
-    ) -> "EmployeeStatusHistoryListResponse":
+    ) -> EmployeeStatusHistoryListResponse:
         return cls(
-            items=[
-                EmployeeStatusHistoryResponse.from_history(item)
-                for item in page.items
-            ],
+            items=[EmployeeStatusHistoryResponse.from_history(item) for item in page.items],
             total=page.total,
             limit=limit,
             offset=offset,
@@ -184,7 +181,7 @@ class UpdateEmployeeRequest(BaseModel):
     is_active: bool | None = None
 
     @model_validator(mode="after")
-    def _at_least_one_change(self) -> "UpdateEmployeeRequest":
+    def _at_least_one_change(self) -> UpdateEmployeeRequest:
         changed_fields = self.model_fields_set - {
             "expected_version",
             "operation_id",
@@ -233,7 +230,7 @@ class EmployeeStatusEvaluationResponse(BaseModel):
     def from_evaluation(
         cls,
         evaluation: EmployeeStatusEvaluation,
-    ) -> "EmployeeStatusEvaluationResponse":
+    ) -> EmployeeStatusEvaluationResponse:
         return cls(**evaluation.__dict__)
 
 
@@ -263,7 +260,7 @@ class EmployeeObservationResponse(BaseModel):
     def from_observation(
         cls,
         observation: EmployeeObservation,
-    ) -> "EmployeeObservationResponse":
+    ) -> EmployeeObservationResponse:
         return cls(**observation.__dict__)
 
 

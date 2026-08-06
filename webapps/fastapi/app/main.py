@@ -26,15 +26,12 @@ from .auth.router import page_router as auth_page_router
 from .classrooms.router import admin_page_router as classrooms_admin_page_router
 from .classrooms.router import alert_api_router as classroom_alert_api_router
 from .classrooms.router import alert_page_router as classroom_alert_page_router
-from .classrooms.router import classroom_api_router
+from .classrooms.router import classroom_api_router, seat_api_router
 from .classrooms.router import development_api_router as classroom_development_api_router
 from .classrooms.router import (
     development_page_router as classroom_development_page_router,
 )
 from .classrooms.router import page_router as classrooms_page_router
-from .classrooms.router import seat_api_router
-from .events.router import api_router as events_api_router
-from .events.router import page_router as events_page_router
 from .employees.router import admin_page_router as employees_admin_page_router
 from .employees.router import api_router as employees_api_router
 from .employees.router import development_api_router as employee_development_api_router
@@ -43,6 +40,8 @@ from .employees.router import (
 )
 from .employees.router import evaluation_api_router as employee_evaluation_api_router
 from .employees.router import page_router as employees_page_router
+from .events.router import api_router as events_api_router
+from .events.router import page_router as events_page_router
 from .interview_waits.router import api_router as interview_waits_api_router
 from .interview_waits.router import (
     expiration_api_router as interview_wait_expiration_api_router,
@@ -97,17 +96,18 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(auth_page_router)
 app.include_router(events_page_router)
+_EVENT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorResponse},
+    422: {"model": ErrorResponse},
+    500: {"model": ErrorResponse},
+    503: {"model": ErrorResponse},
+}
 app.include_router(users_page_router)
 app.include_router(
     events_api_router,
-    responses={
-        404: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
-        500: {"model": ErrorResponse},
-        503: {"model": ErrorResponse},
-    },
+    responses=_EVENT_ERROR_RESPONSES,
 )
-_AUTH_ERROR_RESPONSES = {
+_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
     401: {"model": ErrorResponse},
     403: {"model": ErrorResponse},
@@ -125,12 +125,8 @@ app.include_router(users_api_router, responses=_AUTH_ERROR_RESPONSES)
 def include_notification_routers(application: FastAPI, settings: Settings) -> None:
     """인앱 알림은 항상, mock delivery 관리 경계는 허용 환경에만 등록한다."""
     application.include_router(notifications_page_router)
-    application.include_router(
-        notifications_api_router, responses=_AUTH_ERROR_RESPONSES
-    )
-    application.include_router(
-        notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES
-    )
+    application.include_router(notifications_api_router, responses=_AUTH_ERROR_RESPONSES)
+    application.include_router(notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:
         application.include_router(notification_development_page_router)
         application.include_router(
@@ -163,9 +159,7 @@ def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
     application.include_router(classroom_alert_page_router)
     application.include_router(classroom_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(seat_api_router, responses=_AUTH_ERROR_RESPONSES)
-    application.include_router(
-        classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES
-    )
+    application.include_router(classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:
         application.include_router(classroom_development_page_router)
         application.include_router(
@@ -255,8 +249,7 @@ def handle_validation_error(request: Request, exc: RequestValidationError) -> Re
     if not _wants_json(request):
         return _error_page(request, status_code=422, message=message)
     sanitized_errors = [
-        {"location": list(error["loc"]), "type": error["type"]}
-        for error in exc.errors()
+        {"location": list(error["loc"]), "type": error["type"]} for error in exc.errors()
     ]
     return JSONResponse(
         status_code=422,

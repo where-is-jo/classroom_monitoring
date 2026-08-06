@@ -24,9 +24,7 @@ class InMemoryNotificationRepository:
             if operation_owner is not None:
                 return operation_owner
             if notification.dedupe_key is not None:
-                dedupe_owner = self.get_notification_by_dedupe_key(
-                    notification.dedupe_key
-                )
+                dedupe_owner = self.get_notification_by_dedupe_key(notification.dedupe_key)
                 if dedupe_owner is not None:
                     return dedupe_owner
             self._notifications[notification.id] = notification
@@ -43,9 +41,7 @@ class InMemoryNotificationRepository:
         with self._lock:
             return list(self._notifications.values()), list(self._deliveries.values())
 
-    def get_notification_by_operation_id(
-        self, operation_id: str
-    ) -> Notification | None:
+    def get_notification_by_operation_id(self, operation_id: str) -> Notification | None:
         with self._lock:
             return next(
                 (
@@ -56,9 +52,7 @@ class InMemoryNotificationRepository:
                 None,
             )
 
-    def get_notification_by_dedupe_key(
-        self, dedupe_key: str
-    ) -> Notification | None:
+    def get_notification_by_dedupe_key(self, dedupe_key: str) -> Notification | None:
         with self._lock:
             return next(
                 (
@@ -86,9 +80,7 @@ class InMemoryNotificationRepository:
             ]
         if is_read is not None:
             notifications = [
-                notification
-                for notification in notifications
-                if notification.is_read is is_read
+                notification for notification in notifications if notification.is_read is is_read
             ]
         if notification_type is not None:
             notifications = [
@@ -110,8 +102,7 @@ class InMemoryNotificationRepository:
             return sum(
                 1
                 for notification in self._notifications.values()
-                if notification.recipient_user_id == recipient_user_id
-                and not notification.is_read
+                if notification.recipient_user_id == recipient_user_id and not notification.is_read
             )
 
     def mark_read(
@@ -124,10 +115,7 @@ class InMemoryNotificationRepository:
     ) -> Notification | None:
         with self._lock:
             notification = self._notifications.get(notification_id)
-            if (
-                notification is None
-                or notification.recipient_user_id != recipient_user_id
-            ):
+            if notification is None or notification.recipient_user_id != recipient_user_id:
                 return None
             if notification.is_read:
                 return notification
@@ -151,8 +139,7 @@ class InMemoryNotificationRepository:
             unread_ids = [
                 notification.id
                 for notification in self._notifications.values()
-                if notification.recipient_user_id == recipient_user_id
-                and not notification.is_read
+                if notification.recipient_user_id == recipient_user_id and not notification.is_read
             ]
             for notification_id in unread_ids:
                 self._notifications[notification_id] = replace(
@@ -165,24 +152,18 @@ class InMemoryNotificationRepository:
 
     def append_delivery(self, delivery: MockDelivery) -> MockDelivery:
         with self._lock:
-            operation_owner = self.get_delivery_by_operation_id(
-                delivery.operation_id
-            )
+            operation_owner = self.get_delivery_by_operation_id(delivery.operation_id)
             if operation_owner is not None:
                 if operation_owner.notification_id != delivery.notification_id:
                     raise NotificationOperationConflictError()
                 return operation_owner
-            attempt_owner = self.get_delivery_by_attempt(
-                delivery.notification_id, delivery.attempt
-            )
+            attempt_owner = self.get_delivery_by_attempt(delivery.notification_id, delivery.attempt)
             if attempt_owner is not None:
                 return attempt_owner
             self._deliveries[delivery.id] = delivery
             return delivery
 
-    def get_delivery_by_operation_id(
-        self, operation_id: str
-    ) -> MockDelivery | None:
+    def get_delivery_by_operation_id(self, operation_id: str) -> MockDelivery | None:
         with self._lock:
             return next(
                 (
@@ -193,16 +174,13 @@ class InMemoryNotificationRepository:
                 None,
             )
 
-    def get_delivery_by_attempt(
-        self, notification_id: str, attempt: int
-    ) -> MockDelivery | None:
+    def get_delivery_by_attempt(self, notification_id: str, attempt: int) -> MockDelivery | None:
         with self._lock:
             return next(
                 (
                     delivery
                     for delivery in self._deliveries.values()
-                    if delivery.notification_id == notification_id
-                    and delivery.attempt == attempt
+                    if delivery.notification_id == notification_id and delivery.attempt == attempt
                 ),
                 None,
             )
@@ -217,11 +195,7 @@ class InMemoryNotificationRepository:
         with self._lock:
             deliveries = list(self._deliveries.values())
         if status is not None:
-            deliveries = [
-                delivery
-                for delivery in deliveries
-                if delivery.status.value == status
-            ]
+            deliveries = [delivery for delivery in deliveries if delivery.status.value == status]
         deliveries.sort(
             key=lambda delivery: (delivery.attempted_at, delivery.id),
             reverse=True,
@@ -231,9 +205,7 @@ class InMemoryNotificationRepository:
             total=len(deliveries),
         )
 
-    def list_notification_deliveries(
-        self, notification_id: str
-    ) -> list[MockDelivery]:
+    def list_notification_deliveries(self, notification_id: str) -> list[MockDelivery]:
         with self._lock:
             deliveries = [
                 delivery

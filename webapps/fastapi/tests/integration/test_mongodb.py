@@ -28,13 +28,6 @@ from app.classrooms.models import (
     SeatOccupancy,
     SeatOccupancyHistory,
 )
-from app.events.adapters.mongo_repository import MongoEventRepository
-from app.interview_waits.adapters.mongo_repository import MongoInterviewWaitRepository
-from app.interview_waits.models import (
-    InterviewWait,
-    InterviewWaitHistory,
-    InterviewWaitStatus,
-)
 from app.employees.adapters.mongo_repository import MongoEmployeeRepository
 from app.employees.models import (
     Employee,
@@ -44,9 +37,16 @@ from app.employees.models import (
     EmployeeStatusHistory,
     StatusSource,
 )
+from app.events.adapters.mongo_repository import MongoEventRepository
+from app.interview_waits.adapters.mongo_repository import MongoInterviewWaitRepository
+from app.interview_waits.models import (
+    InterviewWait,
+    InterviewWaitHistory,
+    InterviewWaitStatus,
+)
 from app.notifications.adapters.mongo_repository import MongoNotificationRepository
 from app.notifications.models import MockDelivery, MockDeliveryStatus, Notification
-from app.shared.database import initialize_indexes
+from app.shared.database import MongoDatabase, initialize_indexes
 from app.users.adapters.mongo_repository import MongoUserRepository
 from app.users.models import User, UserRole, UserStatus
 
@@ -54,7 +54,7 @@ pytestmark = pytest.mark.mongodb
 
 
 def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
-    mongodb_database,
+    mongodb_database: MongoDatabase,
 ) -> None:
     mongodb_database.command("ping")
 
@@ -75,25 +75,14 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
     index_information = mongodb_database["events"].index_information()
     assert MongoEventRepository.detected_at_index_name in index_information
     matching_names = [
-        name
-        for name in index_information
-        if name == MongoEventRepository.detected_at_index_name
+        name for name in index_information if name == MongoEventRepository.detected_at_index_name
     ]
     assert matching_names == [MongoEventRepository.detected_at_index_name]
     assert "users_email_unique" in mongodb_database["users"].index_information()
-    assert (
-        "refresh_tokens_hash_unique"
-        in mongodb_database["refresh_tokens"].index_information()
-    )
-    assert (
-        "audit_logs_operation_unique"
-        in mongodb_database["audit_logs"].index_information()
-    )
+    assert "refresh_tokens_hash_unique" in mongodb_database["refresh_tokens"].index_information()
+    assert "audit_logs_operation_unique" in mongodb_database["audit_logs"].index_information()
     assert "employees_number_unique" in mongodb_database["employees"].index_information()
-    assert (
-        "notifications_dedupe_unique"
-        in mongodb_database["notifications"].index_information()
-    )
+    assert "notifications_dedupe_unique" in mongodb_database["notifications"].index_information()
     assert (
         "notification_deliveries_notification_attempt_unique"
         in mongodb_database["notification_deliveries"].index_information()
@@ -107,26 +96,18 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         in mongodb_database["interview_wait_history"].index_information()
     )
     assert "classrooms_code_unique" in mongodb_database["classrooms"].index_information()
-    assert (
-        "seats_classroom_code_unique"
-        in mongodb_database["seats"].index_information()
-    )
+    assert "seats_classroom_code_unique" in mongodb_database["seats"].index_information()
     assert (
         "after_hours_alerts_dedupe_unique"
         in mongodb_database["after_hours_alerts"].index_information()
     )
-    assert (
-        "notifications_dashboard_recent"
-        in mongodb_database["notifications"].index_information()
-    )
+    assert "notifications_dashboard_recent" in mongodb_database["notifications"].index_information()
 
 
 def test_dashboard_recent_query_explain_uses_bounded_sort_index(
-    mongodb_database,
+    mongodb_database: MongoDatabase,
 ) -> None:
-    initialize_indexes(
-        mongodb_database, [MongoAdminDashboardRepository.ensure_indexes]
-    )
+    initialize_indexes(mongodb_database, [MongoAdminDashboardRepository.ensure_indexes])
     plan = (
         mongodb_database["notifications"]
         .find({"created_at": {"$gte": datetime.now(UTC) - timedelta(days=1)}})
@@ -136,7 +117,7 @@ def test_dashboard_recent_query_explain_uses_bounded_sort_index(
         .explain()
     )
 
-    def contains_ixscan(value) -> bool:
+    def contains_ixscan(value: object) -> bool:
         if isinstance(value, dict):
             return value.get("stage") == "IXSCAN" or any(
                 contains_ixscan(item) for item in value.values()
@@ -149,7 +130,7 @@ def test_dashboard_recent_query_explain_uses_bounded_sort_index(
 
 
 def test_classroom_seat_history_batch_and_alert_mongo_contract(
-    mongodb_database,
+    mongodb_database: MongoDatabase,
 ) -> None:
     initialize_indexes(mongodb_database, [MongoClassroomRepository.ensure_indexes])
     current_time = datetime.now(UTC)
@@ -275,35 +256,37 @@ def test_classroom_seat_history_batch_and_alert_mongo_contract(
         assert repository.complete_observation_batch(completed) == completed
         assert repository.create_alert(alert) == (alert, True)
         assert repository.create_alert(alert) == (alert, False)
-        assert repository.list_occupancy_history(
-            classroom.id,
-            seat_id=seat.id,
-            from_time=None,
-            to_time=None,
-            limit=50,
-            offset=0,
-        ).total == 1
-        assert repository.list_alerts(
-            status=AfterHoursAlertStatus.OPEN,
-            classroom_id=classroom.id,
-            business_date=alert.business_date,
-            limit=50,
-            offset=0,
-        ).total == 1
+        assert (
+            repository.list_occupancy_history(
+                classroom.id,
+                seat_id=seat.id,
+                from_time=None,
+                to_time=None,
+                limit=50,
+                offset=0,
+            ).total
+            == 1
+        )
+        assert (
+            repository.list_alerts(
+                status=AfterHoursAlertStatus.OPEN,
+                classroom_id=classroom.id,
+                business_date=alert.business_date,
+                limit=50,
+                offset=0,
+            ).total
+            == 1
+        )
     finally:
         mongodb_database["after_hours_alerts"].delete_one({"_id": alert.id})
-        mongodb_database["seat_occupancy_history"].delete_many(
-            {"classroom_id": classroom.id}
-        )
+        mongodb_database["seat_occupancy_history"].delete_many({"classroom_id": classroom.id})
         mongodb_database["seat_observation_batches"].delete_one({"_id": event_id})
         mongodb_database["seats"].delete_many({"classroom_id": classroom.id})
         mongodb_database["classrooms"].delete_one({"_id": classroom.id})
 
 
-def test_interview_wait_mongo_adapter_contract(mongodb_database) -> None:
-    initialize_indexes(
-        mongodb_database, [MongoInterviewWaitRepository.ensure_indexes]
-    )
+def test_interview_wait_mongo_adapter_contract(mongodb_database: MongoDatabase) -> None:
+    initialize_indexes(mongodb_database, [MongoInterviewWaitRepository.ensure_indexes])
     current_time = datetime.now(UTC)
     now = current_time.replace(microsecond=(current_time.microsecond // 1000) * 1000)
     suffix = str(uuid4())
@@ -340,9 +323,7 @@ def test_interview_wait_mongo_adapter_contract(mongodb_database) -> None:
     try:
         assert repository.create_wait(wait, initial_history) == wait
         assert repository.create_wait(wait, initial_history) == wait
-        assert repository.get_active_wait(
-            wait.requester_user_id, wait.employee_id
-        ) == wait
+        assert repository.get_active_wait(wait.requester_user_id, wait.employee_id) == wait
         assert repository.list_history(wait.id) == [initial_history]
 
         ready_operation = f"interview-wait-ready-{suffix}"
@@ -364,24 +345,16 @@ def test_interview_wait_mongo_adapter_contract(mongodb_database) -> None:
             operation_id=ready_operation,
             occurred_at=now,
         )
-        assert repository.replace_wait(
-            ready, expected_version=0, history=ready_history
-        ) == ready
-        assert repository.replace_wait(
-            ready, expected_version=0, history=ready_history
-        ) == ready
+        assert repository.replace_wait(ready, expected_version=0, history=ready_history) == ready
+        assert repository.replace_wait(ready, expected_version=0, history=ready_history) == ready
         assert repository.list_history(wait.id) == [initial_history, ready_history]
     finally:
-        mongodb_database["interview_wait_history"].delete_many(
-            {"wait_id": wait.id}
-        )
+        mongodb_database["interview_wait_history"].delete_many({"wait_id": wait.id})
         mongodb_database["interview_waits"].delete_one({"_id": wait.id})
 
 
-def test_알림과_mock_delivery_Mongo_adapter_계약(mongodb_database) -> None:
-    initialize_indexes(
-        mongodb_database, [MongoNotificationRepository.ensure_indexes]
-    )
+def test_알림과_mock_delivery_Mongo_adapter_계약(mongodb_database: MongoDatabase) -> None:
+    initialize_indexes(mongodb_database, [MongoNotificationRepository.ensure_indexes])
     current_time = datetime.now(UTC)
     now = current_time.replace(microsecond=(current_time.microsecond // 1000) * 1000)
     suffix = str(uuid4())
@@ -434,7 +407,7 @@ def test_알림과_mock_delivery_Mongo_adapter_계약(mongodb_database) -> None:
         mongodb_database["notifications"].delete_one({"_id": notification.id})
 
 
-def test_사용자_refresh_audit_Mongo_adapter_계약(mongodb_database) -> None:
+def test_사용자_refresh_audit_Mongo_adapter_계약(mongodb_database: MongoDatabase) -> None:
     initialize_indexes(
         mongodb_database,
         [
@@ -527,7 +500,7 @@ def test_사용자_refresh_audit_Mongo_adapter_계약(mongodb_database) -> None:
         mongodb_database["users"].delete_one({"_id": user.id})
 
 
-def test_직원_상태_이력_관측_Mongo_adapter_계약(mongodb_database) -> None:
+def test_직원_상태_이력_관측_Mongo_adapter_계약(mongodb_database: MongoDatabase) -> None:
     initialize_indexes(mongodb_database, [MongoEmployeeRepository.ensure_indexes])
     current_time = datetime.now(UTC)
     now = current_time.replace(microsecond=(current_time.microsecond // 1000) * 1000)
@@ -573,14 +546,17 @@ def test_직원_상태_이력_관측_Mongo_adapter_계약(mongodb_database) -> N
         assert repository.create_employee(employee, initial_history) == employee
         assert repository.create_employee(employee, initial_history) == employee
         assert repository.get_employee_by_number(employee.employee_no) == employee
-        assert repository.list_status_history(
-            employee.id,
-            limit=50,
-            offset=0,
-            source=None,
-            from_status=None,
-            to_status=None,
-        ).total == 1
+        assert (
+            repository.list_status_history(
+                employee.id,
+                limit=50,
+                offset=0,
+                source=None,
+                from_status=None,
+                to_status=None,
+            ).total
+            == 1
+        )
 
         observation = EmployeeObservation(
             event_id=f"observation-{suffix}",
@@ -605,17 +581,9 @@ def test_직원_상태_이력_관측_Mongo_adapter_계약(mongodb_database) -> N
             last_operation_id=update_operation_id,
             operation_ids=(*employee.operation_ids, update_operation_id),
         )
-        assert repository.replace_employee(
-            updated, expected_version=0, history=None
-        ) == updated
-        assert repository.replace_employee(
-            updated, expected_version=0, history=None
-        ) == updated
+        assert repository.replace_employee(updated, expected_version=0, history=None) == updated
+        assert repository.replace_employee(updated, expected_version=0, history=None) == updated
     finally:
-        mongodb_database["employee_observations"].delete_many(
-            {"employee_id": employee.id}
-        )
-        mongodb_database["employee_status_history"].delete_many(
-            {"employee_id": employee.id}
-        )
+        mongodb_database["employee_observations"].delete_many({"employee_id": employee.id})
+        mongodb_database["employee_status_history"].delete_many({"employee_id": employee.id})
         mongodb_database["employees"].delete_one({"_id": employee.id})

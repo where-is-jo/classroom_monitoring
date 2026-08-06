@@ -66,9 +66,7 @@ class InterviewWaitService:
         self._expires_after = timedelta(hours=expires_after_hours)
         self._clock = clock
 
-    def create_wait(
-        self, actor: User, command: CreateInterviewWaitCommand
-    ) -> InterviewWait:
+    def create_wait(self, actor: User, command: CreateInterviewWaitCommand) -> InterviewWait:
         self._require_active_user(actor)
         employee = self._required_active_employee(command.employee_id)
         message = self._normalize_message(command.message)
@@ -268,9 +266,7 @@ class InterviewWaitService:
             )
         raise InterviewWaitTransitionError()
 
-    def list_history(
-        self, actor: User, wait_id: str
-    ) -> list[InterviewWaitHistory]:
+    def list_history(self, actor: User, wait_id: str) -> list[InterviewWaitHistory]:
         wait = self.get_wait(actor, wait_id)
         return self._repository.list_history(wait.id)
 
@@ -424,9 +420,19 @@ class InterviewWaitService:
             updated = replace(
                 current,
                 status=to_status,
-                ready_at=(occurred_at if to_status == InterviewWaitStatus.READY else current.ready_at),
-                completed_at=(occurred_at if to_status == InterviewWaitStatus.COMPLETED else current.completed_at),
-                cancelled_at=(occurred_at if to_status == InterviewWaitStatus.CANCELLED else current.cancelled_at),
+                ready_at=(
+                    occurred_at if to_status == InterviewWaitStatus.READY else current.ready_at
+                ),
+                completed_at=(
+                    occurred_at
+                    if to_status == InterviewWaitStatus.COMPLETED
+                    else current.completed_at
+                ),
+                cancelled_at=(
+                    occurred_at
+                    if to_status == InterviewWaitStatus.CANCELLED
+                    else current.cancelled_at
+                ),
                 version=current.version + 1,
                 active_key=(current.active_key if to_status in ACTIVE_WAIT_STATUSES else None),
                 last_operation_id=operation_id,
@@ -655,8 +661,7 @@ class InterviewWaitService:
             (from_status == InterviewWaitStatus.WAITING and to_status == InterviewWaitStatus.READY)
             or (
                 from_status in ACTIVE_WAIT_STATUSES
-                and to_status
-                in {InterviewWaitStatus.CANCELLED, InterviewWaitStatus.EXPIRED}
+                and to_status in {InterviewWaitStatus.CANCELLED, InterviewWaitStatus.EXPIRED}
             )
             or (
                 from_status == InterviewWaitStatus.READY

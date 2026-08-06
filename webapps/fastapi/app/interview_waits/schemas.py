@@ -29,7 +29,7 @@ class InterviewWaitResponse(BaseModel):
     version: int
 
     @classmethod
-    def from_wait(cls, wait: InterviewWait) -> "InterviewWaitResponse":
+    def from_wait(cls, wait: InterviewWait) -> InterviewWaitResponse:
         return cls(
             id=wait.id,
             requester_user_id=wait.requester_user_id,
@@ -73,9 +73,7 @@ class InterviewWaitExpirationResponse(BaseModel):
     expired_count: int = Field(ge=0)
 
     @classmethod
-    def from_result(
-        cls, result: InterviewWaitExpirationResult
-    ) -> "InterviewWaitExpirationResponse":
+    def from_result(cls, result: InterviewWaitExpirationResult) -> InterviewWaitExpirationResponse:
         return cls(
             evaluated_at=result.evaluated_at,
             evaluated_count=result.evaluated_count,

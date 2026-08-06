@@ -16,7 +16,7 @@ class RecordingCollection:
     def __init__(self) -> None:
         self.indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
 
-    def create_index(self, fields, **options):
+    def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
 
 
@@ -41,10 +41,21 @@ def test_Mongo_adapter는_unique와_조회_index를_idempotent_정의한다() ->
     user_indexes = database.collections["users"].indexes
     refresh_indexes = database.collections["refresh_tokens"].indexes
     audit_indexes = database.collections["audit_logs"].indexes
-    assert any(options.get("unique") and fields == [("email", 1)] for fields, options in user_indexes)
-    assert any(options.get("unique") and fields == [("operation_ids", 1)] for fields, options in user_indexes)
-    assert any(options.get("unique") and fields == [("token_hash", 1)] for fields, options in refresh_indexes)
-    assert any(options.get("unique") and fields == [("operation_id", 1)] for fields, options in audit_indexes)
+    assert any(
+        options.get("unique") and fields == [("email", 1)] for fields, options in user_indexes
+    )
+    assert any(
+        options.get("unique") and fields == [("operation_ids", 1)]
+        for fields, options in user_indexes
+    )
+    assert any(
+        options.get("unique") and fields == [("token_hash", 1)]
+        for fields, options in refresh_indexes
+    )
+    assert any(
+        options.get("unique") and fields == [("operation_id", 1)]
+        for fields, options in audit_indexes
+    )
     assert any(fields == [("family_id", 1), ("revoked_at", 1)] for fields, _ in refresh_indexes)
     assert any(fields[0] == ("resource_type", 1) for fields, _ in audit_indexes)
 

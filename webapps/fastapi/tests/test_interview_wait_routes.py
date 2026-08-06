@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import cast
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.auth.dependencies import CSRF_COOKIE
 from app.employees.models import RecordEmployeeObservationCommand
@@ -18,7 +21,7 @@ from app.shared.dependencies import (
     get_notification_service,
     get_user_service,
 )
-from app.users.models import UserRole
+from app.users.models import User, UserRole
 from tests.interview_wait_helpers import InterviewWaitStack, build_interview_wait_stack
 
 ORIGIN = "http://testserver"
@@ -31,24 +34,24 @@ def interview_stack() -> InterviewWaitStack:
 
 
 @pytest.fixture
-def interview_client(interview_stack: InterviewWaitStack):
+def interview_client(interview_stack: InterviewWaitStack) -> Iterator[TestClient]:
     dependencies = interview_stack.employees
     app.dependency_overrides[get_auth_service] = lambda: dependencies.auth.auth_service
     app.dependency_overrides[get_user_service] = lambda: dependencies.auth.user_service
     app.dependency_overrides[get_employee_service] = lambda: dependencies.service
-    app.dependency_overrides[get_notification_service] = (
-        lambda: interview_stack.notification_service
+    app.dependency_overrides[get_notification_service] = lambda: (
+        interview_stack.notification_service
     )
     app.dependency_overrides[get_interview_wait_service] = lambda: interview_stack.service
-    app.dependency_overrides[get_employee_interview_coordinator] = (
-        lambda: interview_stack.coordinator
+    app.dependency_overrides[get_employee_interview_coordinator] = lambda: (
+        interview_stack.coordinator
     )
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
 
 
-def _login(client: TestClient, user) -> None:
+def _login(client: TestClient, user: User) -> None:
     client.cookies.clear()
     response = client.post(
         "/api/v1/auth/login",
@@ -62,15 +65,18 @@ def _csrf_headers(client: TestClient) -> dict[str, str]:
     return {"Origin": ORIGIN, "X-CSRF-Token": client.cookies[CSRF_COOKIE]}
 
 
-def _create_via_api(client: TestClient, employee_id: str, *, message: str = "hello"):
-    return client.post(
-        "/api/v1/interview-waits",
-        headers=_csrf_headers(client),
-        json={
-            "employee_id": employee_id,
-            "message": message,
-            "operation_id": str(uuid4()),
-        },
+def _create_via_api(client: TestClient, employee_id: str, *, message: str = "hello") -> Response:
+    return cast(
+        Response,
+        client.post(
+            "/api/v1/interview-waits",
+            headers=_csrf_headers(client),
+            json={
+                "employee_id": employee_id,
+                "message": message,
+                "operation_id": str(uuid4()),
+            },
+        ),
     )
 
 
@@ -78,9 +84,7 @@ def test_api_scopes_lists_and_hides_another_requesters_wait(
     interview_client: TestClient,
     interview_stack: InterviewWaitStack,
 ) -> None:
-    employee = interview_stack.employees.create_employee(
-        user_id=interview_stack.employees.staff.id
-    )
+    employee = interview_stack.employees.create_employee(user_id=interview_stack.employees.staff.id)
     other_student = interview_stack.employees.auth.seed(
         UserRole.STUDENT, email="other-student@example.invalid"
     )
@@ -146,9 +150,7 @@ def test_return_notification_read_and_staff_complete_user_journey(
     assert notifications.json()["total"] == 1
     notification = notifications.json()["items"][0]
     assert notification["target_route"] == f"/my/interview-waits/{wait_id}"
-    assert interview_client.get("/api/v1/notifications/unread-count").json() == {
-        "unread_count": 1
-    }
+    assert interview_client.get("/api/v1/notifications/unread-count").json() == {"unread_count": 1}
 
     marked = interview_client.patch(
         f"/api/v1/notifications/{notification['id']}",
@@ -244,6 +246,4 @@ def test_expiration_is_explicit_admin_write_and_get_remains_read_only(
     )
     assert evaluated.status_code == 200
     assert evaluated.json()["expired_count"] == 1
-    assert interview_client.get(f"/api/v1/interview-waits/{wait_id}").json()[
-        "status"
-    ] == "EXPIRED"
+    assert interview_client.get(f"/api/v1/interview-waits/{wait_id}").json()["status"] == "EXPIRED"

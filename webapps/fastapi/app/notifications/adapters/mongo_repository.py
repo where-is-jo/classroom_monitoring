@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from math import isfinite
+
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
@@ -79,9 +80,7 @@ class MongoNotificationRepository:
             self._notifications.insert_one(self._notification_to_document(notification))
             return notification
         except DuplicateKeyError:
-            existing = self.get_notification_by_operation_id(
-                notification.created_operation_id
-            )
+            existing = self.get_notification_by_operation_id(notification.created_operation_id)
             if existing is None and notification.dedupe_key is not None:
                 existing = self.get_notification_by_dedupe_key(notification.dedupe_key)
             if existing is not None:
@@ -93,14 +92,10 @@ class MongoNotificationRepository:
     def get_notification(self, notification_id: str) -> Notification | None:
         return self._find_notification({"_id": notification_id})
 
-    def get_notification_by_operation_id(
-        self, operation_id: str
-    ) -> Notification | None:
+    def get_notification_by_operation_id(self, operation_id: str) -> Notification | None:
         return self._find_notification({"created_operation_id": operation_id})
 
-    def get_notification_by_dedupe_key(
-        self, dedupe_key: str
-    ) -> Notification | None:
+    def get_notification_by_dedupe_key(self, dedupe_key: str) -> Notification | None:
         return self._find_notification({"dedupe_key": dedupe_key})
 
     def _find_notification(self, query: MongoDocument) -> Notification | None:
@@ -209,28 +204,20 @@ class MongoNotificationRepository:
             existing = self.get_delivery_by_operation_id(delivery.operation_id)
             if existing is not None:
                 if existing.notification_id != delivery.notification_id:
-                    raise NotificationOperationConflictError()
+                    raise NotificationOperationConflictError() from None
                 return existing
-            existing = self.get_delivery_by_attempt(
-                delivery.notification_id, delivery.attempt
-            )
+            existing = self.get_delivery_by_attempt(delivery.notification_id, delivery.attempt)
             if existing is not None:
                 return existing
             raise RepositoryUnavailableError() from None
         except PyMongoError:
             raise RepositoryUnavailableError() from None
 
-    def get_delivery_by_operation_id(
-        self, operation_id: str
-    ) -> MockDelivery | None:
+    def get_delivery_by_operation_id(self, operation_id: str) -> MockDelivery | None:
         return self._find_delivery({"operation_id": operation_id})
 
-    def get_delivery_by_attempt(
-        self, notification_id: str, attempt: int
-    ) -> MockDelivery | None:
-        return self._find_delivery(
-            {"notification_id": notification_id, "attempt": attempt}
-        )
+    def get_delivery_by_attempt(self, notification_id: str, attempt: int) -> MockDelivery | None:
+        return self._find_delivery({"notification_id": notification_id, "attempt": attempt})
 
     def _find_delivery(self, query: MongoDocument) -> MockDelivery | None:
         try:
@@ -264,9 +251,7 @@ class MongoNotificationRepository:
             total=total,
         )
 
-    def list_notification_deliveries(
-        self, notification_id: str
-    ) -> list[MockDelivery]:
+    def list_notification_deliveries(self, notification_id: str) -> list[MockDelivery]:
         try:
             documents = list(
                 self._deliveries.find({"notification_id": notification_id}).sort(
@@ -384,20 +369,14 @@ def _aware_datetime(document: MongoDocument, field: str) -> datetime:
     return value
 
 
-def _optional_aware_datetime(
-    document: MongoDocument, field: str
-) -> datetime | None:
+def _optional_aware_datetime(document: MongoDocument, field: str) -> datetime | None:
     value = document.get(field)
-    if value is not None and (
-        not isinstance(value, datetime) or value.tzinfo is None
-    ):
+    if value is not None and (not isinstance(value, datetime) or value.tzinfo is None):
         raise TypeError(f"{field} must be an aware datetime or null")
     return value
 
 
-def _payload(
-    document: MongoDocument, field: str
-) -> dict[str, NotificationDataValue]:
+def _payload(document: MongoDocument, field: str) -> dict[str, NotificationDataValue]:
     value = document[field]
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
         raise TypeError(f"{field} must be a string-keyed mapping")

@@ -184,7 +184,7 @@ def users_page(
     actor: User = Depends(require_page_admin),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_users_page(
         request,
         actor=actor,
@@ -207,7 +207,7 @@ def create_user_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.create_user(actor, _create_command(form), ip_fingerprint=ip_fingerprint)
     except DomainError as exc:
@@ -232,7 +232,7 @@ def update_user_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.update_user(
             actor,
@@ -261,7 +261,7 @@ def deactivate_user_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.deactivate_user(
             actor,
@@ -294,7 +294,7 @@ def _render_users_page(
     offset: int = 0,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_users(
         actor,
@@ -326,9 +326,7 @@ def _render_users_page(
             "error": error,
             "create_operation_id": str(uuid4()),
             "row_operation_ids": {user.id: str(uuid4()) for user in page.items},
-            "row_deactivate_operation_ids": {
-                user.id: str(uuid4()) for user in page.items
-            },
+            "row_deactivate_operation_ids": {user.id: str(uuid4()) for user in page.items},
         },
         status_code=status_code,
     )

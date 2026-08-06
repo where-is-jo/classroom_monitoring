@@ -23,7 +23,7 @@ class UserResponse(BaseModel):
     version: int
 
     @classmethod
-    def from_user(cls, user: User) -> "UserResponse":
+    def from_user(cls, user: User) -> UserResponse:
         return cls(
             id=user.id,
             email=user.email,
@@ -51,7 +51,7 @@ class UserListResponse(BaseModel):
         *,
         limit: int,
         offset: int,
-    ) -> "UserListResponse":
+    ) -> UserListResponse:
         return cls(
             items=[UserResponse.from_user(user) for user in page.items],
             total=page.total,
@@ -77,11 +77,8 @@ class UpdateUserRequest(BaseModel):
     status: UserStatus | None = None
 
     @model_validator(mode="after")
-    def _at_least_one_change(self) -> "UpdateUserRequest":
-        if all(
-            value is None
-            for value in (self.email, self.name, self.role, self.status)
-        ):
+    def _at_least_one_change(self) -> UpdateUserRequest:
+        if all(value is None for value in (self.email, self.name, self.role, self.status)):
             raise ValueError("변경할 필드가 하나 이상 필요합니다.")
         return self
 

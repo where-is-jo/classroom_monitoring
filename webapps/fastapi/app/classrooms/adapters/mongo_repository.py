@@ -124,13 +124,11 @@ class MongoClassroomRepository:
             self._classrooms.insert_one(self._classroom_to_document(classroom))
             return classroom
         except DuplicateKeyError:
-            operation_owner = self.get_classroom_by_operation_id(
-                classroom.created_operation_id
-            )
+            operation_owner = self.get_classroom_by_operation_id(classroom.created_operation_id)
             if operation_owner is not None:
                 return operation_owner
             if self.get_classroom_by_code(classroom.code) is not None:
-                raise ClassroomDuplicateError()
+                raise ClassroomDuplicateError() from None
             raise RepositoryUnavailableError() from None
         except PyMongoError:
             raise RepositoryUnavailableError() from None
@@ -151,9 +149,7 @@ class MongoClassroomRepository:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._classroom_to_domain(document)
 
-    def list_classrooms(
-        self, *, include_inactive: bool, limit: int, offset: int
-    ) -> ClassroomPage:
+    def list_classrooms(self, *, include_inactive: bool, limit: int, offset: int) -> ClassroomPage:
         query: MongoDocument = {} if include_inactive else {"is_active": True}
         try:
             total = self._classrooms.count_documents(query)
@@ -170,9 +166,7 @@ class MongoClassroomRepository:
             total=total,
         )
 
-    def replace_classroom(
-        self, classroom: Classroom, *, expected_version: int
-    ) -> Classroom | None:
+    def replace_classroom(self, classroom: Classroom, *, expected_version: int) -> Classroom | None:
         try:
             document = self._classrooms.find_one_and_replace(
                 {"_id": classroom.id, "version": expected_version},
@@ -196,10 +190,8 @@ class MongoClassroomRepository:
             operation_owner = self.get_seat_by_operation_id(seat.created_operation_id)
             if operation_owner is not None:
                 return operation_owner
-            if self._find_seat(
-                {"classroom_id": seat.classroom_id, "code": seat.code}
-            ) is not None:
-                raise SeatDuplicateError()
+            if self._find_seat({"classroom_id": seat.classroom_id, "code": seat.code}) is not None:
+                raise SeatDuplicateError() from None
             raise RepositoryUnavailableError() from None
         except PyMongoError:
             raise RepositoryUnavailableError() from None
@@ -238,9 +230,7 @@ class MongoClassroomRepository:
             )
         except PyMongoError:
             raise RepositoryUnavailableError() from None
-        return SeatPage(
-            items=[self._seat_to_domain(item) for item in documents], total=total
-        )
+        return SeatPage(items=[self._seat_to_domain(item) for item in documents], total=total)
 
     def replace_seat(self, seat: Seat, *, expected_version: int) -> Seat | None:
         try:
@@ -272,9 +262,7 @@ class MongoClassroomRepository:
         except PyMongoError:
             raise RepositoryUnavailableError() from None
 
-    def get_observation_batch(
-        self, event_id: str
-    ) -> SeatObservationBatchRecord | None:
+    def get_observation_batch(self, event_id: str) -> SeatObservationBatchRecord | None:
         try:
             document = self._batches.find_one({"_id": event_id})
         except PyMongoError:
@@ -308,23 +296,17 @@ class MongoClassroomRepository:
         self, event_id: str, seat_id: str
     ) -> SeatOccupancyHistory | None:
         try:
-            document = self._history.find_one(
-                {"event_id": event_id, "seat_id": seat_id}
-            )
+            document = self._history.find_one({"event_id": event_id, "seat_id": seat_id})
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._history_to_domain(document)
 
-    def append_occupancy_history(
-        self, history: SeatOccupancyHistory
-    ) -> SeatOccupancyHistory:
+    def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory:
         try:
             self._history.insert_one(self._history_to_document(history))
             return history
         except DuplicateKeyError:
-            existing = self.get_history_by_event_and_seat(
-                history.event_id, history.seat_id
-            )
+            existing = self.get_history_by_event_and_seat(history.event_id, history.seat_id)
             if existing == history:
                 return existing
             raise SeatBatchConflictError() from None
@@ -488,9 +470,7 @@ class MongoClassroomRepository:
                 location=_string(document, "location"),
                 timezone=_string(document, "timezone"),
                 schedules=schedules,
-                after_hours_grace_minutes=_integer(
-                    document, "after_hours_grace_minutes"
-                ),
+                after_hours_grace_minutes=_integer(document, "after_hours_grace_minutes"),
                 is_active=_boolean(document, "is_active"),
                 created_at=_aware_datetime(document, "created_at"),
                 updated_at=_aware_datetime(document, "updated_at"),
@@ -699,9 +679,7 @@ class MongoClassroomRepository:
                 status=AfterHoursAlertStatus(_string(document, "status")),
                 detected_at=_aware_datetime(document, "detected_at"),
                 resolved_at=_optional_aware_datetime(document, "resolved_at"),
-                resolved_by_user_id=_optional_string(
-                    document, "resolved_by_user_id"
-                ),
+                resolved_by_user_id=_optional_string(document, "resolved_by_user_id"),
                 created_operation_id=_string(document, "created_operation_id"),
                 last_operation_id=_string(document, "last_operation_id"),
                 operation_ids=_string_tuple(document, "operation_ids"),
@@ -711,9 +689,7 @@ class MongoClassroomRepository:
             raise RepositoryDataError() from None
 
 
-def _same_batch(
-    left: SeatObservationBatchRecord, right: SeatObservationBatchRecord
-) -> bool:
+def _same_batch(left: SeatObservationBatchRecord, right: SeatObservationBatchRecord) -> bool:
     return (
         left.event_id == right.event_id
         and left.classroom_id == right.classroom_id
@@ -752,11 +728,7 @@ def _boolean(document: MongoDocument, field: str) -> bool:
 
 def _number(document: MongoDocument, field: str) -> float:
     value = document[field]
-    if (
-        not isinstance(value, (int, float))
-        or isinstance(value, bool)
-        or not isfinite(value)
-    ):
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(value):
         raise TypeError
     return float(value)
 
@@ -765,11 +737,7 @@ def _optional_number(document: MongoDocument, field: str) -> float | None:
     value = document.get(field)
     if value is None:
         return None
-    if (
-        not isinstance(value, (int, float))
-        or isinstance(value, bool)
-        or not isfinite(value)
-    ):
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(value):
         raise TypeError
     return float(value)
 
@@ -783,9 +751,7 @@ def _aware_datetime(document: MongoDocument, field: str) -> datetime:
 
 def _optional_aware_datetime(document: MongoDocument, field: str) -> datetime | None:
     value = document.get(field)
-    if value is not None and (
-        not isinstance(value, datetime) or value.tzinfo is None
-    ):
+    if value is not None and (not isinstance(value, datetime) or value.tzinfo is None):
         raise TypeError
     return value
 

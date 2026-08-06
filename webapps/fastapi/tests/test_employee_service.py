@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -19,8 +19,11 @@ from app.employees.errors import (
 )
 from app.employees.models import (
     ClearStatusOverrideCommand,
-    CreateEmployeeCommand,
+    Employee,
+    EmployeeObservation,
     EmployeeStatus,
+    EmployeeStatusEvaluation,
+    EmployeeStatusHistory,
     EvaluateEmployeeStatusesCommand,
     RecordEmployeeObservationCommand,
     SetStatusOverrideCommand,
@@ -42,9 +45,9 @@ def _observation(
     *,
     person_present: bool,
     phone_detected: bool = False,
-    observed_at=None,
+    observed_at: datetime | None = None,
     event_id: str | None = None,
-):
+) -> EmployeeObservation:
     return stack.service.record_mock_observation(
         stack.admin,
         RecordEmployeeObservationCommand(
@@ -58,7 +61,7 @@ def _observation(
     )
 
 
-def _evaluate(stack: EmployeeStack, operation_id: str | None = None):
+def _evaluate(stack: EmployeeStack, operation_id: str | None = None) -> EmployeeStatusEvaluation:
     return stack.service.evaluate_statuses(
         stack.admin,
         EvaluateEmployeeStatusesCommand(operation_id=operation_id or str(uuid4())),
@@ -67,9 +70,13 @@ def _evaluate(stack: EmployeeStack, operation_id: str | None = None):
 
 
 def _history_count(stack: EmployeeStack, employee_id: str) -> int:
-    return stack.service.list_status_history(
-        stack.admin, employee_id, limit=200, offset=0
-    ).total
+    return stack.service.list_status_history(stack.admin, employee_id, limit=200, offset=0).total
+
+
+def _stored_employee(stack: EmployeeStack, employee_id: str) -> Employee:
+    employee = stack.employees.get_employee(employee_id)
+    assert employee is not None
+    return employee
 
 
 def test_직원_CRUD와_STAFF_0대1_연결_제약(employee_stack: EmployeeStack) -> None:
@@ -82,13 +89,9 @@ def test_직원_CRUD와_STAFF_0대1_연결_제약(employee_stack: EmployeeStack)
     with pytest.raises(EmployeeNumberConflictError):
         employee_stack.create_employee(employee_no="emp-001")
     with pytest.raises(EmployeeUserLinkConflictError):
-        employee_stack.create_employee(
-            employee_no="EMP-002", user_id=employee_stack.staff.id
-        )
+        employee_stack.create_employee(employee_no="EMP-002", user_id=employee_stack.staff.id)
     with pytest.raises(InvalidEmployeeUserError):
-        employee_stack.create_employee(
-            employee_no="EMP-003", user_id=employee_stack.student.id
-        )
+        employee_stack.create_employee(employee_no="EMP-003", user_id=employee_stack.student.id)
 
     updated = employee_stack.service.update_employee(
         employee_stack.admin,
@@ -123,17 +126,15 @@ def test_사람과_통화_조합_및_동일_상태_noop(employee_stack: Employee
     working = _observation(employee_stack, employee.id, person_present=True)
     assert working.resulting_status == EmployeeStatus.WORKING
     assert working.status_changed
-    version_after_working = employee_stack.employees.get_employee(employee.id).version
+    version_after_working = _stored_employee(employee_stack, employee.id).version
 
     repeated = _observation(employee_stack, employee.id, person_present=True)
     assert repeated.resulting_status == EmployeeStatus.WORKING
     assert not repeated.status_changed
     assert _history_count(employee_stack, employee.id) == 2
-    assert employee_stack.employees.get_employee(employee.id).version == version_after_working + 1
+    assert _stored_employee(employee_stack, employee.id).version == version_after_working + 1
 
-    on_call = _observation(
-        employee_stack, employee.id, person_present=True, phone_detected=True
-    )
+    on_call = _observation(employee_stack, employee.id, person_present=True, phone_detected=True)
     assert on_call.resulting_status == EmployeeStatus.ON_CALL
     assert _history_count(employee_stack, employee.id) == 3
 
@@ -145,38 +146,46 @@ def test_2분59초_3분_59분59초_60분_경계(employee_stack: EmployeeStack) -
 
     employee_stack.auth.clock.value = seen_at + timedelta(minutes=2, seconds=59)
     assert _evaluate(employee_stack).changed_count == 0
-    assert employee_stack.employees.get_employee(employee.id).current_status.status == EmployeeStatus.WORKING
+    assert (
+        _stored_employee(employee_stack, employee.id).current_status.status
+        == EmployeeStatus.WORKING
+    )
 
     employee_stack.auth.clock.value = seen_at + timedelta(minutes=3)
     assert _evaluate(employee_stack).changed_count == 1
-    assert employee_stack.employees.get_employee(employee.id).current_status.status == EmployeeStatus.AWAY
+    assert (
+        _stored_employee(employee_stack, employee.id).current_status.status == EmployeeStatus.AWAY
+    )
 
     employee_stack.auth.clock.value = seen_at + timedelta(minutes=59, seconds=59)
     assert _evaluate(employee_stack).changed_count == 0
-    assert employee_stack.employees.get_employee(employee.id).current_status.status == EmployeeStatus.AWAY
+    assert (
+        _stored_employee(employee_stack, employee.id).current_status.status == EmployeeStatus.AWAY
+    )
 
     employee_stack.auth.clock.value = seen_at + timedelta(minutes=60)
     assert _evaluate(employee_stack).changed_count == 1
-    assert employee_stack.employees.get_employee(employee.id).current_status.status == EmployeeStatus.OFFSITE
+    assert (
+        _stored_employee(employee_stack, employee.id).current_status.status
+        == EmployeeStatus.OFFSITE
+    )
 
 
 def test_GET은_상태_version_history를_변경하지_않는다(employee_stack: EmployeeStack) -> None:
     employee = employee_stack.create_employee()
     _observation(employee_stack, employee.id, person_present=True)
-    before = employee_stack.employees.get_employee(employee.id)
+    before = _stored_employee(employee_stack, employee.id)
     before_history = _history_count(employee_stack, employee.id)
     employee_stack.auth.clock.advance(minutes=90)
 
     for _ in range(3):
-        employee_stack.service.list_employees(
-            employee_stack.staff, limit=50, offset=0
-        )
+        employee_stack.service.list_employees(employee_stack.staff, limit=50, offset=0)
         employee_stack.service.get_employee(employee_stack.staff, employee.id)
         employee_stack.service.list_status_history(
             employee_stack.staff, employee.id, limit=50, offset=0
         )
 
-    assert employee_stack.employees.get_employee(employee.id) == before
+    assert _stored_employee(employee_stack, employee.id) == before
     assert _history_count(employee_stack, employee.id) == before_history
 
 
@@ -185,7 +194,7 @@ def test_override_우선과_해제_즉시_재평가_사용자_여정(
 ) -> None:
     employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
     _observation(employee_stack, employee.id, person_present=True)
-    current = employee_stack.employees.get_employee(employee.id)
+    current = _stored_employee(employee_stack, employee.id)
 
     overridden = employee_stack.service.set_status_override(
         employee_stack.staff,
@@ -202,12 +211,10 @@ def test_override_우선과_해제_즉시_재평가_사용자_여정(
     assert overridden.current_status.status == EmployeeStatus.OFFSITE
 
     employee_stack.auth.clock.advance(seconds=30)
-    ignored = _observation(
-        employee_stack, employee.id, person_present=True, phone_detected=True
-    )
+    ignored = _observation(employee_stack, employee.id, person_present=True, phone_detected=True)
     assert ignored.resulting_status == EmployeeStatus.OFFSITE
     assert not ignored.status_changed
-    during_override = employee_stack.employees.get_employee(employee.id)
+    during_override = _stored_employee(employee_stack, employee.id)
     assert during_override.current_status.status == EmployeeStatus.OFFSITE
 
     cleared = employee_stack.service.clear_status_override(
@@ -229,7 +236,7 @@ def test_override_만료와_평가_operation_id_재시도는_이력을_중복하
 ) -> None:
     employee = employee_stack.create_employee()
     _observation(employee_stack, employee.id, person_present=True)
-    current = employee_stack.employees.get_employee(employee.id)
+    current = _stored_employee(employee_stack, employee.id)
     ends_at = employee_stack.auth.clock() + timedelta(seconds=30)
     employee_stack.service.set_status_override(
         employee_stack.admin,
@@ -252,7 +259,7 @@ def test_override_만료와_평가_operation_id_재시도는_이력을_중복하
 
     assert first.changed_count == second.changed_count == 1
     assert _history_count(employee_stack, employee.id) == history_after_first
-    restored = employee_stack.employees.get_employee(employee.id)
+    restored = _stored_employee(employee_stack, employee.id)
     assert restored.active_override is None
     assert restored.current_status.status == EmployeeStatus.WORKING
 
@@ -276,7 +283,7 @@ def test_동일_event_id와_오래된_관측은_최초_결과를_보존한다(
         person_present=True,
         phone_detected=True,
     )
-    version_before_old = employee_stack.employees.get_employee(employee.id).version
+    version_before_old = _stored_employee(employee_stack, employee.id).version
     old = _observation(
         employee_stack,
         employee.id,
@@ -293,9 +300,12 @@ def test_동일_event_id와_오래된_관측은_최초_결과를_보존한다(
 
     assert old.resulting_status == EmployeeStatus.ON_CALL
     assert not old.status_changed
-    assert employee_stack.employees.get_employee(employee.id).version == version_before_old
+    assert _stored_employee(employee_stack, employee.id).version == version_before_old
     assert duplicate == first
-    assert employee_stack.employees.get_employee(employee.id).current_status.status == EmployeeStatus.ON_CALL
+    assert (
+        _stored_employee(employee_stack, employee.id).current_status.status
+        == EmployeeStatus.ON_CALL
+    )
 
 
 class OneConflictRepository(InMemoryEmployeeRepository):
@@ -303,7 +313,13 @@ class OneConflictRepository(InMemoryEmployeeRepository):
         super().__init__()
         self.fail_next_replace = False
 
-    def replace_employee(self, employee, *, expected_version, history):
+    def replace_employee(
+        self,
+        employee: Employee,
+        *,
+        expected_version: int,
+        history: EmployeeStatusHistory | None,
+    ) -> Employee | None:
         if self.fail_next_replace:
             self.fail_next_replace = False
             return None
@@ -323,7 +339,13 @@ def test_mock_관측_CAS_충돌은_재시도하고_고갈되면_409() -> None:
     assert observation.resulting_status == EmployeeStatus.WORKING
 
     class AlwaysConflictRepository(OneConflictRepository):
-        def replace_employee(self, employee, *, expected_version, history):
+        def replace_employee(
+            self,
+            employee: Employee,
+            *,
+            expected_version: int,
+            history: EmployeeStatusHistory | None,
+        ) -> Employee | None:
             return None
 
     blocked = build_employee_stack(AlwaysConflictRepository())
@@ -334,9 +356,7 @@ def test_mock_관측_CAS_충돌은_재시도하고_고갈되면_409() -> None:
 
 def test_override_권한은_STAFF_본인과_ADMIN만_허용(employee_stack: EmployeeStack) -> None:
     employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
-    other_staff = employee_stack.auth.seed(
-        UserRole.STAFF, email="other-staff@example.invalid"
-    )
+    other_staff = employee_stack.auth.seed(UserRole.STAFF, email="other-staff@example.invalid")
     command = SetStatusOverrideCommand(
         employee_id=employee.id,
         status=EmployeeStatus.AWAY,

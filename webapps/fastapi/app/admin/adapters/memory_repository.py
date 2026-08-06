@@ -76,18 +76,15 @@ class InMemoryAdminDashboardRepository:
         ]
         classroom_ids = {item.id for item in active_classrooms}
         active_seats = [
-            item
-            for item in seats
-            if item.is_active and item.classroom_id in classroom_ids
+            item for item in seats if item.is_active and item.classroom_id in classroom_ids
         ]
         scoped_alerts = [
             item
             for item in alerts
-            if item.status == AfterHoursAlertStatus.OPEN
-            and item.classroom_id in classroom_ids
+            if item.status == AfterHoursAlertStatus.OPEN and item.classroom_id in classroom_ids
         ]
 
-        counts = {status: 0 for status in EmployeeStatus}
+        counts = dict.fromkeys(EmployeeStatus, 0)
         for employee in active_employees:
             counts[employee.current_status.status] += 1
         return DashboardSnapshot(
@@ -99,22 +96,16 @@ class InMemoryAdminDashboardRepository:
                 offsite=counts[EmployeeStatus.OFFSITE],
             ),
             interview_waits=InterviewWaitSummary(
-                waiting=sum(
-                    item.status == InterviewWaitStatus.WAITING for item in active_waits
-                ),
-                ready=sum(
-                    item.status == InterviewWaitStatus.READY for item in active_waits
-                ),
+                waiting=sum(item.status == InterviewWaitStatus.WAITING for item in active_waits),
+                ready=sum(item.status == InterviewWaitStatus.READY for item in active_waits),
             ),
             classrooms=ClassroomSummary(
                 active=len(active_classrooms),
                 occupied_seats=sum(
-                    item.current_occupancy.state == SeatOccupancy.OCCUPIED
-                    for item in active_seats
+                    item.current_occupancy.state == SeatOccupancy.OCCUPIED for item in active_seats
                 ),
                 unknown_seats=sum(
-                    item.current_occupancy.state == SeatOccupancy.UNKNOWN
-                    for item in active_seats
+                    item.current_occupancy.state == SeatOccupancy.UNKNOWN for item in active_seats
                 ),
             ),
             alerts=AlertSummary(open_after_hours=len(scoped_alerts)),
@@ -205,9 +196,7 @@ class InMemoryAdminDashboardRepository:
             )
         items = [item for item in items if from_time <= item.occurred_at < to_time]
         items.sort(key=lambda item: (-item.occurred_at.timestamp(), item.id))
-        return DashboardActivityPage(
-            items=items[offset : offset + limit], total=len(items)
-        )
+        return DashboardActivityPage(items=items[offset : offset + limit], total=len(items))
 
     def list_audit_logs(
         self,

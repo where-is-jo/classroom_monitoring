@@ -21,9 +21,7 @@ class StatusSource(StrEnum):
     SYSTEM = "SYSTEM"
 
 
-MANUAL_OVERRIDE_STATUSES = frozenset(
-    {EmployeeStatus.AWAY, EmployeeStatus.OFFSITE}
-)
+MANUAL_OVERRIDE_STATUSES = frozenset({EmployeeStatus.AWAY, EmployeeStatus.OFFSITE})
 
 
 @dataclass(frozen=True)
