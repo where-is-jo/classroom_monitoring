@@ -1,0 +1,1 @@
+"""Classroom repository adapters."""

@@ -160,3 +160,20 @@ def test_interview_wait_expiration_hours_has_safe_bounds() -> None:
             database_mode="memory",
             interview_wait_expires_after_hours=169,
         )
+
+
+def test_seat_occupancy_confidence_threshold_is_bounded() -> None:
+    assert Settings(
+        _env_file=None,
+        app_env="local",
+        database_mode="memory",
+        seat_occupancy_confidence_threshold=0.6,
+    ).seat_occupancy_confidence_threshold == 0.6
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            seat_occupancy_confidence_threshold=1.01,
+        )

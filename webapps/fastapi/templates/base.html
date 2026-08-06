@@ -16,6 +16,7 @@
         <a href="/employees">직원 상태</a>
       {% endif %}
       {% if current_user %}
+        <a href="/classrooms">강의실 좌석</a>
         <a href="/notifications">
           알림
           {% set unread_count = request.state.notification_unread_count | default(0) %}
@@ -28,6 +29,8 @@
       {% endif %}
       {% if can_manage_employees %}
         <a href="/admin/employees">직원 관리</a>
+        <a href="/admin/classrooms">강의실 관리</a>
+        <a href="/admin/alerts">마감 후 경고</a>
       {% endif %}
       {% if show_employee_dev_tools %}
         <a href="/admin/dev-tools">개발 도구</a>

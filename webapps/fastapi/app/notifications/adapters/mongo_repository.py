@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from math import isfinite
-from typing import Any
-
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 

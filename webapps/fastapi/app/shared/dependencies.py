@@ -16,6 +16,10 @@ from ..auth.adapters.memory_repository import InMemoryAuthRepository
 from ..auth.adapters.mongo_repository import MongoAuthRepository
 from ..auth.ports import AuthRepository
 from ..auth.service import AuthService, LoginRateLimiter
+from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
+from ..classrooms.ports import ClassroomRepository
+from ..classrooms.service import ClassroomService
 from ..events.adapters.memory_repository import InMemoryEventRepository
 from ..events.adapters.mongo_repository import MongoEventRepository
 from ..events.ports import EventRepository
@@ -96,6 +100,11 @@ def _interview_wait_repository() -> InMemoryInterviewWaitRepository:
 
 
 @lru_cache
+def _classroom_repository() -> InMemoryClassroomRepository:
+    return InMemoryClassroomRepository()
+
+
+@lru_cache
 def _mongo_client() -> MongoClient[MongoDocument]:
     settings = get_settings()
     if settings.database_url is None:
@@ -149,6 +158,11 @@ def _mongo_interview_wait_repository() -> MongoInterviewWaitRepository:
     return MongoInterviewWaitRepository(_mongo_database())
 
 
+@lru_cache
+def _mongo_classroom_repository() -> MongoClassroomRepository:
+    return MongoClassroomRepository(_mongo_database())
+
+
 def get_event_repository(settings: Settings = Depends(get_settings)) -> EventRepository:
     if settings.database_mode == "memory":
         return _event_repository()
@@ -195,6 +209,14 @@ def get_interview_wait_repository(
     if settings.database_mode == "memory":
         return _interview_wait_repository()
     return _mongo_interview_wait_repository()
+
+
+def get_classroom_repository(
+    settings: Settings = Depends(get_settings),
+) -> ClassroomRepository:
+    if settings.database_mode == "memory":
+        return _classroom_repository()
+    return _mongo_classroom_repository()
 
 
 @lru_cache
@@ -340,6 +362,23 @@ def get_employee_interview_coordinator(
     return EmployeeInterviewCoordinator(employee_service, interview_wait_service)
 
 
+def get_classroom_service(
+    repository: ClassroomRepository = Depends(get_classroom_repository),
+    notification_service: NotificationService = Depends(get_notification_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    settings: Settings = Depends(get_settings),
+) -> ClassroomService:
+    return ClassroomService(
+        repository,
+        notification_service,
+        audit_service,
+        occupancy_confidence_threshold=(
+            settings.seat_occupancy_confidence_threshold
+        ),
+        clock=utc_now,
+    )
+
+
 def initialize_data_store() -> None:
     """시작 시 연결·index를 검증하고 opt-in 가상 사용자를 seed한다."""
     settings = get_settings()
@@ -356,6 +395,7 @@ def initialize_data_store() -> None:
                 MongoEmployeeRepository.ensure_indexes,
                 MongoNotificationRepository.ensure_indexes,
                 MongoInterviewWaitRepository.ensure_indexes,
+                MongoClassroomRepository.ensure_indexes,
             ],
         )
     if settings.auth_seed_enabled:
@@ -394,6 +434,7 @@ def close_data_store() -> None:
     _mongo_employee_repository.cache_clear()
     _mongo_notification_repository.cache_clear()
     _mongo_interview_wait_repository.cache_clear()
+    _mongo_classroom_repository.cache_clear()
     _mongo_auth_repository.cache_clear()
     _mongo_user_repository.cache_clear()
     _mongo_event_repository.cache_clear()

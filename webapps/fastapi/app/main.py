@@ -21,6 +21,16 @@ from .auth.dependencies import login_redirect
 from .auth.errors import PageAuthenticationRequired
 from .auth.router import api_router as auth_api_router
 from .auth.router import page_router as auth_page_router
+from .classrooms.router import admin_page_router as classrooms_admin_page_router
+from .classrooms.router import alert_api_router as classroom_alert_api_router
+from .classrooms.router import alert_page_router as classroom_alert_page_router
+from .classrooms.router import classroom_api_router
+from .classrooms.router import development_api_router as classroom_development_api_router
+from .classrooms.router import (
+    development_page_router as classroom_development_page_router,
+)
+from .classrooms.router import page_router as classrooms_page_router
+from .classrooms.router import seat_api_router
 from .events.router import api_router as events_api_router
 from .events.router import page_router as events_page_router
 from .employees.router import admin_page_router as employees_admin_page_router
@@ -144,8 +154,27 @@ def include_employee_routers(application: FastAPI, settings: Settings) -> None:
         )
 
 
+def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
+    """강의실 기능은 항상, 구조화 mock 좌석 입력은 허용 환경에만 등록한다."""
+    application.include_router(classrooms_page_router)
+    application.include_router(classrooms_admin_page_router)
+    application.include_router(classroom_alert_page_router)
+    application.include_router(classroom_api_router, responses=_AUTH_ERROR_RESPONSES)
+    application.include_router(seat_api_router, responses=_AUTH_ERROR_RESPONSES)
+    application.include_router(
+        classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES
+    )
+    if settings.mock_inputs_enabled:
+        application.include_router(classroom_development_page_router)
+        application.include_router(
+            classroom_development_api_router,
+            responses=_AUTH_ERROR_RESPONSES,
+        )
+
+
 include_employee_routers(app, get_settings())
 include_notification_routers(app, get_settings())
+include_classroom_routers(app, get_settings())
 app.include_router(interview_waits_my_page_router)
 app.include_router(interview_waits_staff_page_router)
 app.include_router(interview_waits_api_router, responses=_AUTH_ERROR_RESPONSES)

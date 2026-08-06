@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     ] = "success"
     notification_mock_delivery_max_attempts: int = Field(default=3, ge=1, le=10)
     interview_wait_expires_after_hours: int = Field(default=24, ge=1, le=168)
+    seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
 
     # 신뢰도 판정 임계값. 화면과 API가 아니라 서비스 계층에서 적용한다.
     high_confidence_threshold: float = Field(default=0.80, ge=0, le=1)

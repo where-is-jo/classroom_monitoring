@@ -7,6 +7,7 @@
   <p class="summary">사람이 작성한 구조화 값만 입력합니다. 이 화면과 API는 mock 입력이 허용된 환경에만 등록됩니다.</p>
   {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
   {% if success %}<div class="alert alert--success" role="status">{{ success }}</div>{% endif %}
+  {% if seat_result %}<div class="alert alert--success" role="status">{{ seat_result }}</div>{% endif %}
 
   {% if employees %}
     <form method="post" action="/admin/dev-tools" class="form-grid" data-submit-state>
@@ -28,4 +29,6 @@
   {% else %}
     <div class="empty" role="status">mock 관측을 입력할 활성 직원이 없습니다.</div>
   {% endif %}
+
+  {% include "admin/dev_tools/seat_observations.html" %}
 {% endblock %}

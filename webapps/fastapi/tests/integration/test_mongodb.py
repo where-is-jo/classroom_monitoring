@@ -12,6 +12,21 @@ from app.audit.adapters.mongo_repository import MongoAuditRepository
 from app.audit.models import AuditLog
 from app.auth.adapters.mongo_repository import MongoAuthRepository
 from app.auth.models import RefreshRotationStatus, RefreshToken
+from app.classrooms.adapters.mongo_repository import MongoClassroomRepository
+from app.classrooms.models import (
+    AfterHoursAlert,
+    AfterHoursAlertStatus,
+    Classroom,
+    ClassroomSchedule,
+    ObservationBatchStatus,
+    OccupancySource,
+    Seat,
+    SeatCurrentOccupancy,
+    SeatObservation,
+    SeatObservationBatchRecord,
+    SeatOccupancy,
+    SeatOccupancyHistory,
+)
 from app.events.adapters.mongo_repository import MongoEventRepository
 from app.interview_waits.adapters.mongo_repository import MongoInterviewWaitRepository
 from app.interview_waits.models import (
@@ -50,6 +65,7 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         MongoEmployeeRepository.ensure_indexes,
         MongoNotificationRepository.ensure_indexes,
         MongoInterviewWaitRepository.ensure_indexes,
+        MongoClassroomRepository.ensure_indexes,
     ]
     initialize_indexes(mongodb_database, initializers)
     initialize_indexes(mongodb_database, initializers)
@@ -88,6 +104,167 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         "interview_wait_history_operation_unique"
         in mongodb_database["interview_wait_history"].index_information()
     )
+    assert "classrooms_code_unique" in mongodb_database["classrooms"].index_information()
+    assert (
+        "seats_classroom_code_unique"
+        in mongodb_database["seats"].index_information()
+    )
+    assert (
+        "after_hours_alerts_dedupe_unique"
+        in mongodb_database["after_hours_alerts"].index_information()
+    )
+
+
+def test_classroom_seat_history_batch_and_alert_mongo_contract(
+    mongodb_database,
+) -> None:
+    initialize_indexes(mongodb_database, [MongoClassroomRepository.ensure_indexes])
+    current_time = datetime.now(UTC)
+    now = current_time.replace(microsecond=(current_time.microsecond // 1000) * 1000)
+    suffix = str(uuid4())
+    classroom_operation = f"classroom-create-{suffix}"
+    classroom = Classroom(
+        id=f"classroom-{suffix}",
+        code=f"ROOM-{suffix}",
+        name="Integration Classroom",
+        location="Building A",
+        timezone="Asia/Seoul",
+        schedules=(ClassroomSchedule(2, datetime.min.time(), datetime.max.time()),),
+        after_hours_grace_minutes=10,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+        version=0,
+        created_operation_id=classroom_operation,
+        last_operation_id=classroom_operation,
+        operation_ids=(classroom_operation,),
+    )
+    seat_operation = f"seat-create-{suffix}"
+    seat = Seat(
+        id=f"seat-{suffix}",
+        classroom_id=classroom.id,
+        code="A-1",
+        label="Integration Seat",
+        geometry=None,
+        is_active=True,
+        current_occupancy=SeatCurrentOccupancy(
+            state=SeatOccupancy.UNKNOWN,
+            source=OccupancySource.SYSTEM,
+            confidence=None,
+            observed_at=None,
+            event_id=None,
+        ),
+        created_at=now,
+        updated_at=now,
+        version=0,
+        created_operation_id=seat_operation,
+        last_operation_id=seat_operation,
+        operation_ids=(seat_operation,),
+    )
+    event_id = f"seat-event-{suffix}"
+    batch = SeatObservationBatchRecord(
+        event_id=event_id,
+        classroom_id=classroom.id,
+        actor_user_id="admin-id",
+        observed_at=now,
+        observations=(SeatObservation(seat.id, True, 0.9),),
+        status=ObservationBatchStatus.PROCESSING,
+        processed_count=0,
+        changed_count=0,
+        alert_count=0,
+        received_at=now,
+        completed_at=None,
+    )
+    history = SeatOccupancyHistory(
+        id=f"seat-history-{suffix}",
+        seat_id=seat.id,
+        classroom_id=classroom.id,
+        event_id=event_id,
+        from_state=SeatOccupancy.UNKNOWN,
+        to_state=SeatOccupancy.OCCUPIED,
+        occupied=True,
+        confidence=0.9,
+        observed_at=now,
+        received_at=now,
+        applied_to_current=True,
+        state_changed=True,
+    )
+    alert_operation = f"after-hours-alert-{suffix}"
+    alert = AfterHoursAlert(
+        id=f"after-hours-alert-{suffix}",
+        dedupe_key=f"{classroom.id}:{seat.id}:{now.date()}:after_hours",
+        classroom_id=classroom.id,
+        seat_id=seat.id,
+        business_date=now.date(),
+        status=AfterHoursAlertStatus.OPEN,
+        detected_at=now,
+        resolved_at=None,
+        resolved_by_user_id=None,
+        created_operation_id=alert_operation,
+        last_operation_id=alert_operation,
+        operation_ids=(alert_operation,),
+        version=0,
+    )
+    repository = MongoClassroomRepository(mongodb_database)
+    try:
+        assert repository.create_classroom(classroom) == classroom
+        assert repository.create_classroom(classroom) == classroom
+        assert repository.create_seat(seat) == seat
+        assert repository.create_seat(seat) == seat
+        assert repository.claim_observation_batch(batch) == batch
+        assert repository.claim_observation_batch(batch) == batch
+        assert repository.append_occupancy_history(history) == history
+        assert repository.append_occupancy_history(history) == history
+
+        observation_operation = f"seat-observation:{event_id}:{seat.id}"
+        occupied = replace(
+            seat,
+            current_occupancy=SeatCurrentOccupancy(
+                SeatOccupancy.OCCUPIED,
+                OccupancySource.MOCK,
+                0.9,
+                now,
+                event_id,
+            ),
+            version=1,
+            last_operation_id=observation_operation,
+            operation_ids=(*seat.operation_ids, observation_operation),
+        )
+        assert repository.replace_seat(occupied, expected_version=0) == occupied
+        completed = replace(
+            batch,
+            status=ObservationBatchStatus.COMPLETED,
+            processed_count=1,
+            changed_count=1,
+            alert_count=1,
+            completed_at=now,
+        )
+        assert repository.complete_observation_batch(completed) == completed
+        assert repository.create_alert(alert) == (alert, True)
+        assert repository.create_alert(alert) == (alert, False)
+        assert repository.list_occupancy_history(
+            classroom.id,
+            seat_id=seat.id,
+            from_time=None,
+            to_time=None,
+            limit=50,
+            offset=0,
+        ).total == 1
+        assert repository.list_alerts(
+            status=AfterHoursAlertStatus.OPEN,
+            classroom_id=classroom.id,
+            business_date=alert.business_date,
+            limit=50,
+            offset=0,
+        ).total == 1
+    finally:
+        mongodb_database["after_hours_alerts"].delete_one({"_id": alert.id})
+        mongodb_database["seat_occupancy_history"].delete_many(
+            {"classroom_id": classroom.id}
+        )
+        mongodb_database["seat_observation_batches"].delete_one({"_id": event_id})
+        mongodb_database["seats"].delete_many({"classroom_id": classroom.id})
+        mongodb_database["classrooms"].delete_one({"_id": classroom.id})
 
 
 def test_interview_wait_mongo_adapter_contract(mongodb_database) -> None:

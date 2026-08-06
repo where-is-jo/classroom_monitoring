@@ -620,12 +620,17 @@ def evaluate_employee_statuses_page(
 @development_page_router.get("")
 def development_tools_page(
     request: Request,
+    seat_result: str | None = None,
     actor: User = Depends(require_page_admin),
     service: EmployeeService = Depends(get_employee_service),
     settings: Settings = Depends(get_settings),
 ):
     return _render_development_tools(
-        request, actor=actor, service=service, settings=settings
+        request,
+        actor=actor,
+        service=service,
+        settings=settings,
+        seat_result=seat_result,
     )
 
 
@@ -765,6 +770,7 @@ def _render_development_tools(
     settings: Settings,
     error: str | None = None,
     success: str | None = None,
+    seat_result: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ):
     page = service.list_employees(
@@ -784,6 +790,7 @@ def _render_development_tools(
             observed_at=datetime.now(UTC).isoformat(),
             error=error,
             success=success,
+            seat_result=seat_result,
             show_employee_dev_tools=True,
         ),
         status_code=status_code,

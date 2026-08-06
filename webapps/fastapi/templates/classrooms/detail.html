@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}{{ summary.classroom.name }} 좌석 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <p><a href="/classrooms">← 강의실 목록</a></p>
+  <div class="section-heading">
+    <div><h1>{{ summary.classroom.name }}</h1><p>{{ summary.classroom.location }} · {{ summary.classroom.timezone }}</p></div>
+    <a class="button-link" href="/classrooms/{{ summary.classroom.id }}">새로고침</a>
+  </div>
+  <section class="panel">
+    <h2>현재 요약</h2>
+    <p><strong>{{ '운영 중' if summary.is_operating else '운영 시간 외' }}</strong> · 점유 {{ summary.occupied_count }}/{{ summary.total }} · 빈 좌석 {{ summary.vacant_count }} · UNKNOWN {{ summary.unknown_count }}</p>
+    <p class="muted">마지막 관측 {{ summary.last_observed_at|kst_datetime }}</p>
+  </section>
+
+  {% set geometry_seats = summary.seats | selectattr('geometry') | list %}
+  {% set grid_seats = summary.seats | rejectattr('geometry') | list %}
+  {% if geometry_seats %}
+    <section class="panel"><h2>정규화 배치 좌석</h2>
+      <div class="seat-map" style="position:relative;min-height:28rem;border:1px solid currentColor" aria-label="정규화 좌석 배치">
+        {% for seat in geometry_seats %}
+          <div class="seat-card seat-card--{{ seat.current_occupancy.state.value|lower }}" style="position:absolute;left:{{ seat.geometry.x*100 }}%;top:{{ seat.geometry.y*100 }}%;width:{{ seat.geometry.width*100 }}%;height:{{ seat.geometry.height*100 }}%;border:1px solid currentColor;padding:.25rem;overflow:auto">
+            <strong>{{ seat.label }}</strong><br>
+            <span aria-label="좌석 상태 {{ seat.current_occupancy.state.value }}">{% if seat.current_occupancy.state.value == 'OCCUPIED' %}●{% elif seat.current_occupancy.state.value == 'VACANT' %}○{% else %}?{% endif %} {{ seat.current_occupancy.state.value }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+  <section class="panel"><h2>{{ 'code 순 좌석' if grid_seats else '기타 좌석' }}</h2>
+    {% if grid_seats %}<ul class="card-list" aria-label="좌석 목록">
+      {% for seat in grid_seats %}<li class="user-card"><h3>{{ seat.label }} <span class="muted">{{ seat.code }}</span></h3><p><strong>{% if seat.current_occupancy.state.value == 'OCCUPIED' %}●{% elif seat.current_occupancy.state.value == 'VACANT' %}○{% else %}?{% endif %} {{ seat.current_occupancy.state.value }}</strong></p><p class="muted">관측 {{ seat.current_occupancy.observed_at|kst_datetime }} · confidence {{ seat.current_occupancy.confidence if seat.current_occupancy.confidence is not none else '-' }}</p></li>{% endfor %}
+    </ul>{% else %}<div class="empty" role="status">geometry 없는 좌석이 없습니다.</div>{% endif %}
+  </section>
+{% endblock %}

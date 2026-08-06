@@ -2,9 +2,9 @@
 
 FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
 
-> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림, 면담 대기 동작**. 기존 이벤트 화면/API는
+> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림, 면담 대기, 강의실 좌석 동작**. 기존 이벤트 화면/API는
 > 공개 범위를 유지한다. 직원 프로필, 저장된 현재 상태와 이력, 수동 override, 명시적 시간
-> 정책 평가, 사용자별 알림함과 직원 복귀 연계 면담 대기를 제공하며 local 인메모리 mode와 MongoDB mode가 같은
+> 정책 평가, 사용자별 알림함, 직원 복귀 연계 면담 대기와 mock 좌석 점유·마감 후 경고를 제공하며 local 인메모리 mode와 MongoDB mode가 같은
 > 저장소 계약을 구현한다. 개발환경에서는 외부 네트워크 없는 mock delivery 결과를 기록한다.
 
 ## 실행 방법
@@ -47,6 +47,10 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET/POST /my/interview-waits` | 본인 면담 대기 목록·신청 화면 |
 | `GET /my/interview-waits/{wait_id}` | 본인 또는 권한 있는 담당자의 면담 대기 상세·이력 화면 |
 | `GET /staff/interview-waits` | 연결된 STAFF 대상 면담 대기 화면 |
+| `GET /classrooms` | 강의실별 점유·UNKNOWN·운영 여부 현황 |
+| `GET /classrooms/{classroom_id}` | geometry 배치 또는 code 순 좌석 상세 |
+| `GET /admin/classrooms` | `ADMIN` 이상 강의실·일정·좌석 관리 화면 |
+| `GET /admin/alerts` | `ADMIN` 이상 마감 후 경고·해결 화면 |
 | `GET /admin/mock-deliveries` | mock 입력 허용 환경의 정제된 delivery 기록·명시적 재시도 화면 |
 | `POST /api/v1/auth/login` | access/refresh `HttpOnly` cookie 발급 |
 | `POST /api/v1/auth/refresh` | refresh rotation |
@@ -68,6 +72,15 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET/POST /api/v1/interview-waits` | 역할 범위 면담 대기 목록·신청 |
 | `GET/PATCH /api/v1/interview-waits/{wait_id}` | 권한 범위 상세·취소·완료 |
 | `POST /api/v1/interview-wait-expirations` | 모든 환경의 `ADMIN` 이상 명시적 만료 평가 |
+| `GET/POST /api/v1/classrooms` | 로그인 목록·`ADMIN` 이상 강의실 생성 |
+| `GET/PATCH/DELETE /api/v1/classrooms/{classroom_id}` | 조회·`ADMIN` 이상 수정·비활성화 |
+| `GET/PUT /api/v1/classrooms/{classroom_id}/schedules` | 조회·`ADMIN` 이상 요일 일정 전체 교체 |
+| `GET/POST /api/v1/classrooms/{classroom_id}/seats` | 좌석 조회·`ADMIN` 이상 생성 |
+| `PATCH/DELETE /api/v1/seats/{seat_id}` | `ADMIN` 이상 좌석 수정·비활성화 |
+| `GET /api/v1/classrooms/{classroom_id}/occupancy` | 현재 좌석과 점유 summary |
+| `GET /api/v1/classrooms/{classroom_id}/occupancy-history` | `ADMIN` 이상 기간·좌석 이력 |
+| `POST /api/v1/mock-seat-observations` | mock 입력 허용 환경의 구조화 좌석 batch |
+| `GET/PATCH /api/v1/after-hours-alerts[/{alert_id}]` | `ADMIN` 이상 경고 목록·해결 |
 | `GET /api/v1/admin/mock-deliveries` | mock 입력 허용 환경의 `ADMIN` 이상 delivery 기록 |
 | `POST /api/v1/admin/mock-delivery-attempts` | 실패한 mock delivery의 명시적 멱등 재시도 |
 | `GET /docs` | 자동 생성 API 문서 |
@@ -120,6 +133,7 @@ app/
 ├─ employees/              직원 CRUD, 상태 정책, override, memory/MongoDB 저장소
 ├─ notifications/          사용자별 인앱 알림, 읽음, dedupe, mock delivery 저장소
 ├─ interview_waits/        면담 대기 상태·이력, 직원 복귀 연계, memory/MongoDB 저장소
+├─ classrooms/             강의실·일정·좌석 점유·마감 후 경고, memory/MongoDB 저장소
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
@@ -148,6 +162,9 @@ templates/                 Jinja2 템플릿
 ├─ admin/mock_deliveries/  환경별로 등록되는 정제된 mock delivery 화면
 ├─ notifications/          사용자별 알림함
 ├─ interview_waits/        본인·STAFF 면담 대기 목록과 상세
+├─ classrooms/             강의실 목록과 geometry/code 순 좌석 상세
+├─ admin/classrooms/       강의실·요일 일정·좌석 숫자 geometry 관리
+├─ admin/alerts/           OPEN 우선 마감 후 경고와 해결 action
 ├─ events/                 기능별 템플릿
 └─ errors/                 오류 화면
 
@@ -235,6 +252,7 @@ boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 �
 | `NOTIFICATION_MOCK_DELIVERY_MODE` | mock 입력 허용 환경의 기록 결과 | `success` / `fail_once` / `always_fail` |
 | `NOTIFICATION_MOCK_DELIVERY_MAX_ATTEMPTS` | 명시적 mock delivery 최대 시도 | 기본 3, 최대 10 |
 | `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS` | 면담 대기 만료 기준 | 기본 24시간, 1~168시간 |
+| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 좌석 UNKNOWN 판정 confidence 기준 | 기본 0.6, 0~1 |
 | `JWT_ACCESS_SECRET` | access JWT 서명 | 필수 비밀값, 32자 이상, 기본값 없음 |
 | `JWT_REFRESH_SECRET` | refresh JWT 서명 | 필수 비밀값, 32자 이상, access와 분리 |
 | `CSRF_SECRET` | CSRF token 서명 | 필수 비밀값, 32자 이상 |
@@ -255,7 +273,8 @@ boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 �
 
 MongoDB mode는 시작 시 ping한 뒤 events, users, refresh_tokens, audit_logs, employees,
 employee_status_history, employee_observations, notifications, notification_deliveries,
-interview_waits, interview_wait_history의
+interview_waits, interview_wait_history, classrooms, seats, seat_observation_batches,
+seat_occupancy_history, after_hours_alerts의
 고정 이름 index를 초기화한다. email, employee_no, STAFF 연결, refresh hash,
 operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로 중복을 막고
 사용자·직원 갱신은 compare-and-set으로 경합을 감지한다. multi-document transaction을
@@ -277,6 +296,13 @@ operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로
 알림을 한 번 생성한다. 목록·상세 GET은 상태와 이력을 변경하지 않고, 만료는 관리자 전용
 `POST /api/v1/interview-wait-expirations` 또는 관련 상태 변경 요청에서만 평가한다. 요청자와
 관리자는 활성 대기를 취소할 수 있고, `READY` 대기는 요청자·관리자·연결된 STAFF가 완료할 수 있다.
+
+강의실 일정은 IANA timezone과 월요일 0~일요일 6의 당일 운영시간으로 저장한다. 좌석 geometry는
+0~1 범위의 `x/y/width/height` 숫자만 허용하고 도면이나 영상은 저장하지 않는다. 구조화 mock batch는
+좌석 소속·활성을 전부 검증한 뒤 처리하며 event_id 재전송은 멱등하다. confidence가 설정 기준보다
+낮으면 `UNKNOWN`, 이상이면 boolean에 따라 `OCCUPIED/VACANT`로 판정하고 오래된 관측은 current를
+되돌리지 않는다. 마감+grace 이후 실제 `OCCUPIED` 전이만 영업일별 경고·관리자 알림을 한 번 만들며,
+해결된 같은 영업일 경고는 다시 열지 않는다.
 
 ### 가상 사용자 seed
 
@@ -306,6 +332,8 @@ operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로
   mock delivery 실패·최대 시도·동일 attempt 방지와 production 라우터 미등록을 확인한다.
 - 면담 대기 테스트는 중복 방지, 상태 전이표, 역할별 조회·변경, 명시적 만료, 직원 복귀 연계,
   알림 dedupe와 신청→복귀→알림 읽음→완료 사용자 여정을 확인한다.
+- 강의실 테스트는 일정·timezone·geometry 검증, confidence 0.599/0.6, 오래된 관측 보호,
+  batch 멱등·전체 검증, 마감·grace 경계, 경고 dedupe·해결과 좌석→경고→알림 사용자 여정을 확인한다.
 - MongoDB 연결·index는 `mongodb` marker 통합 테스트로 분리한다.
 - 계약 변경 시 기존 응답 스키마 테스트를 함께 갱신한다.
 
