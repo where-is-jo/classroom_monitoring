@@ -90,6 +90,20 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `POST /api/v1/admin/mock-delivery-attempts` | 실패한 mock delivery의 명시적 멱등 재시도 |
 | `GET /docs` | 자동 생성 API 문서 |
 | `GET /openapi.json` | OpenAPI JSON |
+| `GET /docs/api-spec` | 구현 전 API 설계 명세 Swagger UI |
+| `GET /api-spec.json` | 구현 전 API 설계 명세 OpenAPI JSON |
+
+### 구현 전 API 설계 명세
+
+`individual_tasks/API명세서.md`를 OpenAPI 3.1로 옮긴 문서를 `api-spec/openapi.json`에 두고
+`GET /docs/api-spec`으로 제공한다. 스마트 오피스 직원 상태 모니터링(대시보드 요약, 직원 상태,
+좌석·카메라, 탐지 기록, 내부 추론 연동)의 **아직 구현되지 않은** 계약이다.
+
+- 위 표의 API와 `/docs`는 화면 mockup 용도이며 이 설계 명세와 별개다. 둘을 섞지 않으려고
+  경로를 나눴고, 설계 명세는 `/openapi.json`에 넣지 않는다. 경로가 겹치더라도
+  명세 쪽 정의를 목표 계약으로 본다.
+- 구현되지 않았으므로 이 화면에서는 요청 실행(Try it out)을 끈다.
+- 구현이 끝나면 자동 생성 OpenAPI가 정본이 되고 이 명세 문서는 폐기한다.
 
 ### 테스트
 
