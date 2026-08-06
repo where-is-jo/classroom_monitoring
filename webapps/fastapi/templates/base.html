@@ -21,6 +21,10 @@
           {% set unread_count = request.state.notification_unread_count | default(0) %}
           {% if unread_count %}<span class="badge" aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>{% endif %}
         </a>
+        <a href="/my/interview-waits">내 면담 대기</a>
+        {% if request.state.can_view_staff_waits | default(false) %}
+          <a href="/staff/interview-waits">직원 대상 대기</a>
+        {% endif %}
       {% endif %}
       {% if can_manage_employees %}
         <a href="/admin/employees">직원 관리</a>

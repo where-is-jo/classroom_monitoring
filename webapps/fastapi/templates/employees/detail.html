@@ -22,6 +22,26 @@
     </dl>
   </section>
 
+  <section id="interview-wait" class="panel" aria-labelledby="interview-wait-title">
+    <h2 id="interview-wait-title">면담 대기</h2>
+    {% if employee.is_active %}
+      <p class="muted">
+        {% if employee_is_present %}현재 재석 중이므로 등록 즉시 READY가 됩니다.{% else %}현재 부재 중이며 복귀 상태 변경 시 READY 알림을 받습니다.{% endif %}
+      </p>
+      <form method="post" action="/my/interview-waits" class="form-grid" data-submit-state>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="employee_id" value="{{ employee.id }}">
+        <input type="hidden" name="operation_id" value="{{ wait_operation_id }}">
+        <label>요청 메시지
+          <input name="message" maxlength="500" placeholder="선택 입력">
+        </label>
+        <button type="submit" data-pending-label="등록 중…">면담 대기 등록</button>
+      </form>
+    {% else %}
+      <p class="muted">비활성 직원에게는 면담 대기를 등록할 수 없습니다.</p>
+    {% endif %}
+  </section>
+
   <section class="panel" aria-labelledby="override-title">
     <h2 id="override-title">수동 override</h2>
     {% if employee.active_override %}

@@ -28,12 +28,15 @@ from .models import (
     Employee,
     EmployeeCurrentStatus,
     EmployeeObservation,
+    EmployeeObservationResult,
     EmployeeOverride,
     EmployeePage,
     EmployeeStatus,
     EmployeeStatusEvaluation,
     EmployeeStatusHistory,
     EmployeeStatusHistoryPage,
+    EmployeeStatusTransition,
+    EmployeeMutationResult,
     EvaluateEmployeeStatusesCommand,
     RecordEmployeeObservationCommand,
     SetStatusOverrideCommand,
@@ -494,6 +497,42 @@ class EmployeeService:
             )
         raise EmployeeConcurrentUpdateError()
 
+    def record_mock_observation_result(
+        self,
+        actor: User,
+        command: RecordEmployeeObservationCommand,
+    ) -> EmployeeObservationResult:
+        observation = self.record_mock_observation(actor, command)
+        return EmployeeObservationResult(
+            observation=observation,
+            transition=self._transition_for_operation(
+                command.employee_id,
+                command.event_id,
+                fallback_status=observation.resulting_status,
+            ),
+        )
+
+    def clear_status_override_result(
+        self,
+        actor: User,
+        command: ClearStatusOverrideCommand,
+        *,
+        ip_fingerprint: str | None,
+    ) -> EmployeeMutationResult:
+        employee = self.clear_status_override(
+            actor,
+            command,
+            ip_fingerprint=ip_fingerprint,
+        )
+        return EmployeeMutationResult(
+            employee=employee,
+            transition=self._transition_for_operation(
+                command.employee_id,
+                command.operation_id,
+                fallback_status=employee.current_status.status,
+            ),
+        )
+
     def can_override(self, actor: User, employee: Employee) -> bool:
         return actor.status == UserStatus.ACTIVE and (
             actor.role in ADMIN_ROLES
@@ -804,6 +843,37 @@ class EmployeeService:
         if employee.id != employee_id:
             raise EmployeeOperationConflictError()
         return employee
+
+    def _transition_for_operation(
+        self,
+        employee_id: str,
+        operation_id: str,
+        *,
+        fallback_status: EmployeeStatus,
+    ) -> EmployeeStatusTransition:
+        history = self._repository.get_history_by_operation_id(operation_id)
+        if history is None:
+            return EmployeeStatusTransition(
+                employee_id=employee_id,
+                from_status=fallback_status,
+                to_status=fallback_status,
+                status_changed=False,
+            )
+        if history.employee_id != employee_id or history.from_status is None:
+            raise EmployeeOperationConflictError()
+        return EmployeeStatusTransition(
+            employee_id=employee_id,
+            from_status=history.from_status,
+            to_status=history.to_status,
+            status_changed=history.from_status != history.to_status,
+        )
+
+    @staticmethod
+    def is_present(employee: Employee) -> bool:
+        return employee.current_status.status in {
+            EmployeeStatus.WORKING,
+            EmployeeStatus.ON_CALL,
+        }
 
     def _validate_staff_link(
         self,

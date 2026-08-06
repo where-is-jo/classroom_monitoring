@@ -134,3 +134,29 @@ def test_mock_delivery_mode와_최대시도는_제한된_설정만_허용한다(
             database_mode="memory",
             notification_mock_delivery_mode="network",  # type: ignore[arg-type]
         )
+
+
+def test_interview_wait_expiration_hours_has_safe_bounds() -> None:
+    settings = Settings(
+        _env_file=None,
+        app_env="local",
+        database_mode="memory",
+        interview_wait_expires_after_hours=24,
+    )
+    assert settings.interview_wait_expires_after_hours == 24
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            interview_wait_expires_after_hours=0,
+        )
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            interview_wait_expires_after_hours=169,
+        )

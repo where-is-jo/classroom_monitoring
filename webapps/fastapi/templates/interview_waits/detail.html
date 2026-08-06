@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}면담 대기 상세 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <p><a href="/my/interview-waits">← 내 면담 대기</a></p>
+  <h1>면담 대기 상세</h1>
+  {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
+  <section class="panel">
+    <dl class="detail">
+      <dt>대상 직원</dt><dd>{{ display.employee_name }}</dd>
+      <dt>요청자</dt><dd>{{ display.requester_name }}</dd>
+      <dt>상태</dt><dd><span class="status-label">{{ display.wait.status.value }}</span></dd>
+      <dt>메시지</dt><dd>{{ display.wait.message or '없음' }}</dd>
+      <dt>요청 시각</dt><dd>{{ display.wait.requested_at|kst_datetime }}</dd>
+      <dt>READY 시각</dt><dd>{{ display.wait.ready_at|kst_datetime }}</dd>
+      <dt>완료 시각</dt><dd>{{ display.wait.completed_at|kst_datetime }}</dd>
+      <dt>취소 시각</dt><dd>{{ display.wait.cancelled_at|kst_datetime }}</dd>
+      <dt>만료 시각</dt><dd>{{ display.wait.expires_at|kst_datetime }}</dd>
+    </dl>
+    <div class="inline-actions">
+      {% if can_cancel %}
+        <form method="post" action="/my/interview-waits/{{ display.wait.id }}/transition" data-submit-state>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ cancel_operation_id }}"><input type="hidden" name="status" value="CANCELLED">
+          <button type="submit" data-pending-label="취소 중…">대기 취소</button>
+        </form>
+      {% endif %}
+      {% if can_complete %}
+        <form method="post" action="/my/interview-waits/{{ display.wait.id }}/transition" data-submit-state>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="operation_id" value="{{ complete_operation_id }}"><input type="hidden" name="status" value="COMPLETED">
+          <button type="submit" data-pending-label="완료 중…">면담 완료</button>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+  <section class="panel">
+    <h2>상태 이력</h2>
+    {% if history %}
+      <div class="table-scroll"><table><thead><tr><th>변경</th><th>사유</th><th>시각</th></tr></thead><tbody>
+        {% for item in history %}<tr><td>{{ item.from_status.value if item.from_status else '최초' }} → {{ item.to_status.value }}</td><td>{{ item.reason }}</td><td>{{ item.occurred_at|kst_datetime }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    {% else %}<div class="empty" role="status">상태 이력이 없습니다.</div>{% endif %}
+  </section>
+{% endblock %}

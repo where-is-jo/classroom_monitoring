@@ -14,7 +14,7 @@ from ..shared.dependencies import (
     get_settings,
 )
 from ..shared.security import fingerprint_ip, verify_csrf_token
-from ..users.models import ADMIN_ROLES, User
+from ..users.models import ADMIN_ROLES, User, UserRole
 from .errors import (
     AuthenticationRequiredError,
     CsrfValidationError,
@@ -73,6 +73,9 @@ def get_current_page_user(
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
         request.state.notification_unread_count = notification_service.unread_count(user)
+        request.state.can_view_staff_waits = (
+            user.role == UserRole.STAFF or user.role in ADMIN_ROLES
+        )
         return user
     except AuthenticationRequiredError:
         path = request.url.path
@@ -89,9 +92,13 @@ def get_optional_page_user(
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
         request.state.notification_unread_count = notification_service.unread_count(user)
+        request.state.can_view_staff_waits = (
+            user.role == UserRole.STAFF or user.role in ADMIN_ROLES
+        )
         return user
     except AuthenticationRequiredError:
         request.state.notification_unread_count = 0
+        request.state.can_view_staff_waits = False
         return None
 
 

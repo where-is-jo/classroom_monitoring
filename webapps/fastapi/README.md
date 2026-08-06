@@ -2,9 +2,9 @@
 
 FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
 
-> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림 동작**. 기존 이벤트 화면/API는
+> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림, 면담 대기 동작**. 기존 이벤트 화면/API는
 > 공개 범위를 유지한다. 직원 프로필, 저장된 현재 상태와 이력, 수동 override, 명시적 시간
-> 정책 평가와 사용자별 알림함을 제공하며 local 인메모리 mode와 MongoDB mode가 같은
+> 정책 평가, 사용자별 알림함과 직원 복귀 연계 면담 대기를 제공하며 local 인메모리 mode와 MongoDB mode가 같은
 > 저장소 계약을 구현한다. 개발환경에서는 외부 네트워크 없는 mock delivery 결과를 기록한다.
 
 ## 실행 방법
@@ -44,6 +44,9 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET /admin/employees` | `ADMIN` 이상 직원 CRUD·명시적 정책 평가 화면 |
 | `GET /admin/dev-tools` | mock 입력 허용 환경의 구조화 관측 화면 |
 | `GET /notifications` | 로그인 사용자의 읽음 상태·유형 필터 인앱 알림함 |
+| `GET/POST /my/interview-waits` | 본인 면담 대기 목록·신청 화면 |
+| `GET /my/interview-waits/{wait_id}` | 본인 또는 권한 있는 담당자의 면담 대기 상세·이력 화면 |
+| `GET /staff/interview-waits` | 연결된 STAFF 대상 면담 대기 화면 |
 | `GET /admin/mock-deliveries` | mock 입력 허용 환경의 정제된 delivery 기록·명시적 재시도 화면 |
 | `POST /api/v1/auth/login` | access/refresh `HttpOnly` cookie 발급 |
 | `POST /api/v1/auth/refresh` | refresh rotation |
@@ -62,6 +65,9 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 | `GET /api/v1/notifications/unread-count` | 본인 미읽음 알림 수 |
 | `PATCH /api/v1/notifications/{notification_id}` | 본인 알림 읽음 처리 |
 | `POST /api/v1/notification-read-batches` | 본인 알림 전체 읽음 처리 |
+| `GET/POST /api/v1/interview-waits` | 역할 범위 면담 대기 목록·신청 |
+| `GET/PATCH /api/v1/interview-waits/{wait_id}` | 권한 범위 상세·취소·완료 |
+| `POST /api/v1/interview-wait-expirations` | 모든 환경의 `ADMIN` 이상 명시적 만료 평가 |
 | `GET /api/v1/admin/mock-deliveries` | mock 입력 허용 환경의 `ADMIN` 이상 delivery 기록 |
 | `POST /api/v1/admin/mock-delivery-attempts` | 실패한 mock delivery의 명시적 멱등 재시도 |
 | `GET /docs` | 자동 생성 API 문서 |
@@ -113,6 +119,7 @@ app/
 ├─ audit/                  민감정보를 제거한 사용자·역할·상태 변경 감사 로그
 ├─ employees/              직원 CRUD, 상태 정책, override, memory/MongoDB 저장소
 ├─ notifications/          사용자별 인앱 알림, 읽음, dedupe, mock delivery 저장소
+├─ interview_waits/        면담 대기 상태·이력, 직원 복귀 연계, memory/MongoDB 저장소
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
@@ -140,6 +147,7 @@ templates/                 Jinja2 템플릿
 ├─ admin/dev_tools/        환경별로 등록되는 구조화 mock 관측 화면
 ├─ admin/mock_deliveries/  환경별로 등록되는 정제된 mock delivery 화면
 ├─ notifications/          사용자별 알림함
+├─ interview_waits/        본인·STAFF 면담 대기 목록과 상세
 ├─ events/                 기능별 템플릿
 └─ errors/                 오류 화면
 
@@ -226,6 +234,7 @@ boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 �
 | `EMPLOYEE_OFFSITE_AFTER_SECONDS` | 마지막 사람 있음 후 OFFSITE 기준 | 기본 3600초, AWAY보다 커야 함 |
 | `NOTIFICATION_MOCK_DELIVERY_MODE` | mock 입력 허용 환경의 기록 결과 | `success` / `fail_once` / `always_fail` |
 | `NOTIFICATION_MOCK_DELIVERY_MAX_ATTEMPTS` | 명시적 mock delivery 최대 시도 | 기본 3, 최대 10 |
+| `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS` | 면담 대기 만료 기준 | 기본 24시간, 1~168시간 |
 | `JWT_ACCESS_SECRET` | access JWT 서명 | 필수 비밀값, 32자 이상, 기본값 없음 |
 | `JWT_REFRESH_SECRET` | refresh JWT 서명 | 필수 비밀값, 32자 이상, access와 분리 |
 | `CSRF_SECRET` | CSRF token 서명 | 필수 비밀값, 32자 이상 |
@@ -245,7 +254,8 @@ boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 �
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트 접속 정보 | URL 경로 DB 이름은 `test_` 접두사 필수 |
 
 MongoDB mode는 시작 시 ping한 뒤 events, users, refresh_tokens, audit_logs, employees,
-employee_status_history, employee_observations, notifications, notification_deliveries의
+employee_status_history, employee_observations, notifications, notification_deliveries,
+interview_waits, interview_wait_history의
 고정 이름 index를 초기화한다. email, employee_no, STAFF 연결, refresh hash,
 operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로 중복을 막고
 사용자·직원 갱신은 compare-and-set으로 경합을 감지한다. multi-document transaction을
@@ -261,6 +271,12 @@ operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로
 60분 외근, override 만료는 `POST /api/v1/employee-status-evaluations` 또는 관련 쓰기에서만
 평가한다. override는 `AWAY`와 `OFFSITE`만 허용하며 해제 시 최신 유효 mock 관측으로 즉시
 재평가한다. 시각은 API에서 ISO 8601 UTC로 주고받고 화면에서는 KST로 표시한다.
+
+면담 대기는 요청자와 직원 조합당 활성 `WAITING` 또는 `READY` 한 건만 허용한다. 직원이 이미
+재석 중이면 즉시 `READY`, 부재 중이면 `WAITING`으로 만들며 부재→재석 전이에서만 `READY`
+알림을 한 번 생성한다. 목록·상세 GET은 상태와 이력을 변경하지 않고, 만료는 관리자 전용
+`POST /api/v1/interview-wait-expirations` 또는 관련 상태 변경 요청에서만 평가한다. 요청자와
+관리자는 활성 대기를 취소할 수 있고, `READY` 대기는 요청자·관리자·연결된 STAFF가 완료할 수 있다.
 
 ### 가상 사용자 seed
 
@@ -288,6 +304,8 @@ operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로
   중복·역전 관측, CAS 재시도, override 권한·만료·해제 사용자 여정을 확인한다.
 - 알림 테스트는 사용자 격리, dedupe, 개별·전체 읽음, badge, 민감 데이터 제거,
   mock delivery 실패·최대 시도·동일 attempt 방지와 production 라우터 미등록을 확인한다.
+- 면담 대기 테스트는 중복 방지, 상태 전이표, 역할별 조회·변경, 명시적 만료, 직원 복귀 연계,
+  알림 dedupe와 신청→복귀→알림 읽음→완료 사용자 여정을 확인한다.
 - MongoDB 연결·index는 `mongodb` marker 통합 테스트로 분리한다.
 - 계약 변경 시 기존 응답 스키마 테스트를 함께 갱신한다.
 

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}내 면담 대기 · 스마트 오피스 모니터링{% endblock %}
+
+{% block content %}
+  <div class="section-heading">
+    <div><h1>내 면담 대기</h1><p class="muted">조회는 상태나 이력을 변경하지 않습니다.</p></div>
+    <a class="button-link" href="/my/interview-waits">새로고침</a>
+  </div>
+  {% if error %}<div class="alert alert--error" role="alert">{{ error }}</div>{% endif %}
+
+  <form method="get" action="/my/interview-waits" class="filter-form">
+    <label>상태
+      <select name="status"><option value="">전체</option>{% for status in statuses %}<option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ status.value }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">필터 적용</button>
+  </form>
+
+  {% if displays %}
+    <ul class="card-list" aria-label="내 면담 대기 목록">
+      {% for display in displays %}
+        <li class="user-card">
+          <h2><a href="/my/interview-waits/{{ display.wait.id }}">{{ display.employee_name }}</a></h2>
+          <p>
+            <strong>{{ '활성' if display.wait.status.value in ['WAITING', 'READY'] else '종료' }}</strong>
+            <span class="status-label">{{ display.wait.status.value }}</span>
+          </p>
+          <p>{{ display.wait.message or '요청 메시지 없음' }}</p>
+          <p class="muted">요청 {{ display.wait.requested_at|kst_datetime }} · 만료 {{ display.wait.expires_at|kst_datetime }}</p>
+          <div class="inline-actions">
+            {% if can_cancel[display.wait.id] %}
+              <form method="post" action="/my/interview-waits/{{ display.wait.id }}/transition" data-submit-state>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="operation_id" value="{{ cancel_operation_ids[display.wait.id] }}">
+                <input type="hidden" name="status" value="CANCELLED">
+                <button type="submit" data-pending-label="취소 중…">대기 취소</button>
+              </form>
+            {% endif %}
+            {% if can_complete[display.wait.id] %}
+              <form method="post" action="/my/interview-waits/{{ display.wait.id }}/transition" data-submit-state>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="operation_id" value="{{ complete_operation_ids[display.wait.id] }}">
+                <input type="hidden" name="status" value="COMPLETED">
+                <button type="submit" data-pending-label="완료 중…">면담 완료</button>
+              </form>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+    <nav class="pagination" aria-label="내 면담 대기 페이지">
+      {% if has_prev %}<a href="?limit={{ limit }}&offset={{ [0, offset-limit]|max }}{% if selected_status %}&status={{ selected_status.value }}{% endif %}">이전</a>{% endif %}
+      <span>{{ offset + 1 }}–{{ [offset + limit, page.total]|min }} / {{ page.total }}</span>
+      {% if has_next %}<a href="?limit={{ limit }}&offset={{ offset+limit }}{% if selected_status %}&status={{ selected_status.value }}{% endif %}">다음</a>{% endif %}
+    </nav>
+  {% else %}
+    <div class="empty" role="status">표시할 면담 대기가 없습니다.</div>
+  {% endif %}
+{% endblock %}

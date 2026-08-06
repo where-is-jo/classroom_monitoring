@@ -103,6 +103,26 @@ class EmployeeObservation:
 
 
 @dataclass(frozen=True)
+class EmployeeStatusTransition:
+    employee_id: str
+    from_status: EmployeeStatus
+    to_status: EmployeeStatus
+    status_changed: bool
+
+
+@dataclass(frozen=True)
+class EmployeeObservationResult:
+    observation: EmployeeObservation
+    transition: EmployeeStatusTransition
+
+
+@dataclass(frozen=True)
+class EmployeeMutationResult:
+    employee: Employee
+    transition: EmployeeStatusTransition
+
+
+@dataclass(frozen=True)
 class CreateEmployeeCommand:
     employee_no: str
     user_id: str | None

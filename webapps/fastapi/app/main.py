@@ -31,6 +31,14 @@ from .employees.router import (
 )
 from .employees.router import evaluation_api_router as employee_evaluation_api_router
 from .employees.router import page_router as employees_page_router
+from .interview_waits.router import api_router as interview_waits_api_router
+from .interview_waits.router import (
+    expiration_api_router as interview_wait_expiration_api_router,
+)
+from .interview_waits.router import my_page_router as interview_waits_my_page_router
+from .interview_waits.router import (
+    staff_page_router as interview_waits_staff_page_router,
+)
 from .notifications.router import api_router as notifications_api_router
 from .notifications.router import (
     development_api_router as notification_development_api_router,
@@ -138,6 +146,13 @@ def include_employee_routers(application: FastAPI, settings: Settings) -> None:
 
 include_employee_routers(app, get_settings())
 include_notification_routers(app, get_settings())
+app.include_router(interview_waits_my_page_router)
+app.include_router(interview_waits_staff_page_router)
+app.include_router(interview_waits_api_router, responses=_AUTH_ERROR_RESPONSES)
+app.include_router(
+    interview_wait_expiration_api_router,
+    responses=_AUTH_ERROR_RESPONSES,
+)
 
 
 def _wants_json(request: Request) -> bool:

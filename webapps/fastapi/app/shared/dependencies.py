@@ -24,6 +24,10 @@ from ..employees.adapters.memory_repository import InMemoryEmployeeRepository
 from ..employees.adapters.mongo_repository import MongoEmployeeRepository
 from ..employees.ports import EmployeeRepository
 from ..employees.service import EmployeeService
+from ..interview_waits.adapters.memory_repository import InMemoryInterviewWaitRepository
+from ..interview_waits.adapters.mongo_repository import MongoInterviewWaitRepository
+from ..interview_waits.ports import InterviewWaitRepository
+from ..interview_waits.service import EmployeeInterviewCoordinator, InterviewWaitService
 from ..notifications.adapters.memory_repository import InMemoryNotificationRepository
 from ..notifications.adapters.mongo_repository import MongoNotificationRepository
 from ..notifications.ports import NotificationRepository
@@ -87,6 +91,11 @@ def _notification_repository() -> InMemoryNotificationRepository:
 
 
 @lru_cache
+def _interview_wait_repository() -> InMemoryInterviewWaitRepository:
+    return InMemoryInterviewWaitRepository()
+
+
+@lru_cache
 def _mongo_client() -> MongoClient[MongoDocument]:
     settings = get_settings()
     if settings.database_url is None:
@@ -135,6 +144,11 @@ def _mongo_notification_repository() -> MongoNotificationRepository:
     return MongoNotificationRepository(_mongo_database())
 
 
+@lru_cache
+def _mongo_interview_wait_repository() -> MongoInterviewWaitRepository:
+    return MongoInterviewWaitRepository(_mongo_database())
+
+
 def get_event_repository(settings: Settings = Depends(get_settings)) -> EventRepository:
     if settings.database_mode == "memory":
         return _event_repository()
@@ -173,6 +187,14 @@ def get_notification_repository(
     if settings.database_mode == "memory":
         return _notification_repository()
     return _mongo_notification_repository()
+
+
+def get_interview_wait_repository(
+    settings: Settings = Depends(get_settings),
+) -> InterviewWaitRepository:
+    if settings.database_mode == "memory":
+        return _interview_wait_repository()
+    return _mongo_interview_wait_repository()
 
 
 @lru_cache
@@ -294,6 +316,30 @@ def get_notification_service(
     )
 
 
+def get_interview_wait_service(
+    repository: InterviewWaitRepository = Depends(get_interview_wait_repository),
+    employee_repository: EmployeeRepository = Depends(get_employee_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+    notification_service: NotificationService = Depends(get_notification_service),
+    settings: Settings = Depends(get_settings),
+) -> InterviewWaitService:
+    return InterviewWaitService(
+        repository,
+        employee_repository,
+        user_repository,
+        notification_service,
+        expires_after_hours=settings.interview_wait_expires_after_hours,
+        clock=utc_now,
+    )
+
+
+def get_employee_interview_coordinator(
+    employee_service: EmployeeService = Depends(get_employee_service),
+    interview_wait_service: InterviewWaitService = Depends(get_interview_wait_service),
+) -> EmployeeInterviewCoordinator:
+    return EmployeeInterviewCoordinator(employee_service, interview_wait_service)
+
+
 def initialize_data_store() -> None:
     """시작 시 연결·index를 검증하고 opt-in 가상 사용자를 seed한다."""
     settings = get_settings()
@@ -309,6 +355,7 @@ def initialize_data_store() -> None:
                 MongoAuditRepository.ensure_indexes,
                 MongoEmployeeRepository.ensure_indexes,
                 MongoNotificationRepository.ensure_indexes,
+                MongoInterviewWaitRepository.ensure_indexes,
             ],
         )
     if settings.auth_seed_enabled:
@@ -346,6 +393,7 @@ def close_data_store() -> None:
     _mongo_audit_repository.cache_clear()
     _mongo_employee_repository.cache_clear()
     _mongo_notification_repository.cache_clear()
+    _mongo_interview_wait_repository.cache_clear()
     _mongo_auth_repository.cache_clear()
     _mongo_user_repository.cache_clear()
     _mongo_event_repository.cache_clear()

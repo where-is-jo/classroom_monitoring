@@ -32,7 +32,7 @@
     {% if page.items %}
       <div class="table-scroll">
         <table>
-          <thead><tr><th>직원</th><th>부서</th><th>위치</th><th>현재 상태</th><th>마지막 갱신</th></tr></thead>
+          <thead><tr><th>직원</th><th>부서</th><th>위치</th><th>현재 상태</th><th>면담</th><th>마지막 갱신</th></tr></thead>
           <tbody>
             {% for employee in page.items %}
               <tr>
@@ -40,6 +40,10 @@
                 <td>{{ employee.department }} · {{ employee.position }}</td>
                 <td>{{ employee.office_zone }}</td>
                 <td><span class="status-label status-label--{{ employee.current_status.status.value|lower|replace('_', '-') }}">{{ employee.current_status.status.value }}</span></td>
+                <td>
+                  <a href="/employees/{{ employee.id }}#interview-wait">면담 대기</a>
+                  <span class="muted">{% if employee.id in present_employee_ids %}즉시 READY{% else %}복귀 시 READY{% endif %}</span>
+                </td>
                 <td>{{ employee.updated_at|kst_datetime }}</td>
               </tr>
             {% endfor %}

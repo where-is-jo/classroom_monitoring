@@ -13,6 +13,12 @@ from app.audit.models import AuditLog
 from app.auth.adapters.mongo_repository import MongoAuthRepository
 from app.auth.models import RefreshRotationStatus, RefreshToken
 from app.events.adapters.mongo_repository import MongoEventRepository
+from app.interview_waits.adapters.mongo_repository import MongoInterviewWaitRepository
+from app.interview_waits.models import (
+    InterviewWait,
+    InterviewWaitHistory,
+    InterviewWaitStatus,
+)
 from app.employees.adapters.mongo_repository import MongoEmployeeRepository
 from app.employees.models import (
     Employee,
@@ -43,6 +49,7 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         MongoAuditRepository.ensure_indexes,
         MongoEmployeeRepository.ensure_indexes,
         MongoNotificationRepository.ensure_indexes,
+        MongoInterviewWaitRepository.ensure_indexes,
     ]
     initialize_indexes(mongodb_database, initializers)
     initialize_indexes(mongodb_database, initializers)
@@ -73,6 +80,92 @@ def test_ping과_index_초기화를_반복해도_같은_index를_유지한다(
         "notification_deliveries_notification_attempt_unique"
         in mongodb_database["notification_deliveries"].index_information()
     )
+    assert (
+        "interview_waits_active_key_unique"
+        in mongodb_database["interview_waits"].index_information()
+    )
+    assert (
+        "interview_wait_history_operation_unique"
+        in mongodb_database["interview_wait_history"].index_information()
+    )
+
+
+def test_interview_wait_mongo_adapter_contract(mongodb_database) -> None:
+    initialize_indexes(
+        mongodb_database, [MongoInterviewWaitRepository.ensure_indexes]
+    )
+    current_time = datetime.now(UTC)
+    now = current_time.replace(microsecond=(current_time.microsecond // 1000) * 1000)
+    suffix = str(uuid4())
+    create_operation = f"interview-wait-create-{suffix}"
+    wait = InterviewWait(
+        id=f"interview-wait-{suffix}",
+        requester_user_id=f"requester-{suffix}",
+        employee_id=f"employee-{suffix}",
+        status=InterviewWaitStatus.WAITING,
+        message="integration interview wait",
+        requested_at=now,
+        ready_at=None,
+        completed_at=None,
+        cancelled_at=None,
+        expires_at=now + timedelta(hours=24),
+        version=0,
+        active_key=f"requester-{suffix}:employee-{suffix}",
+        created_operation_id=create_operation,
+        last_operation_id=create_operation,
+        operation_ids=(create_operation,),
+        last_actor_user_id=f"requester-{suffix}",
+    )
+    initial_history = InterviewWaitHistory(
+        id=f"interview-wait-history-create-{suffix}",
+        wait_id=wait.id,
+        from_status=None,
+        to_status=InterviewWaitStatus.WAITING,
+        reason="integration create",
+        actor_user_id=wait.requester_user_id,
+        operation_id=create_operation,
+        occurred_at=now,
+    )
+    repository = MongoInterviewWaitRepository(mongodb_database)
+    try:
+        assert repository.create_wait(wait, initial_history) == wait
+        assert repository.create_wait(wait, initial_history) == wait
+        assert repository.get_active_wait(
+            wait.requester_user_id, wait.employee_id
+        ) == wait
+        assert repository.list_history(wait.id) == [initial_history]
+
+        ready_operation = f"interview-wait-ready-{suffix}"
+        ready = replace(
+            wait,
+            status=InterviewWaitStatus.READY,
+            ready_at=now,
+            version=1,
+            last_operation_id=ready_operation,
+            operation_ids=(*wait.operation_ids, ready_operation),
+        )
+        ready_history = InterviewWaitHistory(
+            id=f"interview-wait-history-ready-{suffix}",
+            wait_id=wait.id,
+            from_status=InterviewWaitStatus.WAITING,
+            to_status=InterviewWaitStatus.READY,
+            reason="integration ready",
+            actor_user_id="admin-id",
+            operation_id=ready_operation,
+            occurred_at=now,
+        )
+        assert repository.replace_wait(
+            ready, expected_version=0, history=ready_history
+        ) == ready
+        assert repository.replace_wait(
+            ready, expected_version=0, history=ready_history
+        ) == ready
+        assert repository.list_history(wait.id) == [initial_history, ready_history]
+    finally:
+        mongodb_database["interview_wait_history"].delete_many(
+            {"wait_id": wait.id}
+        )
+        mongodb_database["interview_waits"].delete_one({"_id": wait.id})
 
 
 def test_알림과_mock_delivery_Mongo_adapter_계약(mongodb_database) -> None:

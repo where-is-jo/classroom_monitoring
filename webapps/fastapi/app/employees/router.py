@@ -18,8 +18,10 @@ from ..auth.dependencies import (
     require_csrf,
     require_page_admin,
 )
+from ..interview_waits.service import EmployeeInterviewCoordinator
 from ..shared.config import Settings
 from ..shared.dependencies import (
+    get_employee_interview_coordinator,
     get_employee_service,
     get_settings,
     get_user_service,
@@ -212,9 +214,11 @@ def deactivate_employee(
     _: None = Depends(require_csrf),
     actor: User = Depends(require_admin),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
-    service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(
+        get_employee_interview_coordinator
+    ),
 ) -> Response:
-    service.deactivate_employee(
+    coordinator.deactivate_employee(
         actor,
         employee_id,
         expected_version=payload.expected_version,
@@ -291,9 +295,11 @@ def clear_status_override(
     _: None = Depends(require_csrf),
     actor: User = Depends(get_current_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
-    service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(
+        get_employee_interview_coordinator
+    ),
 ) -> EmployeeResponse:
-    employee = service.clear_status_override(
+    employee = coordinator.clear_status_override(
         actor,
         ClearStatusOverrideCommand(
             employee_id=employee_id,
@@ -326,9 +332,11 @@ def record_mock_observation(
     payload: MockEmployeeObservationRequest,
     _: None = Depends(require_csrf),
     actor: User = Depends(require_admin),
-    service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(
+        get_employee_interview_coordinator
+    ),
 ) -> EmployeeObservationResponse:
-    observation = service.record_mock_observation(
+    observation = coordinator.record_mock_observation(
         actor,
         RecordEmployeeObservationCommand(
             event_id=str(payload.event_id),
@@ -380,6 +388,9 @@ def employees_page(
             has_prev=resolved_offset > 0,
             has_next=resolved_offset + resolved_limit < page.total,
             show_employee_dev_tools=settings.mock_inputs_enabled,
+            present_employee_ids={
+                employee.id for employee in page.items if service.is_present(employee)
+            },
         ),
     )
 
@@ -440,9 +451,12 @@ def clear_status_override_page(
     actor: User = Depends(get_current_page_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(
+        get_employee_interview_coordinator
+    ),
 ):
     try:
-        service.clear_status_override(
+        coordinator.clear_status_override(
             actor,
             ClearStatusOverrideCommand(
                 employee_id=employee_id,
@@ -554,11 +568,14 @@ def deactivate_employee_page(
     actor: User = Depends(require_page_admin),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(
+        get_employee_interview_coordinator
+    ),
     user_service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
 ):
     try:
-        service.deactivate_employee(
+        coordinator.deactivate_employee(
             actor,
             employee_id,
             expected_version=form.expected_version,
@@ -619,10 +636,13 @@ def record_mock_observation_page(
     _: None = Depends(require_csrf),
     actor: User = Depends(require_page_admin),
     service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(
+        get_employee_interview_coordinator
+    ),
     settings: Settings = Depends(get_settings),
 ):
     try:
-        observation = service.record_mock_observation(
+        observation = coordinator.record_mock_observation(
             actor,
             RecordEmployeeObservationCommand(
                 event_id=str(form.event_id),
@@ -682,6 +702,8 @@ def _render_employee_detail(
             override_statuses=[EmployeeStatus.AWAY, EmployeeStatus.OFFSITE],
             set_operation_id=str(uuid4()),
             clear_operation_id=str(uuid4()),
+            wait_operation_id=str(uuid4()),
+            employee_is_present=service.is_present(employee),
             error=error,
         ),
         status_code=status_code,
