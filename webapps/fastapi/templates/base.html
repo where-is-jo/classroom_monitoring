@@ -8,6 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300685f'/%3E%3Cpath d='M6 10l10-5 10 5-10 5L6 10zm4 3l6 3 6-3v8l-6 3-6-3v-8z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
   <script src="{{ url_for('static', path='/forms.js') }}" defer></script>
+  {% block head_extra %}{% endblock %}
 </head>
 <body class="{% if current_user %}app-body{% else %}guest-body{% endif %}">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
@@ -45,8 +46,10 @@
               <a href="/employees"{% if current_path.startswith('/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>직원 조회</span></a>
               <a href="/staff/interview-waits"{% if current_path.startswith('/staff/interview-waits') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⇄</span><span>접수된 면담</span></a>
               <a href="/classrooms"{% if current_path.startswith('/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석</span></a>
-              <a href="/monitoring"{% if current_path.startswith('/monitoring') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>실시간 모니터링</span></a>
-              <a href="/video-search"{% if current_path.startswith('/video-search') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>영상 검색</span></a>
+              {% if request.state.show_video_demo | default(false) %}
+                <a href="/monitoring"{% if current_path.startswith('/monitoring') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>데모 모니터링</span></a>
+                <a href="/video-search"{% if current_path.startswith('/video-search') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>데모 영상 검색</span></a>
+              {% endif %}
             </div>
           {% elif request.state.is_admin | default(false) %}
             <div class="nav-group">
@@ -54,8 +57,10 @@
               <a href="/admin"{% if current_path == '/admin' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▤</span><span>대시보드</span></a>
               <a href="/employees"{% if current_path.startswith('/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>직원 조회</span></a>
               <a href="/classrooms"{% if current_path.startswith('/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석</span></a>
-              <a href="/monitoring"{% if current_path.startswith('/monitoring') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>실시간 모니터링</span></a>
-              <a href="/video-search"{% if current_path.startswith('/video-search') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>영상 검색</span></a>
+              {% if request.state.show_video_demo | default(false) %}
+                <a href="/monitoring"{% if current_path.startswith('/monitoring') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>데모 모니터링</span></a>
+                <a href="/video-search"{% if current_path.startswith('/video-search') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>데모 영상 검색</span></a>
+              {% endif %}
               <a href="/admin/users"{% if current_path.startswith('/admin/users') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>사용자 관리</span></a>
               <a href="/admin/employees"{% if current_path.startswith('/admin/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span><span>직원 관리</span></a>
               <a href="/admin/classrooms"{% if current_path.startswith('/admin/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 관리</span></a>
@@ -151,5 +156,6 @@
   {% else %}
     <footer class="site-footer site-footer--guest"><p>학생과 직원의 일상 업무를 한곳에서 안전하게 연결합니다.</p></footer>
   {% endif %}
+  {% block scripts %}{% endblock %}
 </body>
 </html>

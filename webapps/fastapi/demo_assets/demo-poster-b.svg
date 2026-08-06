@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-labelledby="title description">
+  <title id="title">남색 합성 실습실 포스터</title><desc id="description">실제 카메라가 아닌 격자와 도형으로 만든 데모 이미지</desc>
+  <rect width="640" height="360" fill="#151d43"/><g stroke="#34437d"><path d="M0 45h640M0 90h640M0 135h640M0 180h640M0 225h640M0 270h640M0 315h640"/><path d="M45 0v360M90 0v360M135 0v360M180 0v360M225 0v360M270 0v360M315 0v360M360 0v360M405 0v360M450 0v360M495 0v360M540 0v360M585 0v360"/></g>
+  <g fill="#fff" opacity=".1"><rect x="64" y="82" width="118" height="70" rx="8"/><rect x="210" y="82" width="118" height="70" rx="8"/><rect x="356" y="82" width="118" height="70" rx="8"/><rect x="502" y="82" width="74" height="70" rx="8"/></g><circle cx="235" cy="238" r="24" fill="#8ba5ff"/><rect x="405" y="214" width="34" height="34" fill="#ff9ab2"/>
+  <text x="24" y="34" fill="#fff" font-family="system-ui,sans-serif" font-size="18" font-weight="700">SYNTHETIC DEMO · B203</text><text x="24" y="334" fill="#c9d3ff" font-family="system-ui,sans-serif" font-size="14">NO REAL CAMERA · NO PERSONAL DATA</text>
+</svg>

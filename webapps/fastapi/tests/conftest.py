@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 os.environ["APP_ENV"] = "local"
 os.environ["DATABASE_MODE"] = "memory"
 os.environ["MOCK_INPUTS_ENABLED"] = "false"
+os.environ["DEMO_MODE_ENABLED"] = "false"
 os.environ["JWT_ACCESS_SECRET"] = "test-access-secret-at-least-32-characters"
 os.environ["JWT_REFRESH_SECRET"] = "test-refresh-secret-at-least-32-characters"
 os.environ["CSRF_SECRET"] = "test-csrf-secret-at-least-32-characters"

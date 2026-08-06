@@ -15,6 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
+DEMO_ASSET_DIR = BASE_DIR / "demo_assets"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 KST = timezone(timedelta(hours=9), name="KST")

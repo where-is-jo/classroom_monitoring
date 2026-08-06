@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}데모 모니터링 · 캠퍼스 운영 포털{% endblock %}
+{% block head_extra %}<script src="/demo-assets/demo-video.js" defer></script>{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">합성 자료 · 데모 전용</p>
+      <h1>강의실 데모 모니터링</h1>
+      <p class="summary">실제 CCTV나 실시간 스트림이 아닙니다. 개인정보가 없는 도형을 브라우저에서 반복 재생합니다.</p>
+    </div>
+    <div class="demo-clock"><span>현재 시각</span><strong data-current-time>{{ current_time|kst_datetime }}</strong></div>
+  </header>
+
+  <section class="panel" aria-labelledby="monitoring-filter-title">
+    <h2 id="monitoring-filter-title">피드 필터</h2>
+    <form method="get" action="/monitoring" class="filter-form">
+      <label>검색<input name="q" value="{{ selected_query }}" maxlength="100" placeholder="A101 또는 전면"></label>
+      <label>강의실
+        <select name="classroom_id"><option value="">전체</option>{% for value, label in classroom_options %}<option value="{{ value }}"{% if value == selected_classroom_id %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      </label>
+      <label>연결 상태
+        <select name="status"><option value="">전체</option>{% for status in statuses %}<option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ '연결됨' if status.value == 'CONNECTED' else '샘플 영상 없음' }}</option>{% endfor %}</select>
+      </label>
+      <button type="submit" class="secondary">적용</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="feed-list-title">
+    <div class="section-heading"><div><h2 id="feed-list-title">데모 피드</h2><p class="summary">{{ feeds|length }}개 표시 중</p></div><a class="button-link secondary" href="/monitoring">필터 초기화</a></div>
+    {% if feeds %}
+      <div class="demo-video-grid">
+        {% for feed in feeds %}
+          <article class="demo-video-card">
+            <div class="demo-video-frame">
+              {% if feed.synthetic_variant %}
+                <video data-synthetic-video data-variant="{{ feed.synthetic_variant }}" muted playsinline loop controls poster="{{ feed.poster_path }}" aria-label="{{ feed.classroom_code }} 합성 데모 피드"></video>
+                <div class="demo-video-error" data-video-error hidden role="alert">합성 피드를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.</div>
+              {% else %}
+                <img src="{{ feed.poster_path }}" alt="영상이 없는 강의실을 나타내는 합성 포스터">
+                <div class="demo-video-empty" role="status">샘플 영상 없음</div>
+              {% endif %}
+              <span class="demo-ribbon">데모 피드</span>
+            </div>
+            <div class="demo-video-copy">
+              <div><p class="eyebrow">{{ feed.classroom_code }}</p><h3>{{ feed.classroom_name }}</h3><p>{{ feed.camera_label }}</p></div>
+              <span class="status-label status-label--{{ 'active' if feed.status.value == 'CONNECTED' else 'unknown' }}">{{ '연결됨' if feed.status.value == 'CONNECTED' else '영상 없음' }}</span>
+            </div>
+            <p class="card-meta"><span>마지막 갱신 {{ feed.last_updated_at|kst_datetime }}</span><span>합성 catalog ID {{ feed.id }}</span></p>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty" role="status">조건에 맞는 데모 피드가 없습니다. 필터를 초기화해 주세요.</div>
+    {% endif %}
+  </section>
+{% endblock %}

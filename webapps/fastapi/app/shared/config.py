@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     database_name: str | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     mock_inputs_enabled: bool = False
+    demo_mode_enabled: bool = False
 
     jwt_access_secret: SecretStr | None = None
     jwt_refresh_secret: SecretStr | None = None
@@ -82,6 +83,8 @@ class Settings(BaseSettings):
 
         if self.app_env == "prod" and self.mock_inputs_enabled:
             raise ValueError("APP_ENV=prod에서는 MOCK_INPUTS_ENABLED를 활성화할 수 없습니다.")
+        if self.app_env == "prod" and self.demo_mode_enabled:
+            raise ValueError("APP_ENV=prod에서는 DEMO_MODE_ENABLED를 활성화할 수 없습니다.")
 
         missing_security_names = [
             name

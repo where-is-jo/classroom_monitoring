@@ -13,6 +13,7 @@ from app.notifications.service import NotificationService
 from app.shared.dependencies import (
     get_auth_service,
     get_notification_service,
+    get_settings,
     get_user_service,
 )
 from app.users.models import UserRole
@@ -80,8 +81,8 @@ def test_login_후_역할별_기본_경로로_이동한다(
         ),
         (
             UserRole.STAFF,
-            ("직원 조회", "접수된 면담", "실시간 모니터링", "영상 검색"),
-            ("내 면담", "사용자 관리", "강의실 관리"),
+            ("직원 조회", "접수된 면담", "강의실 좌석"),
+            ("내 면담", "사용자 관리", "강의실 관리", "데모 모니터링"),
         ),
         (
             UserRole.ADMIN,
@@ -119,6 +120,25 @@ def test_제품_탐색은_역할별_목표만_표시한다(
         "마감 후 경고",
     ):
         assert removed_label not in page.text
+
+
+def test_demo_mode에서_staff와_admin_영상_탐색을_표시한다(
+    navigation_client: TestClient,
+    navigation_stack: AuthStack,
+) -> None:
+    settings = get_settings().model_copy(update={"demo_mode_enabled": True})
+    app.dependency_overrides[get_settings] = lambda: settings
+    staff = navigation_stack.seed(UserRole.STAFF, email="staff-demo-nav@example.invalid")
+    navigation_client.post(
+        "/api/v1/auth/login",
+        headers={"Origin": ORIGIN},
+        json={"email": staff.email, "password": PASSWORD},
+    )
+
+    page = navigation_client.get("/employees")
+
+    assert "데모 모니터링" in page.text
+    assert "데모 영상 검색" in page.text
 
 
 def test_외부_또는_역할에_허용되지_않은_return_to는_기본_홈으로_보낸다(

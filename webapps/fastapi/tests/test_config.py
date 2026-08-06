@@ -74,6 +74,28 @@ def test_prod에서는_mock_입력을_활성화할_수_없다() -> None:
     assert "MOCK_INPUTS_ENABLED" in str(raised.value)
 
 
+def test_demo_mode는_local_dev에서만_활성화할_수_있다() -> None:
+    local = make_settings(
+        _env_file=None,
+        app_env="local",
+        database_mode="memory",
+        demo_mode_enabled=True,
+    )
+    assert local.demo_mode_enabled is True
+
+    with pytest.raises(ValidationError) as raised:
+        make_settings(
+            _env_file=None,
+            app_env="prod",
+            database_mode="mongodb",
+            database_url="mongodb://example.invalid",
+            database_name="smart_office",
+            demo_mode_enabled=True,
+        )
+
+    assert "DEMO_MODE_ENABLED" in str(raised.value)
+
+
 def test_prod에서는_가상_사용자_seed를_활성화할_수_없다() -> None:
     with pytest.raises(ValidationError) as raised:
         make_settings(

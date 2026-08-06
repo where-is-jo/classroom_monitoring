@@ -55,6 +55,7 @@ from ..users.adapters.mongo_repository import MongoUserRepository
 from ..users.ports import UserRepository
 from ..users.seed import VirtualSeedPasswords, seed_virtual_users
 from ..users.service import UserService
+from ..video_monitoring.service import VideoDemoService
 from .config import Settings
 from .database import (
     DatabaseOperationError,
@@ -428,6 +429,10 @@ def get_admin_dashboard_service(
     repository: AdminDashboardRepository = Depends(get_admin_dashboard_repository),
 ) -> AdminDashboardService:
     return AdminDashboardService(repository, clock=utc_now)
+
+
+def get_video_demo_service() -> VideoDemoService:
+    return VideoDemoService(clock=utc_now)
 
 
 def initialize_data_store() -> None:

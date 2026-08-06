@@ -70,10 +70,12 @@ from .shared.dependencies import (
 )
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.schemas import HealthResponse, ReadinessResponse
-from .shared.templating import STATIC_DIR, templates
+from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
 from .users.models import User
 from .users.router import api_router as users_api_router
 from .users.router import page_router as users_page_router
+from .video_monitoring.router import api_router as video_demo_api_router
+from .video_monitoring.router import page_router as video_demo_page_router
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +170,23 @@ def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
         )
 
 
+def include_video_demo_routers(application: FastAPI, settings: Settings) -> None:
+    """Register synthetic catalog, pages, and assets only in an explicit demo mode."""
+    if not settings.demo_mode_enabled or settings.app_env not in {"local", "dev"}:
+        return
+    application.mount(
+        "/demo-assets",
+        StaticFiles(directory=str(DEMO_ASSET_DIR)),
+        name="demo-assets",
+    )
+    application.include_router(video_demo_page_router)
+    application.include_router(video_demo_api_router, responses=_AUTH_ERROR_RESPONSES)
+
+
 include_employee_routers(app, get_settings())
 include_notification_routers(app, get_settings())
 include_classroom_routers(app, get_settings())
+include_video_demo_routers(app, get_settings())
 app.include_router(interview_waits_my_page_router)
 app.include_router(interview_waits_staff_page_router)
 app.include_router(interview_waits_api_router, responses=_AUTH_ERROR_RESPONSES)

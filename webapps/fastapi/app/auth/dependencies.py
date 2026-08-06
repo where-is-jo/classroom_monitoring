@@ -206,6 +206,10 @@ def _set_page_navigation_state(
     request.state.can_view_staff_waits = user is not None and user.role == UserRole.STAFF
     request.state.show_employee_dev_tools = settings.mock_inputs_enabled and is_admin
     request.state.show_notification_dev_tools = settings.mock_inputs_enabled and is_admin
+    request.state.show_video_demo = settings.demo_mode_enabled and settings.app_env in {
+        "local",
+        "dev",
+    }
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
