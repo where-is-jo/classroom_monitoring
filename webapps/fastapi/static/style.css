@@ -35,7 +35,6 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
-  min-width: 320px;
   color-scheme: light;
   scroll-behavior: smooth;
 }
