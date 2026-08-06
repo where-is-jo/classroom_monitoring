@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse
 
 from ..auth.dependencies import CSRF_COOKIE, can_manage_users, get_optional_page_user
 from ..shared.config import Settings

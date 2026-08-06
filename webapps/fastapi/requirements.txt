@@ -10,3 +10,7 @@ python-multipart>=0.0.20,<1
 # 테스트
 pytest
 httpx
+
+# 린트·타입 검사
+ruff
+mypy

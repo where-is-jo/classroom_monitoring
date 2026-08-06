@@ -73,6 +73,7 @@
 ## Architecture Rules
 
 아래는 서비스 구현 시 지켜야 할 구조 원칙이다. 위반이 필요하면 먼저 [ADR](../architecture/decisions/)로 남긴다.
+새 코드를 어디에 둘지, 의존 방향이 규칙에 맞는지 판단할 때는 `architecture-review` 스킬을 따른다.
 
 1. **브라우저는 `fastapi`만 호출한다.** `deeplearning`과 `worker`에 직접 접근하지 않는다.
 2. **외부 클라이언트 요청은 `fastapi`를 통해 처리한다.** `fastapi`가 유일한 외부 진입점이다.

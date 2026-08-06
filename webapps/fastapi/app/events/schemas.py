@@ -28,7 +28,7 @@ class EventResponse(BaseModel):
         return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @classmethod
-    def from_summary(cls, summary: EventSummary) -> "EventResponse":
+    def from_summary(cls, summary: EventSummary) -> EventResponse:
         event = summary.event
         return cls(
             id=event.id,
@@ -48,7 +48,7 @@ class EventListResponse(BaseModel):
     offset: int
 
     @classmethod
-    def from_page(cls, page: EventPage, *, limit: int, offset: int) -> "EventListResponse":
+    def from_page(cls, page: EventPage, *, limit: int, offset: int) -> EventListResponse:
         return cls(
             items=[EventResponse.from_summary(summary) for summary in page.items],
             total=page.total,

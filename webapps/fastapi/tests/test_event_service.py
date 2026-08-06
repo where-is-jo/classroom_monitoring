@@ -63,9 +63,7 @@ def test_임계값이_바뀌면_등급도_바뀐다() -> None:
     strict = EventService(
         repository, high_confidence_threshold=0.9, medium_confidence_threshold=0.8
     )
-    loose = EventService(
-        repository, high_confidence_threshold=0.6, medium_confidence_threshold=0.3
-    )
+    loose = EventService(repository, high_confidence_threshold=0.6, medium_confidence_threshold=0.3)
 
     assert strict.get_event("evt-test-001").confidence_level == "low"
     assert loose.get_event("evt-test-001").confidence_level == "high"

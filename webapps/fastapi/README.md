@@ -109,6 +109,28 @@ database 이름을 명시한 뒤 다음 marker를 사용한다. fixture는 이�
 python -m pytest -m mongodb
 ```
 
+### 린트와 타입 검사
+
+```bash
+cd webapps/fastapi
+python -m ruff check .        # 린트
+python -m ruff format .       # 포매팅
+python -m mypy                # 타입 검사 (대상은 pyproject.toml에 있다)
+```
+
+`ruff check --fix`로 자동 수정할 수 있는 지적은 `[*]` 표시가 붙는다.
+병합 전에는 세 명령과 `python -m pytest`가 모두 통과해야 한다.
+
+설정은 [`pyproject.toml`](./pyproject.toml)에 있다. 저장소 최상위가 아니라 이 디렉터리에
+두는 이유와 각 규칙을 켠 이유는 그 파일의 주석에 적혀 있다.
+
+**mypy는 `strict` 모드다.** 공개 함수의 인자와 반환값에 타입 힌트를 붙이라는
+[코딩 규칙](../../docs/conventions/coding-convention.md#python)을 도구로 강제하는 것이며,
+새 제약을 더하는 것이 아니다.
+
+Scripts 디렉터리가 PATH에 없을 수 있어 `ruff`·`mypy`를 직접 부르지 않고
+`python -m` 형태로 적었다. `python -m pytest`, `python -m uvicorn`과 같은 방식이다.
+
 ## 서비스 목적
 
 외부 클라이언트 요청의 유일한 진입점이다.
@@ -143,6 +165,7 @@ app/
 ├─ events/                 탐지 이벤트
 │  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
 │  ├─ service.py           비즈니스 로직. 포트에만 의존
+│  ├─ rules.py             탐지 결과를 업무 의미로 바꾸는 순수 함수
 │  ├─ schemas.py           Pydantic 요청·응답 스키마
 │  ├─ models.py            도메인 모델(dataclass)
 │  ├─ ports.py             외부 I/O 인터페이스(Protocol)
@@ -189,6 +212,10 @@ tests/                     기본 테스트와 선택적 integration/ MongoDB �
 현재 포트는 프로세스 밖 I/O인 저장소 경계에만 만든다. mock HTTP 입력과 같은 프로세스의
 서비스 호출에는 포트를 만들지 않는다.
 선택 배경과 포트 판단 기준은 [ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)에 있다.
+
+포트 외의 설계 패턴(파사드·Strategy·Observer 등)을 언제 만들어도 되는지는
+[ADR-0005](../../docs/architecture/decisions/ADR-0005-design-pattern-scope.md)의 판정 질문으로 정한다.
+현재는 모두 "아직 만들지 않는다" 상태이며, `service.py`가 라우터에 대한 파사드 역할을 겸한다.
 
 템플릿은 기능별로 나누되 `app/` 밖에 둔다. Python 코드와 템플릿 파일을 섞지 않는다.
 

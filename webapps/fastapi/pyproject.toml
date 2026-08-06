@@ -1,0 +1,62 @@
+# webapps/fastapi 전용 도구 설정.
+#
+# 이 파일을 저장소 최상위가 아니라 서비스 디렉터리 안에 둔다.
+# 최상위에 빌드·설정 파일을 새로 만들지 않는다는 제약 때문이다(docs/agents/AGENTS.md).
+# 서비스마다 독립적으로 실행·검사한다는 원칙과도 맞는다.
+#
+# 패키지 배포용이 아니므로 [project] 절을 두지 않는다. 도구 설정만 담는다.
+
+[tool.ruff]
+line-length = 100
+
+# 팀이 지원할 최소 Python 버전은 아직 **결정 필요** 상태다. 배포 환경이 정해지지 않았다.
+# 3.12는 추정이 아니라 측정값이다. 3.10으로 낮추면 설치된 서드파티 스텁이 3.12 문법을 써서
+# 타입 검사가 아예 멈춘다. 지금 도구가 실제로 동작하는 하한이 3.12다.
+# 배포 환경이 확정되면 이 값과 아래 mypy 설정을 함께 올린다.
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes — 미사용 import, 정의되지 않은 이름
+    "E",    # pycodestyle 오류
+    "W",    # pycodestyle 경고
+    "I",    # isort — import 정렬
+    "UP",   # pyupgrade — 낡은 문법
+    "B",    # bugbear — 가변 기본 인자 등 실제 버그로 이어지는 패턴
+    "SIM",  # 불필요하게 복잡한 표현
+    "C4",   # 비효율적인 컴프리헨션
+    "DTZ",  # 시간대 없는 datetime — 시각은 ISO 8601 UTC로 다룬다
+    "PTH",  # 경로 문자열 조합 대신 pathlib
+    "RUF",  # ruff 자체 규칙
+]
+
+ignore = [
+    # 줄 길이는 포매터에 맡긴다. 한국어 주석과 docstring은 포매터가 재배치하지 못해
+    # 이 규칙을 켜면 고칠 수 없는 지적만 쌓인다. 코딩 규칙의 "포매팅은 도구에 맡긴다"를
+    # 따르는 것이며, 길이를 무시한다는 뜻은 아니다.
+    "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI는 기본 인자로 Depends·Query를 받는 구조라 B008(함수 호출을 기본 인자로 쓰지 않기)이
+# 프레임워크 관용구 전체를 지적한다. 해당 호출만 예외로 둔다.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+
+[tool.mypy]
+# ruff의 target-version과 같은 값을 유지한다. 두 도구가 다른 버전을 가정하면
+# 한쪽만 통과하는 코드가 생긴다.
+python_version = "3.12"
+strict = true
+files = ["app", "tests"]
+
+# 검사에서 뺀 코드가 어디인지 보이게 한다. 조용히 통과하는 구간을 만들지 않는다.
+warn_unused_ignores = true
+warn_unreachable = true
+
+# 타입 스텁이 없는 서드파티는 오류로 만들지 않는다. 우리 코드의 문제와 구분한다.
+[[tool.mypy.overrides]]
+module = ["uvicorn.*"]
+ignore_missing_imports = true
