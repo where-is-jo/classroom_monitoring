@@ -94,11 +94,3 @@ class SelfDeactivationError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("현재 로그인한 계정은 비활성화할 수 없습니다.")
-
-
-class LastSystemOperatorError(DomainError):
-    code = "LAST_SYSTEM_OPERATOR_REQUIRED"
-    status_code = 409
-
-    def __init__(self) -> None:
-        super().__init__("마지막 활성 SYSTEM_OPERATOR는 변경할 수 없습니다.")

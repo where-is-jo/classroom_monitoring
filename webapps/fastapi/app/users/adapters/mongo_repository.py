@@ -111,17 +111,6 @@ class MongoUserRepository:
             raise RepositoryUnavailableError() from None
         return None if updated is None else self._to_domain(updated)
 
-    def count_active_system_operators(self) -> int:
-        try:
-            return self._collection.count_documents(
-                {
-                    "role": UserRole.SYSTEM_OPERATOR.value,
-                    "status": UserStatus.ACTIVE.value,
-                }
-            )
-        except PyMongoError:
-            raise RepositoryUnavailableError() from None
-
     def _find_one(self, query: MongoDocument) -> User | None:
         try:
             document = self._collection.find_one(query)

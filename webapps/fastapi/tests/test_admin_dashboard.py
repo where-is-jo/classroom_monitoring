@@ -311,9 +311,12 @@ def test_dashboard_api_page_and_full_503_policy(
     try:
         with TestClient(app) as client:
             response = client.get("/api/v1/admin/dashboard-summary")
+            audit_api = client.get("/api/v1/admin/audit-logs")
             page = client.get("/admin")
             audit = client.get("/admin/audit-logs")
         assert response.status_code == page.status_code == 200
+        assert audit_api.status_code == 200
+        assert audit_api.headers["deprecation"] == "true"
         assert audit.status_code == 404
         assert response.json()["employees"]["total"] == 0
         assert "interview_waits" not in response.json()

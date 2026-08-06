@@ -348,7 +348,7 @@ def _return_to_for(user: User, value: str) -> str:
             "/video-search",
             "/account",
         ),
-        UserRole.SYSTEM_OPERATOR: ("/admin", "/employees", "/classrooms", "/account"),
+        UserRole.SYSTEM_OPERATOR: (),
     }
     if candidate and candidate.startswith(allowed_prefixes[user.role]):
         return candidate

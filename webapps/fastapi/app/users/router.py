@@ -25,6 +25,7 @@ from .schemas import (
     CreateUserRequest,
     DeactivateUserForm,
     DeactivateUserRequest,
+    ProductUserRole,
     UpdateUserForm,
     UpdateUserRequest,
     UserListResponse,
@@ -72,7 +73,7 @@ def _update_command(
     summary="관리자 사용자 목록 조회",
 )
 def list_users(
-    role: UserRole | None = None,
+    role: ProductUserRole | None = None,
     status_filter: UserStatus | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, max_length=100),
     limit: int | None = Query(default=None, ge=1),
@@ -176,7 +177,7 @@ def deactivate_user(
 @page_router.get("")
 def users_page(
     request: Request,
-    role: UserRole | None = None,
+    role: ProductUserRole | None = None,
     status_filter: UserStatus | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, max_length=100),
     limit: int | None = Query(default=None, ge=1),

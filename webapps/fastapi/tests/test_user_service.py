@@ -11,17 +11,18 @@ from app.auth.errors import InvalidRefreshTokenError, PermissionDeniedError
 from app.auth.models import LoginCommand
 from app.users.errors import (
     CurrentPasswordMismatchError,
-    LastSystemOperatorError,
     PasswordPolicyError,
     SelfDeactivationError,
     UserConcurrentUpdateError,
     UserEmailConflictError,
 )
 from app.users.models import (
+    PRODUCT_ROLES,
     ChangePasswordCommand,
     CreateUserCommand,
     UpdateUserCommand,
     UserRole,
+    UserStatus,
 )
 from app.users.seed import VirtualSeedPasswords, seed_virtual_users
 from tests.auth_helpers import build_auth_stack
@@ -31,19 +32,18 @@ def operation_id() -> str:
     return str(uuid4())
 
 
-def test_환경_주입_password로_네_역할의_가상_사용자를_idempotent_seed한다() -> None:
+def test_환경_주입_password로_세_제품_역할의_가상_사용자를_idempotent_seed한다() -> None:
     stack = build_auth_stack()
     passwords = VirtualSeedPasswords(
         student="StudentPassword1!",
         staff="StaffPassword12!",
         admin="AdminPassword12!",
-        system_operator="OperatorPassword1!",
     )
 
     first = seed_virtual_users(stack.user_service, passwords)
     second = seed_virtual_users(stack.user_service, passwords)
 
-    assert {user.role for user in first} == set(UserRole)
+    assert {user.role for user in first} == PRODUCT_ROLES
     assert [user.id for user in first] == [user.id for user in second]
     assert all(user.email.endswith("@example.invalid") for user in first)
 
@@ -132,10 +132,15 @@ def test_허용_필드만_CAS로_수정하고_중복_operation은_같은_결과�
         )
 
 
-def test_soft_deactivate는_본인과_마지막_SYSTEM_OPERATOR를_보호한다() -> None:
+def test_soft_deactivate는_본인을_보호하고_legacy_operator_정리를_허용한다() -> None:
     stack = build_auth_stack()
     admin = stack.seed(UserRole.ADMIN)
-    operator = stack.seed(UserRole.SYSTEM_OPERATOR)
+    operator = stack.seed(
+        UserRole.SYSTEM_OPERATOR, email="legacy-operator@example.invalid"
+    )
+    migrating = stack.seed(
+        UserRole.SYSTEM_OPERATOR, email="migrating-operator@example.invalid"
+    )
 
     with pytest.raises(SelfDeactivationError):
         stack.user_service.deactivate_user(
@@ -144,13 +149,24 @@ def test_soft_deactivate는_본인과_마지막_SYSTEM_OPERATOR를_보호한다(
             operation_id=operation_id(),
             ip_fingerprint=None,
         )
-    with pytest.raises(LastSystemOperatorError):
-        stack.user_service.deactivate_user(
-            admin,
-            operator.id,
+    inactive = stack.user_service.deactivate_user(
+        admin,
+        operator.id,
+        operation_id=operation_id(),
+        ip_fingerprint=None,
+    )
+    migrated = stack.user_service.update_user(
+        admin,
+        UpdateUserCommand(
+            user_id=migrating.id,
+            expected_version=migrating.version,
             operation_id=operation_id(),
-            ip_fingerprint=None,
-        )
+            role=UserRole.ADMIN,
+        ),
+        ip_fingerprint=None,
+    )
+    assert inactive.status == UserStatus.INACTIVE
+    assert migrated.role == UserRole.ADMIN
 
 
 def test_비밀번호_변경은_기존값을_확인하고_전체_refresh를_폐기한다() -> None:

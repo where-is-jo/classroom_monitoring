@@ -166,8 +166,12 @@ def test_OpenAPI와_docs_경로를_유지한다(client: TestClient) -> None:
     openapi_response = client.get("/openapi.json")
     assert openapi_response.status_code == 200
     assert client.get("/docs").status_code == 200
-    event_responses = openapi_response.json()["paths"]["/api/v1/events"]["get"]["responses"]
-    assert event_responses["422"]["content"]["application/json"]["schema"] == {
+    paths = openapi_response.json()["paths"]
+    assert "/api/v1/events" not in paths
+    assert "/api/v1/events/{event_id}" not in paths
+    assert "/api/v1/admin/audit-logs" not in paths
+    activity_responses = paths["/api/v1/admin/dashboard-activities"]["get"]["responses"]
+    assert activity_responses["422"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ErrorResponse"
     }
 
@@ -180,6 +184,7 @@ def test_local_memory_mode_기반_사용자_여정(client: TestClient) -> None:
     event_list = client.get("/api/v1/events?limit=1&offset=0")
     assert event_list.status_code == 200
     assert event_list.json()["limit"] == 1
+    assert event_list.headers["deprecation"] == "true"
 
     event_page = client.get("/events")
     assert event_page.status_code == 200

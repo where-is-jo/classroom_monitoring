@@ -461,7 +461,6 @@ def _seed_users(settings: Settings) -> None:
     assert settings.auth_seed_student_password is not None
     assert settings.auth_seed_staff_password is not None
     assert settings.auth_seed_admin_password is not None
-    assert settings.auth_seed_system_operator_password is not None
     audit_service = get_audit_service(get_audit_repository(settings))
     user_service = get_user_service(
         repository=get_user_repository(settings),
@@ -479,7 +478,6 @@ def _seed_users(settings: Settings) -> None:
             student=settings.auth_seed_student_password.get_secret_value(),
             staff=settings.auth_seed_staff_password.get_secret_value(),
             admin=settings.auth_seed_admin_password.get_secret_value(),
-            system_operator=(settings.auth_seed_system_operator_password.get_secret_value()),
         ),
     )
 

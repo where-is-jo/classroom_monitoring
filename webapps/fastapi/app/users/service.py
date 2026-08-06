@@ -20,7 +20,6 @@ from .errors import (
     CurrentPasswordMismatchError,
     InvalidEmailError,
     InvalidUserNameError,
-    LastSystemOperatorError,
     PasswordPolicyError,
     PasswordUnchangedError,
     SelfDeactivationError,
@@ -31,6 +30,7 @@ from .errors import (
 )
 from .models import (
     ADMIN_ROLES,
+    PRODUCT_ROLES,
     ChangePasswordCommand,
     CreateUserCommand,
     UpdateUserCommand,
@@ -145,7 +145,7 @@ class UserService:
         if command.role is not None:
             self._require_product_role(command.role)
         status = current.status if command.status is None else command.status
-        self._protect_operator_and_self(actor, current, role=role, status=status)
+        self._protect_self(actor, current, status=status)
 
         now = self._clock()
         updated = replace(
@@ -208,12 +208,7 @@ class UserService:
                 ip_fingerprint=ip_fingerprint,
             )
             return current
-        self._protect_operator_and_self(
-            actor,
-            current,
-            role=current.role,
-            status=UserStatus.INACTIVE,
-        )
+        self._protect_self(actor, current, status=UserStatus.INACTIVE)
         now = self._clock()
         inactive = replace(
             current,
@@ -379,26 +374,15 @@ class UserService:
             ip_fingerprint=ip_fingerprint,
         )
 
-    def _protect_operator_and_self(
+    def _protect_self(
         self,
         actor: User,
         current: User,
         *,
-        role: UserRole,
         status: UserStatus,
     ) -> None:
         if actor.id == current.id and status != UserStatus.ACTIVE:
             raise SelfDeactivationError()
-        was_active_operator = (
-            current.role == UserRole.SYSTEM_OPERATOR and current.status == UserStatus.ACTIVE
-        )
-        remains_active_operator = role == UserRole.SYSTEM_OPERATOR and status == UserStatus.ACTIVE
-        if (
-            was_active_operator
-            and not remains_active_operator
-            and self._repository.count_active_system_operators() <= 1
-        ):
-            raise LastSystemOperatorError()
 
     @staticmethod
     def _require_admin(actor: User) -> None:
@@ -427,7 +411,7 @@ class UserService:
 
     @staticmethod
     def _require_product_role(role: UserRole) -> None:
-        if role not in {UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN}:
+        if role not in PRODUCT_ROLES:
             raise UnsupportedUserRoleError()
 
 

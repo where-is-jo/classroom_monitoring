@@ -19,7 +19,7 @@ from ..shared.security import (
     hash_refresh_token,
 )
 from ..users.errors import UserConcurrentUpdateError
-from ..users.models import User, UserStatus
+from ..users.models import PRODUCT_ROLES, User, UserStatus
 from ..users.ports import UserRepository
 from .errors import (
     AccountLockedError,
@@ -118,11 +118,16 @@ class AuthService:
             self._password_security.verify_password(command.password, user.password_hash)
             self._rate_limiter.record_failure(command.ip_fingerprint, now=now)
             raise AccountLockedError()
-        if user.status != UserStatus.ACTIVE or not self._password_security.verify_password(
+        password_matches = self._password_security.verify_password(
             command.password, user.password_hash
+        )
+        if (
+            user.status != UserStatus.ACTIVE
+            or user.role not in PRODUCT_ROLES
+            or not password_matches
         ):
             self._rate_limiter.record_failure(command.ip_fingerprint, now=now)
-            if user.status == UserStatus.ACTIVE:
+            if user.status == UserStatus.ACTIVE and user.role in PRODUCT_ROLES:
                 locked = self._record_account_failure(
                     user,
                     now=now,
@@ -164,7 +169,11 @@ class AuthService:
             raise InvalidRefreshTokenError()
 
         user = self._users.get_user(current.user_id)
-        if user is None or user.status != UserStatus.ACTIVE:
+        if (
+            user is None
+            or user.status != UserStatus.ACTIVE
+            or user.role not in PRODUCT_ROLES
+        ):
             self._auth.revoke_family(current.family_id, now=now)
             raise InvalidRefreshTokenError()
 
@@ -219,7 +228,11 @@ class AuthService:
         except (TokenExpiredError, TokenValidationError):
             raise AuthenticationRequiredError() from None
         user = self._users.get_user(claims.user_id)
-        if user is None or user.status != UserStatus.ACTIVE:
+        if (
+            user is None
+            or user.status != UserStatus.ACTIVE
+            or user.role not in PRODUCT_ROLES
+        ):
             raise AuthenticationRequiredError()
         return user
 

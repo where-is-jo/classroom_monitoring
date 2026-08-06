@@ -1,4 +1,4 @@
-"""환경에서 받은 password로만 네 역할의 가상 사용자를 만드는 helper."""
+"""환경에서 받은 password로만 세 제품 역할의 가상 사용자를 만드는 helper."""
 
 from __future__ import annotations
 
@@ -14,19 +14,12 @@ class VirtualSeedPasswords:
     student: str
     staff: str
     admin: str
-    system_operator: str
 
 
 _VIRTUAL_USERS = (
     ("student@example.invalid", "가상 학생", UserRole.STUDENT, "student"),
     ("staff@example.invalid", "가상 직원", UserRole.STAFF, "staff"),
     ("admin@example.invalid", "가상 관리자", UserRole.ADMIN, "admin"),
-    (
-        "operator@example.invalid",
-        "가상 시스템 운영자",
-        UserRole.SYSTEM_OPERATOR,
-        "system_operator",
-    ),
 )
 
 

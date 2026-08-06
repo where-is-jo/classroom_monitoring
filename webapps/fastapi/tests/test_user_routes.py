@@ -125,6 +125,27 @@ def test_목록_API는_filter와_표준_pagination_응답을_사용한다(
     assert response.json()["items"][0]["role"] == "STAFF"
 
 
+def test_사용자_API는_레거시_SYSTEM_OPERATOR_지정을_거부한다(
+    user_client: TestClient,
+    user_stack: AuthStack,
+) -> None:
+    login_admin(user_client, user_stack)
+
+    response = user_client.post(
+        "/api/v1/users",
+        headers=write_headers(user_client),
+        json={
+            "email": "legacy-role@example.invalid",
+            "password": "LegacyRolePassword1!",
+            "name": "레거시 역할",
+            "role": "SYSTEM_OPERATOR",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_사용자_API는_validation_CSRF와_CAS_오류_형식을_지킨다(
     user_client: TestClient,
     user_stack: AuthStack,
@@ -231,3 +252,7 @@ def test_OpenAPI는_auth_user_계약과_공통_오류_model을_노출한다(
     user_properties = schema["components"]["schemas"]["UserResponse"]["properties"]
     assert "password_hash" not in user_properties
     assert "access_token" not in user_properties
+    create_role = schema["components"]["schemas"]["CreateUserRequest"]["properties"][
+        "role"
+    ]
+    assert create_role["enum"] == ["STUDENT", "STAFF", "ADMIN"]

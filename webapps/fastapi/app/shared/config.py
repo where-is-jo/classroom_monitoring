@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     auth_seed_student_password: SecretStr | None = None
     auth_seed_staff_password: SecretStr | None = None
     auth_seed_admin_password: SecretStr | None = None
-    auth_seed_system_operator_password: SecretStr | None = None
 
     employee_away_after_seconds: int = Field(default=180, ge=1, le=86400)
     employee_offsite_after_seconds: int = Field(default=3600, ge=1, le=604800)
@@ -119,10 +118,6 @@ class Settings(BaseSettings):
                     ("AUTH_SEED_STUDENT_PASSWORD", self.auth_seed_student_password),
                     ("AUTH_SEED_STAFF_PASSWORD", self.auth_seed_staff_password),
                     ("AUTH_SEED_ADMIN_PASSWORD", self.auth_seed_admin_password),
-                    (
-                        "AUTH_SEED_SYSTEM_OPERATOR_PASSWORD",
-                        self.auth_seed_system_operator_password,
-                    ),
                 )
                 if secret is None or not secret.get_secret_value()
             ]

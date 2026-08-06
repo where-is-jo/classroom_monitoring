@@ -108,7 +108,6 @@ def test_prod에서는_가상_사용자_seed를_활성화할_수_없다() -> Non
             auth_seed_student_password="StudentPassword1!",
             auth_seed_staff_password="StaffPassword12!",
             auth_seed_admin_password="AdminPassword12!",
-            auth_seed_system_operator_password="OperatorPassword1!",
         )
 
     assert "AUTH_SEED_ENABLED" in str(raised.value)

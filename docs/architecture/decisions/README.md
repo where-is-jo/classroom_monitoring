@@ -60,6 +60,7 @@ ADR은 그 반복을 막기 위한 기록이다.
 | [0003](./ADR-0003-metadata-store-mongodb.md) | 메타데이터 저장소로 MongoDB 채택 | Accepted |
 | [0004](./ADR-0004-object-storage-minio.md) | 영상·스냅샷 저장소로 MinIO 채택 | Accepted |
 | [0005](./ADR-0005-design-pattern-scope.md) | 설계 패턴 적용 범위와 판단 기준 | Accepted |
+| [0006](./ADR-0006-v2-legacy-compatibility.md) | v2 제품 경계와 레거시 호환성 | Accepted |
 
 0001은 템플릿이므로 목록에 넣지 않는다.
 새 ADR을 추가하면 이 표에 한 줄 추가한다.

@@ -238,7 +238,9 @@ def product_home_path(role: UserRole) -> str:
         return "/employees"
     if role == UserRole.STAFF:
         return "/staff/interview-waits"
-    return "/admin"
+    if role == UserRole.ADMIN:
+        return "/admin"
+    return "/login"
 
 
 def request_ip_fingerprint(

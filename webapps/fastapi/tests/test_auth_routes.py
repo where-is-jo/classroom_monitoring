@@ -203,7 +203,6 @@ def test_login_화면은_정상_실패_잠금_제출중_상태를_표현한다(
         (UserRole.STUDENT, 403, 403),
         (UserRole.STAFF, 403, 403),
         (UserRole.ADMIN, 200, 200),
-        (UserRole.SYSTEM_OPERATOR, 200, 200),
     ],
 )
 def test_역할별_API와_page_권한표(
@@ -230,7 +229,6 @@ def test_역할별_API와_page_권한표(
         UserRole.STUDENT,
         UserRole.STAFF,
         UserRole.ADMIN,
-        UserRole.SYSTEM_OPERATOR,
     ],
 )
 def test_인증된_모든_역할은_events_공통_shell을_렌더링한다(
@@ -254,14 +252,26 @@ def test_mock_입력_허용_환경도_개발용_메뉴를_제품_탐색에_표�
 ) -> None:
     development_settings = get_settings().model_copy(update={"mock_inputs_enabled": True})
     app.dependency_overrides[get_settings] = lambda: development_settings
-    operator = auth_stack.seed(UserRole.SYSTEM_OPERATOR)
-    assert login(auth_client, operator.email).status_code == 200
+    admin = auth_stack.seed(UserRole.ADMIN)
+    assert login(auth_client, admin.email).status_code == 200
 
     response = auth_client.get("/events")
 
     assert response.status_code == 200
     assert 'href="/admin/dev-tools"' not in response.text
     assert 'href="/admin/mock-deliveries"' not in response.text
+
+
+def test_legacy_SYSTEM_OPERATOR는_로그인할_수_없다(
+    auth_client: TestClient,
+    auth_stack: AuthStack,
+) -> None:
+    operator = auth_stack.seed(UserRole.SYSTEM_OPERATOR)
+
+    response = login(auth_client, operator.email)
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
 
 def test_보호_page는_원래_경로와_함께_login으로_보낸다(

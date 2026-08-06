@@ -20,7 +20,8 @@ class UserStatus(StrEnum):
     LOCKED = "LOCKED"
 
 
-ADMIN_ROLES = frozenset({UserRole.ADMIN, UserRole.SYSTEM_OPERATOR})
+PRODUCT_ROLES = frozenset({UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN})
+ADMIN_ROLES = frozenset({UserRole.ADMIN})
 
 
 @dataclass(frozen=True)

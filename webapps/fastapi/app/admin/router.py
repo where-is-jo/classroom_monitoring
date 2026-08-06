@@ -97,8 +97,10 @@ def dashboard_activities(
     response_model=AuditLogListResponse,
     summary="감사 로그 조회",
     description="민감 필드를 마스킹한 감사 로그를 필터와 페이지 단위로 반환합니다.",
+    include_in_schema=False,
 )
 def audit_logs(
+    response: Response,
     actor_user_id: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
     action: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
     resource: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
@@ -110,6 +112,7 @@ def audit_logs(
     service: AdminDashboardService = Depends(get_admin_dashboard_service),
     settings: Settings = Depends(get_settings),
 ) -> AuditLogListResponse:
+    response.headers["Deprecation"] = "true"
     resolved_limit, resolved_offset = _paging(limit, offset, settings)
     page = service.list_audit_logs(
         actor,

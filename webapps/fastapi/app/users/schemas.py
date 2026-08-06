@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
 from .models import User, UserPage, UserRole, UserStatus
+
+ProductUserRole = Literal[UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN]
 
 
 class UserResponse(BaseModel):
@@ -68,7 +71,7 @@ class CreateUserRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=100)
-    role: UserRole
+    role: ProductUserRole
     operation_id: UUID = Field(default_factory=uuid4)
 
 
@@ -77,7 +80,7 @@ class UpdateUserRequest(BaseModel):
     operation_id: UUID = Field(default_factory=uuid4)
     email: str | None = Field(default=None, min_length=3, max_length=254)
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    role: UserRole | None = None
+    role: ProductUserRole | None = None
     status: UserStatus | None = None
 
     @model_validator(mode="after")
