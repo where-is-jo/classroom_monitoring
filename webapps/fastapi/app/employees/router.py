@@ -260,9 +260,9 @@ def set_status_override(
     _: None = Depends(require_csrf),
     actor: User = Depends(get_current_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
-    service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
 ) -> EmployeeResponse:
-    employee = service.set_status_override(
+    employee = coordinator.set_status_override(
         actor,
         SetStatusOverrideCommand(
             employee_id=employee_id,
@@ -402,9 +402,10 @@ def set_status_override_page(
     actor: User = Depends(get_current_page_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
 ) -> Response:
     try:
-        service.set_status_override(
+        coordinator.set_status_override(
             actor,
             SetStatusOverrideCommand(
                 employee_id=employee_id,
@@ -678,7 +679,7 @@ def _render_employee_detail(
             history=history,
             can_override=service.can_override(actor, employee),
             can_request_interview=actor.role == UserRole.STUDENT,
-            override_statuses=[EmployeeStatus.AWAY, EmployeeStatus.OFFSITE],
+            override_statuses=list(EmployeeStatus),
             set_operation_id=str(uuid4()),
             clear_operation_id=str(uuid4()),
             wait_operation_id=str(uuid4()),

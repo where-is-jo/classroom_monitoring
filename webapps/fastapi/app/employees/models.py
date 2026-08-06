@@ -21,7 +21,7 @@ class StatusSource(StrEnum):
     SYSTEM = "SYSTEM"
 
 
-MANUAL_OVERRIDE_STATUSES = frozenset({EmployeeStatus.AWAY, EmployeeStatus.OFFSITE})
+MANUAL_OVERRIDE_STATUSES = frozenset(EmployeeStatus)
 
 
 @dataclass(frozen=True)
@@ -150,7 +150,7 @@ class UpdateEmployeeCommand:
 class SetStatusOverrideCommand:
     employee_id: str
     status: EmployeeStatus
-    reason: str
+    reason: str | None
     ends_at: datetime | None
     expected_version: int
     operation_id: str

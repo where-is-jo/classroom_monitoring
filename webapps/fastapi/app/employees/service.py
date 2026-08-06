@@ -286,8 +286,12 @@ class EmployeeService:
         self._require_active(current)
         if current.version != command.expected_version:
             raise EmployeeConcurrentUpdateError()
+        if current.current_status.status == command.status:
+            return current
         now = self._clock()
-        reason = self._required_text(command.reason)
+        reason = (
+            "사용자 직접 설정" if command.reason is None else self._required_text(command.reason)
+        )
         invalid_end = command.ends_at is not None and (
             command.ends_at.tzinfo is None or command.ends_at <= now
         )
@@ -515,11 +519,38 @@ class EmployeeService:
             ),
         )
 
-    def can_override(self, actor: User, employee: Employee) -> bool:
-        return actor.status == UserStatus.ACTIVE and (
-            actor.role in ADMIN_ROLES
-            or (actor.role == UserRole.STAFF and employee.user_id == actor.id)
+    def set_status_override_result(
+        self,
+        actor: User,
+        command: SetStatusOverrideCommand,
+        *,
+        ip_fingerprint: str | None,
+    ) -> EmployeeMutationResult:
+        employee = self.set_status_override(
+            actor,
+            command,
+            ip_fingerprint=ip_fingerprint,
         )
+        return EmployeeMutationResult(
+            employee=employee,
+            transition=self._transition_for_operation(
+                command.employee_id,
+                command.operation_id,
+                fallback_status=employee.current_status.status,
+            ),
+        )
+
+    def can_override(self, actor: User, employee: Employee) -> bool:
+        return (
+            actor.status == UserStatus.ACTIVE
+            and actor.role == UserRole.STAFF
+            and employee.user_id == actor.id
+        )
+
+    def get_linked_employee(self, actor: User) -> Employee | None:
+        if actor.status != UserStatus.ACTIVE or actor.role != UserRole.STAFF:
+            return None
+        return self._repository.get_employee_by_user_id(actor.id)
 
     def _evaluate_one(
         self,

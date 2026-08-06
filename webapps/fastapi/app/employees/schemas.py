@@ -199,7 +199,7 @@ class DeactivateEmployeeRequest(BaseModel):
 
 class SetStatusOverrideRequest(BaseModel):
     status: EmployeeStatus
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
     ends_at: datetime | None = None
     expected_version: int = Field(ge=0)
     operation_id: UUID = Field(default_factory=uuid4)
@@ -207,6 +207,11 @@ class SetStatusOverrideRequest(BaseModel):
     @field_validator("ends_at", mode="before")
     @classmethod
     def _empty_ends_at_is_none(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _empty_reason_is_none(cls, value: object) -> object:
         return None if value == "" else value
 
     _aware_ends_at = field_validator("ends_at")(_require_aware)

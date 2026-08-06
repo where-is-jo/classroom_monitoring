@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from fastapi import Depends, Request
 
+from ..employees.models import EmployeeStatus
+from ..employees.service import EmployeeService
 from ..notifications.service import NotificationService
 from ..shared.config import Settings
 from ..shared.dependencies import (
     get_auth_service,
+    get_employee_service,
     get_notification_service,
     get_settings,
 )
@@ -78,6 +82,7 @@ def get_current_page_user(
     service: AuthService = Depends(get_auth_service),
     notification_service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
+    employee_service: EmployeeService = Depends(get_employee_service),
 ) -> User:
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
@@ -92,6 +97,7 @@ def get_current_page_user(
             settings=settings,
             notification_unread_count=notification_service.unread_count(user),
         )
+        _set_profile_state(request, user=user, employee_service=employee_service)
         return user
     except AuthenticationRequiredError:
         path = request.url.path
@@ -105,6 +111,7 @@ def get_password_change_page_user(
     service: AuthService = Depends(get_auth_service),
     notification_service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
+    employee_service: EmployeeService = Depends(get_employee_service),
 ) -> User:
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
@@ -116,6 +123,7 @@ def get_password_change_page_user(
         settings=settings,
         notification_unread_count=notification_service.unread_count(user),
     )
+    _set_profile_state(request, user=user, employee_service=employee_service)
     return user
 
 
@@ -124,6 +132,7 @@ def get_optional_page_user(
     service: AuthService = Depends(get_auth_service),
     notification_service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
+    employee_service: EmployeeService = Depends(get_employee_service),
 ) -> User | None:
     try:
         user = service.authenticate_access_token(request.cookies.get(ACCESS_COOKIE))
@@ -133,6 +142,7 @@ def get_optional_page_user(
             settings=settings,
             notification_unread_count=notification_service.unread_count(user),
         )
+        _set_profile_state(request, user=user, employee_service=employee_service)
         return user
     except AuthenticationRequiredError:
         _set_page_navigation_state(
@@ -141,7 +151,22 @@ def get_optional_page_user(
             settings=settings,
             notification_unread_count=0,
         )
+        _set_profile_state(request, user=None, employee_service=employee_service)
         return None
+
+
+def _set_profile_state(
+    request: Request,
+    *,
+    user: User | None,
+    employee_service: EmployeeService,
+) -> None:
+    request.state.profile_employee = (
+        None if user is None else employee_service.get_linked_employee(user)
+    )
+    request.state.profile_set_operation_id = str(uuid4())
+    request.state.profile_clear_operation_id = str(uuid4())
+    request.state.profile_statuses = list(EmployeeStatus)
 
 
 def _set_page_navigation_state(

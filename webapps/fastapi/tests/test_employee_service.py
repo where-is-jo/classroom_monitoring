@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -121,7 +120,7 @@ def test_직원_CRUD와_STAFF_0대1_연결_제약(employee_stack: EmployeeStack)
 
 
 def test_사람과_통화_조합_및_동일_상태_noop(employee_stack: EmployeeStack) -> None:
-    employee = employee_stack.create_employee()
+    employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
 
     working = _observation(employee_stack, employee.id, person_present=True)
     assert working.resulting_status == EmployeeStatus.WORKING
@@ -234,12 +233,12 @@ def test_override_우선과_해제_즉시_재평가_사용자_여정(
 def test_override_만료와_평가_operation_id_재시도는_이력을_중복하지_않는다(
     employee_stack: EmployeeStack,
 ) -> None:
-    employee = employee_stack.create_employee()
+    employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
     _observation(employee_stack, employee.id, person_present=True)
     current = _stored_employee(employee_stack, employee.id)
     ends_at = employee_stack.auth.clock() + timedelta(seconds=30)
     employee_stack.service.set_status_override(
-        employee_stack.admin,
+        employee_stack.staff,
         SetStatusOverrideCommand(
             employee_id=employee.id,
             status=EmployeeStatus.OFFSITE,
@@ -354,7 +353,7 @@ def test_mock_관측_CAS_충돌은_재시도하고_고갈되면_409() -> None:
         _observation(blocked, blocked_employee.id, person_present=True)
 
 
-def test_override_권한은_STAFF_본인과_ADMIN만_허용(employee_stack: EmployeeStack) -> None:
+def test_override_권한은_연결된_STAFF_본인만_허용(employee_stack: EmployeeStack) -> None:
     employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
     other_staff = employee_stack.auth.seed(UserRole.STAFF, email="other-staff@example.invalid")
     command = SetStatusOverrideCommand(
@@ -378,17 +377,58 @@ def test_override_권한은_STAFF_본인과_ADMIN만_허용(employee_stack: Empl
     own = employee_stack.service.set_status_override(
         employee_stack.staff, command, ip_fingerprint="test-ip-fingerprint"
     )
-    admin_command = replace(
-        command,
-        expected_version=own.version,
-        operation_id=str(uuid4()),
-        status=EmployeeStatus.OFFSITE,
-    )
-    assert (
+    with pytest.raises(PermissionDeniedError):
         employee_stack.service.set_status_override(
             employee_stack.admin,
-            admin_command,
+            SetStatusOverrideCommand(
+                employee_id=employee.id,
+                status=EmployeeStatus.OFFSITE,
+                reason=None,
+                ends_at=None,
+                expected_version=own.version,
+                operation_id=str(uuid4()),
+            ),
             ip_fingerprint="test-ip-fingerprint",
-        ).current_status.status
-        == EmployeeStatus.OFFSITE
+        )
+
+
+def test_네가지_수동상태와_같은상태_noop을_지원한다(
+    employee_stack: EmployeeStack,
+) -> None:
+    employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
+    unchanged = employee_stack.service.set_status_override(
+        employee_stack.staff,
+        SetStatusOverrideCommand(
+            employee.id,
+            EmployeeStatus.AWAY,
+            None,
+            None,
+            employee.version,
+            str(uuid4()),
+        ),
+        ip_fingerprint="test",
     )
+    assert unchanged == employee
+
+    current = unchanged
+    for selected_status in (
+        EmployeeStatus.WORKING,
+        EmployeeStatus.ON_CALL,
+        EmployeeStatus.OFFSITE,
+        EmployeeStatus.AWAY,
+    ):
+        current = employee_stack.service.set_status_override(
+            employee_stack.staff,
+            SetStatusOverrideCommand(
+                current.id,
+                selected_status,
+                None,
+                None,
+                current.version,
+                str(uuid4()),
+            ),
+            ip_fingerprint="test",
+        )
+        assert current.current_status.status == selected_status
+        assert current.active_override is not None
+        assert current.active_override.reason == "사용자 직접 설정"

@@ -15,6 +15,7 @@ from ..employees.models import (
     EmployeeStatus,
     EmployeeStatusTransition,
     RecordEmployeeObservationCommand,
+    SetStatusOverrideCommand,
 )
 from ..employees.ports import EmployeeRepository
 from ..employees.service import EmployeeService
@@ -708,6 +709,25 @@ class EmployeeInterviewCoordinator:
         ip_fingerprint: str | None,
     ) -> Employee:
         result = self._employees.clear_status_override_result(
+            actor,
+            command,
+            ip_fingerprint=ip_fingerprint,
+        )
+        self._handle_return_transition(
+            result.transition,
+            source_operation_id=command.operation_id,
+            actor_user_id=actor.id,
+        )
+        return result.employee
+
+    def set_status_override(
+        self,
+        actor: User,
+        command: SetStatusOverrideCommand,
+        *,
+        ip_fingerprint: str | None,
+    ) -> Employee:
+        result = self._employees.set_status_override_result(
             actor,
             command,
             ip_fingerprint=ip_fingerprint,

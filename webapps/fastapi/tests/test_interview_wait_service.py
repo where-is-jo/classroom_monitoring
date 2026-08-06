@@ -12,6 +12,7 @@ from app.employees.models import (
     EmployeeObservation,
     EmployeeStatus,
     RecordEmployeeObservationCommand,
+    SetStatusOverrideCommand,
 )
 from app.interview_waits.errors import (
     InterviewWaitDuplicateError,
@@ -178,6 +179,31 @@ def test_면담_신청은_STUDENT만_가능하다(stack: InterviewWaitStack) -> 
     for actor in (stack.employees.staff, stack.employees.admin):
         with pytest.raises(PermissionDeniedError):
             stack.service.create_wait(actor, command)
+
+
+def test_STAFF가_프로필에서_WORKING으로_바꾸면_학생_대기가_READY가_된다(
+    stack: InterviewWaitStack,
+) -> None:
+    employee = stack.employees.create_employee(user_id=stack.employees.staff.id)
+    wait = stack.create_wait(employee.id)
+
+    changed = stack.coordinator.set_status_override(
+        stack.employees.staff,
+        SetStatusOverrideCommand(
+            employee_id=employee.id,
+            status=EmployeeStatus.WORKING,
+            reason=None,
+            ends_at=None,
+            expected_version=employee.version,
+            operation_id="staff-profile-working",
+        ),
+        ip_fingerprint="test",
+    )
+
+    ready = stack.waits.get_wait(wait.id)
+    assert changed.current_status.status == EmployeeStatus.WORKING
+    assert ready is not None and ready.status == InterviewWaitStatus.READY
+    assert stack.notifications.count_unread(stack.employees.student.id) == 1
 
 
 def test_직원복귀에서만_READY_history_알림이_한번생성되고_재처리는_멱등이다(

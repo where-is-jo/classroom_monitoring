@@ -69,9 +69,46 @@
             {% set unread_count = request.state.notification_unread_count | default(0) %}
             {% if unread_count %}<span class="nav-badge" aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>{% endif %}
           </button>
-          <span class="account-avatar" aria-hidden="true">{{ current_user.name[:1] }}</span>
-          <span class="account-copy"><strong>{{ current_user.name }}</strong><small>{{ current_user.role.value|display_label }}</small></span>
-          <a class="icon-button" href="/account/password" aria-label="비밀번호 변경" title="비밀번호 변경">⚙</a>
+          <details class="profile-popover">
+            <summary class="profile-trigger" aria-label="프로필 열기">
+              <span class="account-avatar" aria-hidden="true">{{ current_user.name[:1] }}</span>
+              <span class="account-copy"><strong>{{ current_user.name }}</strong><small>{{ current_user.role.value|display_label }}</small></span>
+            </summary>
+            <div class="profile-popover-panel">
+              <p class="eyebrow">내 계정</p>
+              <strong>{{ current_user.name }}</strong>
+              <small>{{ current_user.email }}</small>
+              {% if request.state.is_staff | default(false) %}
+                {% set profile_employee = request.state.profile_employee | default(none) %}
+                <div class="profile-status-control">
+                  <h2>내 근무 상태</h2>
+                  {% if profile_employee %}
+                    <p>현재 <strong>{{ profile_employee.current_status.status.value|display_label }}</strong> · {{ profile_employee.current_status.source.value|display_label }}</p>
+                    <form method="post" action="/employees/{{ profile_employee.id }}/status-override" class="stack" data-submit-state>
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="operation_id" value="{{ request.state.profile_set_operation_id }}">
+                      <input type="hidden" name="expected_version" value="{{ profile_employee.version }}">
+                      <label>상태
+                        <select name="status" required>{% for status in request.state.profile_statuses %}<option value="{{ status.value }}"{% if status == profile_employee.current_status.status %} selected{% endif %}>{{ status.value|display_label }}</option>{% endfor %}</select>
+                      </label>
+                      <label>사유(선택)<input name="reason" maxlength="500"></label>
+                      <label>종료 시각(선택)<input name="ends_at" placeholder="2026-08-06T09:00:00+00:00"><span class="help-text">시간대를 포함한 ISO 8601 형식</span></label>
+                      <button type="submit" data-pending-label="변경 중…">근무 상태 변경</button>
+                    </form>
+                    <form method="post" action="/employees/{{ profile_employee.id }}/status-override/clear" data-submit-state>
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="operation_id" value="{{ request.state.profile_clear_operation_id }}">
+                      <input type="hidden" name="expected_version" value="{{ profile_employee.version }}">
+                      <button type="submit" class="secondary" data-pending-label="전환 중…">자동 상태 사용</button>
+                    </form>
+                  {% else %}
+                    <div class="empty" role="status">연결된 직원 프로필이 없습니다. 관리자에게 계정 연결을 요청하세요.</div>
+                  {% endif %}
+                </div>
+              {% endif %}
+              <a href="/account/password">비밀번호 변경</a>
+            </div>
+          </details>
           <form method="post" action="/logout" data-submit-state>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="icon-button" type="submit" data-pending-label="…" aria-label="로그아웃" title="로그아웃">↪</button>
