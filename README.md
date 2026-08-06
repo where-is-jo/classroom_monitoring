@@ -10,17 +10,24 @@
 
 ## 현재 단계
 
-문서 체계가 갖춰졌고, **`webapps/fastapi`에 최소 동작 골격이 있다.**
-이벤트 목록·상세 화면과 JSON API가 인메모리 샘플 데이터로 동작한다.
+문서 체계와 **`webapps/fastapi`의 v2 캠퍼스 운영 포털**이 동작한다. 세 제품 역할의
+인증·사용자 관리, 직원 상태, 면담 대기, 강의실 좌석과 마감 후 경고, 인앱 알림,
+관리자 대시보드를 제공한다. local/dev에서는 실제 영상이나 개인정보 없이 합성 모니터링과
+영상 검색 흐름도 시연할 수 있다.
 
 ```bash
 cd webapps/fastapi
 python -m pip install -r requirements.txt
+cp .env.example .env
+# .env의 네 보안 비밀값을 각각 32자 이상 값으로 채운다.
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-`deeplearning`, `worker`, `monitoring`, `RPAs`에는 아직 코드가 없다.
-MongoDB·MinIO 연동, 인증, 실시간 갱신, 추론도 구현되지 않았다.
+FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 지원한다. 실행 방법,
+역할별 화면, 환경변수와 API 경계는 [fastapi README](./webapps/fastapi/README.md)가 기준이다.
+
+`deeplearning`, `worker`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다. 실제 카메라·영상
+수집, 추론, 실시간 갱신, MinIO 영상 저장은 구현되지 않았다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -127,4 +134,5 @@ README.md      이 문서
 - 알림 채널
 
 확정된 결정은 [ADR](./docs/architecture/decisions/README.md)에 기록되어 있다.
-메타데이터 저장소(MongoDB), 영상 저장소(MinIO), fastapi 내부 구조가 여기에 해당한다.
+메타데이터 저장소(MongoDB), 영상 저장소(MinIO), fastapi 내부 구조와
+[v2 레거시 호환성](./docs/architecture/decisions/ADR-0006-v2-legacy-compatibility.md)이 여기에 해당한다.
