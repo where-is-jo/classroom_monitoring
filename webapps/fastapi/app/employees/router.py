@@ -677,6 +677,7 @@ def _render_employee_detail(
             employee=employee,
             history=history,
             can_override=service.can_override(actor, employee),
+            can_request_interview=actor.role == UserRole.STUDENT,
             override_statuses=[EmployeeStatus.AWAY, EmployeeStatus.OFFSITE],
             set_operation_id=str(uuid4()),
             clear_operation_id=str(uuid4()),

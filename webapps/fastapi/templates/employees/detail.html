@@ -90,7 +90,7 @@
       {% endif %}
     </div>
 
-    <aside class="sticky-column">
+    {% if can_request_interview %}<aside class="sticky-column">
       <section id="interview-wait" class="panel" aria-labelledby="interview-wait-title">
         <p class="eyebrow">빠른 작업</p>
         <h2 id="interview-wait-title">면담 대기</h2>
@@ -113,6 +113,6 @@
           <div class="empty" role="status">비활성 직원에게는 면담 대기를 등록할 수 없습니다.</div>
         {% endif %}
       </section>
-    </aside>
+    </aside>{% endif %}
   </div>
 {% endblock %}

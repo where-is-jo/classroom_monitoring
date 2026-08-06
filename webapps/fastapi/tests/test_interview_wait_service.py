@@ -155,14 +155,29 @@ def test_요청자_대상STAFF_다른STAFF_ADMIN_권한(
 
     assert stack.service.get_wait(stack.employees.student, wait.id) == wait
     assert stack.service.get_wait(stack.employees.staff, wait.id) == wait
-    assert stack.service.get_wait(stack.employees.admin, wait.id) == wait
     with pytest.raises(PermissionDeniedError):
         stack.service.get_wait(other_staff, wait.id)
+    with pytest.raises(PermissionDeniedError):
+        stack.service.get_wait(stack.employees.admin, wait.id)
     with pytest.raises(PermissionDeniedError):
         stack.service.transition_wait(
             other_staff,
             TransitionInterviewWaitCommand(wait.id, InterviewWaitStatus.CANCELLED, "other-cancel"),
         )
+    with pytest.raises(PermissionDeniedError):
+        stack.service.transition_wait(
+            stack.employees.admin,
+            TransitionInterviewWaitCommand(wait.id, InterviewWaitStatus.CANCELLED, "admin-cancel"),
+        )
+
+
+def test_면담_신청은_STUDENT만_가능하다(stack: InterviewWaitStack) -> None:
+    employee = stack.employees.create_employee()
+    command = CreateInterviewWaitCommand(employee.id, None, "role-create")
+
+    for actor in (stack.employees.staff, stack.employees.admin):
+        with pytest.raises(PermissionDeniedError):
+            stack.service.create_wait(actor, command)
 
 
 def test_직원복귀에서만_READY_history_알림이_한번생성되고_재처리는_멱등이다(

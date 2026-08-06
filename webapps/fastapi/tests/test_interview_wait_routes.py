@@ -111,8 +111,8 @@ def test_api_scopes_lists_and_hides_another_requesters_wait(
 
     _login(interview_client, interview_stack.employees.admin)
     admin_list = interview_client.get("/api/v1/interview-waits")
-    assert admin_list.status_code == 200
-    assert admin_list.json()["total"] == 1
+    assert admin_list.status_code == 403
+    assert interview_client.get(f"/api/v1/interview-waits/{wait_id}").status_code == 403
 
 
 def test_return_notification_read_and_staff_complete_user_journey(
@@ -214,6 +214,12 @@ def test_pages_render_empty_normal_duplicate_and_permission_states(
     staff_page = interview_client.get("/staff/interview-waits")
     assert staff_page.status_code == 200
     assert student.name in staff_page.text
+    assert interview_client.get("/my/interview-waits").status_code == 403
+
+    for actor in (interview_stack.employees.staff, interview_stack.employees.admin):
+        _login(interview_client, actor)
+        denied_create = _create_via_api(interview_client, employee.id)
+        assert denied_create.status_code == 403
 
 
 def test_expiration_is_explicit_admin_write_and_get_remains_read_only(
@@ -246,4 +252,7 @@ def test_expiration_is_explicit_admin_write_and_get_remains_read_only(
     )
     assert evaluated.status_code == 200
     assert evaluated.json()["expired_count"] == 1
-    assert interview_client.get(f"/api/v1/interview-waits/{wait_id}").json()["status"] == "EXPIRED"
+    assert interview_client.get(f"/api/v1/interview-waits/{wait_id}").status_code == 403
+    stored = interview_stack.waits.get_wait(wait_id)
+    assert stored is not None
+    assert stored.status.value == "EXPIRED"
