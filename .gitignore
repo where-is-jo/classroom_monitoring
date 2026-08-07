@@ -25,3 +25,7 @@ venv/
 # Codex, Cursor 설정 지침
 .agents/
 .cursor/
+
+# 캠 영상 및 프레임 이미지 저장 경로
+.worker/data/video/
+.worker/data/frame/
