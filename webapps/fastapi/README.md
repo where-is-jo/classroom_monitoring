@@ -29,12 +29,12 @@ python -m uvicorn app.main:app --reload --port 8000
 `DEMO_MODE_ENABLED=true`를 함께 설정하면 memory 저장소에 직원·면담·강의실·좌석·경고·알림
 fixture도 멱등하게 채워져 별도 입력 없이 역할별 흐름을 시연할 수 있다.
 
-| 이메일 | 역할 |
-| --- | --- |
-| `student@example.invalid` | `STUDENT` |
-| `staff@example.invalid` | `STAFF` |
-| `staff-02@example.invalid` | `STAFF` |
-| `admin@example.invalid` | `ADMIN` |
+| 이메일                     | 역할      |
+| -------------------------- | --------- |
+| `student@example.invalid`  | `STUDENT` |
+| `staff@example.invalid`    | `STAFF`   |
+| `staff-02@example.invalid` | `STAFF`   |
+| `admin@example.invalid`    | `ADMIN`   |
 
 MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_NAME`을
 주입한다. 앱은 요청을 받기 전에 연결을 확인하고 필요한 index를 idempotent하게 초기화한다.
@@ -42,11 +42,11 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 
 ## 역할별 제품 흐름
 
-| 역할 | 로그인 후 시작 화면 | 할 수 있는 일 |
-| --- | --- | --- |
-| `STUDENT` | `/employees` | 직원 상태 조회, 본인 면담 신청·취소·완료, 강의실 좌석 조회 |
-| `STAFF` | `/staff/interview-waits` | 접수된 본인 면담 처리, 직원 상태 조회와 본인 근무 상태 override, 강의실 좌석 조회, 합성 영상 데모 |
-| `ADMIN` | `/admin` | 운영 요약·최근 활동·열린 경고 해결, 사용자·직원·강의실 관리, 합성 영상 데모 |
+| 역할      | 로그인 후 시작 화면      | 할 수 있는 일                                                                                     |
+| --------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `STUDENT` | `/employees`             | 직원 상태 조회, 본인 면담 신청·취소·완료, 강의실 좌석 조회                                        |
+| `STAFF`   | `/staff/interview-waits` | 접수된 본인 면담 처리, 직원 상태 조회와 본인 근무 상태 override, 강의실 좌석 조회, 합성 영상 데모 |
+| `ADMIN`   | `/admin`                 | 운영 요약·최근 활동·열린 경고 해결, 사용자·직원·강의실 관리, 합성 영상 데모                       |
 
 알림은 별도 제품 페이지가 아니라 공통 화면의 알림 팝오버로 제공한다. 학생은 준비된 면담
 알림, STAFF와 ADMIN은 담당 강의실의 마감 후 좌석 경고를 확인하고 개별 또는 전체 읽음
@@ -64,31 +64,31 @@ Jinja2 화면과 form 경로, 레거시 호환 경로는 OpenAPI에 넣지 않�
 
 ### 기본 화면
 
-| 경로 | 접근 | 설명 |
-| --- | --- | --- |
-| `/login`, `/account/password` | 비로그인·로그인 | 로그인과 최초/본인 비밀번호 변경 |
-| `/employees`, `/employees/{id}` | 로그인 | 직원 현재 상태와 이력 조회; 연결된 STAFF는 본인 상태 override |
-| `/my/interview-waits*` | `STUDENT` | 본인 면담 대기 신청·상세·상태 전이 |
-| `/staff/interview-waits*` | `STAFF` | 본인에게 접수된 면담 대기 조회·완료 |
-| `/classrooms`, `/classrooms/{id}` | 로그인 | 운영 강의실과 좌석 점유 현황 |
-| `/admin` | `ADMIN` | 직원·강의실·경고 요약, 최근 핵심 활동, 열린 경고 해결 |
-| `/admin/users` | `ADMIN` | 세 제품 역할 사용자 생성·수정·soft deactivate |
-| `/admin/employees` | `ADMIN` | 직원 프로필과 STAFF 계정 연결 관리 |
-| `/admin/classrooms` | `ADMIN` | 강의실·담당 STAFF·요일 일정·좌석 관리 |
+| 경로                              | 접근            | 설명                                                          |
+| --------------------------------- | --------------- | ------------------------------------------------------------- |
+| `/login`, `/account/password`     | 비로그인·로그인 | 로그인과 최초/본인 비밀번호 변경                              |
+| `/employees`, `/employees/{id}`   | 로그인          | 직원 현재 상태와 이력 조회; 연결된 STAFF는 본인 상태 override |
+| `/my/interview-waits*`            | `STUDENT`       | 본인 면담 대기 신청·상세·상태 전이                            |
+| `/staff/interview-waits*`         | `STAFF`         | 본인에게 접수된 면담 대기 조회·완료                           |
+| `/classrooms`, `/classrooms/{id}` | 로그인          | 운영 강의실과 좌석 점유 현황                                  |
+| `/admin`                          | `ADMIN`         | 직원·강의실·경고 요약, 최근 핵심 활동, 열린 경고 해결         |
+| `/admin/users`                    | `ADMIN`         | 세 제품 역할 사용자 생성·수정·soft deactivate                 |
+| `/admin/employees`                | `ADMIN`         | 직원 프로필과 STAFF 계정 연결 관리                            |
+| `/admin/classrooms`               | `ADMIN`         | 강의실·담당 STAFF·요일 일정·좌석 관리                         |
 
 ### 기본 API
 
-| 경로 묶음 | 설명 |
-| --- | --- |
-| `/api/v1/auth/*` | 로그인, refresh rotation, 로그아웃, 현재 사용자, 비밀번호 변경 |
-| `/api/v1/users*` | ADMIN 사용자 조회·생성·수정·soft deactivate |
-| `/api/v1/employees*`, `/api/v1/employee-status-evaluations` | 직원·상태 이력·override·명시적 시간 정책 평가 |
-| `/api/v1/interview-waits*`, `/api/v1/interview-wait-expirations` | 역할 범위 면담 대기와 명시적 만료 평가 |
-| `/api/v1/classrooms*`, `/api/v1/seats*` | 강의실·일정·좌석·점유·점유 이력 |
-| `/api/v1/after-hours-alerts*` | ADMIN 마감 후 경고 조회·해결 |
-| `/api/v1/notifications*`, `/api/v1/notification-read-batches` | 본인 알림 조회·읽음·전체 읽음 |
-| `/api/v1/admin/dashboard-summary`, `/api/v1/admin/dashboard-activities` | ADMIN 운영 집계와 최근 핵심 활동 |
-| `/health`, `/health/ready` | 프로세스 기동과 현재 저장소 준비 상태 |
+| 경로 묶음                                                               | 설명                                                           |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `/api/v1/auth/*`                                                        | 로그인, refresh rotation, 로그아웃, 현재 사용자, 비밀번호 변경 |
+| `/api/v1/users*`                                                        | ADMIN 사용자 조회·생성·수정·soft deactivate                    |
+| `/api/v1/employees*`, `/api/v1/employee-status-evaluations`             | 직원·상태 이력·override·명시적 시간 정책 평가                  |
+| `/api/v1/interview-waits*`, `/api/v1/interview-wait-expirations`        | 역할 범위 면담 대기와 명시적 만료 평가                         |
+| `/api/v1/classrooms*`, `/api/v1/seats*`                                 | 강의실·일정·좌석·점유·점유 이력                                |
+| `/api/v1/after-hours-alerts*`                                           | ADMIN 마감 후 경고 조회·해결                                   |
+| `/api/v1/notifications*`, `/api/v1/notification-read-batches`           | 본인 알림 조회·읽음·전체 읽음                                  |
+| `/api/v1/admin/dashboard-summary`, `/api/v1/admin/dashboard-activities` | ADMIN 운영 집계와 최근 핵심 활동                               |
+| `/health`, `/health/ready`                                              | 프로세스 기동과 현재 저장소 준비 상태                          |
 
 쓰기 API는 로그인 때 발급된 `som_csrf` cookie 값을 `X-CSRF-Token` header로 보내고,
 `Origin`을 `WEB_ORIGIN`과 일치시켜야 한다. Jinja2 form은 hidden field로 같은 검증을 한다.
@@ -98,12 +98,12 @@ Jinja2 화면과 form 경로, 레거시 호환 경로는 OpenAPI에 넣지 않�
 `APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 다음 경로를 등록한다.
 `STUDENT`는 접근할 수 없고 `STAFF`, `ADMIN`만 사용할 수 있다.
 
-| 경로 | 설명 |
-| --- | --- |
-| `/monitoring` | 연결된 합성 feed 2개와 영상 없음 상태 1개 |
-| `/video-search` | 고정 한국어 metadata와 기간·강의실 조건을 이용한 영상 검색 시연 |
-| `/api/v1/video-streams*`, `/api/v1/video-searches` | 같은 고정 catalog의 JSON API |
-| `/demo-assets/*` | 개인정보 없는 SVG poster와 브라우저 합성 영상 자산 |
+| 경로                                               | 설명                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------- |
+| `/monitoring`                                      | 연결된 합성 feed 2개와 영상 없음 상태 1개                       |
+| `/video-search`                                    | 고정 한국어 metadata와 기간·강의실 조건을 이용한 영상 검색 시연 |
+| `/api/v1/video-streams*`, `/api/v1/video-searches` | 같은 고정 catalog의 JSON API                                    |
+| `/demo-assets/*`                                   | 개인정보 없는 SVG poster와 브라우저 합성 영상 자산              |
 
 이 기능은 카메라·스트림·추론·영상 저장을 구현하지 않는다. 외부 미디어, 사용자 업로드,
 운영 데이터도 사용하지 않는다. `APP_ENV=prod`에서는 설정 검증 단계에서 활성화를 거부한다.
@@ -120,6 +120,23 @@ Jinja2 화면과 form 경로, 레거시 호환 경로는 OpenAPI에 넣지 않�
 호출을 유지한다. 이벤트 API 응답은 `Deprecation: true`를 보낸다. 감사 기록 저장은 내부
 통제로 유지하며 `/admin/audit-logs` 화면은 404다. `/api/v1/admin/audit-logs` 직접 호출은
 OpenAPI에서 숨기고 `Deprecation: true`를 보낸다.
+
+### 구현 전 API 설계 명세
+
+`individual_tasks/API명세서.md`를 OpenAPI 3.1로 옮긴 `api-spec/openapi.json`을 별도 경로로
+제공한다. 스마트 오피스 직원 상태 모니터링(대시보드 요약, 직원 상태, 좌석·카메라, 탐지 기록,
+내부 추론 연동)의 **아직 구현되지 않은** 계약이다.
+
+| 경로              | 설명                             |
+| ----------------- | -------------------------------- |
+| `/docs/api-spec`  | 설계 명세 Swagger UI             |
+| `/api-spec.json`  | 설계 명세 OpenAPI JSON           |
+
+- 위의 실제 API와 섞이지 않도록 경로를 나눴고 `/openapi.json`에도 넣지 않는다.
+  현재 구현은 화면 mockup 용도라, 경로가 겹치더라도 명세 쪽 정의를 목표 계약으로 본다.
+- 구현되지 않았으므로 이 화면에서는 요청 실행(Try it out)을 끈다.
+- 인증·권한, 실시간 갱신 방식, 영상 보존 범위는 **결정 필요** 상태다.
+- 구현이 끝나면 자동 생성 OpenAPI가 정본이 되고 이 명세 문서는 폐기한다.
 
 ## 핵심 도메인 규칙
 
@@ -172,15 +189,15 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 
 전체 이름과 기본값은 [`.env.example`](./.env.example)이 기준이다.
 
-| 묶음 | 주요 변수 | 제약 |
-| --- | --- | --- |
-| 실행·저장소 | `APP_ENV`, `DATABASE_MODE`, `DATABASE_URL`, `DATABASE_NAME` | memory는 local 전용; MongoDB mode는 URL·이름 필수 |
-| 보안 | `JWT_*_SECRET`, `CSRF_SECRET`, `AUDIT_IP_HASH_SECRET`, `WEB_ORIGIN` | 비밀값 32자 이상; origin exact match |
-| 인증 정책 | `AUTH_*_TTL_SECONDS`, 실패·잠금 제한, `AUTH_PASSWORD_MIN_LENGTH` | 시작 시 범위 검증 |
-| 가상 사용자·fixture | `AUTH_SEED_ENABLED`, 세 `AUTH_SEED_*_PASSWORD`, `DEMO_MODE_ENABLED` | local memory의 전체 fixture는 두 mode를 함께 활성화; prod 금지 |
-| 직원·면담·좌석 | `EMPLOYEE_*`, `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS`, `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 시간·confidence 범위 검증 |
-| 개발 경계 | `MOCK_INPUTS_ENABLED`, `DEMO_MODE_ENABLED`, `NOTIFICATION_MOCK_*` | local/dev opt-in; prod 금지 |
-| 목록·레거시 이벤트 | `PAGE_SIZE_*`, `HIGH_CONFIDENCE_THRESHOLD`, `MEDIUM_CONFIDENCE_THRESHOLD` | 페이지 최대 200; medium ≤ high |
+| 묶음                | 주요 변수                                                                                 | 제약                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 실행·저장소         | `APP_ENV`, `DATABASE_MODE`, `DATABASE_URL`, `DATABASE_NAME`                               | memory는 local 전용; MongoDB mode는 URL·이름 필수              |
+| 보안                | `JWT_*_SECRET`, `CSRF_SECRET`, `AUDIT_IP_HASH_SECRET`, `WEB_ORIGIN`                       | 비밀값 32자 이상; origin exact match                           |
+| 인증 정책           | `AUTH_*_TTL_SECONDS`, 실패·잠금 제한, `AUTH_PASSWORD_MIN_LENGTH`                          | 시작 시 범위 검증                                              |
+| 가상 사용자·fixture | `AUTH_SEED_ENABLED`, 세 `AUTH_SEED_*_PASSWORD`, `DEMO_MODE_ENABLED`                       | local memory의 전체 fixture는 두 mode를 함께 활성화; prod 금지 |
+| 직원·면담·좌석      | `EMPLOYEE_*`, `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS`, `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 시간·confidence 범위 검증                                      |
+| 개발 경계           | `MOCK_INPUTS_ENABLED`, `DEMO_MODE_ENABLED`, `NOTIFICATION_MOCK_*`                         | local/dev opt-in; prod 금지                                    |
+| 목록·레거시 이벤트  | `PAGE_SIZE_*`, `HIGH_CONFIDENCE_THRESHOLD`, `MEDIUM_CONFIDENCE_THRESHOLD`                 | 페이지 최대 200; medium ≤ high                                 |
 
 환경변수의 저장·명명 규칙은
 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다. 실제 비밀값과 `.env`는

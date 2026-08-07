@@ -60,6 +60,7 @@ from .notifications.router import (
 from .notifications.router import (
     read_batch_api_router as notification_read_batch_api_router,
 )
+from .shared.api_spec import router as design_spec_router
 from .shared.config import Settings
 from .shared.dependencies import (
     close_data_store,
@@ -98,6 +99,8 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# 구현 전 API 설계 명세. 앱의 실제 OpenAPI 스키마와 섞이지 않게 별도 경로로 낸다.
+app.include_router(design_spec_router)
 app.include_router(auth_page_router, include_in_schema=False)
 app.include_router(events_page_router, include_in_schema=False)
 _EVENT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {

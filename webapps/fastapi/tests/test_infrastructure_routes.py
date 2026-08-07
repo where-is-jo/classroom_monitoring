@@ -179,6 +179,53 @@ def test_OpenAPI와_docs_경로를_유지한다(client: TestClient) -> None:
     }
 
 
+def test_설계_명세는_별도_Swagger_경로로_제공된다(client: TestClient) -> None:
+    spec_response = client.get("/api-spec.json")
+    assert spec_response.status_code == 200
+
+    spec = spec_response.json()
+    assert spec["openapi"].startswith("3.1")
+    assert "/api/v1/dashboard/summary" in spec["paths"]
+    assert "/internal/v1/detections" in spec["paths"]
+
+    docs_response = client.get("/docs/api-spec")
+    assert docs_response.status_code == 200
+    assert "/api-spec.json" in docs_response.text
+
+
+def test_설계_명세는_앱_OpenAPI_스키마를_오염시키지_않는다(client: TestClient) -> None:
+    """구현되지 않은 경로가 실제 API 문서에 있는 기능처럼 보이면 안 된다."""
+    paths = set(client.get("/openapi.json").json()["paths"])
+
+    assert "/api/v1/dashboard/summary" not in paths
+    assert "/api/v1/employee-statuses" not in paths
+    assert "/api-spec.json" not in paths
+    assert "/docs/api-spec" not in paths
+
+
+def test_설계_명세의_모든_참조가_실제로_존재한다(client: TestClient) -> None:
+    """$ref 오타는 Swagger UI에서 조용히 빈 스키마로 보인다. 문서 단계에서 잡는다."""
+    spec = client.get("/api-spec.json").json()
+
+    def collect_refs(node: object) -> list[str]:
+        if isinstance(node, dict):
+            found = [node["$ref"]] if isinstance(node.get("$ref"), str) else []
+            for key, value in node.items():
+                if key != "$ref":
+                    found.extend(collect_refs(value))
+            return found
+        if isinstance(node, list):
+            return [ref for item in node for ref in collect_refs(item)]
+        return []
+
+    for ref in collect_refs(spec):
+        assert ref.startswith("#/"), ref
+        target: object = spec
+        for segment in ref.removeprefix("#/").split("/"):
+            assert isinstance(target, dict) and segment in target, ref
+            target = target[segment]
+
+
 def test_local_memory_mode_기반_사용자_여정(client: TestClient) -> None:
     """기동→준비 확인→기존 API→기존 화면 흐름이 외부 서비스 없이 동작한다."""
     assert client.get("/health").json() == {"status": "ok"}
