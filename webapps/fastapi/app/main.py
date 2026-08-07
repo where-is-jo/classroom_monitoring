@@ -10,6 +10,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,22 +20,18 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .admin.router import api_router as admin_dashboard_api_router
 from .admin.router import page_router as admin_dashboard_page_router
-from .auth.dependencies import login_redirect
-from .auth.errors import PageAuthenticationRequired
+from .auth.dependencies import get_optional_page_user, login_redirect, product_home_path
+from .auth.errors import PageAuthenticationRequired, PagePasswordChangeRequired
 from .auth.router import api_router as auth_api_router
 from .auth.router import page_router as auth_page_router
 from .classrooms.router import admin_page_router as classrooms_admin_page_router
 from .classrooms.router import alert_api_router as classroom_alert_api_router
-from .classrooms.router import alert_page_router as classroom_alert_page_router
-from .classrooms.router import classroom_api_router
+from .classrooms.router import classroom_api_router, seat_api_router
 from .classrooms.router import development_api_router as classroom_development_api_router
 from .classrooms.router import (
     development_page_router as classroom_development_page_router,
 )
 from .classrooms.router import page_router as classrooms_page_router
-from .classrooms.router import seat_api_router
-from .events.router import api_router as events_api_router
-from .events.router import page_router as events_page_router
 from .employees.router import admin_page_router as employees_admin_page_router
 from .employees.router import api_router as employees_api_router
 from .employees.router import development_api_router as employee_development_api_router
@@ -43,6 +40,8 @@ from .employees.router import (
 )
 from .employees.router import evaluation_api_router as employee_evaluation_api_router
 from .employees.router import page_router as employees_page_router
+from .events.router import api_router as events_api_router
+from .events.router import page_router as events_page_router
 from .interview_waits.router import api_router as interview_waits_api_router
 from .interview_waits.router import (
     expiration_api_router as interview_wait_expiration_api_router,
@@ -58,7 +57,6 @@ from .notifications.router import (
 from .notifications.router import (
     development_page_router as notification_development_page_router,
 )
-from .notifications.router import page_router as notifications_page_router
 from .notifications.router import (
     read_batch_api_router as notification_read_batch_api_router,
 )
@@ -71,9 +69,12 @@ from .shared.dependencies import (
 )
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.schemas import HealthResponse, ReadinessResponse
-from .shared.templating import STATIC_DIR, templates
+from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
+from .users.models import User
 from .users.router import api_router as users_api_router
 from .users.router import page_router as users_page_router
+from .video_monitoring.router import api_router as video_demo_api_router
+from .video_monitoring.router import page_router as video_demo_page_router
 
 logger = logging.getLogger(__name__)
 
@@ -89,25 +90,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Smart Office Monitoring",
-    description="이벤트 조회, 인증·사용자 관리, 직원 상태 API와 화면",
-    version="0.1.0",
+    description=(
+        "학생·직원·관리자용 직원 상태, 면담 대기, 강의실 좌석, 알림, 운영 대시보드 API와 화면"
+    ),
+    version="0.2.0",
     lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.include_router(auth_page_router)
-app.include_router(events_page_router)
-app.include_router(users_page_router)
+app.include_router(auth_page_router, include_in_schema=False)
+app.include_router(events_page_router, include_in_schema=False)
+_EVENT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorResponse},
+    422: {"model": ErrorResponse},
+    500: {"model": ErrorResponse},
+    503: {"model": ErrorResponse},
+}
+app.include_router(users_page_router, include_in_schema=False)
 app.include_router(
     events_api_router,
-    responses={
-        404: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
-        500: {"model": ErrorResponse},
-        503: {"model": ErrorResponse},
-    },
+    responses=_EVENT_ERROR_RESPONSES,
 )
-_AUTH_ERROR_RESPONSES = {
+_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
     401: {"model": ErrorResponse},
     403: {"model": ErrorResponse},
@@ -124,15 +128,13 @@ app.include_router(users_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 def include_notification_routers(application: FastAPI, settings: Settings) -> None:
     """인앱 알림은 항상, mock delivery 관리 경계는 허용 환경에만 등록한다."""
-    application.include_router(notifications_page_router)
-    application.include_router(
-        notifications_api_router, responses=_AUTH_ERROR_RESPONSES
-    )
-    application.include_router(
-        notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES
-    )
+    application.include_router(notifications_api_router, responses=_AUTH_ERROR_RESPONSES)
+    application.include_router(notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:
-        application.include_router(notification_development_page_router)
+        application.include_router(
+            notification_development_page_router,
+            include_in_schema=False,
+        )
         application.include_router(
             notification_development_api_router,
             responses=_AUTH_ERROR_RESPONSES,
@@ -141,15 +143,15 @@ def include_notification_routers(application: FastAPI, settings: Settings) -> No
 
 def include_employee_routers(application: FastAPI, settings: Settings) -> None:
     """일반 직원 기능은 항상, mock 입력 기능은 허용 환경에만 등록한다."""
-    application.include_router(employees_page_router)
-    application.include_router(employees_admin_page_router)
+    application.include_router(employees_page_router, include_in_schema=False)
+    application.include_router(employees_admin_page_router, include_in_schema=False)
     application.include_router(employees_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(
         employee_evaluation_api_router,
         responses=_AUTH_ERROR_RESPONSES,
     )
     if settings.mock_inputs_enabled:
-        application.include_router(employee_development_page_router)
+        application.include_router(employee_development_page_router, include_in_schema=False)
         application.include_router(
             employee_development_api_router,
             responses=_AUTH_ERROR_RESPONSES,
@@ -158,33 +160,44 @@ def include_employee_routers(application: FastAPI, settings: Settings) -> None:
 
 def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
     """강의실 기능은 항상, 구조화 mock 좌석 입력은 허용 환경에만 등록한다."""
-    application.include_router(classrooms_page_router)
-    application.include_router(classrooms_admin_page_router)
-    application.include_router(classroom_alert_page_router)
+    application.include_router(classrooms_page_router, include_in_schema=False)
+    application.include_router(classrooms_admin_page_router, include_in_schema=False)
     application.include_router(classroom_api_router, responses=_AUTH_ERROR_RESPONSES)
     application.include_router(seat_api_router, responses=_AUTH_ERROR_RESPONSES)
-    application.include_router(
-        classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES
-    )
+    application.include_router(classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES)
     if settings.mock_inputs_enabled:
-        application.include_router(classroom_development_page_router)
+        application.include_router(classroom_development_page_router, include_in_schema=False)
         application.include_router(
             classroom_development_api_router,
             responses=_AUTH_ERROR_RESPONSES,
         )
 
 
+def include_video_demo_routers(application: FastAPI, settings: Settings) -> None:
+    """Register synthetic catalog, pages, and assets only in an explicit demo mode."""
+    if not settings.demo_mode_enabled or settings.app_env not in {"local", "dev"}:
+        return
+    application.mount(
+        "/demo-assets",
+        StaticFiles(directory=str(DEMO_ASSET_DIR)),
+        name="demo-assets",
+    )
+    application.include_router(video_demo_page_router, include_in_schema=False)
+    application.include_router(video_demo_api_router, responses=_AUTH_ERROR_RESPONSES)
+
+
 include_employee_routers(app, get_settings())
 include_notification_routers(app, get_settings())
 include_classroom_routers(app, get_settings())
-app.include_router(interview_waits_my_page_router)
-app.include_router(interview_waits_staff_page_router)
+include_video_demo_routers(app, get_settings())
+app.include_router(interview_waits_my_page_router, include_in_schema=False)
+app.include_router(interview_waits_staff_page_router, include_in_schema=False)
 app.include_router(interview_waits_api_router, responses=_AUTH_ERROR_RESPONSES)
 app.include_router(
     interview_wait_expiration_api_router,
     responses=_AUTH_ERROR_RESPONSES,
 )
-app.include_router(admin_dashboard_page_router)
+app.include_router(admin_dashboard_page_router, include_in_schema=False)
 app.include_router(admin_dashboard_api_router, responses=_AUTH_ERROR_RESPONSES)
 
 
@@ -249,14 +262,24 @@ def handle_page_authentication_required(
     return RedirectResponse(url=login_redirect(exc.return_to), status_code=303)
 
 
+@app.exception_handler(PagePasswordChangeRequired)
+def handle_page_password_change_required(
+    _: Request,
+    exc: PagePasswordChangeRequired,
+) -> RedirectResponse:
+    return RedirectResponse(
+        url="/account/password?" + urlencode({"next": exc.return_to}),
+        status_code=303,
+    )
+
+
 @app.exception_handler(RequestValidationError)
 def handle_validation_error(request: Request, exc: RequestValidationError) -> Response:
     message = "요청 값이 올바르지 않습니다."
     if not _wants_json(request):
         return _error_page(request, status_code=422, message=message)
     sanitized_errors = [
-        {"location": list(error["loc"]), "type": error["type"]}
-        for error in exc.errors()
+        {"location": list(error["loc"]), "type": error["type"]} for error in exc.errors()
     ]
     return JSONResponse(
         status_code=422,
@@ -301,8 +324,12 @@ def handle_unexpected_error(request: Request, exc: Exception) -> Response:
 
 
 @app.get("/", include_in_schema=False)
-def index() -> RedirectResponse:
-    return RedirectResponse(url="/events")
+def index(user: User | None = Depends(get_optional_page_user)) -> RedirectResponse:
+    if user is None:
+        return RedirectResponse(url="/login")
+    if user.must_change_password:
+        return RedirectResponse(url="/account/password")
+    return RedirectResponse(url=product_home_path(user.role))
 
 
 @app.get("/health", tags=["system"], response_model=HealthResponse)

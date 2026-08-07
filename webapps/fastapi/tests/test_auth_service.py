@@ -20,7 +20,7 @@ from app.users.models import UserRole, UserStatus
 from tests.auth_helpers import build_auth_stack
 
 
-def login_command(email: str, password: str = "ValidPassword1!", ip: str = "ip-a"):
+def login_command(email: str, password: str = "ValidPassword1!", ip: str = "ip-a") -> LoginCommand:
     return LoginCommand(email=email, password=password, ip_fingerprint=ip)
 
 
@@ -44,9 +44,7 @@ def test_정상_로그인과_access_인증() -> None:
     session = stack.auth_service.login(login_command(user.email.upper()))
 
     assert session.user.id == user.id
-    assert stack.auth_service.authenticate_access_token(
-        session.tokens.access_token
-    ).id == user.id
+    assert stack.auth_service.authenticate_access_token(session.tokens.access_token).id == user.id
     saved = stack.users.get_user(user.id)
     assert saved is not None
     assert saved.last_login_at == stack.clock.value
@@ -94,9 +92,7 @@ def test_IP_실패_rate_limit은_원문_IP가_아닌_지문을_기준으로_동�
             stack.auth_service.login(login_command(email, ip="fingerprint-a"))
 
     with pytest.raises(LoginRateLimitedError):
-        stack.auth_service.login(
-            login_command("missing-3@example.invalid", ip="fingerprint-a")
-        )
+        stack.auth_service.login(login_command("missing-3@example.invalid", ip="fingerprint-a"))
 
 
 def test_refresh_rotation과_재사용_탐지는_family_전체를_폐기한다() -> None:

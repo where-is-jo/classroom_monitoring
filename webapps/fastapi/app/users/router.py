@@ -25,6 +25,7 @@ from .schemas import (
     CreateUserRequest,
     DeactivateUserForm,
     DeactivateUserRequest,
+    ProductUserRole,
     UpdateUserForm,
     UpdateUserRequest,
     UserListResponse,
@@ -72,7 +73,7 @@ def _update_command(
     summary="관리자 사용자 목록 조회",
 )
 def list_users(
-    role: UserRole | None = None,
+    role: ProductUserRole | None = None,
     status_filter: UserStatus | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, max_length=100),
     limit: int | None = Query(default=None, ge=1),
@@ -176,7 +177,7 @@ def deactivate_user(
 @page_router.get("")
 def users_page(
     request: Request,
-    role: UserRole | None = None,
+    role: ProductUserRole | None = None,
     status_filter: UserStatus | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, max_length=100),
     limit: int | None = Query(default=None, ge=1),
@@ -184,7 +185,7 @@ def users_page(
     actor: User = Depends(require_page_admin),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_users_page(
         request,
         actor=actor,
@@ -207,7 +208,7 @@ def create_user_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.create_user(actor, _create_command(form), ip_fingerprint=ip_fingerprint)
     except DomainError as exc:
@@ -232,7 +233,7 @@ def update_user_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.update_user(
             actor,
@@ -261,7 +262,7 @@ def deactivate_user_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.deactivate_user(
             actor,
@@ -294,7 +295,7 @@ def _render_users_page(
     offset: int = 0,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_users(
         actor,
@@ -314,7 +315,7 @@ def _render_users_page(
             "can_manage_employees": True,
             "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
             "page": page,
-            "roles": list(UserRole),
+            "roles": [UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN],
             "statuses": list(UserStatus),
             "selected_role": role,
             "selected_status": status_filter,
@@ -326,9 +327,7 @@ def _render_users_page(
             "error": error,
             "create_operation_id": str(uuid4()),
             "row_operation_ids": {user.id: str(uuid4()) for user in page.items},
-            "row_deactivate_operation_ids": {
-                user.id: str(uuid4()) for user in page.items
-            },
+            "row_deactivate_operation_ids": {user.id: str(uuid4()) for user in page.items},
         },
         status_code=status_code,
     )

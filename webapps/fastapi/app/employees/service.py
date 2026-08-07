@@ -27,6 +27,7 @@ from .models import (
     CreateEmployeeCommand,
     Employee,
     EmployeeCurrentStatus,
+    EmployeeMutationResult,
     EmployeeObservation,
     EmployeeObservationResult,
     EmployeeOverride,
@@ -36,7 +37,6 @@ from .models import (
     EmployeeStatusHistory,
     EmployeeStatusHistoryPage,
     EmployeeStatusTransition,
-    EmployeeMutationResult,
     EvaluateEmployeeStatusesCommand,
     RecordEmployeeObservationCommand,
     SetStatusOverrideCommand,
@@ -127,7 +127,7 @@ class EmployeeService:
         user_id = self._validate_staff_link(command.user_id)
         now = self._clock()
         employee = Employee(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             employee_no=self._normalize_employee_no(command.employee_no),
             user_id=user_id,
             display_name=self._required_text(command.display_name),
@@ -179,9 +179,7 @@ class EmployeeService:
         ip_fingerprint: str | None,
     ) -> Employee:
         self._require_admin(actor)
-        idempotent = self._idempotent_employee(
-            command.operation_id, command.employee_id
-        )
+        idempotent = self._idempotent_employee(command.operation_id, command.employee_id)
         if idempotent is not None:
             return idempotent
         current = self._get_required_employee(command.employee_id)
@@ -205,18 +203,12 @@ class EmployeeService:
             department=self._optional_text(command.department, current.department),
             position=self._optional_text(command.position, current.position),
             office_zone=self._optional_text(command.office_zone, current.office_zone),
-            is_active=(
-                current.is_active if command.is_active is None else command.is_active
-            ),
-            active_override=(
-                None if command.is_active is False else current.active_override
-            ),
+            is_active=(current.is_active if command.is_active is None else command.is_active),
+            active_override=(None if command.is_active is False else current.active_override),
             updated_at=self._clock(),
             version=current.version + 1,
             last_operation_id=command.operation_id,
-            operation_ids=self._append_operation(
-                current.operation_ids, command.operation_id
-            ),
+            operation_ids=self._append_operation(current.operation_ids, command.operation_id),
         )
         saved = self._repository.replace_employee(
             updated,
@@ -260,9 +252,7 @@ class EmployeeService:
             updated_at=self._clock(),
             version=current.version + 1,
             last_operation_id=operation_id,
-            operation_ids=self._append_operation(
-                current.operation_ids, operation_id
-            ),
+            operation_ids=self._append_operation(current.operation_ids, operation_id),
         )
         saved = self._repository.replace_employee(
             inactive,
@@ -290,16 +280,18 @@ class EmployeeService:
     ) -> Employee:
         current = self._get_required_employee(command.employee_id)
         self._require_override_permission(actor, current)
-        idempotent = self._idempotent_employee(
-            command.operation_id, command.employee_id
-        )
+        idempotent = self._idempotent_employee(command.operation_id, command.employee_id)
         if idempotent is not None:
             return idempotent
         self._require_active(current)
         if current.version != command.expected_version:
             raise EmployeeConcurrentUpdateError()
+        if current.current_status.status == command.status:
+            return current
         now = self._clock()
-        reason = self._required_text(command.reason)
+        reason = (
+            "사용자 직접 설정" if command.reason is None else self._required_text(command.reason)
+        )
         invalid_end = command.ends_at is not None and (
             command.ends_at.tzinfo is None or command.ends_at <= now
         )
@@ -325,9 +317,7 @@ class EmployeeService:
             updated_at=now,
             version=current.version + 1,
             last_operation_id=command.operation_id,
-            operation_ids=self._append_operation(
-                current.operation_ids, command.operation_id
-            ),
+            operation_ids=self._append_operation(current.operation_ids, command.operation_id),
         )
         history = self._status_history_if_changed(
             current,
@@ -361,9 +351,7 @@ class EmployeeService:
     ) -> Employee:
         current = self._get_required_employee(command.employee_id)
         self._require_override_permission(actor, current)
-        idempotent = self._idempotent_employee(
-            command.operation_id, command.employee_id
-        )
+        idempotent = self._idempotent_employee(command.operation_id, command.employee_id)
         if idempotent is not None:
             return idempotent
         self._require_active(current)
@@ -380,9 +368,7 @@ class EmployeeService:
             updated_at=now,
             version=current.version + 1,
             last_operation_id=command.operation_id,
-            operation_ids=self._append_operation(
-                current.operation_ids, command.operation_id
-            ),
+            operation_ids=self._append_operation(current.operation_ids, command.operation_id),
         )
         history = self._status_history_if_changed(
             current,
@@ -533,11 +519,38 @@ class EmployeeService:
             ),
         )
 
-    def can_override(self, actor: User, employee: Employee) -> bool:
-        return actor.status == UserStatus.ACTIVE and (
-            actor.role in ADMIN_ROLES
-            or (actor.role == UserRole.STAFF and employee.user_id == actor.id)
+    def set_status_override_result(
+        self,
+        actor: User,
+        command: SetStatusOverrideCommand,
+        *,
+        ip_fingerprint: str | None,
+    ) -> EmployeeMutationResult:
+        employee = self.set_status_override(
+            actor,
+            command,
+            ip_fingerprint=ip_fingerprint,
         )
+        return EmployeeMutationResult(
+            employee=employee,
+            transition=self._transition_for_operation(
+                command.employee_id,
+                command.operation_id,
+                fallback_status=employee.current_status.status,
+            ),
+        )
+
+    def can_override(self, actor: User, employee: Employee) -> bool:
+        return (
+            actor.status == UserStatus.ACTIVE
+            and actor.role == UserRole.STAFF
+            and employee.user_id == actor.id
+        )
+
+    def get_linked_employee(self, actor: User) -> Employee | None:
+        if actor.status != UserStatus.ACTIVE or actor.role != UserRole.STAFF:
+            return None
+        return self._repository.get_employee_by_user_id(actor.id)
 
     def _evaluate_one(
         self,
@@ -569,10 +582,7 @@ class EmployeeService:
             )
             if candidate is None:
                 return False
-            if (
-                candidate.status == current.current_status.status
-                and not override_expired
-            ):
+            if candidate.status == current.current_status.status and not override_expired:
                 return False
             updated = replace(
                 current,
@@ -581,9 +591,7 @@ class EmployeeService:
                 updated_at=now,
                 version=current.version + 1,
                 last_operation_id=operation_id,
-                operation_ids=self._append_operation(
-                    current.operation_ids, operation_id
-                ),
+                operation_ids=self._append_operation(current.operation_ids, operation_id),
             )
             history = self._status_history_if_changed(
                 current,
@@ -644,11 +652,7 @@ class EmployeeService:
                 last_person_seen_at=last_person_seen_at,
             )
         elif command.person_present:
-            status = (
-                EmployeeStatus.ON_CALL
-                if command.phone_detected
-                else EmployeeStatus.WORKING
-            )
+            status = EmployeeStatus.ON_CALL if command.phone_detected else EmployeeStatus.WORKING
             current_status = EmployeeCurrentStatus(
                 status=status,
                 source=StatusSource.MOCK,
@@ -670,9 +674,8 @@ class EmployeeService:
                     last_person_seen_at=last_person_seen_at,
                 ),
             )
-            current_status = self._time_policy_status(base, now=received_at)
-            if current_status is None:
-                current_status = base.current_status
+            evaluated_status = self._time_policy_status(base, now=received_at)
+            current_status = base.current_status if evaluated_status is None else evaluated_status
             active_override = None
 
         return replace(
@@ -682,15 +685,11 @@ class EmployeeService:
             updated_at=received_at,
             version=employee.version + 1,
             last_operation_id=command.event_id,
-            operation_ids=self._append_operation(
-                employee.operation_ids, command.event_id
-            ),
+            operation_ids=self._append_operation(employee.operation_ids, command.event_id),
         )
 
     @staticmethod
-    def _append_operation(
-        operation_ids: tuple[str, ...], operation_id: str
-    ) -> tuple[str, ...]:
+    def _append_operation(operation_ids: tuple[str, ...], operation_id: str) -> tuple[str, ...]:
         if operation_id in operation_ids:
             return operation_ids
         return (*operation_ids, operation_id)
@@ -721,9 +720,7 @@ class EmployeeService:
             reason = "마지막 사람 있음 관측 후 부재 기준 경과"
         else:
             status = (
-                EmployeeStatus.ON_CALL
-                if latest_present.phone_detected
-                else EmployeeStatus.WORKING
+                EmployeeStatus.ON_CALL if latest_present.phone_detected else EmployeeStatus.WORKING
             )
             source = StatusSource.MOCK
             reason = "최신 유효 mock 관측 재적용"

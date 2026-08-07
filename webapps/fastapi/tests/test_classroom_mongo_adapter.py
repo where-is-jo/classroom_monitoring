@@ -29,7 +29,7 @@ class RecordingCollection:
     def __init__(self) -> None:
         self.indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
 
-    def create_index(self, fields, **options):
+    def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
 
 
@@ -41,7 +41,13 @@ class RecordingDatabase:
         return self.collections.setdefault(name, RecordingCollection())
 
 
-def _values():
+def _values() -> tuple[
+    Classroom,
+    Seat,
+    SeatObservationBatchRecord,
+    SeatOccupancyHistory,
+    AfterHoursAlert,
+]:
     now = datetime(2026, 8, 5, 8, 0, tzinfo=UTC)
     classroom = Classroom(
         id="classroom-id",
@@ -58,6 +64,7 @@ def _values():
         created_operation_id="classroom-create",
         last_operation_id="classroom-update",
         operation_ids=("classroom-create", "classroom-update"),
+        responsible_staff_user_ids=("staff-id",),
     )
     seat = Seat(
         id="seat-id",
@@ -130,8 +137,7 @@ def test_classroom_indexes_cover_uniqueness_filters_history_and_alerts() -> None
     history_indexes = database.collections["seat_occupancy_history"].indexes
     alert_indexes = database.collections["after_hours_alerts"].indexes
     assert any(
-        fields == [("code", 1)] and options.get("unique")
-        for fields, options in classroom_indexes
+        fields == [("code", 1)] and options.get("unique") for fields, options in classroom_indexes
     )
     assert any(
         fields == [("classroom_id", 1), ("code", 1)] and options.get("unique")
@@ -142,28 +148,50 @@ def test_classroom_indexes_cover_uniqueness_filters_history_and_alerts() -> None
         for fields, options in history_indexes
     )
     assert any(
-        fields == [("dedupe_key", 1)] and options.get("unique")
-        for fields, options in alert_indexes
+        fields == [("dedupe_key", 1)] and options.get("unique") for fields, options in alert_indexes
     )
 
 
 def test_all_classroom_documents_roundtrip() -> None:
     classroom, seat, batch, history, alert = _values()
-    assert MongoClassroomRepository._classroom_to_domain(
-        MongoClassroomRepository._classroom_to_document(classroom)
-    ) == classroom
-    assert MongoClassroomRepository._seat_to_domain(
-        MongoClassroomRepository._seat_to_document(seat)
-    ) == seat
-    assert MongoClassroomRepository._batch_to_domain(
-        MongoClassroomRepository._batch_to_document(batch)
-    ) == batch
-    assert MongoClassroomRepository._history_to_domain(
-        MongoClassroomRepository._history_to_document(history)
-    ) == history
-    assert MongoClassroomRepository._alert_to_domain(
-        MongoClassroomRepository._alert_to_document(alert)
-    ) == alert
+    assert (
+        MongoClassroomRepository._classroom_to_domain(
+            MongoClassroomRepository._classroom_to_document(classroom)
+        )
+        == classroom
+    )
+    assert (
+        MongoClassroomRepository._seat_to_domain(MongoClassroomRepository._seat_to_document(seat))
+        == seat
+    )
+    assert (
+        MongoClassroomRepository._batch_to_domain(
+            MongoClassroomRepository._batch_to_document(batch)
+        )
+        == batch
+    )
+    assert (
+        MongoClassroomRepository._history_to_domain(
+            MongoClassroomRepository._history_to_document(history)
+        )
+        == history
+    )
+    assert (
+        MongoClassroomRepository._alert_to_domain(
+            MongoClassroomRepository._alert_to_document(alert)
+        )
+        == alert
+    )
+
+
+def test_legacy_classroom_document_defaults_responsible_staff_to_empty() -> None:
+    classroom, _, _, _, _ = _values()
+    document = MongoClassroomRepository._classroom_to_document(classroom)
+    document.pop("responsible_staff_user_ids")
+
+    restored = MongoClassroomRepository._classroom_to_domain(document)
+
+    assert restored.responsible_staff_user_ids == ()
 
 
 def test_invalid_nested_document_and_naive_datetime_raise_repository_error() -> None:
@@ -174,6 +202,6 @@ def test_invalid_nested_document_and_naive_datetime_raise_repository_error() -> 
         MongoClassroomRepository._classroom_to_domain(classroom_document)
 
     seat_document = MongoClassroomRepository._seat_to_document(seat)
-    seat_document["updated_at"] = datetime(2026, 8, 5, 8, 0)
+    seat_document["updated_at"] = datetime(2026, 8, 5, 8, 0)  # noqa: DTZ001
     with pytest.raises(RepositoryDataError):
         MongoClassroomRepository._seat_to_domain(seat_document)

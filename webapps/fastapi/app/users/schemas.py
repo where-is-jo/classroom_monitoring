@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
 from .models import User, UserPage, UserRole, UserStatus
+
+ProductUserRole = Literal[UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN]
 
 
 class UserResponse(BaseModel):
@@ -21,9 +24,11 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     version: int
+    must_change_password: bool
+    password_changed_at: datetime | None
 
     @classmethod
-    def from_user(cls, user: User) -> "UserResponse":
+    def from_user(cls, user: User) -> UserResponse:
         return cls(
             id=user.id,
             email=user.email,
@@ -35,6 +40,8 @@ class UserResponse(BaseModel):
             created_at=user.created_at,
             updated_at=user.updated_at,
             version=user.version,
+            must_change_password=user.must_change_password,
+            password_changed_at=user.password_changed_at,
         )
 
 
@@ -51,7 +58,7 @@ class UserListResponse(BaseModel):
         *,
         limit: int,
         offset: int,
-    ) -> "UserListResponse":
+    ) -> UserListResponse:
         return cls(
             items=[UserResponse.from_user(user) for user in page.items],
             total=page.total,
@@ -64,7 +71,7 @@ class CreateUserRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=100)
-    role: UserRole
+    role: ProductUserRole
     operation_id: UUID = Field(default_factory=uuid4)
 
 
@@ -73,15 +80,12 @@ class UpdateUserRequest(BaseModel):
     operation_id: UUID = Field(default_factory=uuid4)
     email: str | None = Field(default=None, min_length=3, max_length=254)
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    role: UserRole | None = None
+    role: ProductUserRole | None = None
     status: UserStatus | None = None
 
     @model_validator(mode="after")
-    def _at_least_one_change(self) -> "UpdateUserRequest":
-        if all(
-            value is None
-            for value in (self.email, self.name, self.role, self.status)
-        ):
+    def _at_least_one_change(self) -> UpdateUserRequest:
+        if all(value is None for value in (self.email, self.name, self.role, self.status)):
             raise ValueError("변경할 필드가 하나 이상 필요합니다.")
         return self
 

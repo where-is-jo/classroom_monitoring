@@ -21,20 +21,14 @@ class InMemoryInterviewWaitRepository:
         self._history: dict[str, InterviewWaitHistory] = {}
         self._lock = RLock()
 
-    def create_wait(
-        self, wait: InterviewWait, history: InterviewWaitHistory
-    ) -> InterviewWait:
+    def create_wait(self, wait: InterviewWait, history: InterviewWaitHistory) -> InterviewWait:
         with self._lock:
             operation_owner = self.get_wait_by_operation_id(wait.created_operation_id)
             if operation_owner is not None:
                 return operation_owner
             if wait.active_key is not None:
                 active_owner = next(
-                    (
-                        item
-                        for item in self._waits.values()
-                        if item.active_key == wait.active_key
-                    ),
+                    (item for item in self._waits.values() if item.active_key == wait.active_key),
                     None,
                 )
                 if active_owner is not None:
@@ -57,17 +51,11 @@ class InMemoryInterviewWaitRepository:
     def get_wait_by_operation_id(self, operation_id: str) -> InterviewWait | None:
         with self._lock:
             return next(
-                (
-                    wait
-                    for wait in self._waits.values()
-                    if operation_id in wait.operation_ids
-                ),
+                (wait for wait in self._waits.values() if operation_id in wait.operation_ids),
                 None,
             )
 
-    def get_active_wait(
-        self, requester_user_id: str, employee_id: str
-    ) -> InterviewWait | None:
+    def get_active_wait(self, requester_user_id: str, employee_id: str) -> InterviewWait | None:
         active_key = f"{requester_user_id}:{employee_id}"
         with self._lock:
             return next(
@@ -124,7 +112,9 @@ class InMemoryInterviewWaitRepository:
             current = self._waits.get(wait.id)
             if current is None or current.version != expected_version:
                 operation_owner = self.get_wait_by_operation_id(history.operation_id)
-                return operation_owner if operation_owner and operation_owner.id == wait.id else None
+                return (
+                    operation_owner if operation_owner and operation_owner.id == wait.id else None
+                )
             if wait.active_key is not None:
                 active_owner = next(
                     (
@@ -150,16 +140,10 @@ class InMemoryInterviewWaitRepository:
             self._history[history.id] = history
             return history
 
-    def get_history_by_operation_id(
-        self, operation_id: str
-    ) -> InterviewWaitHistory | None:
+    def get_history_by_operation_id(self, operation_id: str) -> InterviewWaitHistory | None:
         with self._lock:
             return next(
-                (
-                    item
-                    for item in self._history.values()
-                    if item.operation_id == operation_id
-                ),
+                (item for item in self._history.values() if item.operation_id == operation_id),
                 None,
             )
 

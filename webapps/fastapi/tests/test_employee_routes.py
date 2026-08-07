@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
@@ -10,13 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import CSRF_COOKIE, require_admin, require_csrf, require_page_admin
-from app.employees.models import RecordEmployeeObservationCommand
+from app.employees.models import EmployeeStatus, RecordEmployeeObservationCommand
 from app.employees.router import (
     development_api_router,
     development_page_router,
 )
 from app.main import app, handle_domain_error, include_employee_routers
-from app.shared.config import Settings
 from app.shared.dependencies import (
     get_auth_service,
     get_employee_service,
@@ -27,6 +27,7 @@ from app.shared.errors import DomainError
 from app.shared.templating import STATIC_DIR
 from app.users.models import UserRole
 from tests.employee_helpers import EmployeeStack, build_employee_stack
+from tests.settings_helpers import make_settings
 
 ORIGIN = "http://testserver"
 PASSWORD = "ValidPassword1!"
@@ -38,7 +39,7 @@ def employee_stack() -> EmployeeStack:
 
 
 @pytest.fixture
-def employee_client(employee_stack: EmployeeStack):
+def employee_client(employee_stack: EmployeeStack) -> Iterator[TestClient]:
     app.dependency_overrides[get_auth_service] = lambda: employee_stack.auth.auth_service
     app.dependency_overrides[get_user_service] = lambda: employee_stack.auth.user_service
     app.dependency_overrides[get_employee_service] = lambda: employee_stack.service
@@ -60,7 +61,7 @@ def _write_headers(client: TestClient) -> dict[str, str]:
     return {"Origin": ORIGIN, "X-CSRF-Token": client.cookies[CSRF_COOKIE]}
 
 
-def _employee_payload(stack: EmployeeStack, operation_id: str | None = None):
+def _employee_payload(stack: EmployeeStack, operation_id: str | None = None) -> dict[str, str]:
     return {
         "employee_no": "EMP-API-001",
         "user_id": stack.staff.id,
@@ -127,36 +128,34 @@ def test_직원_API_CRUD_목록_이력과_GET_무부작용(
         },
     )
     assert deactivated.status_code == 204
-    assert not employee_stack.employees.get_employee(created["id"]).is_active
+    stored = employee_stack.employees.get_employee(created["id"])
+    assert stored is not None
+    assert not stored.is_active
 
 
 def test_생성_mock_WORKING_override_OFFSITE_mock무시_해제_재평가_여정(
     employee_client: TestClient,
     employee_stack: EmployeeStack,
 ) -> None:
-    _login(employee_client, employee_stack.admin.email)
-    created = employee_client.post(
-        "/api/v1/employees",
-        headers=_write_headers(employee_client),
-        json=_employee_payload(employee_stack),
-    ).json()
+    employee = employee_stack.create_employee(user_id=employee_stack.staff.id)
     first_seen = employee_stack.auth.clock()
     employee_stack.service.record_mock_observation(
         employee_stack.admin,
         RecordEmployeeObservationCommand(
             event_id=str(uuid4()),
-            employee_id=created["id"],
+            employee_id=employee.id,
             person_present=True,
             phone_detected=False,
             confidence=0.9,
             observed_at=first_seen,
         ),
     )
-    working = employee_client.get(f"/api/v1/employees/{created['id']}").json()
+    _login(employee_client, employee_stack.staff.email)
+    working = employee_client.get(f"/api/v1/employees/{employee.id}").json()
     assert working["current_status"]["status"] == "WORKING"
 
     override = employee_client.put(
-        f"/api/v1/employees/{created['id']}/status-override",
+        f"/api/v1/employees/{employee.id}/status-override",
         headers=_write_headers(employee_client),
         json={
             "status": "OFFSITE",
@@ -173,19 +172,19 @@ def test_생성_mock_WORKING_override_OFFSITE_mock무시_해제_재평가_여정
         employee_stack.admin,
         RecordEmployeeObservationCommand(
             event_id=str(uuid4()),
-            employee_id=created["id"],
+            employee_id=employee.id,
             person_present=True,
             phone_detected=True,
             confidence=0.9,
             observed_at=employee_stack.auth.clock(),
         ),
     )
-    ignored = employee_client.get(f"/api/v1/employees/{created['id']}").json()
+    ignored = employee_client.get(f"/api/v1/employees/{employee.id}").json()
     assert ignored["current_status"]["status"] == "OFFSITE"
 
     cleared = employee_client.request(
         "DELETE",
-        f"/api/v1/employees/{created['id']}/status-override",
+        f"/api/v1/employees/{employee.id}/status-override",
         headers=_write_headers(employee_client),
         json={
             "expected_version": ignored["version"],
@@ -216,13 +215,13 @@ def test_API_인증_권한_CSRF_CAS와_오류_형식(
     )
     assert evaluation_forbidden.status_code == 403
 
-    employee_client.post("/logout", headers={"Origin": ORIGIN}, data={
-        "csrf_token": employee_client.cookies[CSRF_COOKIE]
-    })
-    _login(employee_client, employee_stack.admin.email)
-    no_csrf = employee_client.post(
-        "/api/v1/employees", json=_employee_payload(employee_stack)
+    employee_client.post(
+        "/logout",
+        headers={"Origin": ORIGIN},
+        data={"csrf_token": employee_client.cookies[CSRF_COOKIE]},
     )
+    _login(employee_client, employee_stack.admin.email)
+    no_csrf = employee_client.post("/api/v1/employees", json=_employee_payload(employee_stack))
     assert no_csrf.status_code == 403
     missing = employee_client.get("/api/v1/employees/not-found")
     assert missing.status_code == 404
@@ -281,8 +280,43 @@ def test_Jinja2_정상_빈_오류_권한없음_상태(
         },
         follow_redirects=False,
     )
-    assert override_page.status_code == 303
+    assert override_page.status_code == 403
+    assert "수동 상태 변경" not in detail.text
 
+    linked = employee_stack.create_employee(
+        employee_no="EMP-STAFF",
+        user_id=employee_stack.staff.id,
+        display_name="연결 직원",
+    )
+    _login(employee_client, employee_stack.staff.email)
+    profile_page = employee_client.get("/employees")
+    linked_detail = employee_client.get(f"/employees/{linked.id}")
+    assert "내 근무 상태" in profile_page.text
+    assert all(f'value="{status.value}"' in profile_page.text for status in EmployeeStatus)
+    assert "수동 상태 변경" in linked_detail.text
+    staff_override = employee_client.post(
+        f"/employees/{linked.id}/status-override",
+        headers={"Origin": ORIGIN},
+        data={
+            "csrf_token": employee_client.cookies[CSRF_COOKIE],
+            "operation_id": str(uuid4()),
+            "expected_version": str(linked.version),
+            "status": "WORKING",
+            "reason": "",
+            "ends_at": "",
+        },
+        follow_redirects=False,
+    )
+    assert staff_override.status_code == 303
+
+    unlinked_staff = employee_stack.auth.seed(
+        UserRole.STAFF, email="unlinked-staff@example.invalid"
+    )
+    _login(employee_client, unlinked_staff.email)
+    unlinked_page = employee_client.get("/employees")
+    assert "연결된 직원 프로필이 없습니다" in unlinked_page.text
+
+    _login(employee_client, employee_stack.admin.email)
     evaluation = employee_client.post(
         "/admin/employees/evaluate",
         headers={"Origin": ORIGIN},
@@ -293,9 +327,7 @@ def test_Jinja2_정상_빈_오류_권한없음_상태(
         follow_redirects=False,
     )
     assert evaluation.status_code == 303
-    assert evaluation.headers["location"].startswith(
-        "/admin/employees?evaluated=1&changed=0"
-    )
+    assert evaluation.headers["location"].startswith("/admin/employees?evaluated=2&changed=0")
 
     duplicate = employee_client.post(
         "/admin/employees",
@@ -314,9 +346,11 @@ def test_Jinja2_정상_빈_오류_권한없음_상태(
     assert duplicate.status_code == 409
     assert "이미 사용 중인 직원 번호" in duplicate.text
 
-    employee_client.post("/logout", headers={"Origin": ORIGIN}, data={
-        "csrf_token": employee_client.cookies[CSRF_COOKIE]
-    })
+    employee_client.post(
+        "/logout",
+        headers={"Origin": ORIGIN},
+        data={"csrf_token": employee_client.cookies[CSRF_COOKIE]},
+    )
     _login(employee_client, employee_stack.student.email)
     denied = employee_client.get("/admin/employees")
     assert denied.status_code == 403
@@ -327,17 +361,18 @@ def test_mock_HTTP_schema는_service로_전달되고_개발_화면은_빈상태�
     employee_stack: EmployeeStack,
 ) -> None:
     development_app = FastAPI()
-    development_app.mount(
-        "/static", StaticFiles(directory=str(STATIC_DIR)), name="static"
-    )
+    development_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     development_app.include_router(development_api_router)
     development_app.include_router(development_page_router)
-    development_app.add_exception_handler(DomainError, handle_domain_error)
+    development_app.add_exception_handler(
+        DomainError,
+        handle_domain_error,  # type: ignore[arg-type]
+    )
     development_app.dependency_overrides[require_csrf] = lambda: None
     development_app.dependency_overrides[require_admin] = lambda: employee_stack.admin
     development_app.dependency_overrides[require_page_admin] = lambda: employee_stack.admin
     development_app.dependency_overrides[get_employee_service] = lambda: employee_stack.service
-    development_app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+    development_app.dependency_overrides[get_settings] = lambda: make_settings(_env_file=None)
 
     with TestClient(development_app) as client:
         empty = client.get("/admin/dev-tools")
@@ -385,7 +420,7 @@ def test_mock_HTTP_schema는_service로_전달되고_개발_화면은_빈상태�
 
 
 def test_production에는_mock_router가_없고_평가_endpoint는_있다() -> None:
-    production = Settings(
+    production = make_settings(
         _env_file=None,
         app_env="prod",
         database_mode="mongodb",
@@ -401,12 +436,12 @@ def test_production에는_mock_router가_없고_평가_endpoint는_있다() -> N
     assert "/admin/dev-tools" not in paths
     assert "/api/v1/employee-status-evaluations" in paths
 
-    development = Settings(_env_file=None, mock_inputs_enabled=True)
+    development = make_settings(_env_file=None, mock_inputs_enabled=True)
     development_app = FastAPI()
     include_employee_routers(development_app, development)
     development_paths = set(development_app.openapi()["paths"])
     assert "/api/v1/mock-employee-observations" in development_paths
-    assert "/admin/dev-tools" in development_paths
+    assert "/admin/dev-tools" not in development_paths
 
 
 def test_OpenAPI에_직원_요청응답과_표준_오류_contract가_노출된다(

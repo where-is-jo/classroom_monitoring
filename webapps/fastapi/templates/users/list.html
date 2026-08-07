@@ -42,7 +42,8 @@
       <label>역할
         <select name="role" required>{% for role in roles %}<option value="{{ role.value }}">{{ role.value|display_label }} ({{ role.value }})</option>{% endfor %}</select>
       </label>
-      <label>초기 비밀번호<input name="password" type="password" autocomplete="new-password" required maxlength="128"></label>
+      <label>임시 비밀번호<input name="password" type="password" autocomplete="new-password" required maxlength="128"></label>
+      <p class="field-help">새 계정은 첫 로그인 후 비밀번호를 반드시 변경해야 합니다.</p>
       <button type="submit" data-pending-label="생성 중…">생성</button>
     </form>
   </section>

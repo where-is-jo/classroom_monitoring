@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import re
-from math import isfinite
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from math import isfinite
 from typing import Literal
 from uuid import uuid4
 
-from ..users.models import User, UserStatus
+from ..users.models import User, UserRole, UserStatus
 from ..users.ports import UserRepository
 from .errors import (
     MockDeliveryDisabledError,
@@ -52,6 +52,7 @@ _ALLOWED_TARGET_PREFIXES = (
     "/staff/interview-waits",
     "/classrooms",
     "/notifications",
+    "/admin",
     "/admin/alerts",
 )
 
@@ -77,18 +78,14 @@ class NotificationService:
         normalized = self._normalize_command(command)
         self._require_active_recipient(normalized.recipient_user_id)
 
-        operation_owner = self._repository.get_notification_by_operation_id(
-            normalized.operation_id
-        )
+        operation_owner = self._repository.get_notification_by_operation_id(normalized.operation_id)
         if operation_owner is not None:
             self._assert_same_create(operation_owner, normalized, check_dedupe=True)
             self._ensure_initial_mock_delivery(operation_owner)
             return operation_owner
 
         if normalized.dedupe_key is not None:
-            dedupe_owner = self._repository.get_notification_by_dedupe_key(
-                normalized.dedupe_key
-            )
+            dedupe_owner = self._repository.get_notification_by_dedupe_key(normalized.dedupe_key)
             if dedupe_owner is not None:
                 self._assert_same_create(dedupe_owner, normalized, check_dedupe=False)
                 self._ensure_initial_mock_delivery(dedupe_owner)
@@ -127,9 +124,7 @@ class NotificationService:
         offset: int,
     ) -> NotificationPage:
         normalized_type = (
-            self._normalize_type(notification_type)
-            if notification_type is not None
-            else None
+            self._normalize_type(notification_type) if notification_type is not None else None
         )
         return self._repository.list_notifications(
             recipient_user_id=actor.id,
@@ -142,9 +137,27 @@ class NotificationService:
     def unread_count(self, actor: User) -> int:
         return self._repository.count_unread(actor.id)
 
-    def mark_read(
-        self, actor: User, notification_id: str, *, operation_id: str
-    ) -> Notification:
+    def popover_unread_count(self, actor: User) -> int:
+        notification_type = self.product_notification_type(actor)
+        if notification_type is None:
+            return 0
+        return self._repository.list_notifications(
+            recipient_user_id=actor.id,
+            is_read=False,
+            notification_type=notification_type,
+            limit=1,
+            offset=0,
+        ).total
+
+    @staticmethod
+    def product_notification_type(actor: User) -> str | None:
+        if actor.role == UserRole.STUDENT:
+            return "INTERVIEW_WAIT_READY"
+        if actor.role in {UserRole.STAFF, UserRole.ADMIN}:
+            return "AFTER_HOURS_SEAT"
+        return None
+
+    def mark_read(self, actor: User, notification_id: str, *, operation_id: str) -> Notification:
         notification = self._repository.mark_read(
             notification_id,
             recipient_user_id=actor.id,
@@ -176,13 +189,9 @@ class NotificationService:
             offset=offset,
         )
 
-    def retry_mock_delivery(
-        self, command: RetryMockDeliveryCommand
-    ) -> MockDelivery:
+    def retry_mock_delivery(self, command: RetryMockDeliveryCommand) -> MockDelivery:
         self._require_mock_delivery_enabled()
-        operation_owner = self._repository.get_delivery_by_operation_id(
-            command.operation_id
-        )
+        operation_owner = self._repository.get_delivery_by_operation_id(command.operation_id)
         if operation_owner is not None:
             if operation_owner.notification_id != command.notification_id:
                 raise NotificationOperationConflictError()
@@ -198,8 +207,7 @@ class NotificationService:
             )
         latest = deliveries[-1]
         if (
-            latest.status
-            in {MockDeliveryStatus.SUCCESS, MockDeliveryStatus.PERMANENT_FAILURE}
+            latest.status in {MockDeliveryStatus.SUCCESS, MockDeliveryStatus.PERMANENT_FAILURE}
             or latest.attempt >= self._mock_delivery_max_attempts
         ):
             raise MockDeliveryNotRetryableError()
@@ -215,9 +223,7 @@ class NotificationService:
             return None
         return route if self._is_allowed_target_route(route) else None
 
-    def _normalize_command(
-        self, command: CreateNotificationCommand
-    ) -> CreateNotificationCommand:
+    def _normalize_command(self, command: CreateNotificationCommand) -> CreateNotificationCommand:
         title = command.title.strip()
         body = command.body.strip()
         if not title or len(title) > 200:
@@ -273,9 +279,10 @@ class NotificationService:
                 raise NotificationDataInvalidError()
             if isinstance(value, str) and len(value) > 500:
                 raise NotificationDataInvalidError()
-            if normalized_key == "target_route":
-                if not isinstance(value, str) or not self._is_allowed_target_route(value):
-                    raise NotificationDataInvalidError("허용되지 않은 내부 연결 경로입니다.")
+            if normalized_key == "target_route" and (
+                not isinstance(value, str) or not self._is_allowed_target_route(value)
+            ):
+                raise NotificationDataInvalidError("허용되지 않은 내부 연결 경로입니다.")
             sanitized[normalized_key] = value
         return sanitized
 
@@ -290,8 +297,7 @@ class NotificationService:
         ):
             return False
         return any(
-            route == prefix or route.startswith(prefix + "/")
-            for prefix in _ALLOWED_TARGET_PREFIXES
+            route == prefix or route.startswith(prefix + "/") for prefix in _ALLOWED_TARGET_PREFIXES
         )
 
     @staticmethod
@@ -336,9 +342,7 @@ class NotificationService:
         assert self._mock_delivery_mode is not None
         if self._mock_delivery_mode == "success":
             delivery_status = MockDeliveryStatus.SUCCESS
-            result_payload: dict[str, NotificationDataValue] = {
-                "outcome": "accepted"
-            }
+            result_payload: dict[str, NotificationDataValue] = {"outcome": "accepted"}
             error = None
         elif self._mock_delivery_mode == "fail_once" and attempt > 1:
             delivery_status = MockDeliveryStatus.SUCCESS

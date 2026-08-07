@@ -87,7 +87,7 @@ class MongoUserRepository:
             existing_operation = self.get_user_by_operation_id(user.created_operation_id)
             if existing_operation is not None:
                 if existing_operation.email != user.email:
-                    raise UserOperationConflictError()
+                    raise UserOperationConflictError() from None
                 return existing_operation
             raise UserEmailConflictError() from None
         except PyMongoError:
@@ -110,17 +110,6 @@ class MongoUserRepository:
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if updated is None else self._to_domain(updated)
-
-    def count_active_system_operators(self) -> int:
-        try:
-            return self._collection.count_documents(
-                {
-                    "role": UserRole.SYSTEM_OPERATOR.value,
-                    "status": UserStatus.ACTIVE.value,
-                }
-            )
-        except PyMongoError:
-            raise RepositoryUnavailableError() from None
 
     def _find_one(self, query: MongoDocument) -> User | None:
         try:
@@ -146,6 +135,8 @@ class MongoUserRepository:
             "version": user.version,
             "created_operation_id": user.created_operation_id,
             "last_operation_id": user.last_operation_id,
+            "must_change_password": user.must_change_password,
+            "password_changed_at": user.password_changed_at,
             "operation_ids": list(
                 dict.fromkeys([user.created_operation_id, user.last_operation_id])
             ),
@@ -156,16 +147,13 @@ class MongoUserRepository:
         try:
             datetime_fields = ("created_at", "updated_at")
             if any(
-                not isinstance(document[field], datetime)
-                or document[field].tzinfo is None
+                not isinstance(document[field], datetime) or document[field].tzinfo is None
                 for field in datetime_fields
             ):
                 raise ValueError("user timestamps must be aware")
-            for optional_field in ("locked_until", "last_login_at"):
+            for optional_field in ("locked_until", "last_login_at", "password_changed_at"):
                 value = document.get(optional_field)
-                if value is not None and (
-                    not isinstance(value, datetime) or value.tzinfo is None
-                ):
+                if value is not None and (not isinstance(value, datetime) or value.tzinfo is None):
                     raise ValueError("optional user timestamp must be aware")
             return User(
                 id=_required_string(document, "_id"),
@@ -180,10 +168,10 @@ class MongoUserRepository:
                 created_at=document["created_at"],
                 updated_at=document["updated_at"],
                 version=_required_int(document, "version"),
-                created_operation_id=_required_string(
-                    document, "created_operation_id"
-                ),
+                created_operation_id=_required_string(document, "created_operation_id"),
                 last_operation_id=_required_string(document, "last_operation_id"),
+                must_change_password=_optional_bool(document, "must_change_password", False),
+                password_changed_at=document.get("password_changed_at"),
             )
         except (KeyError, TypeError, ValueError):
             raise RepositoryDataError() from None
@@ -200,4 +188,11 @@ def _required_int(document: MongoDocument, field: str) -> int:
     value = document[field]
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError(f"{field} must be an integer")
+    return value
+
+
+def _optional_bool(document: MongoDocument, field: str, default: bool) -> bool:
+    value = document.get(field, default)
+    if not isinstance(value, bool):
+        raise TypeError(f"{field} must be a boolean")
     return value

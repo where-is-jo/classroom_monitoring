@@ -73,7 +73,7 @@
               <label>상태
                 <select name="status" required>{% for status in override_statuses %}<option value="{{ status.value }}">{{ status.value|display_label }}</option>{% endfor %}</select>
               </label>
-              <label>사유<input name="reason" required maxlength="500"></label>
+              <label>사유(선택)<input name="reason" maxlength="500"></label>
               <label>종료 시각(ISO 8601 UTC)<input name="ends_at" placeholder="2026-08-06T09:00:00+00:00"><span class="help-text">서버 입력 형식은 UTC이며 화면 시각은 KST로 표시됩니다.</span></label>
               <button type="submit" data-pending-label="설정 중…">수동 상태 설정</button>
             </form>
@@ -82,7 +82,7 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="operation_id" value="{{ clear_operation_id }}">
                 <input type="hidden" name="expected_version" value="{{ employee.version }}">
-                <button type="submit" class="secondary" data-pending-label="해제 중…">override 해제 후 즉시 재평가</button>
+                <button type="submit" class="secondary" data-pending-label="전환 중…">자동 상태 사용</button>
               </form>
             {% endif %}
           {% endif %}
@@ -90,7 +90,7 @@
       {% endif %}
     </div>
 
-    <aside class="sticky-column">
+    {% if can_request_interview %}<aside class="sticky-column">
       <section id="interview-wait" class="panel" aria-labelledby="interview-wait-title">
         <p class="eyebrow">빠른 작업</p>
         <h2 id="interview-wait-title">면담 대기</h2>
@@ -113,6 +113,6 @@
           <div class="empty" role="status">비활성 직원에게는 면담 대기를 등록할 수 없습니다.</div>
         {% endif %}
       </section>
-    </aside>
+    </aside>{% endif %}
   </div>
 {% endblock %}

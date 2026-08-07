@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Iterator
+from datetime import UTC, datetime, time
 from uuid import uuid4
 
 import pytest
@@ -19,7 +20,6 @@ from app.classrooms.models import (
     SeatObservation,
 )
 from app.main import app, include_classroom_routers
-from app.shared.config import Settings
 from app.shared.dependencies import (
     get_auth_service,
     get_classroom_service,
@@ -27,7 +27,9 @@ from app.shared.dependencies import (
     get_settings,
     get_user_service,
 )
+from app.users.models import User, UserRole
 from tests.classroom_helpers import ClassroomStack, build_classroom_stack
+from tests.settings_helpers import make_settings
 
 ORIGIN = "http://testserver"
 PASSWORD = "ValidPassword1!"
@@ -39,25 +41,19 @@ def classroom_stack() -> ClassroomStack:
 
 
 @pytest.fixture
-def classroom_client(classroom_stack: ClassroomStack):
-    app.dependency_overrides[get_auth_service] = (
-        lambda: classroom_stack.auth.auth_service
+def classroom_client(classroom_stack: ClassroomStack) -> Iterator[TestClient]:
+    app.dependency_overrides[get_auth_service] = lambda: classroom_stack.auth.auth_service
+    app.dependency_overrides[get_user_service] = lambda: classroom_stack.auth.user_service
+    app.dependency_overrides[get_notification_service] = lambda: (
+        classroom_stack.notification_service
     )
-    app.dependency_overrides[get_user_service] = (
-        lambda: classroom_stack.auth.user_service
-    )
-    app.dependency_overrides[get_notification_service] = (
-        lambda: classroom_stack.notification_service
-    )
-    app.dependency_overrides[get_classroom_service] = (
-        lambda: classroom_stack.service
-    )
+    app.dependency_overrides[get_classroom_service] = lambda: classroom_stack.service
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
 
 
-def _login(client: TestClient, user) -> None:
+def _login(client: TestClient, user: User) -> None:
     client.cookies.clear()
     response = client.post(
         "/api/v1/auth/login",
@@ -111,9 +107,7 @@ def test_admin_crud_student_read_and_write_denial(
         f"/api/v1/classrooms/{classroom_id}/schedules",
         headers=_headers(classroom_client),
         json={
-            "schedules": [
-                {"day_of_week": 2, "opens_at": "09:00", "closes_at": "17:00"}
-            ],
+            "schedules": [{"day_of_week": 2, "opens_at": "09:00", "closes_at": "17:00"}],
             "expected_version": created.json()["version"],
             "operation_id": str(uuid4()),
         },
@@ -152,9 +146,7 @@ def test_admin_crud_student_read_and_write_denial(
 
     _login(classroom_client, classroom_stack.student)
     listed = classroom_client.get("/api/v1/classrooms?limit=1&offset=0")
-    occupancy = classroom_client.get(
-        f"/api/v1/classrooms/{classroom_id}/occupancy"
-    )
+    occupancy = classroom_client.get(f"/api/v1/classrooms/{classroom_id}/occupancy")
     denied = classroom_client.post(
         f"/api/v1/classrooms/{classroom_id}/seats",
         headers=_headers(classroom_client),
@@ -168,6 +160,36 @@ def test_admin_crud_student_read_and_write_denial(
     assert listed.status_code == 200 and listed.json()["total"] == 1
     assert occupancy.status_code == 200 and occupancy.json()["total"] == 2
     assert denied.status_code == 403
+
+
+def test_admin_classroom_form_assigns_multiple_responsible_staff(
+    classroom_client: TestClient,
+    classroom_stack: ClassroomStack,
+) -> None:
+    first_staff = classroom_stack.auth.seed(UserRole.STAFF, email="form-staff-1@example.invalid")
+    second_staff = classroom_stack.auth.seed(UserRole.STAFF, email="form-staff-2@example.invalid")
+    _login(classroom_client, classroom_stack.admin)
+
+    response = classroom_client.post(
+        "/admin/classrooms",
+        headers={"Origin": ORIGIN},
+        data={
+            "csrf_token": classroom_client.cookies[CSRF_COOKIE],
+            "code": "ROOM-FORM-STAFF",
+            "name": "담당자 폼 강의실",
+            "location": "Building C",
+            "timezone": "Asia/Seoul",
+            "after_hours_grace_minutes": "10",
+            "operation_id": str(uuid4()),
+            "responsible_staff_user_ids": [first_staff.id, second_staff.id],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    page = classroom_stack.repository.list_classrooms(include_inactive=True, limit=50, offset=0)
+    created = next(item for item in page.items if item.code == "ROOM-FORM-STAFF")
+    assert created.responsible_staff_user_ids == tuple(sorted((first_staff.id, second_staff.id)))
 
 
 def test_after_hours_http_journey_and_pages(
@@ -184,8 +206,8 @@ def test_after_hours_http_journey_and_pages(
             schedules=(
                 ClassroomSchedule(
                     day_of_week=2,
-                    opens_at=datetime.strptime("09:00", "%H:%M").time(),
-                    closes_at=datetime.strptime("17:00", "%H:%M").time(),
+                    opens_at=time(9),
+                    closes_at=time(17),
                 ),
             ),
             expected_version=classroom.version,
@@ -215,11 +237,11 @@ def test_after_hours_http_journey_and_pages(
     alert_page = classroom_client.get("/admin/alerts")
     assert alerts.status_code == 200 and alerts.json()["total"] == 1
     assert notifications.status_code == 200 and notifications.json()["total"] == 1
-    assert notifications.json()["items"][0]["target_route"] == "/admin/alerts"
+    assert notifications.json()["items"][0]["target_route"] == "/admin"
     assert "Classroom ROOM-JOURNEY" in public_page.text
     assert "OCCUPIED" in detail_page.text
     assert "좌석 생성" in admin_page.text
-    assert "⚠ OPEN" in alert_page.text
+    assert alert_page.status_code == 404
 
     alert = alerts.json()["items"][0]
     resolved = classroom_client.patch(
@@ -238,7 +260,7 @@ def test_after_hours_http_journey_and_pages(
 def test_mock_router_is_environment_gated_and_accepts_only_structured_values(
     classroom_stack: ClassroomStack,
 ) -> None:
-    production = Settings(
+    production = make_settings(
         _env_file=None,
         app_env="prod",
         database_mode="mongodb",
@@ -254,7 +276,7 @@ def test_mock_router_is_environment_gated_and_accepts_only_structured_values(
 
     classroom = classroom_stack.create_classroom()
     seat = classroom_stack.create_seat(classroom.id)
-    development = Settings(
+    development = make_settings(
         _env_file=None,
         app_env="local",
         database_mode="memory",
@@ -263,13 +285,9 @@ def test_mock_router_is_environment_gated_and_accepts_only_structured_values(
     )
     development_app = FastAPI()
     include_classroom_routers(development_app, development)
-    development_app.dependency_overrides[get_current_user] = (
-        lambda: classroom_stack.admin
-    )
+    development_app.dependency_overrides[get_current_user] = lambda: classroom_stack.admin
     development_app.dependency_overrides[require_csrf] = lambda: None
-    development_app.dependency_overrides[get_classroom_service] = (
-        lambda: classroom_stack.service
-    )
+    development_app.dependency_overrides[get_classroom_service] = lambda: classroom_stack.service
     development_app.dependency_overrides[get_settings] = lambda: development
     with TestClient(development_app) as client:
         response = client.post(
@@ -278,9 +296,7 @@ def test_mock_router_is_environment_gated_and_accepts_only_structured_values(
                 "event_id": str(uuid4()),
                 "classroom_id": classroom.id,
                 "observed_at": "2026-08-05T08:00:00Z",
-                "seats": [
-                    {"seat_id": seat.id, "occupied": False, "confidence": 0.9}
-                ],
+                "seats": [{"seat_id": seat.id, "occupied": False, "confidence": 0.9}],
             },
         )
         forbidden_metadata = client.post(
@@ -290,9 +306,7 @@ def test_mock_router_is_environment_gated_and_accepts_only_structured_values(
                 "classroom_id": classroom.id,
                 "observed_at": "2026-08-05T08:00:00Z",
                 "camera_id": "forbidden",
-                "seats": [
-                    {"seat_id": seat.id, "occupied": False, "confidence": 0.9}
-                ],
+                "seats": [{"seat_id": seat.id, "occupied": False, "confidence": 0.9}],
             },
         )
     assert response.status_code == 201
@@ -311,9 +325,8 @@ def test_classroom_pages_render_empty_and_permission_states(
     assert empty.status_code == 200
     assert "표시할 활성 강의실이 없습니다" in empty.text
     assert denied_classrooms.status_code == 403
-    assert denied_alerts.status_code == 403
+    assert denied_alerts.status_code == 404
 
     _login(classroom_client, classroom_stack.admin)
     alerts = classroom_client.get("/admin/alerts")
-    assert alerts.status_code == 200
-    assert "조건에 맞는 경고가 없습니다" in alerts.text
+    assert alerts.status_code == 404

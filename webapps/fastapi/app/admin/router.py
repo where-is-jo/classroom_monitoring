@@ -4,13 +4,28 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import urlencode
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Form, Query, Request, status
+from fastapi.responses import RedirectResponse, Response
 
-from ..auth.dependencies import CSRF_COOKIE, require_admin, require_page_admin
+from ..auth.dependencies import (
+    CSRF_COOKIE,
+    request_ip_fingerprint,
+    require_admin,
+    require_csrf,
+    require_page_admin,
+)
+from ..classrooms.models import AfterHoursAlertStatus, ResolveAfterHoursAlertCommand
+from ..classrooms.schemas import AlertResolveForm
+from ..classrooms.service import ClassroomService
 from ..shared.config import Settings
-from ..shared.dependencies import get_admin_dashboard_service, get_settings
+from ..shared.dependencies import (
+    get_admin_dashboard_service,
+    get_classroom_service,
+    get_settings,
+)
 from ..shared.templating import templates
 from ..users.models import User
 from .models import DashboardActivityType
@@ -82,8 +97,10 @@ def dashboard_activities(
     response_model=AuditLogListResponse,
     summary="감사 로그 조회",
     description="민감 필드를 마스킹한 감사 로그를 필터와 페이지 단위로 반환합니다.",
+    include_in_schema=False,
 )
 def audit_logs(
+    response: Response,
     actor_user_id: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
     action: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
     resource: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
@@ -95,6 +112,7 @@ def audit_logs(
     service: AdminDashboardService = Depends(get_admin_dashboard_service),
     settings: Settings = Depends(get_settings),
 ) -> AuditLogListResponse:
+    response.headers["Deprecation"] = "true"
     resolved_limit, resolved_offset = _paging(limit, offset, settings)
     page = service.list_audit_logs(
         actor,
@@ -106,9 +124,7 @@ def audit_logs(
         limit=resolved_limit,
         offset=resolved_offset,
     )
-    return AuditLogListResponse.from_page(
-        page, limit=resolved_limit, offset=resolved_offset
-    )
+    return AuditLogListResponse.from_page(page, limit=resolved_limit, offset=resolved_offset)
 
 
 @page_router.get("", response_class=Response, include_in_schema=False)
@@ -118,11 +134,37 @@ def dashboard_page(
     classroom_id: str | None = None,
     actor: User = Depends(require_page_admin),
     service: AdminDashboardService = Depends(get_admin_dashboard_service),
+    classroom_service: ClassroomService = Depends(get_classroom_service),
 ) -> Response:
-    summary = service.get_summary(
-        actor, department=department, classroom_id=classroom_id
-    )
+    summary = service.get_summary(actor, department=department, classroom_id=classroom_id)
     activities = service.list_activities(actor, limit=10, offset=0)
+    alerts = classroom_service.list_alerts(
+        actor,
+        status=AfterHoursAlertStatus.OPEN,
+        classroom_id=classroom_id,
+        business_date=None,
+        limit=10,
+        offset=0,
+    )
+    alert_entries = []
+    for alert in alerts.items:
+        classroom = classroom_service.get_classroom(actor, alert.classroom_id)
+        seats = classroom_service.list_seats(
+            actor,
+            alert.classroom_id,
+            include_inactive=True,
+            limit=200,
+            offset=0,
+        )
+        seat = next((item for item in seats.items if item.id == alert.seat_id), None)
+        alert_entries.append(
+            {
+                "alert": alert,
+                "classroom": classroom,
+                "seat": seat,
+                "operation_id": str(uuid4()),
+            }
+        )
     return templates.TemplateResponse(
         request=request,
         name="admin/dashboard.html",
@@ -131,53 +173,41 @@ def dashboard_page(
             actor,
             summary=summary,
             activities=activities,
+            alert_entries=alert_entries,
+            alert_total=alerts.total,
             department=department or "",
             classroom_id=classroom_id or "",
         ),
     )
 
 
-@page_router.get("/audit-logs", response_class=Response, include_in_schema=False)
-def audit_log_page(
-    request: Request,
-    actor_user_id: str | None = None,
-    action: str | None = None,
-    resource: str | None = None,
-    from_time: Annotated[datetime | None, Query(alias="from")] = None,
-    to_time: Annotated[datetime | None, Query(alias="to")] = None,
-    limit: int | None = None,
-    offset: int = 0,
+@page_router.post("/alerts/{alert_id}/resolve", include_in_schema=False)
+def resolve_dashboard_alert(
+    alert_id: str,
+    form: Annotated[AlertResolveForm, Form()],
+    department: str | None = None,
+    classroom_id: str | None = None,
+    _: None = Depends(require_csrf),
     actor: User = Depends(require_page_admin),
-    service: AdminDashboardService = Depends(get_admin_dashboard_service),
-    settings: Settings = Depends(get_settings),
-) -> Response:
-    resolved_limit, resolved_offset = _paging(limit, offset, settings)
-    page = service.list_audit_logs(
+    ip_fingerprint: str = Depends(request_ip_fingerprint),
+    classroom_service: ClassroomService = Depends(get_classroom_service),
+) -> RedirectResponse:
+    classroom_service.resolve_alert(
         actor,
-        actor_user_id=actor_user_id,
-        action=action,
-        resource=resource,
-        from_time=from_time,
-        to_time=to_time,
-        limit=resolved_limit,
-        offset=resolved_offset,
-    )
-    return templates.TemplateResponse(
-        request=request,
-        name="admin/audit_logs.html",
-        context=_page_context(
-            request,
-            actor,
-            page=page,
-            limit=resolved_limit,
-            offset=resolved_offset,
-            actor_user_id=actor_user_id or "",
-            action=action or "",
-            resource=resource or "",
-            from_time=from_time.isoformat() if from_time else "",
-            to_time=to_time.isoformat() if to_time else "",
+        ResolveAfterHoursAlertCommand(
+            alert_id=alert_id,
+            expected_version=form.expected_version,
+            operation_id=str(form.operation_id),
         ),
+        ip_fingerprint=ip_fingerprint,
     )
+    filters = {
+        key: value
+        for key, value in (("department", department), ("classroom_id", classroom_id))
+        if value
+    }
+    target = "/admin" + (f"?{urlencode(filters)}" if filters else "") + "#open-alerts"
+    return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _page_context(request: Request, actor: User, **values: object) -> dict[str, object]:

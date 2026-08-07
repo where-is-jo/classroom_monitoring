@@ -53,7 +53,7 @@ class MongoAuditRepository:
                     or existing.resource_type != audit_log.resource_type
                     or existing.resource_id != audit_log.resource_id
                 ):
-                    raise AuditOperationConflictError()
+                    raise AuditOperationConflictError() from None
                 return existing
             raise RepositoryUnavailableError() from None
         except PyMongoError:

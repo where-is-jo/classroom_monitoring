@@ -30,7 +30,7 @@ class ScheduleSchema(BaseModel):
     closes_at: time
 
     @model_validator(mode="after")
-    def validate_same_day(self) -> "ScheduleSchema":
+    def validate_same_day(self) -> ScheduleSchema:
         if self.closes_at <= self.opens_at:
             raise ValueError("closes_at must be later than opens_at")
         return self
@@ -55,9 +55,10 @@ class ClassroomResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     version: int
+    responsible_staff_user_ids: list[str]
 
     @classmethod
-    def from_domain(cls, item: Classroom) -> "ClassroomResponse":
+    def from_domain(cls, item: Classroom) -> ClassroomResponse:
         return cls(
             id=item.id,
             code=item.code,
@@ -77,6 +78,7 @@ class ClassroomResponse(BaseModel):
             created_at=item.created_at,
             updated_at=item.updated_at,
             version=item.version,
+            responsible_staff_user_ids=list(item.responsible_staff_user_ids),
         )
 
 
@@ -87,7 +89,7 @@ class ClassroomListResponse(BaseModel):
     offset: int
 
     @classmethod
-    def from_page(cls, page: ClassroomPage, limit: int, offset: int):
+    def from_page(cls, page: ClassroomPage, limit: int, offset: int) -> ClassroomListResponse:
         return cls(
             items=[ClassroomResponse.from_domain(item) for item in page.items],
             total=page.total,
@@ -103,6 +105,7 @@ class CreateClassroomRequest(BaseModel):
     timezone: str = Field(min_length=1, max_length=100)
     after_hours_grace_minutes: int = Field(default=10, ge=0, le=1440)
     operation_id: UUID
+    responsible_staff_user_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class UpdateClassroomRequest(CreateClassroomRequest):
@@ -127,15 +130,13 @@ class GeometrySchema(BaseModel):
     height: float = Field(gt=0, le=1)
 
     @model_validator(mode="after")
-    def validate_bounds(self) -> "GeometrySchema":
+    def validate_bounds(self) -> GeometrySchema:
         if self.x + self.width > 1 or self.y + self.height > 1:
             raise ValueError("geometry must fit inside normalized bounds")
         return self
 
     def to_domain(self) -> SeatGeometry:
-        return SeatGeometry(
-            x=self.x, y=self.y, width=self.width, height=self.height
-        )
+        return SeatGeometry(x=self.x, y=self.y, width=self.width, height=self.height)
 
 
 class CurrentOccupancyResponse(BaseModel):
@@ -159,7 +160,7 @@ class SeatResponse(BaseModel):
     version: int
 
     @classmethod
-    def from_domain(cls, item: Seat) -> "SeatResponse":
+    def from_domain(cls, item: Seat) -> SeatResponse:
         return cls(
             id=item.id,
             classroom_id=item.classroom_id,
@@ -196,7 +197,7 @@ class SeatListResponse(BaseModel):
     offset: int
 
     @classmethod
-    def from_page(cls, page: SeatPage, limit: int, offset: int):
+    def from_page(cls, page: SeatPage, limit: int, offset: int) -> SeatListResponse:
         return cls(
             items=[SeatResponse.from_domain(item) for item in page.items],
             total=page.total,
@@ -227,7 +228,7 @@ class OccupancySummaryResponse(BaseModel):
     last_observed_at: datetime | None
 
     @classmethod
-    def from_domain(cls, value: ClassroomOccupancySummary):
+    def from_domain(cls, value: ClassroomOccupancySummary) -> OccupancySummaryResponse:
         return cls(
             classroom=ClassroomResponse.from_domain(value.classroom),
             seats=[SeatResponse.from_domain(item) for item in value.seats],
@@ -255,7 +256,7 @@ class OccupancyHistoryResponse(BaseModel):
     state_changed: bool
 
     @classmethod
-    def from_domain(cls, item: SeatOccupancyHistory):
+    def from_domain(cls, item: SeatOccupancyHistory) -> OccupancyHistoryResponse:
         return cls(
             id=item.id,
             seat_id=item.seat_id,
@@ -279,7 +280,9 @@ class OccupancyHistoryListResponse(BaseModel):
     offset: int
 
     @classmethod
-    def from_page(cls, page: SeatOccupancyHistoryPage, limit: int, offset: int):
+    def from_page(
+        cls, page: SeatOccupancyHistoryPage, limit: int, offset: int
+    ) -> OccupancyHistoryListResponse:
         return cls(
             items=[OccupancyHistoryResponse.from_domain(item) for item in page.items],
             total=page.total,
@@ -312,7 +315,7 @@ class SeatObservationBatchResponse(BaseModel):
     alert_count: int
 
     @classmethod
-    def from_domain(cls, item: SeatObservationBatchResult):
+    def from_domain(cls, item: SeatObservationBatchResult) -> SeatObservationBatchResponse:
         return cls(
             event_id=item.event_id,
             processed_count=item.processed_count,
@@ -333,7 +336,7 @@ class AfterHoursAlertResponse(BaseModel):
     version: int
 
     @classmethod
-    def from_domain(cls, item: AfterHoursAlert):
+    def from_domain(cls, item: AfterHoursAlert) -> AfterHoursAlertResponse:
         return cls(
             id=item.id,
             classroom_id=item.classroom_id,
@@ -354,7 +357,9 @@ class AfterHoursAlertListResponse(BaseModel):
     offset: int
 
     @classmethod
-    def from_page(cls, page: AfterHoursAlertPage, limit: int, offset: int):
+    def from_page(
+        cls, page: AfterHoursAlertPage, limit: int, offset: int
+    ) -> AfterHoursAlertListResponse:
         return cls(
             items=[AfterHoursAlertResponse.from_domain(item) for item in page.items],
             total=page.total,
@@ -376,6 +381,7 @@ class ClassroomCreateForm(BaseModel):
     timezone: str = Field(min_length=1, max_length=100)
     after_hours_grace_minutes: int = Field(ge=0, le=1440)
     operation_id: UUID
+    responsible_staff_user_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class ClassroomUpdateForm(ClassroomCreateForm):

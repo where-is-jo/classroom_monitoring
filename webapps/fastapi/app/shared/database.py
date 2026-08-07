@@ -7,16 +7,16 @@ MongoDB 접속 정보는 이 모듈 밖으로 노출하지 않는다. 기능 어
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any, TypeAlias
+from typing import Any
 
 from pydantic import SecretStr
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import ConfigurationError, PyMongoError
 
-MongoDocument: TypeAlias = dict[str, Any]
-MongoDatabase: TypeAlias = Database[MongoDocument]
-IndexInitializer: TypeAlias = Callable[[MongoDatabase], None]
+type MongoDocument = dict[str, Any]
+type MongoDatabase = Database[MongoDocument]
+type IndexInitializer = Callable[[MongoDatabase], None]
 
 
 class DatabaseOperationError(RuntimeError):

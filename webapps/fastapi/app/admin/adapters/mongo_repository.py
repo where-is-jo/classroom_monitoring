@@ -20,8 +20,6 @@ from ..models import (
     DashboardActivityType,
     DashboardSnapshot,
     EmployeeSummary,
-    InterviewWaitSummary,
-    NotificationSummary,
 )
 
 
@@ -31,13 +29,10 @@ class MongoAdminDashboardRepository:
     def __init__(self, database: MongoDatabase) -> None:
         self._employees = database["employees"]
         self._employee_history = database["employee_status_history"]
-        self._waits = database["interview_waits"]
-        self._wait_history = database["interview_wait_history"]
         self._classrooms = database["classrooms"]
         self._seats = database["seats"]
+        self._seat_history = database["seat_occupancy_history"]
         self._alerts = database["after_hours_alerts"]
-        self._notifications = database["notifications"]
-        self._deliveries = database["notification_deliveries"]
         self._audit = database["audit_logs"]
 
     @classmethod
@@ -46,21 +41,9 @@ class MongoAdminDashboardRepository:
             [("occurred_at", DESCENDING), ("_id", ASCENDING)],
             name="employee_history_dashboard_recent",
         )
-        database["interview_wait_history"].create_index(
-            [("occurred_at", DESCENDING), ("_id", ASCENDING)],
-            name="interview_history_dashboard_recent",
-        )
-        database["notifications"].create_index(
-            [("is_read", ASCENDING), ("created_at", DESCENDING)],
-            name="notifications_unread_dashboard",
-        )
-        database["notifications"].create_index(
-            [("created_at", DESCENDING), ("_id", ASCENDING)],
-            name="notifications_dashboard_recent",
-        )
-        database["notification_deliveries"].create_index(
-            [("status", ASCENDING), ("attempted_at", DESCENDING)],
-            name="deliveries_status_dashboard_recent",
+        database["seat_occupancy_history"].create_index(
+            [("observed_at", DESCENDING), ("_id", ASCENDING)],
+            name="seat_history_dashboard_recent",
         )
         database["after_hours_alerts"].create_index(
             [("detected_at", DESCENDING), ("_id", ASCENDING)],
@@ -80,15 +63,13 @@ class MongoAdminDashboardRepository:
         *,
         department: str | None,
         classroom_id: str | None,
-        delivery_failure_since: datetime,
     ) -> DashboardSnapshot:
         try:
             employee_match: MongoDocument = {"is_active": True}
             if department is not None:
                 employee_match["department"] = department
             employee_ids = [
-                _string(item, "_id")
-                for item in self._employees.find(employee_match, {"_id": 1})
+                _string(item, "_id") for item in self._employees.find(employee_match, {"_id": 1})
             ]
             employee_counts = self._group_counts(
                 self._employees,
@@ -96,17 +77,11 @@ class MongoAdminDashboardRepository:
                 "$current_status.status",
             )
 
-            wait_match: MongoDocument = {"status": {"$in": ["WAITING", "READY"]}}
-            if department is not None:
-                wait_match["employee_id"] = {"$in": employee_ids}
-            wait_counts = self._group_counts(self._waits, wait_match, "$status")
-
             classroom_match: MongoDocument = {"is_active": True}
             if classroom_id is not None:
                 classroom_match["_id"] = classroom_id
             classroom_ids = [
-                _string(item, "_id")
-                for item in self._classrooms.find(classroom_match, {"_id": 1})
+                _string(item, "_id") for item in self._classrooms.find(classroom_match, {"_id": 1})
             ]
             seat_match: MongoDocument = {
                 "is_active": True,
@@ -121,10 +96,6 @@ class MongoAdminDashboardRepository:
                 "status": "OPEN",
                 "classroom_id": {"$in": classroom_ids},
             }
-            failures = {
-                "status": {"$in": ["TEMPORARY_FAILURE", "PERMANENT_FAILURE"]},
-                "attempted_at": {"$gte": delivery_failure_since},
-            }
             return DashboardSnapshot(
                 employees=EmployeeSummary(
                     total=len(employee_ids),
@@ -133,24 +104,13 @@ class MongoAdminDashboardRepository:
                     away=employee_counts.get("AWAY", 0),
                     offsite=employee_counts.get("OFFSITE", 0),
                 ),
-                interview_waits=InterviewWaitSummary(
-                    waiting=wait_counts.get("WAITING", 0),
-                    ready=wait_counts.get("READY", 0),
-                ),
                 classrooms=ClassroomSummary(
                     active=len(classroom_ids),
+                    active_seats=sum(seat_counts.values()),
                     occupied_seats=seat_counts.get("OCCUPIED", 0),
                     unknown_seats=seat_counts.get("UNKNOWN", 0),
                 ),
-                alerts=AlertSummary(
-                    open_after_hours=self._alerts.count_documents(alert_match)
-                ),
-                notifications=NotificationSummary(
-                    unread=self._notifications.count_documents({"is_read": False}),
-                    failed_mock_deliveries_24h=self._deliveries.count_documents(
-                        failures
-                    ),
-                ),
+                alerts=AlertSummary(open_after_hours=self._alerts.count_documents(alert_match)),
             )
         except PyMongoError:
             raise RepositoryUnavailableError() from None
@@ -158,9 +118,7 @@ class MongoAdminDashboardRepository:
             raise RepositoryDataError() from None
 
     @staticmethod
-    def _group_counts(
-        collection: Any, match: MongoDocument, group_field: str
-    ) -> dict[str, int]:
+    def _group_counts(collection: Any, match: MongoDocument, group_field: str) -> dict[str, int]:
         documents = collection.aggregate(
             [
                 {"$match": match},
@@ -187,14 +145,10 @@ class MongoAdminDashboardRepository:
         try:
             if activity_type in (None, DashboardActivityType.EMPLOYEE_STATUS):
                 items.extend(self._employee_activities(from_time, to_time, fetch_limit))
-            if activity_type in (None, DashboardActivityType.INTERVIEW_WAIT):
-                items.extend(self._wait_activities(from_time, to_time, fetch_limit))
+            if activity_type in (None, DashboardActivityType.SEAT_OCCUPANCY):
+                items.extend(self._seat_activities(from_time, to_time, fetch_limit))
             if activity_type in (None, DashboardActivityType.AFTER_HOURS_ALERT):
                 items.extend(self._alert_activities(from_time, to_time, fetch_limit))
-            if activity_type in (None, DashboardActivityType.NOTIFICATION):
-                items.extend(
-                    self._notification_activities(from_time, to_time, fetch_limit)
-                )
             total = sum(
                 self._activity_count(kind, from_time, to_time)
                 for kind in DashboardActivityType
@@ -211,7 +165,10 @@ class MongoAdminDashboardRepository:
         self, kind: DashboardActivityType, from_time: datetime, to_time: datetime
     ) -> int:
         collection, field = self._activity_source(kind)
-        return collection.count_documents({field: {"$gte": from_time, "$lt": to_time}})
+        query: MongoDocument = {field: {"$gte": from_time, "$lt": to_time}}
+        if kind == DashboardActivityType.SEAT_OCCUPANCY:
+            query["state_changed"] = True
+        return int(collection.count_documents(query))
 
     def _activity_source(self, kind: DashboardActivityType) -> tuple[Any, str]:
         return {
@@ -219,16 +176,22 @@ class MongoAdminDashboardRepository:
                 self._employee_history,
                 "occurred_at",
             ),
-            DashboardActivityType.INTERVIEW_WAIT: (self._wait_history, "occurred_at"),
+            DashboardActivityType.SEAT_OCCUPANCY: (self._seat_history, "observed_at"),
             DashboardActivityType.AFTER_HOURS_ALERT: (self._alerts, "detected_at"),
-            DashboardActivityType.NOTIFICATION: (self._notifications, "created_at"),
         }[kind]
 
     @staticmethod
     def _recent(
-        collection: Any, field: str, from_time: datetime, to_time: datetime, limit: int
+        collection: Any,
+        field: str,
+        from_time: datetime,
+        to_time: datetime,
+        limit: int,
+        extra_match: MongoDocument | None = None,
     ) -> list[MongoDocument]:
-        cursor = collection.find({field: {"$gte": from_time, "$lt": to_time}})
+        query: MongoDocument = {field: {"$gte": from_time, "$lt": to_time}}
+        query.update(extra_match or {})
+        cursor = collection.find(query)
         return list(cursor.sort([(field, DESCENDING), ("_id", ASCENDING)]).limit(limit))
 
     def _employee_activities(
@@ -245,27 +208,30 @@ class MongoAdminDashboardRepository:
                 resource_id=_string(item, "employee_id"),
                 target_route=f"/employees/{_string(item, 'employee_id')}",
             )
-            for item in self._recent(
-                self._employee_history, "occurred_at", start, end, limit
-            )
+            for item in self._recent(self._employee_history, "occurred_at", start, end, limit)
         ]
 
-    def _wait_activities(
+    def _seat_activities(
         self, start: datetime, end: datetime, limit: int
     ) -> list[DashboardActivity]:
         return [
             DashboardActivity(
-                id=f"wait:{_string(item, '_id')}",
-                type=DashboardActivityType.INTERVIEW_WAIT,
-                occurred_at=_datetime(item, "occurred_at"),
-                title="면담 대기 변경",
-                description=f"{item.get('from_status') or '-'} → {_string(item, 'to_status')}",
-                resource_type="interview_wait",
-                resource_id=_string(item, "wait_id"),
-                target_route=f"/my/interview-waits/{_string(item, 'wait_id')}",
+                id=f"seat:{_string(item, '_id')}",
+                type=DashboardActivityType.SEAT_OCCUPANCY,
+                occurred_at=_datetime(item, "observed_at"),
+                title="좌석 상태 변경",
+                description=f"{_string(item, 'from_state')} → {_string(item, 'to_state')}",
+                resource_type="seat",
+                resource_id=_string(item, "seat_id"),
+                target_route=f"/classrooms/{_string(item, 'classroom_id')}",
             )
             for item in self._recent(
-                self._wait_history, "occurred_at", start, end, limit
+                self._seat_history,
+                "observed_at",
+                start,
+                end,
+                limit,
+                {"state_changed": True},
             )
         ]
 
@@ -281,28 +247,9 @@ class MongoAdminDashboardRepository:
                 description=f"좌석 {_string(item, 'seat_id')} · {_string(item, 'status')}",
                 resource_type="after_hours_alert",
                 resource_id=_string(item, "_id"),
-                target_route="/admin/alerts",
+                target_route="/admin#open-alerts",
             )
             for item in self._recent(self._alerts, "detected_at", start, end, limit)
-        ]
-
-    def _notification_activities(
-        self, start: datetime, end: datetime, limit: int
-    ) -> list[DashboardActivity]:
-        return [
-            DashboardActivity(
-                id=f"notification:{_string(item, '_id')}",
-                type=DashboardActivityType.NOTIFICATION,
-                occurred_at=_datetime(item, "created_at"),
-                title=_string(item, "title"),
-                description=f"알림 유형 {_string(item, 'type')}",
-                resource_type="notification",
-                resource_id=_string(item, "_id"),
-                target_route="/notifications",
-            )
-            for item in self._recent(
-                self._notifications, "created_at", start, end, limit
-            )
         ]
 
     def list_audit_logs(

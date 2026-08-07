@@ -23,13 +23,9 @@ class EmployeeSummaryResponse(BaseModel):
     offsite: int = Field(ge=0)
 
 
-class InterviewWaitSummaryResponse(BaseModel):
-    waiting: int = Field(ge=0)
-    ready: int = Field(ge=0)
-
-
 class ClassroomSummaryResponse(BaseModel):
     active: int = Field(ge=0)
+    active_seats: int = Field(ge=0)
     occupied_seats: int = Field(ge=0)
     unknown_seats: int = Field(ge=0)
 
@@ -38,30 +34,19 @@ class AlertSummaryResponse(BaseModel):
     open_after_hours: int = Field(ge=0)
 
 
-class NotificationSummaryResponse(BaseModel):
-    unread: int = Field(ge=0)
-    failed_mock_deliveries_24h: int = Field(ge=0)
-
-
 class DashboardSummaryResponse(BaseModel):
     generated_at: datetime
     employees: EmployeeSummaryResponse
-    interview_waits: InterviewWaitSummaryResponse
     classrooms: ClassroomSummaryResponse
     alerts: AlertSummaryResponse
-    notifications: NotificationSummaryResponse
 
     @classmethod
-    def from_domain(cls, item: DashboardSummary) -> "DashboardSummaryResponse":
+    def from_domain(cls, item: DashboardSummary) -> DashboardSummaryResponse:
         return cls(
             generated_at=item.generated_at,
             employees=EmployeeSummaryResponse(**item.employees.__dict__),
-            interview_waits=InterviewWaitSummaryResponse(
-                **item.interview_waits.__dict__
-            ),
             classrooms=ClassroomSummaryResponse(**item.classrooms.__dict__),
             alerts=AlertSummaryResponse(**item.alerts.__dict__),
-            notifications=NotificationSummaryResponse(**item.notifications.__dict__),
         )
 
 
@@ -85,7 +70,7 @@ class DashboardActivityListResponse(BaseModel):
     @classmethod
     def from_page(
         cls, page: DashboardActivityPage, *, limit: int, offset: int
-    ) -> "DashboardActivityListResponse":
+    ) -> DashboardActivityListResponse:
         return cls(
             items=[DashboardActivityResponse(**item.__dict__) for item in page.items],
             total=page.total,
@@ -112,9 +97,7 @@ class AuditLogListResponse(BaseModel):
     offset: int = Field(ge=0)
 
     @classmethod
-    def from_page(
-        cls, page: AuditLogPage, *, limit: int, offset: int
-    ) -> "AuditLogListResponse":
+    def from_page(cls, page: AuditLogPage, *, limit: int, offset: int) -> AuditLogListResponse:
         return cls(
             items=[AuditLogResponse(**item.__dict__) for item in page.items],
             total=page.total,

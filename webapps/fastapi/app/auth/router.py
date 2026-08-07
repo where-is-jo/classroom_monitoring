@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from ..shared.config import Settings
 from ..shared.dependencies import get_auth_service, get_settings, get_user_service
+from ..shared.errors import DomainError
 from ..shared.security import issue_csrf_token
 from ..shared.templating import templates
-from ..users.models import ChangePasswordCommand, User
+from ..users.models import ChangePasswordCommand, User, UserRole
 from ..users.schemas import UserResponse
 from ..users.service import UserService
 from .dependencies import (
     ACCESS_COOKIE,
     CSRF_COOKIE,
     REFRESH_COOKIE,
+    get_authenticated_user,
     get_current_user,
+    get_password_change_page_user,
+    product_home_path,
     request_ip_fingerprint,
     require_csrf,
     require_origin,
@@ -26,6 +31,7 @@ from .dependencies import (
 from .errors import AccountLockedError, InvalidCredentialsError, LoginRateLimitedError
 from .models import AuthenticatedSession, LoginCommand
 from .schemas import (
+    ChangePasswordForm,
     ChangePasswordRequest,
     LoginForm,
     LoginRequest,
@@ -161,8 +167,9 @@ def me(user: User = Depends(get_current_user)) -> MeResponse:
 )
 def change_password(
     payload: ChangePasswordRequest,
+    response: Response,
     _: None = Depends(require_csrf),
-    actor: User = Depends(get_current_user),
+    actor: User = Depends(get_authenticated_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: UserService = Depends(get_user_service),
 ) -> MeResponse:
@@ -175,11 +182,12 @@ def change_password(
         ),
         ip_fingerprint=ip_fingerprint,
     )
+    _clear_session_cookies(response)
     return MeResponse.from_user(changed)
 
 
 @page_router.get("/login")
-def login_page(request: Request, next: str = "/events"):
+def login_page(request: Request, next: str = "") -> Response:
     return templates.TemplateResponse(
         request=request,
         name="auth/login.html",
@@ -195,7 +203,7 @@ def login_page_submit(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: AuthService = Depends(get_auth_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         session = service.login(
             LoginCommand(
@@ -215,10 +223,10 @@ def login_page_submit(
             },
             status_code=exc.status_code,
         )
-    response = RedirectResponse(
-        url=_safe_return_to(form.next),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    destination = _return_to_for(session.user, form.next)
+    if session.user.must_change_password:
+        destination = "/account/password?" + urlencode({"next": destination})
+    response = RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
     _set_session_cookies(response, session, settings=settings)
     return response
 
@@ -228,14 +236,120 @@ def logout_page(
     request: Request,
     _: None = Depends(require_csrf),
     service: AuthService = Depends(get_auth_service),
-):
+) -> Response:
     service.logout(request.cookies.get(REFRESH_COOKIE))
     response = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     _clear_session_cookies(response)
     return response
 
 
+@page_router.get("/account/password")
+def password_page(
+    request: Request,
+    next: str = "",
+    actor: User = Depends(get_password_change_page_user),
+) -> Response:
+    return _render_password_page(
+        request,
+        actor=actor,
+        next_path=_return_to_for(actor, next),
+    )
+
+
+@page_router.post("/account/password")
+def password_page_submit(
+    request: Request,
+    form: Annotated[ChangePasswordForm, Form()],
+    _: None = Depends(require_csrf),
+    actor: User = Depends(get_password_change_page_user),
+    ip_fingerprint: str = Depends(request_ip_fingerprint),
+    service: UserService = Depends(get_user_service),
+) -> Response:
+    next_path = _return_to_for(actor, form.next)
+    if form.new_password != form.new_password_confirm:
+        return _render_password_page(
+            request,
+            actor=actor,
+            next_path=next_path,
+            error="새 비밀번호 확인이 일치하지 않습니다.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        service.change_password(
+            actor,
+            ChangePasswordCommand(
+                current_password=form.current_password,
+                new_password=form.new_password,
+                operation_id=str(form.operation_id),
+            ),
+            ip_fingerprint=ip_fingerprint,
+        )
+    except DomainError as exc:
+        return _render_password_page(
+            request,
+            actor=actor,
+            next_path=next_path,
+            error=exc.message,
+            status_code=exc.status_code,
+        )
+    response = RedirectResponse(
+        url="/login?" + urlencode({"next": next_path}),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    _clear_session_cookies(response)
+    return response
+
+
+def _render_password_page(
+    request: Request,
+    *,
+    actor: User,
+    next_path: str,
+    error: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> Response:
+    return templates.TemplateResponse(
+        request=request,
+        name="account/password.html",
+        context={
+            "current_user": actor,
+            "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
+            "next": next_path,
+            "error": error,
+            "must_change_password": actor.must_change_password,
+        },
+        status_code=status_code,
+    )
+
+
 def _safe_return_to(value: str) -> str:
     if not value.startswith("/") or value.startswith("//"):
-        return "/events"
+        return ""
     return value
+
+
+def _return_to_for(user: User, value: str) -> str:
+    candidate = _safe_return_to(value)
+    allowed_prefixes = {
+        UserRole.STUDENT: ("/employees", "/my/interview-waits", "/classrooms", "/account"),
+        UserRole.STAFF: (
+            "/employees",
+            "/staff/interview-waits",
+            "/classrooms",
+            "/monitoring",
+            "/video-search",
+            "/account",
+        ),
+        UserRole.ADMIN: (
+            "/admin",
+            "/employees",
+            "/classrooms",
+            "/monitoring",
+            "/video-search",
+            "/account",
+        ),
+        UserRole.SYSTEM_OPERATOR: (),
+    }
+    if candidate and candidate.startswith(allowed_prefixes[user.role]):
+        return candidate
+    return product_home_path(user.role)

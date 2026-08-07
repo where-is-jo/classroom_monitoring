@@ -22,3 +22,6 @@ venv/
 # VSCode 설정
 .vscode/
 
+# Codex, Cursor 설정 지침
+.agents/
+.cursor/

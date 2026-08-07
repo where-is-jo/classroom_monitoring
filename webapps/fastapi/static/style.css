@@ -35,7 +35,6 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
-  min-width: 320px;
   color-scheme: light;
   scroll-behavior: smooth;
 }
@@ -233,6 +232,65 @@ a:hover { color: #173bab; }
 .account-copy strong { font-size: 13px; }
 .account-copy small { color: var(--color-text-muted); font-size: 11px; }
 .account-card form { margin: 0; }
+.profile-popover { position: relative; min-width: 0; flex: 1; }
+.notification-popover { position: relative; flex: 0 0 auto; }
+.notification-popover > summary { position: relative; list-style: none; }
+.notification-popover > summary::-webkit-details-marker { display: none; }
+.notification-popover > summary .nav-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; min-height: 18px; padding: 2px 4px; }
+.notification-popover-panel {
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 40px));
+  padding: 18px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.notification-popover-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.notification-popover-heading h2 { margin: 0; font-size: 20px; }
+.notification-popover-list { display: grid; gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.notification-popover-item { display: grid; gap: 5px; padding: 14px; background: var(--color-surface-low); border: 1px solid var(--color-outline-soft); border-radius: var(--radius-md); }
+.notification-popover-item.is-read { opacity: 0.72; }
+.notification-popover-item p, .notification-popover-item time { margin: 0; }
+.notification-popover-item time { color: var(--color-text-muted); font-size: 12px; }
+.notification-popover-item button { justify-self: start; }
+.notification-popover-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.profile-trigger {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  list-style: none;
+}
+.profile-trigger::-webkit-details-marker { display: none; }
+.profile-trigger:hover { background: var(--color-surface-container); }
+.profile-popover-panel {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 40px));
+  padding: 18px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.profile-popover-panel > small { display: block; margin: 4px 0 14px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.profile-status-control { display: grid; gap: 12px; margin: 14px 0; padding-block: 14px; border-block: 1px solid var(--color-outline-soft); }
+.profile-status-control h2 { margin: 0; font-size: 16px; }
+.profile-status-control .stack { gap: 10px; }
+.profile-status-control button { width: 100%; }
 
 .workspace { min-height: 100vh; margin-left: var(--sidebar-width); }
 .content {
@@ -641,6 +699,27 @@ details.management-card[open] > summary::after { content: "−"; }
 .management-card--nested .management-content { padding: 0 16px 16px; }
 .danger-zone { margin-top: 20px; padding-top: 16px; border-top: 1px solid #efb8b3; }
 
+.demo-clock { display: grid; gap: 3px; min-width: 220px; padding: 12px 16px; background: var(--color-surface); border: 1px solid var(--color-outline-soft); border-radius: var(--radius-md); }
+.demo-clock span { color: var(--color-text-muted); font-size: 12px; }
+.demo-clock strong { font-variant-numeric: tabular-nums; }
+.demo-video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 18px; }
+.demo-video-card { overflow: hidden; background: var(--color-surface); border: 1px solid var(--color-outline-soft); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
+.demo-video-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #102d32; }
+.demo-video-frame video, .demo-video-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.demo-video-frame video[hidden] { display: none; }
+.demo-ribbon { position: absolute; top: 12px; left: 12px; padding: 5px 9px; color: #fff; background: rgb(5 45 48 / 88%); border: 1px solid rgb(255 255 255 / 32%); border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+.demo-video-empty, .demo-video-error { position: absolute; inset: auto 18px 18px; padding: 10px 12px; color: #4f3c00; background: rgb(255 245 207 / 94%); border-radius: var(--radius-sm); font-weight: 700; }
+.demo-video-error { color: #7d241d; background: rgb(255 218 214 / 96%); }
+.demo-video-copy { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 18px 18px 8px; }
+.demo-video-copy h3 { margin-bottom: 4px; }
+.demo-video-copy p { margin: 0; color: var(--color-text-muted); }
+.demo-video-card > .card-meta, .demo-video-card > .match-reason, .demo-video-card > .tag-list { margin-inline: 18px; }
+.demo-video-card > .card-meta { padding-bottom: 18px; }
+.match-reason { padding: 10px 12px; color: #254258; background: #edf4ff; border-radius: var(--radius-sm); font-size: 13px; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 7px; padding: 0; list-style: none; }
+.tag-list li { padding: 4px 8px; color: #284e4b; background: #dff2ee; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.example-list { display: grid; gap: 10px; margin-bottom: 0; }
+
 .audit-json {
   min-width: 220px;
   max-width: 360px;
@@ -729,6 +808,7 @@ code {
   .nav-enhanced .side-nav, .nav-enhanced .account-card { display: none; }
   .nav-enhanced.nav-open .side-nav, .nav-enhanced.nav-open .account-card { display: flex; }
   .nav-enhanced.nav-open .side-nav { display: block; }
+  .profile-popover-panel, .notification-popover-panel { position: fixed; inset: auto 16px 16px; width: auto; max-height: calc(100dvh - 32px); }
   .workspace { margin-left: 0; }
   .content { min-height: auto; padding: 24px 16px 40px; }
   .site-footer { padding: 0 16px 24px; }

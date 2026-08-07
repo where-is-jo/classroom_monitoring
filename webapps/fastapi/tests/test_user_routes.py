@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth.dependencies import CSRF_COOKIE
+from app.auth.dependencies import ACCESS_COOKIE, CSRF_COOKIE, REFRESH_COOKIE
+from app.auth.errors import InvalidRefreshTokenError
 from app.main import app
 from app.shared.dependencies import get_auth_service, get_user_service
 from app.users.models import UserRole
@@ -23,7 +25,7 @@ def user_stack() -> AuthStack:
 
 
 @pytest.fixture
-def user_client(user_stack: AuthStack):
+def user_client(user_stack: AuthStack) -> Iterator[TestClient]:
     app.dependency_overrides[get_auth_service] = lambda: user_stack.auth_service
     app.dependency_overrides[get_user_service] = lambda: user_stack.user_service
     with TestClient(app) as client:
@@ -66,7 +68,8 @@ def test_관리자_로그인_생성_수정_비활성화_사용자_여정(
     created = created_response.json()
     assert created["email"] == "journey.user@example.invalid"
     assert created_response.headers["location"].endswith(created["id"])
-    assert "password" not in created_response.text
+    assert "password_hash" not in created_response.text
+    assert "JourneyPassword1!" not in created_response.text
 
     updated_response = user_client.patch(
         f"/api/v1/users/{created['id']}",
@@ -120,6 +123,27 @@ def test_목록_API는_filter와_표준_pagination_응답을_사용한다(
     assert response.json()["offset"] == 0
     assert response.json()["total"] == 1
     assert response.json()["items"][0]["role"] == "STAFF"
+
+
+def test_사용자_API는_레거시_SYSTEM_OPERATOR_지정을_거부한다(
+    user_client: TestClient,
+    user_stack: AuthStack,
+) -> None:
+    login_admin(user_client, user_stack)
+
+    response = user_client.post(
+        "/api/v1/users",
+        headers=write_headers(user_client),
+        json={
+            "email": "legacy-role@example.invalid",
+            "password": "LegacyRolePassword1!",
+            "name": "레거시 역할",
+            "role": "SYSTEM_OPERATOR",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_사용자_API는_validation_CSRF와_CAS_오류_형식을_지킨다(
@@ -185,6 +209,7 @@ def test_본인_비밀번호_변경_API는_refresh를_폐기하고_민감정보�
     user_stack: AuthStack,
 ) -> None:
     login_admin(user_client, user_stack)
+    old_refresh = user_client.cookies[REFRESH_COOKIE]
     response = user_client.patch(
         "/api/v1/auth/me/password",
         headers=write_headers(user_client),
@@ -196,12 +221,13 @@ def test_본인_비밀번호_변경_API는_refresh를_폐기하고_민감정보�
     )
 
     assert response.status_code == 200
-    assert "password" not in response.text
-    refresh = user_client.post(
-        "/api/v1/auth/refresh",
-        headers=write_headers(user_client),
-    )
-    assert refresh.status_code == 401
+    assert "password_hash" not in response.text
+    assert "ChangedPassword2!" not in response.text
+    assert ACCESS_COOKIE not in user_client.cookies
+    assert REFRESH_COOKIE not in user_client.cookies
+    assert CSRF_COOKIE not in user_client.cookies
+    with pytest.raises(InvalidRefreshTokenError):
+        user_stack.auth_service.refresh(old_refresh)
 
 
 def test_OpenAPI는_auth_user_계약과_공통_오류_model을_노출한다(
@@ -226,3 +252,5 @@ def test_OpenAPI는_auth_user_계약과_공통_오류_model을_노출한다(
     user_properties = schema["components"]["schemas"]["UserResponse"]["properties"]
     assert "password_hash" not in user_properties
     assert "access_token" not in user_properties
+    create_role = schema["components"]["schemas"]["CreateUserRequest"]["properties"]["role"]
+    assert create_role["enum"] == ["STUDENT", "STAFF", "ADMIN"]

@@ -56,14 +56,10 @@ class InMemoryEmployeeRepository:
             ]
         if status is not None:
             employees = [
-                employee
-                for employee in employees
-                if employee.current_status.status == status
+                employee for employee in employees if employee.current_status.status == status
             ]
         if is_active is not None:
-            employees = [
-                employee for employee in employees if employee.is_active == is_active
-            ]
+            employees = [employee for employee in employees if employee.is_active == is_active]
         employees.sort(key=lambda employee: (employee.display_name, employee.id))
         return EmployeePage(
             items=employees[offset : offset + limit],
@@ -103,11 +99,7 @@ class InMemoryEmployeeRepository:
     def get_employee_by_user_id(self, user_id: str) -> Employee | None:
         with self._lock:
             return next(
-                (
-                    employee
-                    for employee in self._employees.values()
-                    if employee.user_id == user_id
-                ),
+                (employee for employee in self._employees.values() if employee.user_id == user_id),
                 None,
             )
 
@@ -128,9 +120,7 @@ class InMemoryEmployeeRepository:
         initial_history: EmployeeStatusHistory,
     ) -> Employee:
         with self._lock:
-            operation_owner = self.get_employee_by_operation_id(
-                employee.created_operation_id
-            )
+            operation_owner = self.get_employee_by_operation_id(employee.created_operation_id)
             if operation_owner is not None:
                 if operation_owner.employee_no != employee.employee_no:
                     raise EmployeeOperationConflictError()
@@ -151,9 +141,7 @@ class InMemoryEmployeeRepository:
         history: EmployeeStatusHistory | None,
     ) -> Employee | None:
         with self._lock:
-            operation_owner = self.get_employee_by_operation_id(
-                employee.last_operation_id
-            )
+            operation_owner = self.get_employee_by_operation_id(employee.last_operation_id)
             history_owner = self.get_history_by_operation_id(employee.last_operation_id)
             if operation_owner is not None:
                 if operation_owner.id != employee.id:
@@ -248,10 +236,7 @@ class InMemoryEmployeeRepository:
                 observation
                 for observation in self._observations.values()
                 if observation.employee_id == employee_id
-                and (
-                    person_present is None
-                    or observation.person_present == person_present
-                )
+                and (person_present is None or observation.person_present == person_present)
             ]
         if not observations:
             return None
