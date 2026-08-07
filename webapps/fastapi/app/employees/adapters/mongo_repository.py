@@ -163,9 +163,7 @@ class MongoEmployeeRepository:
         try:
             self._employees.insert_one(self._employee_to_document(employee))
         except DuplicateKeyError:
-            operation_owner = self.get_employee_by_operation_id(
-                employee.created_operation_id
-            )
+            operation_owner = self.get_employee_by_operation_id(employee.created_operation_id)
             if operation_owner is not None:
                 if operation_owner.employee_no != employee.employee_no:
                     raise EmployeeOperationConflictError() from None
@@ -213,9 +211,7 @@ class MongoEmployeeRepository:
                 return_document=ReturnDocument.AFTER,
             )
         except DuplicateKeyError:
-            operation_owner = self.get_employee_by_operation_id(
-                employee.last_operation_id
-            )
+            operation_owner = self.get_employee_by_operation_id(employee.last_operation_id)
             if operation_owner is not None and operation_owner.id != employee.id:
                 raise EmployeeOperationConflictError() from None
             number_owner = self.get_employee_by_number(employee.employee_no)
@@ -304,9 +300,7 @@ class MongoEmployeeRepository:
         self,
         employee_id: str,
     ) -> EmployeeObservation | None:
-        return self._find_latest_observation(
-            {"employee_id": employee_id, "person_present": True}
-        )
+        return self._find_latest_observation({"employee_id": employee_id, "person_present": True})
 
     def _find_employee(self, query: MongoDocument) -> Employee | None:
         try:
@@ -407,9 +401,7 @@ class MongoEmployeeRepository:
                     source=StatusSource(_string(current, "source")),
                     reason=_string(current, "reason"),
                     effective_at=_aware_datetime(current, "effective_at"),
-                    last_person_seen_at=_optional_aware_datetime(
-                        current, "last_person_seen_at"
-                    ),
+                    last_person_seen_at=_optional_aware_datetime(current, "last_person_seen_at"),
                 ),
                 active_override=active_override,
                 created_at=_aware_datetime(document, "created_at"),
@@ -427,9 +419,7 @@ class MongoEmployeeRepository:
         return {
             "_id": history.id,
             "employee_id": history.employee_id,
-            "from_status": (
-                None if history.from_status is None else history.from_status.value
-            ),
+            "from_status": (None if history.from_status is None else history.from_status.value),
             "to_status": history.to_status.value,
             "source": history.source.value,
             "reason": history.reason,
@@ -447,9 +437,7 @@ class MongoEmployeeRepository:
             return EmployeeStatusHistory(
                 id=_string(document, "_id"),
                 employee_id=_string(document, "employee_id"),
-                from_status=(
-                    None if from_status is None else EmployeeStatus(from_status)
-                ),
+                from_status=(None if from_status is None else EmployeeStatus(from_status)),
                 to_status=EmployeeStatus(_string(document, "to_status")),
                 source=StatusSource(_string(document, "source")),
                 reason=_string(document, "reason"),
@@ -492,9 +480,7 @@ class MongoEmployeeRepository:
                 confidence=float(confidence),
                 observed_at=_aware_datetime(document, "observed_at"),
                 received_at=_aware_datetime(document, "received_at"),
-                resulting_status=EmployeeStatus(
-                    _string(document, "resulting_status")
-                ),
+                resulting_status=EmployeeStatus(_string(document, "resulting_status")),
                 status_changed=_boolean(document, "status_changed"),
             )
         except (KeyError, TypeError, ValueError):
@@ -517,9 +503,7 @@ def _optional_string(document: MongoDocument, field: str) -> str | None:
 
 def _string_tuple(document: MongoDocument, field: str) -> tuple[str, ...]:
     value = document[field]
-    if not isinstance(value, list) or any(
-        not isinstance(item, str) for item in value
-    ):
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise TypeError(f"{field} must be a list of strings")
     return tuple(value)
 

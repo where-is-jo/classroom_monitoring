@@ -15,9 +15,7 @@ class InterviewWaitStatus(StrEnum):
     EXPIRED = "EXPIRED"
 
 
-ACTIVE_WAIT_STATUSES = frozenset(
-    {InterviewWaitStatus.WAITING, InterviewWaitStatus.READY}
-)
+ACTIVE_WAIT_STATUSES = frozenset({InterviewWaitStatus.WAITING, InterviewWaitStatus.READY})
 TERMINAL_WAIT_STATUSES = frozenset(
     {
         InterviewWaitStatus.COMPLETED,
@@ -70,6 +68,7 @@ class CreateInterviewWaitCommand:
     employee_id: str
     message: str | None
     operation_id: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)

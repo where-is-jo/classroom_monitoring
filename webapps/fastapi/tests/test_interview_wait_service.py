@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 
 from app.auth.errors import PermissionDeniedError
 from app.employees.models import (
+    EmployeeObservation,
     EmployeeStatus,
     RecordEmployeeObservationCommand,
+    SetStatusOverrideCommand,
 )
 from app.interview_waits.errors import (
     InterviewWaitDuplicateError,
@@ -25,6 +26,7 @@ from app.interview_waits.models import (
 )
 from app.interview_waits.service import EmployeeInterviewCoordinator, InterviewWaitService
 from app.notifications.adapters.memory_repository import InMemoryNotificationRepository
+from app.notifications.models import Notification
 from app.notifications.service import NotificationService
 from app.shared.errors import RepositoryUnavailableError
 from app.users.models import UserRole
@@ -43,7 +45,7 @@ def _observe(
     event_id: str,
     person_present: bool,
     phone_detected: bool = False,
-):
+) -> EmployeeObservation:
     return stack.coordinator.record_mock_observation(
         stack.employees.admin,
         RecordEmployeeObservationCommand(
@@ -149,23 +151,59 @@ def test_요청자_대상STAFF_다른STAFF_ADMIN_권한(
     stack: InterviewWaitStack,
 ) -> None:
     employee = stack.employees.create_employee(user_id=stack.employees.staff.id)
-    other_staff = stack.employees.auth.seed(
-        UserRole.STAFF, email="other-staff@example.invalid"
-    )
+    other_staff = stack.employees.auth.seed(UserRole.STAFF, email="other-staff@example.invalid")
     wait = stack.create_wait(employee.id)
 
     assert stack.service.get_wait(stack.employees.student, wait.id) == wait
     assert stack.service.get_wait(stack.employees.staff, wait.id) == wait
-    assert stack.service.get_wait(stack.employees.admin, wait.id) == wait
     with pytest.raises(PermissionDeniedError):
         stack.service.get_wait(other_staff, wait.id)
     with pytest.raises(PermissionDeniedError):
+        stack.service.get_wait(stack.employees.admin, wait.id)
+    with pytest.raises(PermissionDeniedError):
         stack.service.transition_wait(
             other_staff,
-            TransitionInterviewWaitCommand(
-                wait.id, InterviewWaitStatus.CANCELLED, "other-cancel"
-            ),
+            TransitionInterviewWaitCommand(wait.id, InterviewWaitStatus.CANCELLED, "other-cancel"),
         )
+    with pytest.raises(PermissionDeniedError):
+        stack.service.transition_wait(
+            stack.employees.admin,
+            TransitionInterviewWaitCommand(wait.id, InterviewWaitStatus.CANCELLED, "admin-cancel"),
+        )
+
+
+def test_면담_신청은_STUDENT만_가능하다(stack: InterviewWaitStack) -> None:
+    employee = stack.employees.create_employee()
+    command = CreateInterviewWaitCommand(employee.id, None, "role-create")
+
+    for actor in (stack.employees.staff, stack.employees.admin):
+        with pytest.raises(PermissionDeniedError):
+            stack.service.create_wait(actor, command)
+
+
+def test_STAFF가_프로필에서_WORKING으로_바꾸면_학생_대기가_READY가_된다(
+    stack: InterviewWaitStack,
+) -> None:
+    employee = stack.employees.create_employee(user_id=stack.employees.staff.id)
+    wait = stack.create_wait(employee.id)
+
+    changed = stack.coordinator.set_status_override(
+        stack.employees.staff,
+        SetStatusOverrideCommand(
+            employee_id=employee.id,
+            status=EmployeeStatus.WORKING,
+            reason=None,
+            ends_at=None,
+            expected_version=employee.version,
+            operation_id="staff-profile-working",
+        ),
+        ip_fingerprint="test",
+    )
+
+    ready = stack.waits.get_wait(wait.id)
+    assert changed.current_status.status == EmployeeStatus.WORKING
+    assert ready is not None and ready.status == InterviewWaitStatus.READY
+    assert stack.notifications.count_unread(stack.employees.student.id) == 1
 
 
 def test_직원복귀에서만_READY_history_알림이_한번생성되고_재처리는_멱등이다(
@@ -188,26 +226,23 @@ def test_직원복귀에서만_READY_history_알림이_한번생성되고_재처
 
 
 def test_중간_알림실패후_같은_직원command_재시도는_누락알림만_보완한다() -> None:
-    base_notifications = InMemoryNotificationRepository()
-
-    class FailOnceRepository:
+    class FailOnceRepository(InMemoryNotificationRepository):
         def __init__(self) -> None:
+            super().__init__()
             self.failed = False
 
-        def create_notification(self, notification):
+        def create_notification(self, notification: Notification) -> Notification:
             if not self.failed:
                 self.failed = True
                 raise RepositoryUnavailableError()
-            return base_notifications.create_notification(notification)
-
-        def __getattr__(self, name):
-            return getattr(base_notifications, name)
+            return super().create_notification(notification)
 
     base = build_interview_wait_stack()
     employees = base.employees
     waits = base.waits
+    failing_notifications = FailOnceRepository()
     notification_service = NotificationService(
-        FailOnceRepository(),  # type: ignore[arg-type]
+        failing_notifications,
         employees.auth.users,
         clock=employees.auth.clock,
         mock_delivery_mode=None,
@@ -241,7 +276,7 @@ def test_중간_알림실패후_같은_직원command_재시도는_누락알림�
 
     assert waits.get_wait(wait.id).status == InterviewWaitStatus.READY  # type: ignore[union-attr]
     assert len(waits.list_history(wait.id)) == 2
-    assert base_notifications.count_unread(employees.student.id) == 1
+    assert failing_notifications.count_unread(employees.student.id) == 1
 
 
 def test_목록GET은_만료경계에서_무상태이고_명시적평가가_EXPIRED를_기록한다(

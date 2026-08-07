@@ -19,7 +19,7 @@ class RecordingCollection:
     def __init__(self) -> None:
         self.indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
 
-    def create_index(self, fields, **options):
+    def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
 
 
@@ -56,23 +56,18 @@ def test_알림_Mongo_index는_dedupe_수신자_읽음_attempt_operation을_보�
     notifications = database.collections["notifications"].indexes
     deliveries = database.collections["notification_deliveries"].indexes
     assert any(
-        fields == [("dedupe_key", 1)]
-        and options.get("unique")
-        and options.get("sparse")
+        fields == [("dedupe_key", 1)] and options.get("unique") and options.get("sparse")
         for fields, options in notifications
     )
     assert any(
-        fields[:2] == [("recipient_user_id", 1), ("is_read", 1)]
-        for fields, _ in notifications
+        fields[:2] == [("recipient_user_id", 1), ("is_read", 1)] for fields, _ in notifications
     )
     assert any(
-        fields == [("notification_id", 1), ("attempt", 1)]
-        and options.get("unique")
+        fields == [("notification_id", 1), ("attempt", 1)] and options.get("unique")
         for fields, options in deliveries
     )
     assert any(
-        fields == [("operation_id", 1)] and options.get("unique")
-        for fields, options in deliveries
+        fields == [("operation_id", 1)] and options.get("unique") for fields, options in deliveries
     )
 
 
@@ -94,9 +89,14 @@ def test_알림과_delivery_document_roundtrip은_UTC와_정제_payload를_보�
     notification_document = MongoNotificationRepository._notification_to_document(notification)
     delivery_document = MongoNotificationRepository._delivery_to_document(delivery)
 
-    assert MongoNotificationRepository._notification_to_domain(notification_document) == notification
+    assert (
+        MongoNotificationRepository._notification_to_domain(notification_document) == notification
+    )
     assert MongoNotificationRepository._delivery_to_domain(delivery_document) == delivery
-    assert not ({"password", "token", "cookie", "image", "video"} & delivery_document["request_payload"].keys())
+    assert not (
+        {"password", "token", "cookie", "image", "video"}
+        & delivery_document["request_payload"].keys()
+    )
 
 
 def test_잘못된_payload와_naive_datetime은_내부값_없는_저장소오류가_된다() -> None:
@@ -107,6 +107,6 @@ def test_잘못된_payload와_naive_datetime은_내부값_없는_저장소오류
         MongoNotificationRepository._notification_to_domain(document)
 
     document = MongoNotificationRepository._notification_to_document(_notification())
-    document["created_at"] = datetime(2026, 8, 5, 9, 0)
+    document["created_at"] = datetime(2026, 8, 5, 9, 0)  # noqa: DTZ001
     with pytest.raises(RepositoryDataError):
         MongoNotificationRepository._notification_to_domain(document)

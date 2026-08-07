@@ -15,6 +15,7 @@ from ..employees.models import (
     EmployeeStatus,
     EmployeeStatusTransition,
     RecordEmployeeObservationCommand,
+    SetStatusOverrideCommand,
 )
 from ..employees.ports import EmployeeRepository
 from ..employees.service import EmployeeService
@@ -66,10 +67,9 @@ class InterviewWaitService:
         self._expires_after = timedelta(hours=expires_after_hours)
         self._clock = clock
 
-    def create_wait(
-        self, actor: User, command: CreateInterviewWaitCommand
-    ) -> InterviewWait:
+    def create_wait(self, actor: User, command: CreateInterviewWaitCommand) -> InterviewWait:
         self._require_active_user(actor)
+        self._require_student(actor)
         employee = self._required_active_employee(command.employee_id)
         message = self._normalize_message(command.message)
         operation_id = self._required_operation_id(command.operation_id)
@@ -94,7 +94,7 @@ class InterviewWaitService:
             else InterviewWaitStatus.WAITING
         )
         wait = InterviewWait(
-            id=str(uuid4()),
+            id=command.entity_id or str(uuid4()),
             requester_user_id=actor.id,
             employee_id=employee.id,
             status=initial_status,
@@ -144,17 +144,17 @@ class InterviewWaitService:
         self._require_active_user(actor)
         requester_filter: str | None = None
         employee_filter = employee_id
-        if actor.role in ADMIN_ROLES:
-            pass
-        elif actor.role == UserRole.STAFF:
+        if actor.role == UserRole.STAFF:
             linked = self._employees.get_employee_by_user_id(actor.id)
             if linked is None:
                 return InterviewWaitPage(items=[], total=0)
             if employee_id is not None and employee_id != linked.id:
                 raise PermissionDeniedError()
             employee_filter = linked.id
-        else:
+        elif actor.role == UserRole.STUDENT:
             requester_filter = actor.id
+        else:
+            raise PermissionDeniedError()
         return self._repository.list_waits(
             requester_user_id=requester_filter,
             employee_id=employee_filter,
@@ -172,6 +172,7 @@ class InterviewWaitService:
         offset: int,
     ) -> InterviewWaitPage:
         self._require_active_user(actor)
+        self._require_student(actor)
         return self._repository.list_waits(
             requester_user_id=actor.id,
             employee_id=None,
@@ -189,17 +190,14 @@ class InterviewWaitService:
         offset: int,
     ) -> InterviewWaitPage:
         self._require_active_user(actor)
-        if actor.role not in ADMIN_ROLES and actor.role != UserRole.STAFF:
+        if actor.role != UserRole.STAFF:
             raise PermissionDeniedError()
-        employee_id: str | None = None
-        if actor.role == UserRole.STAFF:
-            linked = self._employees.get_employee_by_user_id(actor.id)
-            if linked is None:
-                return InterviewWaitPage(items=[], total=0)
-            employee_id = linked.id
+        linked = self._employees.get_employee_by_user_id(actor.id)
+        if linked is None:
+            return InterviewWaitPage(items=[], total=0)
         return self._repository.list_waits(
             requester_user_id=None,
-            employee_id=employee_id,
+            employee_id=linked.id,
             status=status,
             limit=limit,
             offset=offset,
@@ -268,21 +266,21 @@ class InterviewWaitService:
             )
         raise InterviewWaitTransitionError()
 
-    def list_history(
-        self, actor: User, wait_id: str
-    ) -> list[InterviewWaitHistory]:
+    def list_history(self, actor: User, wait_id: str) -> list[InterviewWaitHistory]:
         wait = self.get_wait(actor, wait_id)
         return self._repository.list_history(wait.id)
 
     def can_cancel(self, actor: User, wait: InterviewWait) -> bool:
-        return wait.status in ACTIVE_WAIT_STATUSES and (
-            actor.role in ADMIN_ROLES or wait.requester_user_id == actor.id
+        return (
+            actor.role == UserRole.STUDENT
+            and wait.status in ACTIVE_WAIT_STATUSES
+            and wait.requester_user_id == actor.id
         )
 
     def can_complete(self, actor: User, wait: InterviewWait) -> bool:
         if wait.status != InterviewWaitStatus.READY:
             return False
-        if actor.role in ADMIN_ROLES or wait.requester_user_id == actor.id:
+        if actor.role == UserRole.STUDENT and wait.requester_user_id == actor.id:
             return True
         if actor.role != UserRole.STAFF:
             return False
@@ -424,9 +422,19 @@ class InterviewWaitService:
             updated = replace(
                 current,
                 status=to_status,
-                ready_at=(occurred_at if to_status == InterviewWaitStatus.READY else current.ready_at),
-                completed_at=(occurred_at if to_status == InterviewWaitStatus.COMPLETED else current.completed_at),
-                cancelled_at=(occurred_at if to_status == InterviewWaitStatus.CANCELLED else current.cancelled_at),
+                ready_at=(
+                    occurred_at if to_status == InterviewWaitStatus.READY else current.ready_at
+                ),
+                completed_at=(
+                    occurred_at
+                    if to_status == InterviewWaitStatus.COMPLETED
+                    else current.completed_at
+                ),
+                cancelled_at=(
+                    occurred_at
+                    if to_status == InterviewWaitStatus.CANCELLED
+                    else current.cancelled_at
+                ),
                 version=current.version + 1,
                 active_key=(current.active_key if to_status in ACTIVE_WAIT_STATUSES else None),
                 last_operation_id=operation_id,
@@ -520,7 +528,7 @@ class InterviewWaitService:
         )
 
     def _require_view_permission(self, actor: User, wait: InterviewWait) -> None:
-        if actor.role in ADMIN_ROLES or wait.requester_user_id == actor.id:
+        if actor.role == UserRole.STUDENT and wait.requester_user_id == actor.id:
             return
         if actor.role == UserRole.STAFF:
             employee = self._employees.get_employee_by_user_id(actor.id)
@@ -529,11 +537,11 @@ class InterviewWaitService:
         raise PermissionDeniedError()
 
     def _require_cancel_permission(self, actor: User, wait: InterviewWait) -> None:
-        if actor.role not in ADMIN_ROLES and wait.requester_user_id != actor.id:
+        if actor.role != UserRole.STUDENT or wait.requester_user_id != actor.id:
             raise PermissionDeniedError()
 
     def _require_complete_permission(self, actor: User, wait: InterviewWait) -> None:
-        if actor.role in ADMIN_ROLES or wait.requester_user_id == actor.id:
+        if actor.role == UserRole.STUDENT and wait.requester_user_id == actor.id:
             return
         if actor.role == UserRole.STAFF:
             employee = self._employees.get_employee_by_user_id(actor.id)
@@ -544,6 +552,11 @@ class InterviewWaitService:
     @staticmethod
     def _require_active_user(actor: User) -> None:
         if actor.status != UserStatus.ACTIVE:
+            raise PermissionDeniedError()
+
+    @staticmethod
+    def _require_student(actor: User) -> None:
+        if actor.role != UserRole.STUDENT:
             raise PermissionDeniedError()
 
     @staticmethod
@@ -655,8 +668,7 @@ class InterviewWaitService:
             (from_status == InterviewWaitStatus.WAITING and to_status == InterviewWaitStatus.READY)
             or (
                 from_status in ACTIVE_WAIT_STATUSES
-                and to_status
-                in {InterviewWaitStatus.CANCELLED, InterviewWaitStatus.EXPIRED}
+                and to_status in {InterviewWaitStatus.CANCELLED, InterviewWaitStatus.EXPIRED}
             )
             or (
                 from_status == InterviewWaitStatus.READY
@@ -697,6 +709,25 @@ class EmployeeInterviewCoordinator:
         ip_fingerprint: str | None,
     ) -> Employee:
         result = self._employees.clear_status_override_result(
+            actor,
+            command,
+            ip_fingerprint=ip_fingerprint,
+        )
+        self._handle_return_transition(
+            result.transition,
+            source_operation_id=command.operation_id,
+            actor_user_id=actor.id,
+        )
+        return result.employee
+
+    def set_status_override(
+        self,
+        actor: User,
+        command: SetStatusOverrideCommand,
+        *,
+        ip_fingerprint: str | None,
+    ) -> Employee:
+        result = self._employees.set_status_override_result(
             actor,
             command,
             ip_fingerprint=ip_fingerprint,

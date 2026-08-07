@@ -90,8 +90,9 @@ ruff와 mypy도 pytest와 같은 이유로 ADR을 쓰지 않았다. 되돌리기
 **mypy는 처음부터 `strict`로 시작했다.** 코드가 작을 때가 가장 싸고,
 나중에 소급 적용하면 고칠 곳이 파일 수에 비례해 늘어난다.
 
-외부 의존이 필요한 테스트는 아직 없다. 생기면 마커로 표시해 기본 실행에서 분리하고
-그 방법을 여기에 적는다.
+MongoDB 통합 테스트는 `mongodb` marker로 기본 실행에서 분리돼 있다. 실행 조건과
+`TEST_DATABASE_URL` 안전 제약은 [fastapi README의 검증](../../webapps/fastapi/README.md#검증)을
+따른다.
 
 ## 새 서비스에 도구를 도입할 때
 

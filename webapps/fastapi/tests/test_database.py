@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 from pydantic import SecretStr
+from pymongo.database import Database
 from pymongo.errors import ServerSelectionTimeoutError
 
 from app.events.adapters.mongo_repository import MongoEventRepository
@@ -20,7 +23,7 @@ class FakeIndexCollection:
     def __init__(self) -> None:
         self.indexes: dict[str, tuple[tuple[str, int], ...]] = {}
 
-    def create_index(self, keys, *, name: str) -> str:
+    def create_index(self, keys: list[tuple[str, int]], *, name: str) -> str:
         specification = tuple(keys)
         existing = self.indexes.get(name)
         if existing is not None and existing != specification:
@@ -49,17 +52,16 @@ class FailingPingDatabase:
 def test_index_초기화는_두_번_호출해도_하나의_정의만_유지한다() -> None:
     database = FakeIndexDatabase()
 
-    initialize_indexes(database, [MongoEventRepository.ensure_indexes])
-    initialize_indexes(database, [MongoEventRepository.ensure_indexes])
+    mongo_database = cast(Database[dict[str, Any]], database)
+    initialize_indexes(mongo_database, [MongoEventRepository.ensure_indexes])
+    initialize_indexes(mongo_database, [MongoEventRepository.ensure_indexes])
 
-    assert database.collection.indexes == {
-        "events_detected_at_desc": (("detected_at", -1),)
-    }
+    assert database.collection.indexes == {"events_detected_at_desc": (("detected_at", -1),)}
 
 
 def test_ping_실패_예외에는_내부_주소와_자격_정보가_남지_않는다() -> None:
     with pytest.raises(DatabaseOperationError) as raised:
-        ping_database(FailingPingDatabase())
+        ping_database(cast(Database[dict[str, Any]], FailingPingDatabase()))
 
     message = str(raised.value)
     assert "credential-marker" not in message

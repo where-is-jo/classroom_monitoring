@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.auth.dependencies import ACCESS_COOKIE, CSRF_COOKIE, REFRESH_COOKIE
 from app.main import app
-from app.shared.config import Settings
 from app.shared.dependencies import get_auth_service, get_settings, get_user_service
-from app.users.models import UserRole, UserStatus
+from app.users.models import UserRole
 from tests.auth_helpers import AuthStack, build_auth_stack
+from tests.settings_helpers import make_settings
 
 ORIGIN = "http://testserver"
 PASSWORD = "ValidPassword1!"
@@ -24,7 +26,7 @@ def auth_stack() -> AuthStack:
 
 
 @pytest.fixture
-def auth_client(auth_stack: AuthStack):
+def auth_client(auth_stack: AuthStack) -> Iterator[TestClient]:
     app.dependency_overrides[get_auth_service] = lambda: auth_stack.auth_service
     app.dependency_overrides[get_user_service] = lambda: auth_stack.user_service
     with TestClient(app) as client:
@@ -32,11 +34,14 @@ def auth_client(auth_stack: AuthStack):
     app.dependency_overrides.clear()
 
 
-def login(client: TestClient, email: str, password: str = PASSWORD):
-    return client.post(
-        "/api/v1/auth/login",
-        headers={"Origin": ORIGIN},
-        json={"email": email, "password": password},
+def login(client: TestClient, email: str, password: str = PASSWORD) -> Response:
+    return cast(
+        Response,
+        client.post(
+            "/api/v1/auth/login",
+            headers={"Origin": ORIGIN},
+            json={"email": email, "password": password},
+        ),
     )
 
 
@@ -54,7 +59,8 @@ def test_login_API는_cookie를_발급하고_me에서_민감정보를_제외한�
 
     assert response.status_code == 200
     assert response.json()["user"]["email"] == user.email
-    assert "password" not in response.text
+    assert "password_hash" not in response.text
+    assert PASSWORD not in response.text
     assert "token" not in response.text
     set_cookie = response.headers.get_list("set-cookie")
     assert any(f"{ACCESS_COOKIE}=" in value and "HttpOnly" in value for value in set_cookie)
@@ -73,6 +79,8 @@ def test_login_API는_cookie를_발급하고_me에서_민감정보를_제외한�
         "created_at",
         "updated_at",
         "version",
+        "must_change_password",
+        "password_changed_at",
     }
 
 
@@ -81,7 +89,7 @@ def test_production_session_cookie에는_Secure가_적용된다(
     auth_stack: AuthStack,
 ) -> None:
     user = auth_stack.seed(UserRole.ADMIN)
-    production_settings = Settings(
+    production_settings = make_settings(
         _env_file=None,
         app_env="prod",
         database_mode="mongodb",
@@ -142,9 +150,7 @@ def test_refresh_API는_rotation과_재사용_차단을_적용한다(
     assert reused.json()["error"]["code"] == "REFRESH_TOKEN_REUSE_DETECTED"
 
     auth_client.cookies.set(REFRESH_COOKIE, rotated)
-    family_revoked = auth_client.post(
-        "/api/v1/auth/refresh", headers=csrf_headers(auth_client)
-    )
+    family_revoked = auth_client.post("/api/v1/auth/refresh", headers=csrf_headers(auth_client))
     assert family_revoked.status_code == 401
 
 
@@ -197,7 +203,6 @@ def test_login_화면은_정상_실패_잠금_제출중_상태를_표현한다(
         (UserRole.STUDENT, 403, 403),
         (UserRole.STAFF, 403, 403),
         (UserRole.ADMIN, 200, 200),
-        (UserRole.SYSTEM_OPERATOR, 200, 200),
     ],
 )
 def test_역할별_API와_page_권한표(
@@ -212,9 +217,10 @@ def test_역할별_API와_page_권한표(
 
     assert auth_client.get("/api/v1/users").status_code == expected_api
     assert auth_client.get("/admin/users").status_code == expected_page
-    assert auth_client.post(
-        "/api/v1/auth/logout", headers=csrf_headers(auth_client)
-    ).status_code == 204
+    assert (
+        auth_client.post("/api/v1/auth/logout", headers=csrf_headers(auth_client)).status_code
+        == 204
+    )
 
 
 @pytest.mark.parametrize(
@@ -223,7 +229,6 @@ def test_역할별_API와_page_권한표(
         UserRole.STUDENT,
         UserRole.STAFF,
         UserRole.ADMIN,
-        UserRole.SYSTEM_OPERATOR,
     ],
 )
 def test_인증된_모든_역할은_events_공통_shell을_렌더링한다(
@@ -241,22 +246,32 @@ def test_인증된_모든_역할은_events_공통_shell을_렌더링한다(
     assert 'aria-label="주 탐색"' in response.text
 
 
-def test_mock_입력_허용_환경은_관리자_운영_메뉴를_모든_page에_표시한다(
+def test_mock_입력_허용_환경도_개발용_메뉴를_제품_탐색에_표시하지_않는다(
     auth_client: TestClient,
     auth_stack: AuthStack,
 ) -> None:
-    development_settings = get_settings().model_copy(
-        update={"mock_inputs_enabled": True}
-    )
+    development_settings = get_settings().model_copy(update={"mock_inputs_enabled": True})
     app.dependency_overrides[get_settings] = lambda: development_settings
-    operator = auth_stack.seed(UserRole.SYSTEM_OPERATOR)
-    assert login(auth_client, operator.email).status_code == 200
+    admin = auth_stack.seed(UserRole.ADMIN)
+    assert login(auth_client, admin.email).status_code == 200
 
     response = auth_client.get("/events")
 
     assert response.status_code == 200
-    assert 'href="/admin/dev-tools"' in response.text
-    assert 'href="/admin/mock-deliveries"' in response.text
+    assert 'href="/admin/dev-tools"' not in response.text
+    assert 'href="/admin/mock-deliveries"' not in response.text
+
+
+def test_legacy_SYSTEM_OPERATOR는_로그인할_수_없다(
+    auth_client: TestClient,
+    auth_stack: AuthStack,
+) -> None:
+    operator = auth_stack.seed(UserRole.SYSTEM_OPERATOR)
+
+    response = login(auth_client, operator.email)
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
 
 
 def test_보호_page는_원래_경로와_함께_login으로_보낸다(

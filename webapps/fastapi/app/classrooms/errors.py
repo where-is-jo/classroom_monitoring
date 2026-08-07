@@ -25,7 +25,6 @@ class AfterHoursAlertNotFoundError(DomainError):
     code = "AFTER_HOURS_ALERT_NOT_FOUND"
     status_code = 404
 
-
     def __init__(self) -> None:
         super().__init__("요청한 마감 후 경고를 찾을 수 없습니다.")
 

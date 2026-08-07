@@ -35,9 +35,7 @@ class InMemoryClassroomRepository:
 
     def create_classroom(self, classroom: Classroom) -> Classroom:
         with self._lock:
-            operation_owner = self.get_classroom_by_operation_id(
-                classroom.created_operation_id
-            )
+            operation_owner = self.get_classroom_by_operation_id(classroom.created_operation_id)
             if operation_owner is not None:
                 return operation_owner
             if self.get_classroom_by_code(classroom.code) is not None:
@@ -51,12 +49,18 @@ class InMemoryClassroomRepository:
 
     def dashboard_snapshot(
         self,
-    ) -> tuple[list[Classroom], list[Seat], list[AfterHoursAlert]]:
+    ) -> tuple[
+        list[Classroom],
+        list[Seat],
+        list[SeatOccupancyHistory],
+        list[AfterHoursAlert],
+    ]:
         """Return an immutable-value snapshot for the local admin read model."""
         with self._lock:
             return (
                 list(self._classrooms.values()),
                 list(self._seats.values()),
+                list(self._history.values()),
                 list(self._alerts.values()),
             )
 
@@ -70,17 +74,11 @@ class InMemoryClassroomRepository:
     def get_classroom_by_operation_id(self, operation_id: str) -> Classroom | None:
         with self._lock:
             return next(
-                (
-                    item
-                    for item in self._classrooms.values()
-                    if operation_id in item.operation_ids
-                ),
+                (item for item in self._classrooms.values() if operation_id in item.operation_ids),
                 None,
             )
 
-    def list_classrooms(
-        self, *, include_inactive: bool, limit: int, offset: int
-    ) -> ClassroomPage:
+    def list_classrooms(self, *, include_inactive: bool, limit: int, offset: int) -> ClassroomPage:
         with self._lock:
             items = list(self._classrooms.values())
         if not include_inactive:
@@ -88,9 +86,7 @@ class InMemoryClassroomRepository:
         items.sort(key=lambda item: (item.code, item.id))
         return ClassroomPage(items=items[offset : offset + limit], total=len(items))
 
-    def replace_classroom(
-        self, classroom: Classroom, *, expected_version: int
-    ) -> Classroom | None:
+    def replace_classroom(self, classroom: Classroom, *, expected_version: int) -> Classroom | None:
         with self._lock:
             current = self._classrooms.get(classroom.id)
             if current is None or current.version != expected_version:
@@ -119,11 +115,7 @@ class InMemoryClassroomRepository:
     def get_seat_by_operation_id(self, operation_id: str) -> Seat | None:
         with self._lock:
             return next(
-                (
-                    item
-                    for item in self._seats.values()
-                    if operation_id in item.operation_ids
-                ),
+                (item for item in self._seats.values() if operation_id in item.operation_ids),
                 None,
             )
 
@@ -136,11 +128,7 @@ class InMemoryClassroomRepository:
         offset: int,
     ) -> SeatPage:
         with self._lock:
-            items = [
-                item
-                for item in self._seats.values()
-                if item.classroom_id == classroom_id
-            ]
+            items = [item for item in self._seats.values() if item.classroom_id == classroom_id]
         if not include_inactive:
             items = [item for item in items if item.is_active]
         items.sort(key=lambda item: (item.code, item.id))
@@ -170,9 +158,7 @@ class InMemoryClassroomRepository:
             self._batches[record.event_id] = record
             return record
 
-    def get_observation_batch(
-        self, event_id: str
-    ) -> SeatObservationBatchRecord | None:
+    def get_observation_batch(self, event_id: str) -> SeatObservationBatchRecord | None:
         with self._lock:
             return self._batches.get(event_id)
 
@@ -201,13 +187,9 @@ class InMemoryClassroomRepository:
                 None,
             )
 
-    def append_occupancy_history(
-        self, history: SeatOccupancyHistory
-    ) -> SeatOccupancyHistory:
+    def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory:
         with self._lock:
-            existing = self.get_history_by_event_and_seat(
-                history.event_id, history.seat_id
-            )
+            existing = self.get_history_by_event_and_seat(history.event_id, history.seat_id)
             if existing is not None:
                 if existing != history:
                     raise SeatBatchConflictError()
@@ -226,11 +208,7 @@ class InMemoryClassroomRepository:
         offset: int,
     ) -> SeatOccupancyHistoryPage:
         with self._lock:
-            items = [
-                item
-                for item in self._history.values()
-                if item.classroom_id == classroom_id
-            ]
+            items = [item for item in self._history.values() if item.classroom_id == classroom_id]
         if seat_id is not None:
             items = [item for item in items if item.seat_id == seat_id]
         if from_time is not None:
@@ -238,18 +216,12 @@ class InMemoryClassroomRepository:
         if to_time is not None:
             items = [item for item in items if item.observed_at < to_time]
         items.sort(key=lambda item: (item.observed_at, item.id), reverse=True)
-        return SeatOccupancyHistoryPage(
-            items=items[offset : offset + limit], total=len(items)
-        )
+        return SeatOccupancyHistoryPage(items=items[offset : offset + limit], total=len(items))
 
     def create_alert(self, alert: AfterHoursAlert) -> tuple[AfterHoursAlert, bool]:
         with self._lock:
             existing = next(
-                (
-                    item
-                    for item in self._alerts.values()
-                    if item.dedupe_key == alert.dedupe_key
-                ),
+                (item for item in self._alerts.values() if item.dedupe_key == alert.dedupe_key),
                 None,
             )
             if existing is not None:
@@ -264,11 +236,7 @@ class InMemoryClassroomRepository:
     def get_alert_by_operation_id(self, operation_id: str) -> AfterHoursAlert | None:
         with self._lock:
             return next(
-                (
-                    item
-                    for item in self._alerts.values()
-                    if operation_id in item.operation_ids
-                ),
+                (item for item in self._alerts.values() if operation_id in item.operation_ids),
                 None,
             )
 
@@ -320,9 +288,7 @@ class InMemoryClassroomRepository:
         )
 
 
-def _same_batch(
-    left: SeatObservationBatchRecord, right: SeatObservationBatchRecord
-) -> bool:
+def _same_batch(left: SeatObservationBatchRecord, right: SeatObservationBatchRecord) -> bool:
     return (
         left.event_id == right.event_id
         and left.classroom_id == right.classroom_id

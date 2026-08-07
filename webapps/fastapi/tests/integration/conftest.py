@@ -20,7 +20,9 @@ def mongodb_database() -> Generator[Database[dict[str, Any]], None, None]:
     if not database_url:
         pytest.skip("TEST_DATABASE_URL이 없어 MongoDB 통합 테스트를 건너뜁니다.")
 
-    client = MongoClient(database_url, serverSelectionTimeoutMS=5000, tz_aware=True)
+    client: MongoClient[dict[str, Any]] = MongoClient(
+        database_url, serverSelectionTimeoutMS=5000, tz_aware=True
+    )
     try:
         try:
             database = client.get_default_database()

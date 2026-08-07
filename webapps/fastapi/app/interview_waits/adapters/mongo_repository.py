@@ -63,9 +63,7 @@ class MongoInterviewWaitRepository:
             name="interview_wait_history_wait_time",
         )
 
-    def create_wait(
-        self, wait: InterviewWait, history: InterviewWaitHistory
-    ) -> InterviewWait:
+    def create_wait(self, wait: InterviewWait, history: InterviewWaitHistory) -> InterviewWait:
         try:
             self._waits.insert_one(self._wait_to_document(wait))
         except DuplicateKeyError:
@@ -73,11 +71,9 @@ class MongoInterviewWaitRepository:
             if operation_owner is not None:
                 self.append_history(history)
                 return operation_owner
-            active_owner = self.get_active_wait(
-                wait.requester_user_id, wait.employee_id
-            )
+            active_owner = self.get_active_wait(wait.requester_user_id, wait.employee_id)
             if active_owner is not None:
-                raise InterviewWaitDuplicateError()
+                raise InterviewWaitDuplicateError() from None
             raise RepositoryUnavailableError() from None
         except PyMongoError:
             raise RepositoryUnavailableError() from None
@@ -90,12 +86,8 @@ class MongoInterviewWaitRepository:
     def get_wait_by_operation_id(self, operation_id: str) -> InterviewWait | None:
         return self._find_wait({"operation_ids": operation_id})
 
-    def get_active_wait(
-        self, requester_user_id: str, employee_id: str
-    ) -> InterviewWait | None:
-        return self._find_wait(
-            {"active_key": f"{requester_user_id}:{employee_id}"}
-        )
+    def get_active_wait(self, requester_user_id: str, employee_id: str) -> InterviewWait | None:
+        return self._find_wait({"active_key": f"{requester_user_id}:{employee_id}"})
 
     def _find_wait(self, query: MongoDocument) -> InterviewWait | None:
         try:
@@ -197,15 +189,13 @@ class MongoInterviewWaitRepository:
             existing = self.get_history_by_operation_id(history.operation_id)
             if existing is not None:
                 if existing.wait_id != history.wait_id or existing.to_status != history.to_status:
-                    raise InterviewWaitOperationConflictError()
+                    raise InterviewWaitOperationConflictError() from None
                 return existing
             raise RepositoryUnavailableError() from None
         except PyMongoError:
             raise RepositoryUnavailableError() from None
 
-    def get_history_by_operation_id(
-        self, operation_id: str
-    ) -> InterviewWaitHistory | None:
+    def get_history_by_operation_id(self, operation_id: str) -> InterviewWaitHistory | None:
         try:
             document = self._history.find_one({"operation_id": operation_id})
         except PyMongoError:
@@ -332,8 +322,6 @@ def _aware_datetime(document: MongoDocument, field: str) -> datetime:
 
 def _optional_aware_datetime(document: MongoDocument, field: str) -> datetime | None:
     value = document.get(field)
-    if value is not None and (
-        not isinstance(value, datetime) or value.tzinfo is None
-    ):
+    if value is not None and (not isinstance(value, datetime) or value.tzinfo is None):
         raise TypeError(f"{field} must be an aware datetime or null")
     return value

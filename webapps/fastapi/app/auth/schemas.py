@@ -17,7 +17,7 @@ class LoginRequest(BaseModel):
 
 
 class LoginForm(LoginRequest):
-    next: str = Field(default="/events", max_length=500)
+    next: str = Field(default="", max_length=500)
 
 
 class SessionResponse(BaseModel):
@@ -30,7 +30,7 @@ class MeResponse(BaseModel):
     user: UserResponse
 
     @classmethod
-    def from_user(cls, user: User) -> "MeResponse":
+    def from_user(cls, user: User) -> MeResponse:
         return cls(user=UserResponse.from_user(user))
 
 
@@ -38,3 +38,9 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=1, max_length=128)
     operation_id: UUID = Field(default_factory=uuid4)
+
+
+class ChangePasswordForm(ChangePasswordRequest):
+    new_password_confirm: str = Field(min_length=1, max_length=128)
+    next: str = Field(default="", max_length=500)
+    csrf_token: str = Field(min_length=1)

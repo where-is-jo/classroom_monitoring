@@ -187,9 +187,7 @@ class TokenSecurity:
         expires_at = _timestamp_to_utc(payload.get("exp"))
         if expires_at <= now:
             raise TokenExpiredError("token이 만료됐습니다.")
-        if not isinstance(payload.get("sub"), str) or not isinstance(
-            payload.get("jti"), str
-        ):
+        if not isinstance(payload.get("sub"), str) or not isinstance(payload.get("jti"), str):
             raise TokenValidationError("token subject가 올바르지 않습니다.")
         return payload
 

@@ -10,9 +10,8 @@ from typing import Any
 
 class DashboardActivityType(StrEnum):
     EMPLOYEE_STATUS = "EMPLOYEE_STATUS"
-    INTERVIEW_WAIT = "INTERVIEW_WAIT"
+    SEAT_OCCUPANCY = "SEAT_OCCUPANCY"
     AFTER_HOURS_ALERT = "AFTER_HOURS_ALERT"
-    NOTIFICATION = "NOTIFICATION"
 
 
 @dataclass(frozen=True)
@@ -25,14 +24,9 @@ class EmployeeSummary:
 
 
 @dataclass(frozen=True)
-class InterviewWaitSummary:
-    waiting: int
-    ready: int
-
-
-@dataclass(frozen=True)
 class ClassroomSummary:
     active: int
+    active_seats: int
     occupied_seats: int
     unknown_seats: int
 
@@ -43,28 +37,18 @@ class AlertSummary:
 
 
 @dataclass(frozen=True)
-class NotificationSummary:
-    unread: int
-    failed_mock_deliveries_24h: int
-
-
-@dataclass(frozen=True)
 class DashboardSnapshot:
     employees: EmployeeSummary
-    interview_waits: InterviewWaitSummary
     classrooms: ClassroomSummary
     alerts: AlertSummary
-    notifications: NotificationSummary
 
 
 @dataclass(frozen=True)
 class DashboardSummary:
     generated_at: datetime
     employees: EmployeeSummary
-    interview_waits: InterviewWaitSummary
     classrooms: ClassroomSummary
     alerts: AlertSummary
-    notifications: NotificationSummary
 
 
 @dataclass(frozen=True)

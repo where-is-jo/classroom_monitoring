@@ -6,12 +6,17 @@
 from __future__ import annotations
 
 import os
+<<<<<<< HEAD
+=======
+from collections.abc import Iterator
+>>>>>>> c0ce1a49fec0a2a56a7a71199ef0abfd8aa22ce0
 from datetime import UTC, datetime
 
 # 앱 시작 전에 외부 의존 없는 local memory mode를 명시한다.
 os.environ["APP_ENV"] = "local"
 os.environ["DATABASE_MODE"] = "memory"
 os.environ["MOCK_INPUTS_ENABLED"] = "false"
+os.environ["DEMO_MODE_ENABLED"] = "false"
 os.environ["JWT_ACCESS_SECRET"] = "test-access-secret-at-least-32-characters"
 os.environ["JWT_REFRESH_SECRET"] = "test-refresh-secret-at-least-32-characters"
 os.environ["CSRF_SECRET"] = "test-csrf-secret-at-least-32-characters"

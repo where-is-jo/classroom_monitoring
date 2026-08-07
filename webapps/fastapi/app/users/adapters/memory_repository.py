@@ -52,8 +52,7 @@ class InMemoryUserRepository:
                 (
                     user
                     for user in self._users.values()
-                    if operation_id
-                    in (user.created_operation_id, user.last_operation_id)
+                    if operation_id in (user.created_operation_id, user.last_operation_id)
                 ),
                 None,
             )
@@ -83,12 +82,3 @@ class InMemoryUserRepository:
                 raise UserOperationConflictError()
             self._users[user.id] = user
             return user
-
-    def count_active_system_operators(self) -> int:
-        with self._lock:
-            return sum(
-                1
-                for user in self._users.values()
-                if user.role == UserRole.SYSTEM_OPERATOR
-                and user.status == UserStatus.ACTIVE
-            )

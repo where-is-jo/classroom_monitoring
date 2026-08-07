@@ -73,12 +73,8 @@ development_api_router = APIRouter(
     tags=["development"],
 )
 page_router = APIRouter(prefix="/employees", tags=["employee-pages"])
-admin_page_router = APIRouter(
-    prefix="/admin/employees", tags=["employee-admin-pages"]
-)
-development_page_router = APIRouter(
-    prefix="/admin/dev-tools", tags=["development-pages"]
-)
+admin_page_router = APIRouter(prefix="/admin/employees", tags=["employee-admin-pages"])
+development_page_router = APIRouter(prefix="/admin/dev-tools", tags=["development-pages"])
 
 
 def _resolve_paging(
@@ -152,9 +148,7 @@ def list_employees(
         status=status_filter,
         is_active=is_active,
     )
-    return EmployeeListResponse.from_page(
-        page, limit=resolved_limit, offset=resolved_offset
-    )
+    return EmployeeListResponse.from_page(page, limit=resolved_limit, offset=resolved_offset)
 
 
 @api_router.post(
@@ -214,9 +208,7 @@ def deactivate_employee(
     _: None = Depends(require_csrf),
     actor: User = Depends(require_admin),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
-    coordinator: EmployeeInterviewCoordinator = Depends(
-        get_employee_interview_coordinator
-    ),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
 ) -> Response:
     coordinator.deactivate_employee(
         actor,
@@ -268,9 +260,9 @@ def set_status_override(
     _: None = Depends(require_csrf),
     actor: User = Depends(get_current_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
-    service: EmployeeService = Depends(get_employee_service),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
 ) -> EmployeeResponse:
-    employee = service.set_status_override(
+    employee = coordinator.set_status_override(
         actor,
         SetStatusOverrideCommand(
             employee_id=employee_id,
@@ -295,9 +287,7 @@ def clear_status_override(
     _: None = Depends(require_csrf),
     actor: User = Depends(get_current_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
-    coordinator: EmployeeInterviewCoordinator = Depends(
-        get_employee_interview_coordinator
-    ),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
 ) -> EmployeeResponse:
     employee = coordinator.clear_status_override(
         actor,
@@ -332,9 +322,7 @@ def record_mock_observation(
     payload: MockEmployeeObservationRequest,
     _: None = Depends(require_csrf),
     actor: User = Depends(require_admin),
-    coordinator: EmployeeInterviewCoordinator = Depends(
-        get_employee_interview_coordinator
-    ),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
 ) -> EmployeeObservationResponse:
     observation = coordinator.record_mock_observation(
         actor,
@@ -361,7 +349,7 @@ def employees_page(
     actor: User = Depends(get_current_page_user),
     service: EmployeeService = Depends(get_employee_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_employees(
         actor,
@@ -401,7 +389,7 @@ def employee_detail_page(
     employee_id: str,
     actor: User = Depends(get_current_page_user),
     service: EmployeeService = Depends(get_employee_service),
-):
+) -> Response:
     return _render_employee_detail(request, actor=actor, service=service, employee_id=employee_id)
 
 
@@ -414,9 +402,10 @@ def set_status_override_page(
     actor: User = Depends(get_current_page_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
-):
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
+) -> Response:
     try:
-        service.set_status_override(
+        coordinator.set_status_override(
             actor,
             SetStatusOverrideCommand(
                 employee_id=employee_id,
@@ -437,9 +426,7 @@ def set_status_override_page(
             error=exc.message,
             status_code=exc.status_code,
         )
-    return RedirectResponse(
-        url=f"/employees/{employee_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(url=f"/employees/{employee_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @page_router.post("/{employee_id}/status-override/clear")
@@ -451,10 +438,8 @@ def clear_status_override_page(
     actor: User = Depends(get_current_page_user),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
-    coordinator: EmployeeInterviewCoordinator = Depends(
-        get_employee_interview_coordinator
-    ),
-):
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
+) -> Response:
     try:
         coordinator.clear_status_override(
             actor,
@@ -474,9 +459,7 @@ def clear_status_override_page(
             error=exc.message,
             status_code=exc.status_code,
         )
-    return RedirectResponse(
-        url=f"/employees/{employee_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(url=f"/employees/{employee_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @admin_page_router.get("")
@@ -488,7 +471,7 @@ def admin_employees_page(
     service: EmployeeService = Depends(get_employee_service),
     user_service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_admin_employees(
         request,
         actor=actor,
@@ -510,11 +493,9 @@ def create_employee_page(
     service: EmployeeService = Depends(get_employee_service),
     user_service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
-        service.create_employee(
-            actor, _create_command(form), ip_fingerprint=ip_fingerprint
-        )
+        service.create_employee(actor, _create_command(form), ip_fingerprint=ip_fingerprint)
     except DomainError as exc:
         return _render_admin_employees(
             request,
@@ -539,7 +520,7 @@ def update_employee_page(
     service: EmployeeService = Depends(get_employee_service),
     user_service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.update_employee(
             actor,
@@ -568,12 +549,10 @@ def deactivate_employee_page(
     actor: User = Depends(require_page_admin),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
-    coordinator: EmployeeInterviewCoordinator = Depends(
-        get_employee_interview_coordinator
-    ),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
     user_service: UserService = Depends(get_user_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         coordinator.deactivate_employee(
             actor,
@@ -602,17 +581,14 @@ def evaluate_employee_statuses_page(
     actor: User = Depends(require_page_admin),
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: EmployeeService = Depends(get_employee_service),
-):
+) -> Response:
     result = service.evaluate_statuses(
         actor,
         EvaluateEmployeeStatusesCommand(operation_id=str(form.operation_id)),
         ip_fingerprint=ip_fingerprint,
     )
     return RedirectResponse(
-        url=(
-            f"/admin/employees?evaluated={result.evaluated_count}"
-            f"&changed={result.changed_count}"
-        ),
+        url=(f"/admin/employees?evaluated={result.evaluated_count}&changed={result.changed_count}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -624,7 +600,7 @@ def development_tools_page(
     actor: User = Depends(require_page_admin),
     service: EmployeeService = Depends(get_employee_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_development_tools(
         request,
         actor=actor,
@@ -641,11 +617,9 @@ def record_mock_observation_page(
     _: None = Depends(require_csrf),
     actor: User = Depends(require_page_admin),
     service: EmployeeService = Depends(get_employee_service),
-    coordinator: EmployeeInterviewCoordinator = Depends(
-        get_employee_interview_coordinator
-    ),
+    coordinator: EmployeeInterviewCoordinator = Depends(get_employee_interview_coordinator),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         observation = coordinator.record_mock_observation(
             actor,
@@ -687,7 +661,7 @@ def _render_employee_detail(
     employee_id: str,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     employee = service.get_employee(actor, employee_id)
     history = service.list_status_history(
         actor,
@@ -704,7 +678,8 @@ def _render_employee_detail(
             employee=employee,
             history=history,
             can_override=service.can_override(actor, employee),
-            override_statuses=[EmployeeStatus.AWAY, EmployeeStatus.OFFSITE],
+            can_request_interview=actor.role == UserRole.STUDENT,
+            override_statuses=list(EmployeeStatus),
             set_operation_id=str(uuid4()),
             clear_operation_id=str(uuid4()),
             wait_operation_id=str(uuid4()),
@@ -726,7 +701,7 @@ def _render_admin_employees(
     changed: int | None = None,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     page = service.list_employees(
         actor,
         limit=settings.page_size_max,
@@ -750,9 +725,7 @@ def _render_admin_employees(
             create_operation_id=str(uuid4()),
             evaluate_operation_id=str(uuid4()),
             row_operation_ids={employee.id: str(uuid4()) for employee in page.items},
-            deactivate_operation_ids={
-                employee.id: str(uuid4()) for employee in page.items
-            },
+            deactivate_operation_ids={employee.id: str(uuid4()) for employee in page.items},
             evaluated=evaluated,
             changed=changed,
             error=error,
@@ -772,7 +745,7 @@ def _render_development_tools(
     success: str | None = None,
     seat_result: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     page = service.list_employees(
         actor,
         limit=settings.page_size_max,

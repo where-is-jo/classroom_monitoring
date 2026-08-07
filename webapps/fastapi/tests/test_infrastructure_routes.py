@@ -2,25 +2,34 @@
 
 from __future__ import annotations
 
+from typing import cast
+
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 from pymongo.errors import ServerSelectionTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.events.models import Event
+from app.main import handle_http_error
 from app.shared import dependencies
 from app.shared.config import Settings
 from app.shared.dependencies import get_event_repository, get_settings
 from app.shared.errors import RepositoryUnavailableError
 from app.shared.templating import STATIC_DIR
-from app.main import handle_http_error
+from tests.settings_helpers import make_settings
+
+
+def _application(client: TestClient) -> FastAPI:
+    return cast(FastAPI, client.app)
 
 
 class FailingEventRepository:
-    def list_events(self, *, limit: int, offset: int):
+    def list_events(self, *, limit: int, offset: int) -> tuple[list[Event], int]:
         raise RepositoryUnavailableError()
 
-    def get_event(self, event_id: str):
+    def get_event(self, event_id: str) -> Event | None:
         raise RepositoryUnavailableError()
 
 
@@ -39,7 +48,7 @@ class FailingPingDatabase:
 
 
 def mongo_settings() -> Settings:
-    return Settings(
+    return make_settings(
         _env_file=None,
         app_env="dev",
         database_mode="mongodb",
@@ -48,15 +57,17 @@ def mongo_settings() -> Settings:
     )
 
 
-def test_memory_mode_readiness는_준비_응답을_반환한다(client) -> None:
+def test_memory_mode_readiness는_준비_응답을_반환한다(client: TestClient) -> None:
     response = client.get("/health/ready")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready"}
 
 
-def test_mongodb_readiness_ping_성공을_반환한다(client, monkeypatch) -> None:
-    client.app.dependency_overrides[get_settings] = mongo_settings
+def test_mongodb_readiness_ping_성공을_반환한다(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _application(client).dependency_overrides[get_settings] = mongo_settings
     monkeypatch.setattr(dependencies, "_mongo_database", lambda: SuccessfulPingDatabase())
 
     response = client.get("/health/ready")
@@ -66,9 +77,9 @@ def test_mongodb_readiness_ping_성공을_반환한다(client, monkeypatch) -> N
 
 
 def test_mongodb_readiness_실패는_주소_없는_503_오류를_반환한다(
-    client, monkeypatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client.app.dependency_overrides[get_settings] = mongo_settings
+    _application(client).dependency_overrides[get_settings] = mongo_settings
     monkeypatch.setattr(dependencies, "_mongo_database", lambda: FailingPingDatabase())
 
     response = client.get("/health/ready")
@@ -85,7 +96,7 @@ def test_mongodb_readiness_실패는_주소_없는_503_오류를_반환한다(
     assert "internal-mongodb" not in response.text
 
 
-def test_API_검증_오류도_공통_envelope를_사용한다(client) -> None:
+def test_API_검증_오류도_공통_envelope를_사용한다(client: TestClient) -> None:
     response = client.get("/api/v1/events?limit=not-a-number")
 
     assert response.status_code == 422
@@ -95,7 +106,7 @@ def test_API_검증_오류도_공통_envelope를_사용한다(client) -> None:
     assert "not-a-number" not in response.text
 
 
-def test_없는_API_경로도_공통_envelope를_사용한다(client) -> None:
+def test_없는_API_경로도_공통_envelope를_사용한다(client: TestClient) -> None:
     response = client.get("/api/v1/does-not-exist")
 
     assert response.status_code == 404
@@ -109,7 +120,10 @@ def test_없는_API_경로도_공통_envelope를_사용한다(client) -> None:
 def test_권한_없음은_API와_화면에서_명시적으로_표시된다() -> None:
     isolated_app = FastAPI()
     isolated_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    isolated_app.add_exception_handler(StarletteHTTPException, handle_http_error)
+    isolated_app.add_exception_handler(
+        StarletteHTTPException,
+        handle_http_error,  # type: ignore[arg-type]
+    )
 
     @isolated_app.get("/api/v1/forbidden")
     def forbidden_api() -> None:
@@ -129,8 +143,8 @@ def test_권한_없음은_API와_화면에서_명시적으로_표시된다() -> 
     assert "권한이 없습니다" in page_response.text
 
 
-def test_저장소_오류는_API에서_503_envelope로_표시된다(client) -> None:
-    client.app.dependency_overrides[get_event_repository] = FailingEventRepository
+def test_저장소_오류는_API에서_503_envelope로_표시된다(client: TestClient) -> None:
+    _application(client).dependency_overrides[get_event_repository] = FailingEventRepository
 
     response = client.get("/api/v1/events")
 
@@ -138,8 +152,8 @@ def test_저장소_오류는_API에서_503_envelope로_표시된다(client) -> N
     assert response.json()["error"]["code"] == "REPOSITORY_UNAVAILABLE"
 
 
-def test_저장소_오류는_화면에서_빈_상태와_구분된다(client) -> None:
-    client.app.dependency_overrides[get_event_repository] = FailingEventRepository
+def test_저장소_오류는_화면에서_빈_상태와_구분된다(client: TestClient) -> None:
+    _application(client).dependency_overrides[get_event_repository] = FailingEventRepository
 
     response = client.get("/events")
 
@@ -148,18 +162,24 @@ def test_저장소_오류는_화면에서_빈_상태와_구분된다(client) -> 
     assert "표시할 탐지 이벤트가 없습니다" not in response.text
 
 
-def test_OpenAPI와_docs_경로를_유지한다(client) -> None:
+def test_OpenAPI와_docs_경로를_유지한다(client: TestClient) -> None:
     openapi_response = client.get("/openapi.json")
     assert openapi_response.status_code == 200
     assert client.get("/docs").status_code == 200
-    event_responses = openapi_response.json()["paths"]["/api/v1/events"]["get"][
-        "responses"
-    ]
-    assert event_responses["422"]["content"]["application/json"]["schema"] == {
+    paths = openapi_response.json()["paths"]
+    assert openapi_response.json()["info"]["version"] == "0.2.0"
+    assert "/login" not in paths
+    assert "/admin" not in paths
+    assert "/api/v1/events" not in paths
+    assert "/api/v1/events/{event_id}" not in paths
+    assert "/api/v1/admin/audit-logs" not in paths
+    activity_responses = paths["/api/v1/admin/dashboard-activities"]["get"]["responses"]
+    assert activity_responses["422"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ErrorResponse"
     }
 
 
+<<<<<<< HEAD
 def test_설계_명세는_별도_Swagger_경로로_제공된다(client: TestClient) -> None:
     spec_response = client.get("/api-spec.json")
     assert spec_response.status_code == 200
@@ -208,6 +228,9 @@ def test_설계_명세의_모든_참조가_실제로_존재한다(client: TestCl
 
 
 def test_local_memory_mode_기반_사용자_여정(client) -> None:
+=======
+def test_local_memory_mode_기반_사용자_여정(client: TestClient) -> None:
+>>>>>>> c0ce1a49fec0a2a56a7a71199ef0abfd8aa22ce0
     """기동→준비 확인→기존 API→기존 화면 흐름이 외부 서비스 없이 동작한다."""
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/health/ready").json() == {"status": "ready"}
@@ -215,6 +238,7 @@ def test_local_memory_mode_기반_사용자_여정(client) -> None:
     event_list = client.get("/api/v1/events?limit=1&offset=0")
     assert event_list.status_code == 200
     assert event_list.json()["limit"] == 1
+    assert event_list.headers["deprecation"] == "true"
 
     event_page = client.get("/events")
     assert event_page.status_code == 200

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
 from app.notifications.adapters.memory_repository import InMemoryNotificationRepository
@@ -13,11 +15,17 @@ from app.notifications.errors import (
 from app.notifications.models import (
     CreateNotificationCommand,
     MockDeliveryStatus,
+    NotificationDataValue,
     RetryMockDeliveryCommand,
 )
 from app.notifications.service import NotificationService
-from app.users.models import UserRole
-from tests.auth_helpers import build_auth_stack
+from app.users.models import User, UserRole
+from tests.auth_helpers import AuthStack, build_auth_stack
+
+type MockDeliveryMode = Literal["success", "fail_once", "always_fail"] | None
+type NotificationServiceStack = tuple[
+    AuthStack, User, InMemoryNotificationRepository, NotificationService
+]
 
 
 def _command(user_id: str, *, operation_id: str = "create-op") -> CreateNotificationCommand:
@@ -32,7 +40,9 @@ def _command(user_id: str, *, operation_id: str = "create-op") -> CreateNotifica
     )
 
 
-def _service(mode="success", *, max_attempts: int = 3):
+def _service(
+    mode: MockDeliveryMode = "success", *, max_attempts: int = 3
+) -> NotificationServiceStack:
     stack = build_auth_stack()
     recipient = stack.seed(UserRole.STUDENT)
     repository = InMemoryNotificationRepository()
@@ -76,9 +86,12 @@ def test_알림은_사용자별로_격리되고_개별과_전체_읽음이_미�
     )
 
     assert service.unread_count(recipient) == 2
-    assert service.list_notifications(
-        other, is_read=None, notification_type=None, limit=50, offset=0
-    ).total == 0
+    assert (
+        service.list_notifications(
+            other, is_read=None, notification_type=None, limit=50, offset=0
+        ).total
+        == 0
+    )
     with pytest.raises(NotificationNotFoundError):
         service.mark_read(other, first.id, operation_id="other-read")
 
@@ -95,12 +108,8 @@ def test_fail_once는_명시적_재시도로_성공하고_같은_operation은_�
     notification = service.create(_command(recipient.id))
     first = repository.list_notification_deliveries(notification.id)[0]
 
-    retried = service.retry_mock_delivery(
-        RetryMockDeliveryCommand(notification.id, "retry-op")
-    )
-    duplicated = service.retry_mock_delivery(
-        RetryMockDeliveryCommand(notification.id, "retry-op")
-    )
+    retried = service.retry_mock_delivery(RetryMockDeliveryCommand(notification.id, "retry-op"))
+    duplicated = service.retry_mock_delivery(RetryMockDeliveryCommand(notification.id, "retry-op"))
 
     assert first.status == MockDeliveryStatus.TEMPORARY_FAILURE
     assert retried == duplicated
@@ -113,20 +122,18 @@ def test_always_fail은_최대시도에서_영구실패가_되고_기록을_보�
     _, recipient, repository, service = _service(mode="always_fail", max_attempts=3)
     notification = service.create(_command(recipient.id))
 
-    second = service.retry_mock_delivery(
-        RetryMockDeliveryCommand(notification.id, "retry-2")
-    )
-    third = service.retry_mock_delivery(
-        RetryMockDeliveryCommand(notification.id, "retry-3")
-    )
+    second = service.retry_mock_delivery(RetryMockDeliveryCommand(notification.id, "retry-2"))
+    third = service.retry_mock_delivery(RetryMockDeliveryCommand(notification.id, "retry-3"))
 
     assert second.status == MockDeliveryStatus.TEMPORARY_FAILURE
     assert third.status == MockDeliveryStatus.PERMANENT_FAILURE
     with pytest.raises(MockDeliveryNotRetryableError):
-        service.retry_mock_delivery(
-            RetryMockDeliveryCommand(notification.id, "retry-4")
-        )
-    assert [item.attempt for item in repository.list_notification_deliveries(notification.id)] == [1, 2, 3]
+        service.retry_mock_delivery(RetryMockDeliveryCommand(notification.id, "retry-4"))
+    assert [item.attempt for item in repository.list_notification_deliveries(notification.id)] == [
+        1,
+        2,
+        3,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -139,7 +146,9 @@ def test_always_fail은_최대시도에서_영구실패가_되고_기록을_보�
         {"confidence": float("nan")},
     ],
 )
-def test_민감하거나_외부인_data는_저장전에_거부된다(data) -> None:
+def test_민감하거나_외부인_data는_저장전에_거부된다(
+    data: dict[str, NotificationDataValue],
+) -> None:
     _, recipient, repository, service = _service(mode=None)
     command = _command(recipient.id)
     command = CreateNotificationCommand(

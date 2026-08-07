@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     database_name: str | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     mock_inputs_enabled: bool = False
+    demo_mode_enabled: bool = False
 
     jwt_access_secret: SecretStr | None = None
     jwt_refresh_secret: SecretStr | None = None
@@ -34,13 +35,10 @@ class Settings(BaseSettings):
     auth_seed_student_password: SecretStr | None = None
     auth_seed_staff_password: SecretStr | None = None
     auth_seed_admin_password: SecretStr | None = None
-    auth_seed_system_operator_password: SecretStr | None = None
 
     employee_away_after_seconds: int = Field(default=180, ge=1, le=86400)
     employee_offsite_after_seconds: int = Field(default=3600, ge=1, le=604800)
-    notification_mock_delivery_mode: Literal[
-        "success", "fail_once", "always_fail"
-    ] = "success"
+    notification_mock_delivery_mode: Literal["success", "fail_once", "always_fail"] = "success"
     notification_mock_delivery_max_attempts: int = Field(default=3, ge=1, le=10)
     interview_wait_expires_after_hours: int = Field(default=24, ge=1, le=168)
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
@@ -79,12 +77,13 @@ class Settings(BaseSettings):
             ]
             if missing_names:
                 raise ValueError(
-                    "MongoDB mode에 필요한 환경변수가 없습니다: "
-                    + ", ".join(missing_names)
+                    "MongoDB mode에 필요한 환경변수가 없습니다: " + ", ".join(missing_names)
                 )
 
         if self.app_env == "prod" and self.mock_inputs_enabled:
             raise ValueError("APP_ENV=prod에서는 MOCK_INPUTS_ENABLED를 활성화할 수 없습니다.")
+        if self.app_env == "prod" and self.demo_mode_enabled:
+            raise ValueError("APP_ENV=prod에서는 DEMO_MODE_ENABLED를 활성화할 수 없습니다.")
 
         missing_security_names = [
             name
@@ -96,16 +95,19 @@ class Settings(BaseSettings):
             )
             if secret is None or len(secret.get_secret_value()) < 32
         ]
-        if not self.web_origin:
+        web_origin = self.web_origin
+        if not web_origin:
             missing_security_names.append("WEB_ORIGIN")
         if missing_security_names:
             raise ValueError(
                 "인증에 필요한 환경변수가 없거나 너무 짧습니다: "
                 + ", ".join(missing_security_names)
             )
-        if not self.web_origin.startswith(("http://", "https://")):
+        if not web_origin:
+            raise ValueError("WEB_ORIGIN이 필요합니다.")
+        if not web_origin.startswith(("http://", "https://")):
             raise ValueError("WEB_ORIGIN은 http 또는 https origin이어야 합니다.")
-        self.web_origin = self.web_origin.rstrip("/")
+        self.web_origin = web_origin.rstrip("/")
 
         if self.auth_seed_enabled:
             if self.app_env == "prod":
@@ -116,10 +118,6 @@ class Settings(BaseSettings):
                     ("AUTH_SEED_STUDENT_PASSWORD", self.auth_seed_student_password),
                     ("AUTH_SEED_STAFF_PASSWORD", self.auth_seed_staff_password),
                     ("AUTH_SEED_ADMIN_PASSWORD", self.auth_seed_admin_password),
-                    (
-                        "AUTH_SEED_SYSTEM_OPERATOR_PASSWORD",
-                        self.auth_seed_system_operator_password,
-                    ),
                 )
                 if secret is None or not secret.get_secret_value()
             ]

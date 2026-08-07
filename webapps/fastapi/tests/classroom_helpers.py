@@ -37,6 +37,7 @@ class ClassroomStack:
         code: str = "ROOM-101",
         timezone: str = "Asia/Seoul",
         grace: int = 10,
+        responsible_staff_user_ids: tuple[str, ...] = (),
     ) -> Classroom:
         return self.service.create_classroom(
             self.admin,
@@ -47,6 +48,7 @@ class ClassroomStack:
                 timezone=timezone,
                 after_hours_grace_minutes=grace,
                 operation_id=str(uuid4()),
+                responsible_staff_user_ids=responsible_staff_user_ids,
             ),
             ip_fingerprint="test-ip",
         )
@@ -70,6 +72,7 @@ class ClassroomStack:
             ip_fingerprint="test-ip",
         )
 
+
 def build_classroom_stack() -> ClassroomStack:
     from app.users.models import UserRole
 
@@ -86,6 +89,7 @@ def build_classroom_stack() -> ClassroomStack:
     )
     service = ClassroomService(
         repository,
+        auth.users,
         notification_service,
         AuditService(auth.audit, clock=auth.clock),
         occupancy_confidence_threshold=0.6,

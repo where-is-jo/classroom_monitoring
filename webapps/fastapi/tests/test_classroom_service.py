@@ -2,25 +2,33 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
 from uuid import uuid4
 
 import pytest
 
+from app.audit.service import AuditService
 from app.auth.errors import PermissionDeniedError
 from app.classrooms.errors import ClassroomInputError, SeatBatchConflictError
 from app.classrooms.models import (
     AfterHoursAlertStatus,
+    Classroom,
     ClassroomSchedule,
+    CreateClassroomCommand,
     RecordSeatObservationBatchCommand,
     ReplaceSchedulesCommand,
     ResolveAfterHoursAlertCommand,
     SeatGeometry,
     SeatObservation,
+    SeatObservationBatchResult,
     SeatOccupancy,
     UpdateClassroomCommand,
     UpdateSeatCommand,
 )
+from app.classrooms.service import ClassroomStaffAssignmentService
+from app.users.models import UpdateUserCommand, UserRole, UserStatus
+from app.users.service import UserService
 from tests.classroom_helpers import ClassroomStack, build_classroom_stack
 
 
@@ -29,18 +37,14 @@ def stack() -> ClassroomStack:
     return build_classroom_stack()
 
 
-def _schedule(stack: ClassroomStack, classroom_id: str, *, closes: time = time(17)):
+def _schedule(stack: ClassroomStack, classroom_id: str, *, closes: time = time(17)) -> Classroom:
     classroom = stack.repository.get_classroom(classroom_id)
     assert classroom is not None
     return stack.service.replace_schedules(
         stack.admin,
         ReplaceSchedulesCommand(
             classroom_id=classroom.id,
-            schedules=(
-                ClassroomSchedule(
-                    day_of_week=2, opens_at=time(9), closes_at=closes
-                ),
-            ),
+            schedules=(ClassroomSchedule(day_of_week=2, opens_at=time(9), closes_at=closes),),
             expected_version=classroom.version,
             operation_id=str(uuid4()),
         ),
@@ -57,7 +61,7 @@ def _observe(
     occupied: bool = True,
     observed_at: datetime | None = None,
     event_id: str | None = None,
-):
+) -> SeatObservationBatchResult:
     return stack.service.record_mock_observation_batch(
         stack.admin,
         RecordSeatObservationBatchCommand(
@@ -244,14 +248,17 @@ def test_after_hours_timezone_grace_dedupe_resolve_and_no_reopen(
         confidence=0.9,
         observed_at=before_grace,
     )
-    assert stack.service.list_alerts(
-        stack.admin,
-        status=None,
-        classroom_id=None,
-        business_date=None,
-        limit=50,
-        offset=0,
-    ).total == 0
+    assert (
+        stack.service.list_alerts(
+            stack.admin,
+            status=None,
+            classroom_id=None,
+            business_date=None,
+            limit=50,
+            offset=0,
+        ).total
+        == 0
+    )
 
     _observe(
         stack,
@@ -309,14 +316,148 @@ def test_after_hours_timezone_grace_dedupe_resolve_and_no_reopen(
     )
     assert repeated.alert_count == 0
     assert stack.notifications.count_unread(stack.admin.id) == 1
-    assert stack.service.list_alerts(
-        stack.admin,
-        status=None,
-        classroom_id=classroom.id,
-        business_date=None,
-        limit=50,
-        offset=0,
-    ).total == 1
+    assert (
+        stack.service.list_alerts(
+            stack.admin,
+            status=None,
+            classroom_id=classroom.id,
+            business_date=None,
+            limit=50,
+            offset=0,
+        ).total
+        == 1
+    )
+
+
+def test_responsible_staff_validation_and_after_hours_fanout_dedupe(
+    stack: ClassroomStack,
+) -> None:
+    responsible = stack.auth.seed(
+        UserRole.STAFF, email="responsible@example.invalid", name="담당 직원"
+    )
+    other_staff = stack.auth.seed(
+        UserRole.STAFF, email="other-staff@example.invalid", name="다른 직원"
+    )
+    other_admin = stack.auth.seed(
+        UserRole.ADMIN, email="other-admin@example.invalid", name="다른 관리자"
+    )
+    inactive_staff = stack.auth.seed(
+        UserRole.STAFF, email="inactive-staff@example.invalid", name="비활성 직원"
+    )
+    assert stack.auth.users.replace_user(
+        replace(inactive_staff, status=UserStatus.INACTIVE, version=inactive_staff.version + 1),
+        expected_version=inactive_staff.version,
+    )
+
+    with pytest.raises(ClassroomInputError, match="활성 STAFF"):
+        stack.service.create_classroom(
+            stack.admin,
+            CreateClassroomCommand(
+                code="INVALID-STUDENT",
+                name="Invalid",
+                location="Building A",
+                timezone="Asia/Seoul",
+                after_hours_grace_minutes=0,
+                operation_id=str(uuid4()),
+                responsible_staff_user_ids=(stack.student.id,),
+            ),
+            ip_fingerprint="test-ip",
+        )
+    with pytest.raises(ClassroomInputError, match="활성 STAFF"):
+        stack.service.create_classroom(
+            stack.admin,
+            CreateClassroomCommand(
+                code="INVALID-INACTIVE",
+                name="Invalid",
+                location="Building A",
+                timezone="Asia/Seoul",
+                after_hours_grace_minutes=0,
+                operation_id=str(uuid4()),
+                responsible_staff_user_ids=(inactive_staff.id,),
+            ),
+            ip_fingerprint="test-ip",
+        )
+
+    classroom = stack.create_classroom(
+        code="FANOUT",
+        grace=0,
+        responsible_staff_user_ids=(responsible.id,),
+    )
+    seat = stack.create_seat(classroom.id)
+    observed_at = datetime(2026, 8, 5, 8, 0, tzinfo=UTC)
+    first = _observe(stack, classroom.id, seat.id, confidence=0.9, observed_at=observed_at)
+    assert first.alert_count == 1
+    assert stack.notifications.count_unread(responsible.id) == 1
+    assert stack.notifications.count_unread(stack.admin.id) == 1
+    assert stack.notifications.count_unread(other_admin.id) == 1
+    assert stack.notifications.count_unread(other_staff.id) == 0
+
+    _observe(
+        stack,
+        classroom.id,
+        seat.id,
+        occupied=False,
+        confidence=0.9,
+        observed_at=observed_at + timedelta(minutes=1),
+    )
+    repeated = _observe(
+        stack,
+        classroom.id,
+        seat.id,
+        confidence=0.9,
+        observed_at=observed_at + timedelta(minutes=2),
+    )
+    assert repeated.alert_count == 0
+    for recipient in (responsible, stack.admin, other_admin):
+        page = stack.notifications.list_notifications(
+            recipient_user_id=recipient.id,
+            is_read=None,
+            notification_type=None,
+            limit=10,
+            offset=0,
+        )
+        assert page.total == 1
+        assert page.items[0].type == "AFTER_HOURS_SEAT"
+        assert page.items[0].dedupe_key == (
+            f"after_hours_seat:{page.items[0].data['alert_id']}:{recipient.id}"
+        )
+
+
+def test_staff_role_change_unlinks_classroom_assignment(stack: ClassroomStack) -> None:
+    responsible = stack.auth.seed(
+        UserRole.STAFF, email="role-change@example.invalid", name="역할 변경 직원"
+    )
+    classroom = stack.create_classroom(
+        code="ROLE-CHANGE", responsible_staff_user_ids=(responsible.id,)
+    )
+    assignment_policy = ClassroomStaffAssignmentService(
+        stack.repository,
+        AuditService(stack.auth.audit, clock=stack.auth.clock),
+        clock=stack.auth.clock,
+    )
+    stack.auth.user_service = UserService(
+        stack.auth.users,
+        stack.auth.auth,
+        AuditService(stack.auth.audit, clock=stack.auth.clock),
+        stack.auth.passwords,
+        password_min_length=12,
+        clock=stack.auth.clock,
+        staff_assignment_policy=assignment_policy,
+    )
+    command = UpdateUserCommand(
+        user_id=responsible.id,
+        expected_version=responsible.version,
+        operation_id=str(uuid4()),
+        role=UserRole.STUDENT,
+    )
+
+    stack.auth.user_service.update_user(stack.admin, command, ip_fingerprint="test-ip")
+    stack.auth.user_service.update_user(stack.admin, command, ip_fingerprint="test-ip")
+
+    updated = stack.repository.get_classroom(classroom.id)
+    assert updated is not None
+    assert updated.responsible_staff_user_ids == ()
+    assert updated.version == classroom.version + 1
 
 
 def test_batch_membership_active_validation_idempotency_and_conflict(

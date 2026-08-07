@@ -11,13 +11,13 @@ from app.auth.errors import InvalidRefreshTokenError, PermissionDeniedError
 from app.auth.models import LoginCommand
 from app.users.errors import (
     CurrentPasswordMismatchError,
-    LastSystemOperatorError,
     PasswordPolicyError,
     SelfDeactivationError,
     UserConcurrentUpdateError,
     UserEmailConflictError,
 )
 from app.users.models import (
+    PRODUCT_ROLES,
     ChangePasswordCommand,
     CreateUserCommand,
     UpdateUserCommand,
@@ -32,20 +32,21 @@ def operation_id() -> str:
     return str(uuid4())
 
 
-def test_환경_주입_password로_네_역할의_가상_사용자를_idempotent_seed한다() -> None:
+def test_환경_주입_password로_세_제품_역할의_가상_사용자를_idempotent_seed한다() -> None:
     stack = build_auth_stack()
     passwords = VirtualSeedPasswords(
         student="StudentPassword1!",
         staff="StaffPassword12!",
         admin="AdminPassword12!",
-        system_operator="OperatorPassword1!",
     )
 
     first = seed_virtual_users(stack.user_service, passwords)
     second = seed_virtual_users(stack.user_service, passwords)
+    fresh = seed_virtual_users(build_auth_stack().user_service, passwords)
 
-    assert {user.role for user in first} == set(UserRole)
+    assert {user.role for user in first} == PRODUCT_ROLES
     assert [user.id for user in first] == [user.id for user in second]
+    assert [user.id for user in first] == [user.id for user in fresh]
     assert all(user.email.endswith("@example.invalid") for user in first)
 
 
@@ -114,12 +115,8 @@ def test_허용_필드만_CAS로_수정하고_중복_operation은_같은_결과�
         role=UserRole.ADMIN,
     )
 
-    updated = stack.user_service.update_user(
-        admin, command, ip_fingerprint="fingerprint"
-    )
-    repeated = stack.user_service.update_user(
-        admin, command, ip_fingerprint="fingerprint"
-    )
+    updated = stack.user_service.update_user(admin, command, ip_fingerprint="fingerprint")
+    repeated = stack.user_service.update_user(admin, command, ip_fingerprint="fingerprint")
 
     assert updated == repeated
     assert updated.role == UserRole.ADMIN
@@ -137,10 +134,11 @@ def test_허용_필드만_CAS로_수정하고_중복_operation은_같은_결과�
         )
 
 
-def test_soft_deactivate는_본인과_마지막_SYSTEM_OPERATOR를_보호한다() -> None:
+def test_soft_deactivate는_본인을_보호하고_legacy_operator_정리를_허용한다() -> None:
     stack = build_auth_stack()
     admin = stack.seed(UserRole.ADMIN)
-    operator = stack.seed(UserRole.SYSTEM_OPERATOR)
+    operator = stack.seed(UserRole.SYSTEM_OPERATOR, email="legacy-operator@example.invalid")
+    migrating = stack.seed(UserRole.SYSTEM_OPERATOR, email="migrating-operator@example.invalid")
 
     with pytest.raises(SelfDeactivationError):
         stack.user_service.deactivate_user(
@@ -149,21 +147,30 @@ def test_soft_deactivate는_본인과_마지막_SYSTEM_OPERATOR를_보호한다(
             operation_id=operation_id(),
             ip_fingerprint=None,
         )
-    with pytest.raises(LastSystemOperatorError):
-        stack.user_service.deactivate_user(
-            admin,
-            operator.id,
+    inactive = stack.user_service.deactivate_user(
+        admin,
+        operator.id,
+        operation_id=operation_id(),
+        ip_fingerprint=None,
+    )
+    migrated = stack.user_service.update_user(
+        admin,
+        UpdateUserCommand(
+            user_id=migrating.id,
+            expected_version=migrating.version,
             operation_id=operation_id(),
-            ip_fingerprint=None,
-        )
+            role=UserRole.ADMIN,
+        ),
+        ip_fingerprint=None,
+    )
+    assert inactive.status == UserStatus.INACTIVE
+    assert migrated.role == UserRole.ADMIN
 
 
 def test_비밀번호_변경은_기존값을_확인하고_전체_refresh를_폐기한다() -> None:
     stack = build_auth_stack()
     user = stack.seed(UserRole.STAFF)
-    session = stack.auth_service.login(
-        LoginCommand(user.email, "ValidPassword1!", "fingerprint-a")
-    )
+    session = stack.auth_service.login(LoginCommand(user.email, "ValidPassword1!", "fingerprint-a"))
     with pytest.raises(CurrentPasswordMismatchError):
         stack.user_service.change_password(
             session.user,
@@ -173,9 +180,7 @@ def test_비밀번호_변경은_기존값을_확인하고_전체_refresh를_폐�
 
     changed = stack.user_service.change_password(
         session.user,
-        ChangePasswordCommand(
-            "ValidPassword1!", "NewValidPassword2!", operation_id()
-        ),
+        ChangePasswordCommand("ValidPassword1!", "NewValidPassword2!", operation_id()),
         ip_fingerprint="fingerprint-a",
     )
     assert stack.passwords.verify_password("NewValidPassword2!", changed.password_hash)

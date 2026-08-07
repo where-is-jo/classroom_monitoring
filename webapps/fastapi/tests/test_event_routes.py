@@ -20,11 +20,11 @@ def test_헬스체크는_200을_반환한다(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_루트는_이벤트_목록으로_리다이렉트한다(client: TestClient) -> None:
+def test_비로그인_루트는_로그인으로_리다이렉트한다(client: TestClient) -> None:
     response = client.get("/", follow_redirects=False)
 
     assert response.status_code == 307
-    assert response.headers["location"] == "/events"
+    assert response.headers["location"] == "/login"
 
 
 # --------------------------------------------------------------------------

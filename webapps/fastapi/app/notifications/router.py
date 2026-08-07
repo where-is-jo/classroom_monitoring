@@ -45,14 +45,10 @@ read_batch_api_router = APIRouter(
 )
 development_api_router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 page_router = APIRouter(prefix="/notifications", tags=["notification-pages"])
-development_page_router = APIRouter(
-    prefix="/admin/mock-deliveries", tags=["admin-pages"]
-)
+development_page_router = APIRouter(prefix="/admin/mock-deliveries", tags=["admin-pages"])
 
 
-def _resolve_paging(
-    limit: int | None, offset: int, settings: Settings
-) -> tuple[int, int]:
+def _resolve_paging(limit: int | None, offset: int, settings: Settings) -> tuple[int, int]:
     return min(limit or settings.page_size_default, settings.page_size_max), offset
 
 
@@ -112,9 +108,7 @@ def list_notifications(
     )
 
 
-@api_router.get(
-    "/unread-count", response_model=NotificationUnreadCountResponse
-)
+@api_router.get("/unread-count", response_model=NotificationUnreadCountResponse)
 def unread_count(
     actor: User = Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
@@ -122,9 +116,7 @@ def unread_count(
     return NotificationUnreadCountResponse(unread_count=service.unread_count(actor))
 
 
-@api_router.patch(
-    "/{notification_id}", response_model=NotificationResponse
-)
+@api_router.patch("/{notification_id}", response_model=NotificationResponse)
 def mark_notification_read(
     notification_id: str,
     payload: NotificationReadRequest,
@@ -132,9 +124,7 @@ def mark_notification_read(
     actor: User = Depends(get_current_user),
     service: NotificationService = Depends(get_notification_service),
 ) -> NotificationResponse:
-    notification = service.mark_read(
-        actor, notification_id, operation_id=str(payload.operation_id)
-    )
+    notification = service.mark_read(actor, notification_id, operation_id=str(payload.operation_id))
     return _notification_response(notification, service)
 
 
@@ -146,15 +136,11 @@ def mark_all_notifications_read(
     service: NotificationService = Depends(get_notification_service),
 ) -> NotificationReadBatchResponse:
     return NotificationReadBatchResponse(
-        updated_count=service.mark_all_read(
-            actor, operation_id=str(payload.operation_id)
-        )
+        updated_count=service.mark_all_read(actor, operation_id=str(payload.operation_id))
     )
 
 
-@development_api_router.get(
-    "/mock-deliveries", response_model=MockDeliveryListResponse
-)
+@development_api_router.get("/mock-deliveries", response_model=MockDeliveryListResponse)
 def list_mock_deliveries(
     delivery_status: MockDeliveryStatus | None = Query(default=None, alias="status"),
     limit: int | None = Query(default=None, ge=1),
@@ -209,7 +195,7 @@ def notifications_page(
     actor: User = Depends(get_current_page_user),
     service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_notifications(
         request,
         actor=actor,
@@ -231,7 +217,7 @@ def mark_notification_read_page(
     actor: User = Depends(get_current_page_user),
     service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.mark_read(actor, notification_id, operation_id=operation_id)
     except DomainError as exc:
@@ -266,7 +252,7 @@ def mock_deliveries_page(
     actor: User = Depends(require_page_admin),
     service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_mock_deliveries(
         request,
         actor=actor,
@@ -287,7 +273,7 @@ def retry_mock_delivery_page(
     actor: User = Depends(require_page_admin),
     service: NotificationService = Depends(get_notification_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.retry_mock_delivery(
             RetryMockDeliveryCommand(
@@ -304,9 +290,7 @@ def retry_mock_delivery_page(
             error=exc.message,
             status_code=exc.status_code,
         )
-    return RedirectResponse(
-        url="/admin/mock-deliveries", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(url="/admin/mock-deliveries", status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _render_notifications(
@@ -321,7 +305,7 @@ def _render_notifications(
     offset: int = 0,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_notifications(
         actor,
@@ -363,7 +347,7 @@ def _render_mock_deliveries(
     offset: int = 0,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     resolved_limit, resolved_offset = _resolve_paging(limit, offset, settings)
     page = service.list_mock_deliveries(
         status=delivery_status,
@@ -383,9 +367,7 @@ def _render_mock_deliveries(
             offset=resolved_offset,
             has_prev=resolved_offset > 0,
             has_next=resolved_offset + resolved_limit < page.total,
-            retry_operation_ids={
-                item.id: str(uuid4()) for item in page.items
-            },
+            retry_operation_ids={item.id: str(uuid4()) for item in page.items},
             error=error,
             show_notification_dev_tools=True,
         ),

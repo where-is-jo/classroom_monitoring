@@ -43,14 +43,14 @@ from .schemas import (
     AfterHoursAlertResponse,
     AlertResolveForm,
     ClassroomCreateForm,
-    ClassroomUpdateForm,
     ClassroomListResponse,
     ClassroomResponse,
+    ClassroomUpdateForm,
     CreateClassroomRequest,
     CreateSeatRequest,
     MockSeatObservationBatchRequest,
-    MutationRequest,
     MutationForm,
+    MutationRequest,
     OccupancyHistoryListResponse,
     OccupancySummaryResponse,
     ReplaceSchedulesRequest,
@@ -58,11 +58,11 @@ from .schemas import (
     ScheduleLinesForm,
     ScheduleSchema,
     SeatCreateForm,
-    SeatUpdateForm,
     SeatListResponse,
     SeatObservationBatchResponse,
     SeatObservationLinesForm,
     SeatResponse,
+    SeatUpdateForm,
     UpdateClassroomRequest,
     UpdateSeatRequest,
 )
@@ -71,9 +71,7 @@ from .service import ClassroomService
 classroom_api_router = APIRouter(prefix="/api/v1/classrooms", tags=["classrooms"])
 seat_api_router = APIRouter(prefix="/api/v1/seats", tags=["classrooms"])
 alert_api_router = APIRouter(prefix="/api/v1/after-hours-alerts", tags=["classrooms"])
-development_api_router = APIRouter(
-    prefix="/api/v1/mock-seat-observations", tags=["development"]
-)
+development_api_router = APIRouter(prefix="/api/v1/mock-seat-observations", tags=["development"])
 page_router = APIRouter(prefix="/classrooms", tags=["classroom-pages"])
 admin_page_router = APIRouter(prefix="/admin/classrooms", tags=["classroom-pages"])
 alert_page_router = APIRouter(prefix="/admin/alerts", tags=["classroom-pages"])
@@ -128,6 +126,7 @@ def create_classroom(
             timezone=payload.timezone,
             after_hours_grace_minutes=payload.after_hours_grace_minutes,
             operation_id=str(payload.operation_id),
+            responsible_staff_user_ids=tuple(payload.responsible_staff_user_ids),
         ),
         ip_fingerprint=ip_fingerprint,
     )
@@ -165,15 +164,14 @@ def update_classroom(
                 after_hours_grace_minutes=payload.after_hours_grace_minutes,
                 expected_version=payload.expected_version,
                 operation_id=str(payload.operation_id),
+                responsible_staff_user_ids=tuple(payload.responsible_staff_user_ids),
             ),
             ip_fingerprint=ip_fingerprint,
         )
     )
 
 
-@classroom_api_router.delete(
-    "/{classroom_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@classroom_api_router.delete("/{classroom_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deactivate_classroom(
     classroom_id: str,
     payload: MutationRequest,
@@ -192,9 +190,7 @@ def deactivate_classroom(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@classroom_api_router.get(
-    "/{classroom_id}/schedules", response_model=list[ScheduleSchema]
-)
+@classroom_api_router.get("/{classroom_id}/schedules", response_model=list[ScheduleSchema])
 def get_schedules(
     classroom_id: str,
     actor: User = Depends(get_current_user),
@@ -211,9 +207,7 @@ def get_schedules(
     ]
 
 
-@classroom_api_router.put(
-    "/{classroom_id}/schedules", response_model=ClassroomResponse
-)
+@classroom_api_router.put("/{classroom_id}/schedules", response_model=ClassroomResponse)
 def replace_schedules(
     classroom_id: str,
     payload: ReplaceSchedulesRequest,
@@ -236,9 +230,7 @@ def replace_schedules(
     )
 
 
-@classroom_api_router.get(
-    "/{classroom_id}/seats", response_model=SeatListResponse
-)
+@classroom_api_router.get("/{classroom_id}/seats", response_model=SeatListResponse)
 def list_seats(
     classroom_id: str,
     include_inactive: bool = False,
@@ -307,9 +299,7 @@ def update_seat(
                 seat_id=seat_id,
                 code=payload.code,
                 label=payload.label,
-                geometry=(
-                    None if payload.geometry is None else payload.geometry.to_domain()
-                ),
+                geometry=(None if payload.geometry is None else payload.geometry.to_domain()),
                 expected_version=payload.expected_version,
                 operation_id=str(payload.operation_id),
             ),
@@ -337,17 +327,13 @@ def deactivate_seat(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@classroom_api_router.get(
-    "/{classroom_id}/occupancy", response_model=OccupancySummaryResponse
-)
+@classroom_api_router.get("/{classroom_id}/occupancy", response_model=OccupancySummaryResponse)
 def occupancy_summary(
     classroom_id: str,
     actor: User = Depends(get_current_user),
     service: ClassroomService = Depends(get_classroom_service),
 ) -> OccupancySummaryResponse:
-    return OccupancySummaryResponse.from_domain(
-        service.occupancy_summary(actor, classroom_id)
-    )
+    return OccupancySummaryResponse.from_domain(service.occupancy_summary(actor, classroom_id))
 
 
 @classroom_api_router.get(
@@ -466,7 +452,7 @@ def classrooms_page(
     actor: User = Depends(get_current_page_user),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     resolved_limit, resolved_offset = _paging(limit, offset, settings)
     page = service.list_classrooms(
         actor,
@@ -497,7 +483,7 @@ def classroom_detail_page(
     classroom_id: str,
     actor: User = Depends(get_current_page_user),
     service: ClassroomService = Depends(get_classroom_service),
-):
+) -> Response:
     summary = service.occupancy_summary(actor, classroom_id)
     return templates.TemplateResponse(
         request=request,
@@ -512,10 +498,8 @@ def admin_classrooms_page(
     actor: User = Depends(require_page_admin),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
-    return _render_admin_classrooms(
-        request, actor=actor, service=service, settings=settings
-    )
+) -> Response:
+    return _render_admin_classrooms(request, actor=actor, service=service, settings=settings)
 
 
 @admin_page_router.post("")
@@ -527,7 +511,7 @@ def create_classroom_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.create_classroom(
             actor,
@@ -538,6 +522,7 @@ def create_classroom_page(
                 timezone=form.timezone,
                 after_hours_grace_minutes=form.after_hours_grace_minutes,
                 operation_id=str(form.operation_id),
+                responsible_staff_user_ids=tuple(form.responsible_staff_user_ids),
             ),
             ip_fingerprint=ip_fingerprint,
         )
@@ -563,7 +548,7 @@ def replace_schedules_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         schedules = _parse_schedule_lines(form.schedule_lines)
         service.replace_schedules(
@@ -598,7 +583,7 @@ def update_classroom_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.update_classroom(
             actor,
@@ -611,6 +596,7 @@ def update_classroom_page(
                 after_hours_grace_minutes=form.after_hours_grace_minutes,
                 expected_version=form.expected_version,
                 operation_id=str(form.operation_id),
+                responsible_staff_user_ids=tuple(form.responsible_staff_user_ids),
             ),
             ip_fingerprint=ip_fingerprint,
         )
@@ -636,7 +622,7 @@ def deactivate_classroom_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.deactivate_classroom(
             actor,
@@ -667,7 +653,7 @@ def create_seat_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.create_seat(
             actor,
@@ -703,7 +689,7 @@ def update_seat_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         _require_page_seat_membership(
             service, actor, classroom_id=classroom_id, seat_id=seat_id, settings=settings
@@ -743,7 +729,7 @@ def deactivate_seat_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         _require_page_seat_membership(
             service, actor, classroom_id=classroom_id, seat_id=seat_id, settings=settings
@@ -774,7 +760,7 @@ def alerts_page(
     actor: User = Depends(require_page_admin),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     return _render_alerts(
         request,
         actor=actor,
@@ -794,7 +780,7 @@ def resolve_alert_page(
     ip_fingerprint: str = Depends(request_ip_fingerprint),
     service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
-):
+) -> Response:
     try:
         service.resolve_alert(
             actor,
@@ -824,7 +810,7 @@ def record_seat_observations_page(
     _: None = Depends(require_csrf),
     actor: User = Depends(require_page_admin),
     service: ClassroomService = Depends(get_classroom_service),
-):
+) -> Response:
     try:
         result = service.record_mock_observation_batch(
             actor,
@@ -858,7 +844,7 @@ def _render_admin_classrooms(
     settings: Settings,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     page = service.list_classrooms(
         actor, include_inactive=True, limit=settings.page_size_max, offset=0
     )
@@ -910,6 +896,7 @@ def _render_admin_classrooms(
             request,
             actor,
             entries=entries,
+            staff_users=service.list_responsible_staff_candidates(actor),
             create_operation_id=str(uuid4()),
             error=error,
         ),
@@ -926,7 +913,7 @@ def _render_alerts(
     alert_status: AfterHoursAlertStatus | None = None,
     error: str | None = None,
     status_code: int = status.HTTP_200_OK,
-):
+) -> Response:
     page = service.list_alerts(
         actor,
         status=alert_status,

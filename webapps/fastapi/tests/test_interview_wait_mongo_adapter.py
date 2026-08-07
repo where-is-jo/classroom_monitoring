@@ -20,7 +20,7 @@ class RecordingCollection:
     def __init__(self) -> None:
         self.indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
 
-    def create_index(self, fields, **options):
+    def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
 
 
@@ -62,19 +62,15 @@ def test_면담대기_index는_active_key_operation_CAS_조회와_history를_지
     waits = database.collections["interview_waits"].indexes
     history = database.collections["interview_wait_history"].indexes
     assert any(
-        fields == [("active_key", 1)]
-        and options.get("unique")
-        and options.get("sparse")
+        fields == [("active_key", 1)] and options.get("unique") and options.get("sparse")
         for fields, options in waits
     )
     assert any(
-        fields == [("operation_ids", 1)] and options.get("unique")
-        for fields, options in waits
+        fields == [("operation_ids", 1)] and options.get("unique") for fields, options in waits
     )
     assert any(fields == [("expires_at", 1), ("status", 1)] for fields, _ in waits)
     assert any(
-        fields == [("operation_id", 1)] and options.get("unique")
-        for fields, options in history
+        fields == [("operation_id", 1)] and options.get("unique") for fields, options in history
     )
 
 
@@ -101,9 +97,7 @@ def test_면담대기와_history_document_roundtrip은_UTC와_active_key를_보�
 
 def test_종료대기는_sparse_unique를_위해_active_key를_생략한다() -> None:
     wait = _wait()
-    terminal = replace(
-        wait, status=InterviewWaitStatus.CANCELLED, active_key=None
-    )
+    terminal = replace(wait, status=InterviewWaitStatus.CANCELLED, active_key=None)
 
     document = MongoInterviewWaitRepository._wait_to_document(terminal)
 
@@ -117,6 +111,6 @@ def test_잘못된_operation_ids와_naive_datetime은_저장소오류가_된다(
         MongoInterviewWaitRepository._wait_to_domain(document)
 
     document = MongoInterviewWaitRepository._wait_to_document(_wait())
-    document["requested_at"] = datetime(2026, 8, 5, 9, 0)
+    document["requested_at"] = datetime(2026, 8, 5, 9, 0)  # noqa: DTZ001
     with pytest.raises(RepositoryDataError):
         MongoInterviewWaitRepository._wait_to_domain(document)

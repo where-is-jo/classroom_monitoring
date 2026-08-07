@@ -20,7 +20,8 @@ class UserStatus(StrEnum):
     LOCKED = "LOCKED"
 
 
-ADMIN_ROLES = frozenset({UserRole.ADMIN, UserRole.SYSTEM_OPERATOR})
+PRODUCT_ROLES = frozenset({UserRole.STUDENT, UserRole.STAFF, UserRole.ADMIN})
+ADMIN_ROLES = frozenset({UserRole.ADMIN})
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ class User:
     version: int
     created_operation_id: str
     last_operation_id: str
+    must_change_password: bool = False
+    password_changed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,7 @@ class CreateUserCommand:
     name: str
     role: UserRole
     operation_id: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)

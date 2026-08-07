@@ -7,15 +7,15 @@
 각 서비스의 내부 책임과 환경변수는 반복하지 않는다.
 해당 서비스의 README에 있고, 이 문서는 **서비스 사이의 관계**만 다룬다.
 
-> 현재 단계에서 확정된 것은 **서비스 분할과 호출 방향**뿐이다.
-> 통신 방식, 저장소, 모델은 아직 결정되지 않았다.
+> 현재 실행 코드는 `fastapi`에만 있다. 서비스 분할과 호출 방향, metadata 저장소는 확정됐고
+> 영상 수집·추론 서비스 간 통신 방식과 모델은 아직 결정되지 않았다.
 > 표기: `확정` / `예정`(하기로 했으나 아직 없음) / `후보`(고려 중) / `결정 필요`(선택하지 않음)
 
 ## 서비스 구성
 
 | 서비스 | 한 줄 역할 | 상태 |
 | --- | --- | --- |
-| [fastapi](../../webapps/fastapi/README.md) | 외부 요청의 유일한 진입점. API와 Jinja2 화면, 비즈니스 판단 | 예정 |
+| [fastapi](../../webapps/fastapi/README.md) | 외부 요청의 유일한 진입점. API와 Jinja2 화면, 비즈니스 판단 | 구현됨 |
 | [deeplearning](../../deeplearning/README.md) | 프레임에서 객체를 탐지해 결과 반환 | 예정 |
 | [worker](../../worker/README.md) | 영상 수신과 프레임 공급 | 예정 |
 | [monitoring](../../monitoring/README.md) | 서비스 상태·성능 관찰 | 예정 |
@@ -25,37 +25,28 @@
 
 ```mermaid
 flowchart LR
-    subgraph edge[영상 수집]
-        CAM[카메라 / Jetson]
-    end
+    BROWSER(["브라우저"])
+    API["fastapi<br/>API + Jinja2"]
+    MEMORY[("local memory")]
+    STORE[("MongoDB metadata")]
+    DEMO["고정 합성 catalog<br/>local/dev"]
+    CAM["CCTV / Jetson"]
+    STREAM["worker"]
+    INFER["deeplearning"]
+    OBJ[("MinIO 영상")]
 
-    subgraph core[서비스]
-        STREAM[worker]
-        INFER[deeplearning]
-        API[fastapi<br/>API + Jinja2 화면]
-    end
-
-    BROWSER([브라우저])
-
-    STORE[(MongoDB<br/>메타데이터)]
-    OBJ[(MinIO<br/>영상·스냅샷)]
-    MON[monitoring]
-    RPA[RPAs]
-
-    CAM -->|영상 스트림| STREAM
-    STREAM -->|프레임| INFER
-    INFER -->|탐지 결과| API
-    API -->|메타데이터| STORE
-    API -.->|저장 주체·정책 결정 필요| OBJ
-    STREAM -.->|저장 주체·정책 결정 필요| OBJ
-    BROWSER -->|HTTP| API
-    RPA -->|API 호출| API
-    MON -.->|지표 수집| STREAM
-    MON -.->|지표 수집| INFER
-    MON -.->|지표 수집| API
+    BROWSER -->|"HTTP"| API
+    API -->|"local"| MEMORY
+    API -->|"mongodb mode"| STORE
+    API -->|"demo mode"| DEMO
+    CAM -.-> STREAM
+    STREAM -.-> INFER
+    INFER -.-> API
+    STREAM -.-> OBJ
 ```
 
-실선은 확정된 호출 방향이고, 점선은 존재 여부나 방식이 아직 결정되지 않은 경로다.
+실선은 현재 구현된 경로다. 점선은 서비스 또는 계약이 아직 없는 예정 경로다. 합성 catalog는
+실제 영상 파이프라인의 대역이 아니라 제품 화면 흐름만 확인하는 고정 local/dev 데이터다.
 
 저장소는 [MongoDB](./decisions/ADR-0003-metadata-store-mongodb.md)와
 [MinIO](./decisions/ADR-0004-object-storage-minio.md)로 확정됐다.
@@ -91,7 +82,7 @@ deeplearning의 출력은 "사람 1명 탐지, 신뢰도 0.87"까지다.
 영상 바이트와 탐지 메타데이터는 보존 기간, 용량, 접근 권한이 전혀 다르다.
 한 서비스가 둘 다 소유하지 않는다.
 
-- 메타데이터: fastapi가 MongoDB에 기록 (`예정`)
+- 메타데이터: fastapi가 v2 도메인 데이터를 MongoDB에 기록
 - 영상·스냅샷: MinIO에 보관하고 메타데이터에는 참조만 기록한다.
   다만 **저장 주체와 저장 범위·보존 기간은 결정 필요** 상태다.
 
@@ -100,7 +91,7 @@ deeplearning의 출력은 "사람 1명 탐지, 신뢰도 0.87"까지다.
 각 서비스는 상대의 내부 구조를 모른 채 동작해야 한다.
 연동은 문서화된 API 또는 이벤트 스키마로만 한다.
 
-현재 확정된 계약은 없다. 첫 계약을 정의할 때
+실행 중인 서비스 사이의 계약은 아직 없다. 첫 계약을 정의할 때
 [API 규칙](../conventions/api-convention.md)을 따른다.
 
 ## 미결정 항목

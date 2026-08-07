@@ -47,15 +47,12 @@ class AdminDashboardService:
         snapshot = self._repository.get_snapshot(
             department=_optional_text(department),
             classroom_id=_optional_text(classroom_id),
-            delivery_failure_since=now - timedelta(hours=24),
         )
         return DashboardSummary(
             generated_at=now,
             employees=snapshot.employees,
-            interview_waits=snapshot.interview_waits,
             classrooms=snapshot.classrooms,
             alerts=snapshot.alerts,
-            notifications=snapshot.notifications,
         )
 
     def list_activities(

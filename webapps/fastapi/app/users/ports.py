@@ -28,4 +28,13 @@ class UserRepository(Protocol):
 
     def replace_user(self, user: User, *, expected_version: int) -> User | None: ...
 
-    def count_active_system_operators(self) -> int: ...
+
+class StaffAssignmentPolicy(Protocol):
+    def unlink_staff_user(
+        self,
+        actor: User,
+        user_id: str,
+        *,
+        operation_id: str,
+        ip_fingerprint: str | None,
+    ) -> None: ...
