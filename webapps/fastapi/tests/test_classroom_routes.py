@@ -191,6 +191,12 @@ def test_admin_classroom_form_assigns_multiple_responsible_staff(
     created = next(item for item in page.items if item.code == "ROOM-FORM-STAFF")
     assert created.responsible_staff_user_ids == tuple(sorted((first_staff.id, second_staff.id)))
 
+    rendered = classroom_client.get("/admin/classrooms")
+    assert rendered.status_code == 200
+    assert rendered.text.count('name="responsible_staff_user_ids" multiple size="1"') == 2
+    assert "Ctrl 또는 Cmd를 누른 채 여러 명을 선택할 수 있습니다." not in rendered.text
+    assert "선택하지 않으면 경고는 ADMIN에게만 전달됩니다." in rendered.text
+
 
 def test_after_hours_http_journey_and_pages(
     classroom_client: TestClient,

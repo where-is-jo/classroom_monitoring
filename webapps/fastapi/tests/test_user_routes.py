@@ -185,6 +185,7 @@ def test_사용자_화면은_정상_빈_오류_상태와_관리_action을_표시
     assert "사용자 생성" in page.text
     assert "수정 저장" in page.text
     assert "비활성화" in page.text
+    assert "새 계정은 첫 로그인 후 비밀번호를 반드시 변경해야 합니다." not in page.text
     assert empty.status_code == 200
     assert "조건에 맞는 사용자가 없습니다" in empty.text
 

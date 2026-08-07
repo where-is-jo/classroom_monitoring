@@ -157,6 +157,7 @@ def test_staff_and_admin_can_use_demo_pages_and_api(role: UserRole) -> None:
     assert "샘플 영상 없음" in monitoring.text
     assert search_page.status_code == 200
     assert "데모 검색 결과" in search_page.text
+    assert "API에서는 timezone 포함 ISO 8601을 사용합니다." not in search_page.text
     assert streams.status_code == 200 and streams.json()["total"] == 2
     assert search.status_code == 200 and search.json()["total"] == 1
     assert search.json()["items"][0]["is_demo"] is True

@@ -14,7 +14,7 @@
       <label>한국어 검색 문장<input name="query" value="{{ selected_query }}" required minlength="1" maxlength="200" placeholder="어제 5시 이후 A101에 사람이 남아 있던 영상"></label>
       <div class="form-grid">
         <label>강의실(선택)<select name="classroom_id"><option value="">전체</option>{% for value, label in classroom_options %}<option value="{{ value }}"{% if value == selected_classroom_id %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-        <label>시작 시각(선택)<input type="datetime-local" name="from" value="{{ selected_from.strftime('%Y-%m-%dT%H:%M') if selected_from else '' }}"><span class="help-text">API에서는 timezone 포함 ISO 8601을 사용합니다.</span></label>
+        <label>시작 시각(선택)<input type="datetime-local" name="from" value="{{ selected_from.strftime('%Y-%m-%dT%H:%M') if selected_from else '' }}"></label>
         <label>종료 시각(선택)<input type="datetime-local" name="to" value="{{ selected_to.strftime('%Y-%m-%dT%H:%M') if selected_to else '' }}"></label>
         <label>최대 결과<input type="number" name="limit" value="{{ selected_limit }}" min="1" max="50"></label>
       </div>

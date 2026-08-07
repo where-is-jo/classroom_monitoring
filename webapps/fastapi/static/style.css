@@ -81,7 +81,6 @@ a:hover { color: #173bab; }
   width: var(--sidebar-width);
   height: 100dvh;
   flex-direction: column;
-  overflow-y: auto;
   background: var(--color-surface);
   border-right: 1px solid var(--color-outline-soft);
 }
@@ -143,7 +142,7 @@ a:hover { color: #173bab; }
 .nav-toggle-icon::before { position: absolute; top: -6px; }
 .nav-toggle-icon::after { position: absolute; top: 6px; }
 
-.side-nav { flex: 1; padding: 12px 12px 24px; }
+.side-nav { min-height: 0; flex: 1; overflow-y: auto; padding: 12px 12px 24px; }
 .nav-group { padding: 10px 0; }
 .nav-group + .nav-group { border-top: 1px solid var(--color-surface-container); }
 .nav-group-title {
@@ -209,6 +208,7 @@ a:hover { color: #173bab; }
 
 .account-card {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 10px;
   padding: 16px;
