@@ -19,10 +19,9 @@
       <label>IANA timezone<input name="timezone" value="Asia/Seoul" required></label>
       <label>마감 grace(분)<input name="after_hours_grace_minutes" type="number" value="10" min="0" max="1440" required></label>
       <label>담당 STAFF
-        <select name="responsible_staff_user_ids" multiple size="4">
+        <select name="responsible_staff_user_ids" multiple size="1">
           {% for staff in staff_users %}<option value="{{ staff.id }}">{{ staff.name }} · {{ staff.email }}</option>{% endfor %}
         </select>
-        <span class="help-text">Ctrl 또는 Cmd를 누른 채 여러 명을 선택할 수 있습니다.</span>
       </label>
       <button type="submit" data-pending-label="생성 중…">강의실 생성</button>
     </form>
@@ -51,7 +50,7 @@
                   <label>timezone<input name="timezone" value="{{ entry.classroom.timezone }}" required></label>
                   <label>grace(분)<input name="after_hours_grace_minutes" type="number" min="0" max="1440" value="{{ entry.classroom.after_hours_grace_minutes }}" required></label>
                   <label>담당 STAFF
-                    <select name="responsible_staff_user_ids" multiple size="4">
+                    <select name="responsible_staff_user_ids" multiple size="1">
                       {% for staff in staff_users %}<option value="{{ staff.id }}" {% if staff.id in entry.classroom.responsible_staff_user_ids %}selected{% endif %}>{{ staff.name }} · {{ staff.email }}</option>{% endfor %}
                     </select>
                     <span class="help-text">선택하지 않으면 경고는 ADMIN에게만 전달됩니다.</span>
