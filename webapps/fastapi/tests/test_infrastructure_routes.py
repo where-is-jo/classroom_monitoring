@@ -185,8 +185,8 @@ def test_설계_명세는_별도_Swagger_경로로_제공된다(client: TestClie
 
     spec = spec_response.json()
     assert spec["openapi"].startswith("3.1")
-    assert "/api/v1/dashboard/summary" in spec["paths"]
-    assert "/internal/v1/detections" in spec["paths"]
+    assert "/api/auth/login" in spec["paths"]
+    assert "/api/admin/rooms" in spec["paths"]
 
     docs_response = client.get("/docs/api-spec")
     assert docs_response.status_code == 200
@@ -197,8 +197,8 @@ def test_설계_명세는_앱_OpenAPI_스키마를_오염시키지_않는다(cli
     """구현되지 않은 경로가 실제 API 문서에 있는 기능처럼 보이면 안 된다."""
     paths = set(client.get("/openapi.json").json()["paths"])
 
-    assert "/api/v1/dashboard/summary" not in paths
-    assert "/api/v1/employee-statuses" not in paths
+    assert "/api/auth/password" not in paths
+    assert "/api/interviews" not in paths
     assert "/api-spec.json" not in paths
     assert "/docs/api-spec" not in paths
 
