@@ -6,10 +6,7 @@
 from __future__ import annotations
 
 import os
-<<<<<<< HEAD
-=======
 from collections.abc import Iterator
->>>>>>> c0ce1a49fec0a2a56a7a71199ef0abfd8aa22ce0
 from datetime import UTC, datetime
 
 # 앱 시작 전에 외부 의존 없는 local memory mode를 명시한다.
