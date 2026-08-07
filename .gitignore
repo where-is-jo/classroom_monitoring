@@ -1,5 +1,6 @@
 # 로컬 환경변수 — 실제 값이 들어가므로 커밋하지 않는다.
 # 변수 이름과 설명은 각 서비스의 .env.example에 둔다.
+env/*
 .env
 
 # 프로젝트 생성 지시 프롬프트 — 저장소 산출물이 아닌 작업 입력물.
@@ -7,6 +8,11 @@ initial_prompt.md
 
 # 개별 작업 폴더 - 로컬에서 개별적으로 관리합니다.
 individual_tasks/*
+
+# 로컬 docker compose 구성 - 팀 공식 실행 수단으로 확정되지 않아 개인 로컬 전용으로 둔다.
+# docs/agents/AGENTS.md의 "최상위에 인프라 파일을 새로 만들지 않는다" 제약 때문에
+# 커밋 대상에서 제외한다. 공식화하려면 ADR과 AGENTS.md·README.md 갱신이 먼저 필요하다.
+.docker/
 
 # Claude Code 설정·스킬·지침 - 팀원과는 저장소 밖에서 공유한다.
 .claude/
