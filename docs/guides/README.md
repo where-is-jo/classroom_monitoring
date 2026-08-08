@@ -13,7 +13,8 @@
    [fastapi](../../webapps/fastapi/README.md) ·
    [worker](../../worker/README.md) ·
    [deeplearning](../../deeplearning/README.md) ·
-   [monitoring](../../monitoring/README.md) ·
+   [monitoring/internal](../../monitoring/internal/README.md) ·
+   [monitoring/external](../../monitoring/external/README.md) ·
    [RPAs](../../RPAs/README.md)
 4. [개발 규칙](../conventions/) — 전부 읽을 필요는 없다. 필요할 때 본다
 

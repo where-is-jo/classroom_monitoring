@@ -49,7 +49,8 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 | [`webapps/fastapi`](../../webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 외부 진입점. | 추론 연산, 스트림 처리 |
 | [`deeplearning`](../../deeplearning/README.md) | 모델 로딩과 추론. 표준화된 탐지 결과를 반환한다. | 업무 해석, 영속 저장 |
 | [`worker`](../../worker/README.md) | 영상 수신과 프레임 공급. | 추론, 장기 저장 |
-| [`monitoring`](../../monitoring/README.md) | Prometheus·Grafana 설정. | 애플리케이션 비즈니스 로직 |
+| [`monitoring/internal`](../../monitoring/internal/README.md) | **내부 모니터링.** Prometheus·Grafana 설정. 대상은 서비스 자체, 수요자는 운영자. | 애플리케이션 비즈니스 로직 |
+| [`monitoring/external`](../../monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제공하는 실시간 영상 모니터링. **경계가 아직 확정되지 않았다** — 설정·문서만 둘지 서비스 코드를 둘지 정해지기 전까지 코드를 넣지 않는다. | 지표·대시보드, 추론, 탐지 결과의 업무 해석 |
 | `docs` | 아키텍처, 개발 규칙, 에이전트 규칙, 프롬프트, 템플릿. **AI 에이전트 관련 문서는 모두 여기에 둔다.** | 실행 코드, 특정 서비스의 실행 방법 |
 | [`RPAs`](../../RPAs/README.md) | 업무 자동화 프로젝트. 프로젝트별 독립 디렉터리로 관리한다. | 상시 실행 서비스 |
 
