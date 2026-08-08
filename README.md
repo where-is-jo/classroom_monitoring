@@ -10,10 +10,13 @@
 
 ## 현재 단계
 
-문서 체계와 **`webapps/fastapi`의 v2 캠퍼스 운영 포털**이 동작한다. 세 제품 역할의
-인증·사용자 관리, 직원 상태, 면담 대기, 강의실 좌석과 마감 후 경고, 인앱 알림,
-관리자 대시보드를 제공한다. local/dev에서는 실제 영상이나 개인정보 없이 합성 모니터링과
-영상 검색 흐름도 시연할 수 있다.
+실행 코드가 있는 곳은 두 곳이다.
+
+- **`webapps/fastapi`** — v2 캠퍼스 운영 포털. 세 제품 역할의 인증·사용자 관리,
+  직원 상태, 면담 대기, 강의실 좌석과 마감 후 경고, 인앱 알림, 관리자 대시보드를 제공한다.
+  local/dev에서는 실제 영상이나 개인정보 없이 합성 모니터링·영상 검색 흐름도 시연할 수 있다.
+- **`worker`** — USB 카메라 1대를 RTSP로 송출하고 수신해 원본 영상과 학습용 프레임을
+  로컬에 저장한다. 아직 다른 서비스와 연결되어 있지 않다.
 
 ```bash
 cd webapps/fastapi
@@ -24,10 +27,11 @@ python -m uvicorn app.main:app --reload --port 8000
 ```
 
 FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 지원한다. 실행 방법,
-역할별 화면, 환경변수와 API 경계는 [fastapi README](./webapps/fastapi/README.md)가 기준이다.
+역할별 화면, 환경변수와 API 경계는 [fastapi README](./webapps/fastapi/README.md)가 기준이고,
+서비스를 실행하고 검증하는 명령은 [개발 가이드](./docs/guides/README.md)에 모여 있다.
 
-`deeplearning`, `worker`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다. 실제 카메라·영상
-수집, 추론, 실시간 갱신, MinIO 영상 저장은 구현되지 않았다.
+`deeplearning`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다. 추론, 카메라 영상과
+직원 상태의 연결, 실시간 갱신, MinIO 영상 저장은 구현되지 않았다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -48,12 +52,12 @@ README.md      이 문서
 
 ### 서비스
 
-| 디렉터리 | 역할 |
-| --- | --- |
-| [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. |
-| [deeplearning](./deeplearning/README.md) | 영상 프레임 추론. 표준화된 탐지 결과를 반환한다. |
-| [worker](./worker/README.md) | CCTV·Jetson 영상 수신과 프레임 공급. |
-| [monitoring](./monitoring/README.md) | Prometheus·Grafana 설정 관리. |
+| 디렉터리 | 역할 | 상태 |
+| --- | --- | --- |
+| [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. | 동작 |
+| [worker](./worker/README.md) | 카메라 영상 수신과 프레임 공급. | 수집·저장까지 동작 |
+| [deeplearning](./deeplearning/README.md) | 영상 프레임 추론. 표준화된 탐지 결과를 반환한다. | 코드 없음 |
+| [monitoring](./monitoring/README.md) | Prometheus·Grafana 설정 관리. | 코드 없음 |
 
 `webapps/`는 웹 애플리케이션 전용이다. 웹 요청을 처리하지 않는 서비스는
 최상위에 독립 디렉터리로 둔다.
@@ -64,10 +68,10 @@ README.md      이 문서
 | --- | --- |
 | `docs/agents` | AI 에이전트가 지켜야 할 작업 규칙 |
 | `docs/prompts` | 바로 복사해 쓰는 작업 프롬프트 |
-| `docs/architecture` | 구조 설명과 결정 기록(ADR) |
+| `docs/architecture` | [구조 설명](./docs/architecture/README.md)과 [결정 기록](./docs/architecture/decisions.md) |
 | `docs/conventions` | Git·코딩·API·환경변수·문서 규칙 |
-| `docs/guides` | [시작하기](./docs/guides/getting-started.md), [로컬 개발](./docs/guides/local-development.md), [테스트](./docs/guides/testing.md), [배포](./docs/guides/deployment.md) |
-| `docs/templates` | 복사해 쓰는 문서 템플릿 — [서비스 README](./docs/templates/service-readme-template.md), [기능 명세](./docs/templates/feature-spec-template.md), [API 명세](./docs/templates/api-spec-template.md), [트러블슈팅](./docs/templates/troubleshooting-template.md), [ADR](./docs/templates/adr-template.md) |
+| `docs/guides` | [개발 가이드](./docs/guides/README.md) — 실행·검증 명령과 작업 흐름 |
+| `docs/templates` | 복사해 쓰는 문서 템플릿 — [서비스 README](./docs/templates/service-readme-template.md), [기능 명세](./docs/templates/feature-spec-template.md), [API 명세](./docs/templates/api-spec-template.md), [트러블슈팅](./docs/templates/troubleshooting-template.md) |
 
 ### RPAs
 
@@ -78,9 +82,9 @@ README.md      이 문서
 
 1. 이 문서
 2. 담당 서비스 디렉터리의 `README.md`
-3. [아키텍처 개요](./docs/architecture/overview.md) — 서비스 관계와 미결정 항목
+3. [아키텍처](./docs/architecture/README.md) — 서비스 관계와 미결정 항목
 4. 개발 규칙 — [Git](./docs/conventions/git-convention.md) · [코딩](./docs/conventions/coding-convention.md) · [API](./docs/conventions/api-convention.md) · [환경변수](./docs/conventions/environment-convention.md) · [문서](./docs/conventions/documentation-convention.md)
-5. [시작하기 가이드](./docs/guides/getting-started.md) — 무엇부터 읽고 어디서 시작할지
+5. [개발 가이드](./docs/guides/README.md) — 실행하고 검증하는 명령
 
 ## AI 에이전트 사용 방법
 
@@ -92,6 +96,8 @@ README.md      이 문서
   스킬은 `.claude/skills/`에 있으며 **저장소에 포함되지 않는다.** 팀원과는 따로 공유한다.
 - 작업 지시는 `docs/prompts/`의 템플릿을 복사해 변수를 채운 뒤 사용한다.
   [프로젝트 초기화](./docs/prompts/initialize-project.md) · [기능 구현](./docs/prompts/implement-feature.md) · [버그 조사](./docs/prompts/investigate-bug.md) · [PR 리뷰](./docs/prompts/review-pull-request.md) · [문서 갱신](./docs/prompts/update-project-docs.md)
+- 저장소를 직접 읽지 못하는 도구(웹 GPT 등)로 작업할 때는
+  [GPT 코딩 프롬프트](./docs/prompts/gpt-agent.md)의 규칙 블록을 대화에 붙여넣는다.
 
 에이전트 관련 문서는 모두 `docs/` 아래에 두며, 최상위에 `AGENTS.md`를 만들지 않는다.
 
@@ -102,7 +108,7 @@ README.md      이 문서
 | 새 웹 애플리케이션 | `webapps/<service-name>/` | [서비스 README 템플릿](./docs/templates/service-readme-template.md) |
 | 웹이 아닌 새 서비스 | 최상위 `<service-name>/` | 동일. AGENTS.md의 최상위 제약도 갱신한다 |
 | 새 RPA | `RPAs/<rpa-name>/` | [RPA 규칙](./RPAs/README.md) |
-| 아키텍처 결정 | `docs/architecture/decisions/` | [ADR 작성 방법](./docs/architecture/decisions/README.md) |
+| 아키텍처 결정 | `docs/architecture/decisions.md` | [기록 방법](./docs/architecture/decisions.md#어떻게-기록하는가). 결정마다 파일을 만들지 않는다 |
 | 개발 규칙 | `docs/conventions/` | 기존 문서 수정을 우선 |
 | 작업 절차 | `.claude/skills/<skill-name>/` | 저장소 밖. 작성법은 `.claude/skills/README.md` |
 | 문서 템플릿 | `docs/templates/` | |
@@ -121,18 +127,19 @@ README.md      이 문서
 
 ## 아직 결정되지 않은 항목
 
-아래는 확정되지 않았다. 임의로 구현하지 말고 결정 후 ADR로 남긴다.
+아래는 확정되지 않았다. 임의로 구현하지 말고 결정 후 [결정 기록](./docs/architecture/decisions.md)에 남긴다.
+전체 목록과 각 항목의 영향 범위는
+[아키텍처의 미결정 항목](./docs/architecture/README.md#미결정-항목)이 정본이다.
 
-- 실시간 화면 갱신 방식(폴링 / SSE / WebSocket)
-- 서비스 간 통신 방식(동기 HTTP / 메시지 큐)
-- 사용할 모델과 버전, GPU·Jetson 실행 범위
-- 영상 수신 프로토콜(RTSP / WebRTC / HTTP 푸시)
+- 상태 판정 로직을 어느 서비스가 소유하는가
+- 프레임과 탐지 결과의 전달 방식(직접 전달 / 공유 저장소 / 큐)
+- 실시간 화면 갱신 방식(폴링 / SSE / WebSocket)과 브라우저 영상 재생 방식
+- 사용할 모델과 버전, Jetson 적용 범위와 다중 카메라 확장
 - 캐시·큐 도입 여부(Redis는 후보)
 - 영상 저장 범위·보존 기간·접근 권한 — 개인정보가 걸린 합의 사항
-- 영상을 저장하는 주체(worker / fastapi)
-- 배포 환경과 배포 방식
+- 통합 실행 수단(docker compose) 공식화, 배포 환경과 배포 방식
 - 알림 채널
 
-확정된 결정은 [ADR](./docs/architecture/decisions/README.md)에 기록되어 있다.
-메타데이터 저장소(MongoDB), 영상 저장소(MinIO), fastapi 내부 구조와
-[v2 레거시 호환성](./docs/architecture/decisions/ADR-0006-v2-legacy-compatibility.md)이 여기에 해당한다.
+확정된 결정은 [결정 기록](./docs/architecture/decisions.md)에 있다.
+메타데이터 저장소(MongoDB), 영상 저장소(MinIO), fastapi 내부 구조, 설계 패턴 판단 기준,
+v2 레거시 호환성이 여기에 해당한다.

@@ -43,7 +43,7 @@
 - 모델 교체 시 입출력 스키마 변경 여부를 먼저 확인한다.
 
 배포 시 모델 파일 전달 방식은 **결정 필요**다.
-객체 저장소가 MinIO로 확정됐으므로([ADR-0004](../docs/architecture/decisions/ADR-0004-object-storage-minio.md))
+객체 저장소가 MinIO로 확정됐으므로([결정 0004](../docs/architecture/decisions.md#0004--영상스냅샷-저장소로-minio-채택))
 MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함, 볼륨 마운트도 여전히 후보다.
 
 ## 예상 기술
@@ -85,5 +85,4 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 
 - [AI 에이전트 규칙](../docs/agents/ai-agent.md)
 - `add-monitoring-metric` 스킬
-- [데이터 흐름](../docs/architecture/data-flow.md)
-- [아키텍처 개요](../docs/architecture/overview.md)
+- [아키텍처](../docs/architecture/README.md)
