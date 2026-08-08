@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# 사유는 prometheus.yml의 같은 항목 주석 참고.
+deleteDatasources:
+  - name: Loki
+    orgId: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    # 대시보드 JSON이 이 uid로 데이터소스를 참조한다. 바꾸면 대시보드도 함께 고쳐야 한다.
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true

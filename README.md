@@ -57,7 +57,8 @@ README.md      이 문서
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. | 동작 |
 | [worker](./worker/README.md) | 카메라 영상 수신과 프레임 공급. | 수집·저장까지 동작 |
 | [deeplearning](./deeplearning/README.md) | 영상 프레임 추론. 표준화된 탐지 결과를 반환한다. | 코드 없음 |
-| [monitoring](./monitoring/README.md) | Prometheus·Grafana 설정 관리. | 코드 없음 |
+| [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | Grafana 설정만 있음 |
+| [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상 모니터링. | 코드 없음. 경계 미확정 |
 
 `webapps/`는 웹 애플리케이션 전용이다. 웹 요청을 처리하지 않는 서비스는
 최상위에 독립 디렉터리로 둔다.

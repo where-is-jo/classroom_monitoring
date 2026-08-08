@@ -45,7 +45,8 @@ flowchart TB
 | 상태 판정 | 소유 서비스 `결정 필요` | `예정`. 아래 [상태 판정은 누가 하는가](#상태-판정은-누가-하는가) 참고 |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 구현됨 |
 | 영상·프레임을 저장소와 추론 모델에 전달 | [`worker`](../../worker/README.md) | `예정`. 저장 범위 미합의 |
-| 지표·대시보드 | [`monitoring`](../../monitoring/README.md) | `예정`. 코드 없음 |
+| 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)만 있다. **수집할 지표가 없어 Prometheus 설정과 알림 규칙은 `예정`** |
+| 사용자용 실시간 영상 모니터링 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. 코드 없음. 디렉터리 경계와 재생 방식이 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
 
 구성도에는 MinIO가 없지만 영상·스냅샷 저장소는 MinIO로 확정되어 있다
@@ -205,6 +206,8 @@ GET 요청은 시간 정책이나 상태 전이를 실행하지 않는다. 시�
 | 탐지 결과 전달 방식(동기 HTTP / 메시지 큐) | 결정 필요 | 전체 |
 | 실시간 화면 갱신 방식(폴링 / SSE / WebSocket) | 결정 필요 | fastapi |
 | 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | 결정 필요 | fastapi, worker |
+| `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 결정 필요 | monitoring, fastapi |
+| 실시간 영상에서 "브라우저는 fastapi만 호출한다"를 유지할지 | 결정 필요 | fastapi, monitoring |
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 관련 합의 사항 |
 | 모델 종류와 버전 | 후보: YOLO 계열 | deeplearning |
