@@ -11,7 +11,7 @@
 
 - Markdown으로 쓴다.
 - 파일 이름은 소문자와 하이픈을 쓴다: `local-development.md`
-  예외는 관례를 따르는 `README.md`, `AGENTS.md`, `SKILL.md`, `ADR-NNNN-*.md`다.
+  예외는 관례를 따르는 `README.md`, `AGENTS.md`, `SKILL.md`다.
 - 제목(`#`)은 문서당 하나만 쓴다.
 - 표와 목록을 적극적으로 쓴다. 같은 내용을 문단으로 늘어놓지 않는다.
 
@@ -37,13 +37,13 @@ READMEs처럼 대상이 자명한 문서는 한 줄 설명으로 대신해도 �
 | --- | --- |
 | 이 저장소는 무엇인가 | 루트 `README.md` |
 | 이 서비스는 무엇을 맡는가 | `webapps/<service>/README.md` |
-| 시스템이 어떻게 구성되는가 | `docs/architecture/` |
-| 왜 이렇게 결정했는가 | `docs/architecture/decisions/` |
+| 시스템이 어떻게 구성되는가 | `docs/architecture/README.md` |
+| 왜 이렇게 결정했는가 | `docs/architecture/decisions.md` |
 | 결과물이 어떤 형식이어야 하는가 | `docs/conventions/` |
 | 이 작업을 어떤 순서로 하는가 | `.claude/skills/` (저장소 밖) |
 | 에이전트가 무엇을 지켜야 하는가 | `docs/agents/` |
 | 에이전트에게 어떻게 지시하는가 | `docs/prompts/` |
-| 처음 접하는 사람이 어떻게 시작하는가 | `docs/guides/` |
+| 처음 접하는 사람이 어떻게 실행하는가 | `docs/guides/README.md` |
 | 새 문서를 어떤 뼈대로 쓰는가 | `docs/templates/` |
 
 주제별 기준 문서는 [AGENTS.md의 Source of Truth](../agents/AGENTS.md#source-of-truth)에 정리되어 있다.
@@ -80,7 +80,7 @@ READMEs처럼 대상이 자명한 문서는 한 줄 설명으로 대신해도 �
 
 - **확인하지 않은 동작을 사실처럼 쓰지 않는다.**
 - **실행해 보지 않은 명령을 문서에 넣지 않는다.** 구현이 없으면 "구현 후 기록한다"고 적는다.
-- 확정되면 표기를 지우고, 결정 근거는 [ADR](../architecture/decisions/README.md)에 남긴다.
+- 확정되면 표기를 지우고, 결정 근거는 [결정 기록](../architecture/decisions.md)에 남긴다.
 
 ## 쓰지 않는 것
 
@@ -99,8 +99,7 @@ READMEs처럼 대상이 자명한 문서는 한 줄 설명으로 대신해도 �
 - 다이어그램이 설명하는 내용을 글로도 요약한다. 그림만 보고 판단하게 하지 않는다.
 - 다이어그램과 문서 본문이 어긋나지 않게 함께 갱신한다.
 
-사용 예는 [시스템 컨텍스트](../architecture/system-context.md)와
-[아키텍처 개요](../architecture/overview.md)에 있다.
+사용 예는 [아키텍처](../architecture/README.md#시스템-구성)에 있다.
 
 ## 관련 문서
 

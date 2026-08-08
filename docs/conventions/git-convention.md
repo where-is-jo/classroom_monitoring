@@ -71,7 +71,7 @@ Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 | --- | --- |
 | 서비스 | `fastapi`, `deeplearning`, `worker`, `monitoring`, `rpa` |
 | fastapi 기능 | `events`, `cameras`, `auth` |
-| 문서 영역 | `docs`, `agents`, `adr` |
+| 문서 영역 | `docs`, `agents` |
 | 저장소 설정 | `config` |
 
 목록에 없는 스코프가 필요하면 억지로 만들지 말고 생략한다.

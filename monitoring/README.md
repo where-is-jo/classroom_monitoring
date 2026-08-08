@@ -69,5 +69,5 @@ Prometheus와 Grafana 기반 관측 설정을 관리하는 디렉터리다.
 ## 관련 문서
 
 - `add-monitoring-metric` 스킬
-- [아키텍처 개요](../docs/architecture/overview.md)
+- [아키텍처](../docs/architecture/README.md)
 - [코딩 규칙](../docs/conventions/coding-convention.md)

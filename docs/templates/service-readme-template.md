@@ -73,7 +73,7 @@
 ## 테스트 전략
 
 > 무엇을 테스트하고 무엇을 기본 실행에서 분리하는지.
-> 수준별 기준은 docs/guides/testing.md에 있다.
+> 공통 기준은 docs/conventions/coding-convention.md의 테스트 절에 있다.
 
 ## 관련 문서
 

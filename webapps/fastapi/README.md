@@ -54,7 +54,7 @@ MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_
 
 제품 역할은 위 세 가지뿐이다. 저장된 레거시 문서를 읽기 위해 `SYSTEM_OPERATOR` enum은
 남아 있지만 로그인·토큰 인증·관리 권한·신규 생성·seed 대상이 아니다. 레거시 경계와 이전
-정책은 [ADR-0006](../../docs/architecture/decisions/ADR-0006-v2-legacy-compatibility.md)에 있다.
+정책은 [결정 0006](../../docs/architecture/decisions.md#0006--v2-제품-경계와-레거시-호환성)에 있다.
 
 ## 화면과 API
 
@@ -160,7 +160,7 @@ OpenAPI에서 숨기고 `Deprecation: true`를 보낸다.
 기능별 디렉터리와 `router → service → port ← adapter` 호출 방향을 사용한다. 라우터는
 HTTP 변환만, 서비스는 프레임워크와 분리된 판단만 담당한다. 저장소 구현의 조립은
 `app/shared/dependencies.py` 한 곳에 둔다. 배경은
-[ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)에 있다.
+[결정 0002](../../docs/architecture/decisions.md#0002--fastapi-계층형-구조와-경계-포트)에 있다.
 
 ```text
 app/
@@ -227,5 +227,5 @@ python -m pytest -q -m mongodb
 
 - [FastAPI 에이전트 규칙](../../docs/agents/fastapi-agent.md)
 - [API 규칙](../../docs/conventions/api-convention.md)
-- [아키텍처 개요](../../docs/architecture/overview.md)
-- [v2 레거시 호환성 결정](../../docs/architecture/decisions/ADR-0006-v2-legacy-compatibility.md)
+- [아키텍처](../../docs/architecture/README.md)
+- [결정 기록](../../docs/architecture/decisions.md)
