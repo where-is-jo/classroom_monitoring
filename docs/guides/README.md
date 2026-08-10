@@ -71,21 +71,35 @@ python -m pytest -q
 단일 테스트 실행:
 
 ```bash
-python -m pytest tests/test_event_service.py                    # 파일 단위
+python -m pytest tests/employees                                # 기능 단위
+python -m pytest tests/employees/test_service.py                # 파일 단위
 python -m pytest -k "임계값"                                     # 이름으로 필터
 python -m pytest -q -m mongodb                                  # MongoDB 통합 테스트
 ```
+
+테스트는 `app`과 같은 기능별 디렉터리로 나뉜다. 배치 기준은
+[tests README](../../webapps/fastapi/tests/README.md)에 있다.
 
 MongoDB 통합 테스트는 `TEST_DATABASE_URL`이 없으면 skip한다. 실제 MongoDB로 돌릴 때는
 URL 경로에 `test_`로 시작하는 database 이름을 넣는다.
 
 ## worker 실행
 
-USB 카메라 영상을 RTSP로 송출하고, 그 스트림을 받아 원본 영상과 학습용 프레임
-이미지를 저장한다. 실행에는 FFmpeg와 MediaMTX가 별도로 필요하다.
+`worker`는 파이프라인 단계별 워커로 나뉘며 현재 `stream`만 동작한다
+([결정 0007](../architecture/decisions.md#0007--worker를-역할별-워커로-분리)).
+여러 RTSP 소스에 붙어 연결을 유지하고 추론 대상 프레임을 골라낸다.
+USB 카메라를 직접 쓰면 FFmpeg와 MediaMTX가 별도로 필요하다.
 
-실행 절차와 설정값은 [worker README](../../worker/README.md)와
-[카메라 수집 구성](../../worker/camera-guides.md)에 있다.
+```bash
+cd worker
+python -m pip install -r stream/requirements.txt
+cp stream/.env.example stream/.env    # STREAM_SOURCES를 채운다
+python -m stream.main
+python -m pytest stream/tests -q      # 장비 없이 도는 단위 테스트
+```
+
+실행 절차와 환경변수는 [stream README](../../worker/stream/README.md)에,
+설정값의 근거와 겪은 문제는 [카메라 수집 구성](../../worker/stream/camera-guides.md)에 있다.
 
 `deeplearning`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다.
 실행 방법을 지어내지 말고, 구현한 사람이 해당 서비스 README에 실제로 확인한 명령을 적는다.
