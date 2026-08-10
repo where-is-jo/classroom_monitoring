@@ -15,8 +15,9 @@
 - **`webapps/fastapi`** — v2 캠퍼스 운영 포털. 세 제품 역할의 인증·사용자 관리,
   직원 상태, 면담 대기, 강의실 좌석과 마감 후 경고, 인앱 알림, 관리자 대시보드를 제공한다.
   local/dev에서는 실제 영상이나 개인정보 없이 합성 모니터링·영상 검색 흐름도 시연할 수 있다.
-- **`worker`** — USB 카메라 1대를 RTSP로 송출하고 수신해 원본 영상과 학습용 프레임을
-  로컬에 저장한다. 아직 다른 서비스와 연결되어 있지 않다.
+- **`worker/stream`** — 여러 RTSP 소스에 붙어 연결을 유지하고 추론 대상 프레임을 골라낸다.
+  USB 카메라를 RTSP로 송출하는 기능도 함께 있다. 아직 다른 서비스와 연결되어 있지 않다.
+  `worker`의 나머지 세 워커(`inference`, `state`, `recorder`)는 README만 있다.
 
 ```bash
 cd webapps/fastapi
@@ -55,7 +56,7 @@ README.md      이 문서
 | 디렉터리 | 역할 | 상태 |
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. | 동작 |
-| [worker](./worker/README.md) | 카메라 영상 수신과 프레임 공급. | 수집·저장까지 동작 |
+| [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`state`·`recorder`). | `stream`만 동작 |
 | [deeplearning](./deeplearning/README.md) | 영상 프레임 추론. 표준화된 탐지 결과를 반환한다. | 코드 없음 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | Grafana 설정만 있음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상 모니터링. | 코드 없음. 경계 미확정 |
@@ -135,7 +136,7 @@ README.md      이 문서
 - 상태 판정 로직을 어느 서비스가 소유하는가
 - 프레임과 탐지 결과의 전달 방식(직접 전달 / 공유 저장소 / 큐)
 - 실시간 화면 갱신 방식(폴링 / SSE / WebSocket)과 브라우저 영상 재생 방식
-- 사용할 모델과 버전, Jetson 적용 범위와 다중 카메라 확장
+- 사용할 모델과 버전, Jetson 적용 범위
 - 캐시·큐 도입 여부(Redis는 후보)
 - 영상 저장 범위·보존 기간·접근 권한 — 개인정보가 걸린 합의 사항
 - 통합 실행 수단(docker compose) 공식화, 배포 환경과 배포 방식
