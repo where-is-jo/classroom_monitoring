@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from ..config import StreamSettings
-from ..main import _format_validation_error
+from shared.config_errors import format_validation_error
 
 
 def capture_validation_error(**values: object) -> ValidationError:
@@ -16,7 +16,7 @@ def capture_validation_error(**values: object) -> ValidationError:
 
 
 def test_없는_변수의_이름을_환경변수_표기로_알린다() -> None:
-    message = _format_validation_error(capture_validation_error())
+    message = format_validation_error(capture_validation_error())
 
     assert "APP_ENV" in message
     assert "STREAM_SOURCES" in message
@@ -30,7 +30,7 @@ def test_오류_메시지에_설정값을_넣지_않는다() -> None:
         recording_enabled=True,
     )
 
-    message = _format_validation_error(error)
+    message = format_validation_error(error)
 
     assert "SuperSecret123" not in message
     assert "admin" not in message
@@ -44,6 +44,6 @@ def test_모델_수준_오류도_사유를_남긴다() -> None:
         rtsp_publish_enabled=True,
     )
 
-    message = _format_validation_error(error)
+    message = format_validation_error(error)
 
     assert "RTSP_PUBLISH_DEVICE_NAME" in message

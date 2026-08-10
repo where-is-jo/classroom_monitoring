@@ -14,7 +14,7 @@ RTSP 영상 소스에 붙어 연결을 유지하고, 추론 대상 프레임을 
 - 소스별 식별자 부여와 연결 상태 관리 (`idle` / `connected` / `reconnecting` / `failed` / `stopped`)
 - 프레임 추출과 샘플링 — 모든 프레임을 추론에 보내지 않는다
 - 로컬 USB 카메라를 RTSP로 송출 (개발 환경용, 선택)
-- 추출한 프레임을 `inference` worker에 공급 (`예정`, 전달 방식 `결정 필요`)
+- 샘플링한 프레임을 프레임 버퍼에 넣어 `inference` worker에 공급
 - 연결 상태·프레임 처리량 지표 노출 (`예정`)
 
 ## 포함하지 않는 것
@@ -33,13 +33,32 @@ RTSP 영상 소스에 붙어 연결을 유지하고, 추론 대상 프레임을 
 | `camera_reader.py` | RTSP 소스 하나의 연결·재연결·프레임 읽기 |
 | `rtsp_publisher.py` | FFmpeg으로 USB 카메라를 RTSP로 송출 (선택) |
 | `video_recorder.py` | 원본 영상 세그먼트 저장 (개발용, 기본 꺼짐) |
-| `frame_capture.py` | 샘플링한 프레임을 이미지로 저장 (개발용, 기본 꺼짐) |
+| `frame_capture.py` | 넘겨받은 프레임을 이미지로 저장 (개발용, 기본 꺼짐) |
 | `worker.py` | 카메라별 파이프라인을 스레드로 관리 |
 | `main.py` | 진입점. 설정 검증, 로깅, 종료 신호 처리 |
 
 **카메라 대수만큼 프로세스를 띄우지 않는다.** `StreamWorker` 하나가 소스마다
 `CameraPipeline` 스레드를 들고 있고, 한 카메라의 연결 실패가 다른 카메라를 멈추지 않는다.
 OpenCV의 프레임 읽기는 GIL을 놓는 블로킹 호출이라 스레드로 병행된다.
+
+### 샘플링은 파이프라인이 한 번만 판단한다
+
+`CameraPipeline`이 `FRAME_SAMPLE_INTERVAL_FRAMES`마다 프레임 하나를 고르고, 그
+**같은 프레임**을 학습용 저장기와 추론 버퍼에 함께 넘긴다. 저장기와 버퍼가 각자
+세면 디스크에 남은 이미지와 추론에 들어간 프레임이 어긋나, 나중에 탐지 결과를
+이미지로 되짚을 수 없다.
+
+원본 영상 녹화는 샘플링 앞에 있다. 녹화에서 프레임을 건너뛰면 영상이 끊겨 보인다.
+
+```text
+reader.read() ─▶ video_recorder (모든 프레임)
+              └▶ should_sample? ─▶ frame_capture (디스크)
+                                └▶ FrameBuffer  (추론)
+```
+
+`inference`로 넘기는 방식은
+[결정 0008](../../docs/architecture/decisions.md#0008--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)을 따른다.
+`stream`은 `inference`를 import하지 않고 [`shared`의 버퍼](../shared/README.md)에만 넣는다.
 
 ## 기술
 
@@ -124,7 +143,7 @@ python -m pytest stream/tests -q
 ```
 
 - 연결 상태 전이(연결 → 끊김 → 재시도 → 복구)를 대역으로 검증한다.
-- 프레임 샘플링은 순수 함수(`should_sample`)로 분리해 고정 입력으로 검증한다.
+- 프레임 샘플링은 `shared`의 순수 함수(`should_sample`)라 고정 입력으로 검증한다.
 - 오류 메시지에 카메라 자격 증명이 새지 않는지 검증한다.
 - 실제 장비가 필요한 확인은 기본 실행에 넣지 않는다.
 

@@ -1,7 +1,9 @@
-"""샘플링한 프레임을 학습용 이미지로 저장한다.
+"""샘플링된 프레임을 학습용 이미지로 저장한다.
 
-모든 프레임을 다루지 않는다. 샘플링 주기는 설정값이며, 이 주기가 나중에
-deeplearning으로 보낼 프레임을 고르는 기준과 같은 값이다.
+**어느 프레임을 고를지는 여기서 정하지 않는다.** 샘플링 판단은 CameraPipeline이
+한 번만 내리고 그 결과를 이 저장기와 추론 버퍼에 함께 전달한다. 저장기와 버퍼가
+각자 세면 디스크에 남은 학습용 이미지와 추론에 들어간 프레임이 서로 달라져,
+나중에 탐지 결과를 이미지로 되짚을 수 없다.
 """
 
 from __future__ import annotations
@@ -12,8 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-
-from .camera_reader import Frame
+from shared.types import Frame
 
 logger = logging.getLogger(__name__)
 
@@ -24,43 +25,24 @@ def _write_image(path: Path, frame: Frame) -> bool:
     return cv2.imwrite(str(path), frame)
 
 
-def should_sample(frame_index: int, interval_frames: int) -> bool:
-    """이 프레임을 샘플링 대상으로 고를지 판단한다.
-
-    프레임 번호만 보는 순수 함수라 실제 카메라 없이 검증할 수 있다.
-    """
-    if interval_frames < 1:
-        raise ValueError("샘플링 주기는 1 이상이어야 합니다.")
-    return frame_index % interval_frames == 0
-
-
 class FrameCapture:
-    """샘플링된 프레임을 카메라별·날짜별 디렉터리에 JPEG으로 저장한다."""
+    """넘겨받은 프레임을 카메라별·날짜별 디렉터리에 JPEG으로 저장한다."""
 
     def __init__(
         self,
         *,
         camera_id: str,
         output_dir: Path,
-        interval_frames: int,
         image_writer: ImageWriter = _write_image,
         now: Callable[[], datetime] = datetime.now,
     ) -> None:
         self._camera_id = camera_id
         self._output_dir = output_dir
-        self._interval_frames = interval_frames
         self._image_writer = image_writer
         self._now = now
-        self._frame_index = 0
 
-    def offer(self, frame: Frame) -> Path | None:
-        """프레임을 넘긴다. 샘플링 대상이면 저장하고 경로를, 아니면 None을 반환한다."""
-        is_sampled = should_sample(self._frame_index, self._interval_frames)
-        self._frame_index += 1
-
-        if not is_sampled:
-            return None
-
+    def save(self, frame: Frame) -> Path | None:
+        """프레임을 저장하고 경로를 돌려준다. 저장에 실패하면 None."""
         captured_at = self._now()
         capture_dir = self._output_dir / self._camera_id / captured_at.strftime("%Y-%m-%d")
         capture_dir.mkdir(parents=True, exist_ok=True)

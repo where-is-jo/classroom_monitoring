@@ -10,6 +10,12 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from shared.frame_buffer import FrameBuffer
+from shared.sampling import should_sample
+from shared.types import CapturedFrame
 
 from .camera_reader import CameraReader, ConnectionState
 from .config import CameraSource, StreamSettings
@@ -32,14 +38,21 @@ class CameraPipeline:
         reader: CameraReader,
         shutdown_event: threading.Event,
         retry_delay_seconds: float,
+        sample_interval_frames: int,
         recorder: VideoRecorder | None = None,
         frame_capture: FrameCapture | None = None,
+        frame_buffer: FrameBuffer | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._reader = reader
         self._shutdown_event = shutdown_event
         self._retry_delay_seconds = retry_delay_seconds
+        self._sample_interval_frames = sample_interval_frames
         self._recorder = recorder
         self._frame_capture = frame_capture
+        self._frame_buffer = frame_buffer
+        self._now = now
+        self._frame_index = 0
 
     @property
     def camera_id(self) -> str:
@@ -70,10 +83,29 @@ class CameraPipeline:
         if frame is None:
             return
 
+        # 원본 영상은 모든 프레임을 담아야 해서 샘플링 앞에 둔다.
         if self._recorder is not None:
             self._recorder.write(frame)
+
+        sequence = self._frame_index
+        self._frame_index += 1
+        if not should_sample(sequence, self._sample_interval_frames):
+            return
+
+        # 샘플링 판단은 여기서 한 번만 한다. 저장기와 버퍼가 같은 프레임을 받아야
+        # 나중에 탐지 결과를 디스크의 학습용 이미지로 되짚을 수 있다.
         if self._frame_capture is not None:
-            self._frame_capture.offer(frame)
+            self._frame_capture.save(frame)
+
+        if self._frame_buffer is not None:
+            self._frame_buffer.put(
+                CapturedFrame(
+                    camera_id=self.camera_id,
+                    frame=frame,
+                    captured_at=self._now(),
+                    sequence=sequence,
+                )
+            )
 
     def _close(self) -> None:
         self._reader.close()
@@ -89,10 +121,15 @@ class StreamWorker:
         settings: StreamSettings,
         *,
         publisher: RtspPublisher | None = None,
+        frame_buffer: FrameBuffer | None = None,
+        shutdown_event: threading.Event | None = None,
     ) -> None:
         self._settings = settings
         self._publisher = publisher
-        self._shutdown_event = threading.Event()
+        self._frame_buffer = frame_buffer
+        # 조립 진입점이 소비자와 같은 신호를 공유하도록 주입할 수 있게 한다.
+        # 추론이 치명적으로 실패하면 수신도 함께 멈춰야 한다.
+        self._shutdown_event = shutdown_event or threading.Event()
         self._pipelines = [
             self._build_pipeline(source) for source in settings.camera_sources
         ]
@@ -157,7 +194,6 @@ class StreamWorker:
             frame_capture = FrameCapture(
                 camera_id=source.camera_id,
                 output_dir=settings.frame_capture_output_dir,
-                interval_frames=settings.frame_sample_interval_frames,
             )
 
         reader = CameraReader(
@@ -170,6 +206,8 @@ class StreamWorker:
             reader=reader,
             shutdown_event=self._shutdown_event,
             retry_delay_seconds=settings.stream_reconnect_delay_seconds,
+            sample_interval_frames=settings.frame_sample_interval_frames,
             recorder=recorder,
             frame_capture=frame_capture,
+            frame_buffer=self._frame_buffer,
         )
