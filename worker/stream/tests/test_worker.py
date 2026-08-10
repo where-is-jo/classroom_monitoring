@@ -1,10 +1,15 @@
-"""파이프라인 루프와 다중 카메라 구성 검증."""
+"""파이프라인 루프, 샘플링, 버퍼 공급, 다중 카메라 구성 검증."""
 
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
+from pathlib import Path
 
-from ..camera_reader import ConnectionState, Frame
+from shared.frame_buffer import FrameBuffer
+from shared.types import Frame
+
+from ..camera_reader import ConnectionState
 from ..config import StreamSettings
 from ..errors import CameraConnectionError
 from ..worker import CameraPipeline, StreamWorker
@@ -55,10 +60,11 @@ class SpyRecorder:
 
 class SpyCapture:
     def __init__(self) -> None:
-        self.offered = 0
+        self.saved = 0
 
-    def offer(self, frame: Frame) -> None:
-        self.offered += 1
+    def save(self, frame: Frame) -> Path | None:
+        self.saved += 1
+        return None
 
 
 class StopAfter(threading.Event):
@@ -81,15 +87,20 @@ def build_pipeline(
     reader: FakeReader,
     shutdown: threading.Event,
     *,
+    sample_interval_frames: int = 1,
     recorder: SpyRecorder | None = None,
     frame_capture: SpyCapture | None = None,
+    frame_buffer: FrameBuffer | None = None,
 ) -> CameraPipeline:
     return CameraPipeline(
         reader=reader,  # type: ignore[arg-type]
         shutdown_event=shutdown,
         retry_delay_seconds=0,
+        sample_interval_frames=sample_interval_frames,
         recorder=recorder,  # type: ignore[arg-type]
         frame_capture=frame_capture,  # type: ignore[arg-type]
+        frame_buffer=frame_buffer,
+        now=lambda: datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC),
     )
 
 
@@ -104,7 +115,7 @@ def test_프레임을_저장소와_샘플러에_모두_넘긴다() -> None:
     pipeline.run()
 
     assert recorder.written == 2
-    assert capture.offered == 2
+    assert capture.saved == 2
 
 
 def test_None_프레임은_저장하지_않는다() -> None:
@@ -152,6 +163,69 @@ def test_이미_종료_신호면_한_번도_읽지_않는다() -> None:
     assert reader.closed
 
 
+class TestSampling:
+    def test_원본_영상은_샘플링하지_않고_모두_담는다(self) -> None:
+        """녹화에서 프레임을 건너뛰면 영상이 끊겨 보인다."""
+        reader = FakeReader([make_frame() for _ in range(6)])
+        recorder = SpyRecorder()
+        pipeline = build_pipeline(
+            reader, StopAfter(6), sample_interval_frames=3, recorder=recorder
+        )
+
+        pipeline.run()
+
+        assert recorder.written == 6
+
+    def test_주기에_해당하는_프레임만_버퍼에_넣는다(self) -> None:
+        reader = FakeReader([make_frame() for _ in range(6)])
+        buffer = FrameBuffer(maxsize=10)
+        pipeline = build_pipeline(
+            reader, StopAfter(6), sample_interval_frames=3, frame_buffer=buffer
+        )
+
+        pipeline.run()
+
+        # 0, 3번 프레임만 고른다.
+        assert buffer.stats.accepted == 2
+
+    def test_저장기와_버퍼가_같은_프레임을_받는다(self) -> None:
+        """따로 세면 디스크의 학습용 이미지와 추론에 들어간 프레임이 어긋난다."""
+        reader = FakeReader([make_frame() for _ in range(9)])
+        capture = SpyCapture()
+        buffer = FrameBuffer(maxsize=10)
+        pipeline = build_pipeline(
+            reader,
+            StopAfter(9),
+            sample_interval_frames=4,
+            frame_capture=capture,
+            frame_buffer=buffer,
+        )
+
+        pipeline.run()
+
+        assert capture.saved == buffer.stats.accepted == 3
+
+    def test_버퍼에_카메라와_프레임_번호를_함께_넣는다(self) -> None:
+        reader = FakeReader([make_frame() for _ in range(3)], camera_id="camera-02")
+        buffer = FrameBuffer(maxsize=10)
+        pipeline = build_pipeline(
+            reader, StopAfter(3), sample_interval_frames=2, frame_buffer=buffer
+        )
+
+        pipeline.run()
+
+        captured = buffer.get_latest(timeout=0)
+        assert captured is not None
+        assert captured.camera_id == "camera-02"
+        assert captured.sequence == 2
+
+    def test_버퍼가_없으면_아무것도_하지_않는다(self) -> None:
+        reader = FakeReader([make_frame()])
+        pipeline = build_pipeline(reader, StopAfter(1), frame_buffer=None)
+
+        pipeline.run()  # 예외가 나지 않아야 한다
+
+
 def build_settings(**overrides: object) -> StreamSettings:
     base = {
         "app_env": "local",
@@ -195,3 +269,20 @@ class TestStreamWorker:
         worker.request_shutdown()
 
         assert worker._shutdown_event.is_set()
+
+    def test_모든_카메라가_같은_버퍼를_공유한다(self) -> None:
+        buffer = FrameBuffer(maxsize=1)
+        worker = StreamWorker(build_settings(), frame_buffer=buffer)
+
+        assert all(
+            pipeline._frame_buffer is buffer for pipeline in worker._pipelines
+        )
+
+    def test_종료_신호를_주입하면_그것을_쓴다(self) -> None:
+        """추론이 치명적으로 실패하면 수신도 함께 멈춰야 한다."""
+        shutdown = threading.Event()
+        worker = StreamWorker(build_settings(), shutdown_event=shutdown)
+
+        shutdown.set()
+
+        assert worker._shutdown_event is shutdown

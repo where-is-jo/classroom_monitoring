@@ -1,0 +1,4 @@
+# 조립 실행은 두 워커를 한 프로세스에서 돌리므로 양쪽 의존성이 모두 필요하다.
+# 목록을 여기 복사하지 않는다. 복사하면 워커 쪽만 고쳤을 때 조립 실행이 깨진다.
+-r ../stream/requirements.txt
+-r ../inference/requirements.txt

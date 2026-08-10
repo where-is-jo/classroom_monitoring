@@ -14,8 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 import cv2
-
-from .camera_reader import Frame
+from shared.types import Frame
 
 logger = logging.getLogger(__name__)
 

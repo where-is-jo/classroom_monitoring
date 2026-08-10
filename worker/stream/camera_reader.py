@@ -13,15 +13,14 @@ from enum import Enum
 from typing import Protocol
 
 import cv2
-import numpy as np
-from numpy.typing import NDArray
+from shared.types import Frame
 
 from .config import CameraSource
 from .errors import CameraConnectionError
 
 logger = logging.getLogger(__name__)
 
-Frame = NDArray[np.uint8]
+__all__ = ["CameraReader", "ConnectionState", "Frame", "VideoCaptureLike"]
 
 
 class ConnectionState(str, Enum):

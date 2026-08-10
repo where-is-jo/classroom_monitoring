@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ..camera_reader import Frame
+from shared.types import Frame
 from ..video_recorder import VideoRecorder
 from .conftest import make_frame
 

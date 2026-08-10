@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ..camera_reader import Frame
+from shared.types import Frame
 
 
 def make_frame(width: int = 4, height: int = 3) -> Frame:
