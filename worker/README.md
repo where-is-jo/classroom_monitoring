@@ -35,7 +35,7 @@
 | [`stream`](./stream/README.md) | RTSP 영상 수집, 연결 유지·재연결, 프레임 샘플링 | 동작 |
 | [`inference`](./inference/README.md) | 사람·수화기 탐지 (YOLOv8n) | 동작. 결과는 로그로만 나간다 |
 | [`state`](./state/README.md) | 탐지 결과로 직원 상태 판정 | `예정`. 코드 없음. 소유 서비스 `결정 필요` |
-| [`recorder`](./recorder/README.md) | 영상 세그먼트를 MinIO에 적재 | `예정`. 코드 없음. 저장 범위 미합의 |
+| [`recorder`](./recorder/README.md) | 영상 세그먼트를 객체 저장소에 적재 | 동작. **저장 정책은 미합의**([결정 0009](../docs/architecture/decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)) |
 
 워커가 아닌 디렉터리가 둘 있다.
 
@@ -59,8 +59,11 @@
                                  오래된 것 버림
 ```
 
+`recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
+객체 저장소에 적재한 뒤, 보존 기간이 지난 것을 지운다.
+
 **아직 없는 것**: 탐지 결과를 `state`나 `fastapi`로 넘기는 경로(전달 방식 `결정 필요`,
-현재는 로그 출력까지), MinIO 업로드, 상태 판정, 지표 노출.
+현재는 로그 출력까지), 적재한 객체의 참조를 `fastapi`에 알리는 경로, 상태 판정, 지표 노출.
 
 ## 워커 사이의 경계
 
@@ -108,8 +111,13 @@
 ([결정 0003](../docs/architecture/decisions.md#0003--메타데이터-저장소로-mongodb-채택),
 [0004](../docs/architecture/decisions.md#0004--영상스냅샷-저장소로-minio-채택)).
 
-**영상을 저장소로 넘기는 주체는 worker다.** 다만 저장 범위와 보존 기간이 아직
-합의되지 않았으므로, 확정 전까지 영상을 상시 저장하는 기능을 만들지 않는다.
+**영상을 저장소로 넘기는 주체는 `recorder`다.**
+
+**저장 범위·보존 기간·접근 권한은 아직 합의되지 않았다.** 0004는 합의 전까지 상시
+저장 기능을 만들지 않기로 했지만 `recorder`가 먼저 만들어졌다. 그 경위와 남은
+위험은 [결정 0009](../docs/architecture/decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)에 있다.
+보존 기간 기본값 30일은 **팀 합의값이 아니다.**
+
 `stream`의 로컬 저장은 학습 데이터 확보를 위한 개발용이며 **기본값이 꺼져 있고
 `APP_ENV=prod`에서는 켤 수 없다.**
 
@@ -131,7 +139,8 @@ python -m pipeline.main
 
 ```bash
 python -m stream.main       # 수신만
-python -m pytest -q         # 워커 전체 테스트. 장비도 모델도 필요 없다
+python -m recorder.main     # 녹화·적재만
+python -m pytest -q         # 워커 전체 테스트. 장비도 모델도 MinIO도 필요 없다
 ```
 
 ## 관련 문서
@@ -140,6 +149,7 @@ python -m pytest -q         # 워커 전체 테스트. 장비도 모델도 필�
 - [shared](./shared/README.md) — 프레임 버퍼와 공통 타입
 - [stream worker](./stream/README.md) — 실행 방법, 환경변수, 테스트
 - [inference worker](./inference/README.md) — 모델, 탐지 결과 형식
+- [recorder worker](./recorder/README.md) — 녹화·적재, 보존 정책, 객체 키 규칙
 - [카메라 수집 구성](./stream/camera-guides.md) — 구성 요소, 설정값, 겪은 문제
 - [AI 에이전트 규칙](../docs/agents/ai-agent.md)
 - [아키텍처](../docs/architecture/README.md)

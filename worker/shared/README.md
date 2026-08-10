@@ -9,10 +9,13 @@ stream이 만든 프레임을 inference가 받으려면 둘 사이에 공통 타
 따로 배포할 때 상대 워커의 코드가 딸려온다.
 
 ```text
-stream ──┐
-         ├──▶ shared     (양방향 의존 없음)
-inference ──┘
+stream ───┐
+inference ┼──▶ shared     (양방향 의존 없음)
+recorder ─┘
 ```
+
+`stream`과 `recorder`는 같은 `STREAM_SOURCES` 값을 읽는다. 형식을 워커마다 따로
+파싱하면 같은 설정이 워커에 따라 다르게 해석될 수 있다.
 
 ## 무엇을 넣는가
 
@@ -24,6 +27,7 @@ inference ──┘
 | `types.py` | `Frame`, `CapturedFrame` — 프레임과 그 출처 정보 |
 | `frame_buffer.py` | `FrameBuffer` — stream과 inference 사이의 프레임 큐 |
 | `sampling.py` | `should_sample` — 몇 프레임마다 한 장을 고를지 |
+| `camera_sources.py` | `STREAM_SOURCES` 형식 파싱과 자격 증명 가리기 |
 | `logging_setup.py` | 진입점의 로깅·콘솔 인코딩 설정 |
 | `config_errors.py` | 설정 오류를 값 노출 없이 사람이 읽을 형태로 |
 
