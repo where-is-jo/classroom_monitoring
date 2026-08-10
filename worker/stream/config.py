@@ -6,14 +6,12 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Self
-from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared.camera_sources import CameraSource, mask_url_credentials, parse_stream_sources
 
 # 저장 경로와 .env 위치를 실행 위치(CWD)가 아니라 이 파일 기준으로 잡는다.
 # 상대 경로로 두면 저장소 루트에서 실행했을 때 worker 밖에 영상 디렉터리가 생기고,
@@ -21,81 +19,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _STREAM_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = _STREAM_DIR / "data"
 
-_CAMERA_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-
-
-def mask_url_credentials(url: str) -> str:
-    """RTSP URL에서 자격 증명을 지운 로그용 문자열을 만든다.
-
-    카메라 접속 정보는 비밀값이므로 로그·오류 메시지에 원본을 남기지 않는다.
-    """
-    try:
-        split = urlsplit(url)
-    except ValueError:
-        return "<파싱할 수 없는 URL>"
-
-    if not split.hostname:
-        return "<host 없는 URL>"
-
-    netloc = split.hostname
-    if split.port is not None:
-        netloc = f"{netloc}:{split.port}"
-    if split.username or split.password:
-        netloc = f"***@{netloc}"
-    return urlunsplit((split.scheme, netloc, split.path, "", ""))
-
-
-@dataclass(frozen=True)
-class CameraSource:
-    """연결할 영상 소스 하나. 소스별 식별자로 로그와 지표를 구분한다."""
-
-    camera_id: str
-    rtsp_url: str
-
-    @property
-    def masked_url(self) -> str:
-        return mask_url_credentials(self.rtsp_url)
-
-
-def parse_stream_sources(raw: str) -> tuple[CameraSource, ...]:
-    """`camera-01=rtsp://...,camera-02=rtsp://...` 형식을 소스 목록으로 바꾼다.
-
-    소스별 식별자를 URL과 함께 받는 이유는, 식별자가 로그·지표·저장 경로에서
-    카메라를 구분하는 키가 되기 때문이다. URL을 키로 쓰면 자격 증명이 함께 노출된다.
-    """
-    sources: list[CameraSource] = []
-    seen_ids: set[str] = set()
-
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-
-        camera_id, separator, rtsp_url = entry.partition("=")
-        camera_id = camera_id.strip()
-        rtsp_url = rtsp_url.strip()
-
-        if not separator or not rtsp_url:
-            raise ValueError(
-                "STREAM_SOURCES 항목은 '<카메라 식별자>=<RTSP URL>' 형식이어야 합니다: "
-                f"{camera_id or entry}"
-            )
-        if not _CAMERA_ID_PATTERN.match(camera_id):
-            raise ValueError(
-                "카메라 식별자는 소문자·숫자·하이픈만 쓸 수 있습니다: " f"{camera_id}"
-            )
-        if camera_id in seen_ids:
-            raise ValueError(f"STREAM_SOURCES에 중복된 카메라 식별자가 있습니다: {camera_id}")
-        if not rtsp_url.startswith("rtsp://"):
-            # 값 자체는 자격 증명일 수 있으므로 식별자만 알린다.
-            raise ValueError(f"카메라 {camera_id}의 URL이 rtsp:// 로 시작하지 않습니다.")
-
-        seen_ids.add(camera_id)
-        sources.append(CameraSource(camera_id=camera_id, rtsp_url=rtsp_url))
-
-    if not sources:
-        raise ValueError("STREAM_SOURCES에 영상 소스가 하나도 없습니다.")
-    return tuple(sources)
+# 소스 목록 형식은 recorder와 함께 쓰므로 shared에 있다. 여기서는 다시 내보내기만 한다.
+__all__ = ["CameraSource", "StreamSettings", "mask_url_credentials", "parse_stream_sources"]
 
 
 class StreamSettings(BaseSettings):
