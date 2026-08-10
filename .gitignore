@@ -38,3 +38,11 @@ venv/
 # 저장 경로를 설정으로 바꿀 수 있으므로 특정 경로만 나열하지 않는다.
 worker/data/
 worker/**/data/
+
+# 모델 가중치 — 대용량이고 저장소가 아니라 실행 환경에서 관리한다.
+# ultralytics는 MODEL_PATH의 이름을 보고 실행 위치에 자동으로 내려받으므로
+# 확장자 기준으로 막는다. 경로는 MODEL_PATH 환경변수로 주입한다.
+*.pt
+*.pth
+*.onnx
+*.engine
