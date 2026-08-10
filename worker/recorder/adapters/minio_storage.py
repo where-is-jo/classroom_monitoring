@@ -1,0 +1,126 @@
+"""MinIO 객체 저장소 어댑터.
+
+**S3 호환 API 범위 안에서만 쓴다**(결정 0004). MinIO 고유 기능에 의존하면 나중에
+실제 S3나 다른 호환 저장소로 옮길 수 없다. 여기서 쓰는 것은 put/list/remove와
+버킷 존재 확인뿐이다.
+
+MinIO SDK import는 이 파일에만 있다. 다른 곳에서는 ObjectStorage 포트만 본다.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from ..errors import ObjectStorageError
+from ..ports import StoredObject
+
+logger = logging.getLogger(__name__)
+
+try:
+    from minio import Minio
+    from minio.error import S3Error
+except ImportError:  # pragma: no cover - 패키지가 없는 환경에서의 경로
+    Minio = None  # type: ignore[assignment, misc]
+    S3Error = Exception  # type: ignore[assignment, misc]
+
+_CONTENT_TYPE = "video/mp4"
+
+
+def build_minio_client(
+    *, endpoint: str, access_key: str, secret_key: str, secure: bool
+) -> Any:
+    """MinIO 클라이언트를 만든다. 패키지가 없으면 무엇을 설치할지 알린다."""
+    if Minio is None:
+        raise ObjectStorageError(
+            "minio 패키지가 설치되어 있지 않습니다. "
+            "worker/recorder/requirements.txt의 의존성을 설치하세요."
+        )
+    return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+
+
+class MinioObjectStorage:
+    """MinIO 버킷 하나를 객체 저장소로 쓴다."""
+
+    def __init__(self, client: Any, bucket: str) -> None:
+        self._client = client
+        self._bucket = bucket
+
+    @property
+    def bucket(self) -> str:
+        return self._bucket
+
+    def ensure_bucket(self) -> None:
+        """버킷이 없으면 만든다. 시작 시점에 한 번 부른다.
+
+        적재할 때가 되어서야 버킷이 없는 것을 알면, 그때는 이미 세그먼트가
+        쌓이고 있다.
+        """
+        try:
+            if not self._client.bucket_exists(self._bucket):
+                self._client.make_bucket(self._bucket)
+                logger.info("버킷을 만들었다: %s", self._bucket)
+        except S3Error as error:
+            raise ObjectStorageError(
+                f"버킷을 확인하지 못했습니다: {self._bucket} ({error})"
+            ) from error
+        except OSError as error:
+            # 접속 실패. 주소는 남기되 자격 증명은 남기지 않는다.
+            raise ObjectStorageError(f"객체 저장소에 접속하지 못했습니다: {error}") from error
+
+    def put_object(self, key: str, source_path: Path) -> StoredObject:
+        try:
+            self._client.fput_object(
+                self._bucket, key, str(source_path), content_type=_CONTENT_TYPE
+            )
+        except (S3Error, OSError) as error:
+            raise ObjectStorageError(f"객체를 저장하지 못했습니다: {key} ({error})") from error
+
+        stat = source_path.stat()
+        stored = self._stat_object(key)
+        if stored is not None:
+            return stored
+        # 조회에 실패해도 적재 자체는 끝났다. 로컬 정보로 채운다.
+        return StoredObject(
+            key=key,
+            size_bytes=stat.st_size,
+            last_modified=datetime.now(UTC),
+        )
+
+    def list_objects(self, prefix: str = "") -> Iterator[StoredObject]:
+        try:
+            for item in self._client.list_objects(
+                self._bucket, prefix=prefix, recursive=True
+            ):
+                last_modified = item.last_modified
+                if last_modified is not None and last_modified.tzinfo is None:
+                    last_modified = last_modified.replace(tzinfo=UTC)
+                yield StoredObject(
+                    key=item.object_name,
+                    size_bytes=item.size or 0,
+                    last_modified=last_modified,
+                )
+        except (S3Error, OSError) as error:
+            raise ObjectStorageError(f"객체 목록을 읽지 못했습니다: {error}") from error
+
+    def remove_object(self, key: str) -> None:
+        try:
+            self._client.remove_object(self._bucket, key)
+        except (S3Error, OSError) as error:
+            raise ObjectStorageError(f"객체를 지우지 못했습니다: {key} ({error})") from error
+
+    def _stat_object(self, key: str) -> StoredObject | None:
+        try:
+            stat = self._client.stat_object(self._bucket, key)
+        except (S3Error, OSError):
+            return None
+
+        last_modified = stat.last_modified
+        if last_modified is not None and last_modified.tzinfo is None:
+            last_modified = last_modified.replace(tzinfo=UTC)
+        return StoredObject(
+            key=key, size_bytes=stat.size or 0, last_modified=last_modified
+        )
