@@ -40,11 +40,11 @@ flowchart TB
 | --- | --- | --- |
 | 학생·직원 화면, 관리자 화면 | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`templates/`) | 구현됨 |
 | FastAPI 백엔드 API | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`app/`) | 대부분 구현됨. CCTV 스트리밍·영상 검색은 local/dev 합성 데모까지만 |
-| CCTV 실시간 수신, 프레임 분할 | [`worker`](../../worker/README.md) | 단일 USB 카메라 기준으로 동작. 영상·프레임을 로컬에 저장하는 단계까지 |
-| 사람·수화기 탐지 | [`deeplearning`](../../deeplearning/README.md) | `예정`. 코드 없음 |
-| 상태 판정 | 소유 서비스 `결정 필요` | `예정`. 아래 [상태 판정은 누가 하는가](#상태-판정은-누가-하는가) 참고 |
+| CCTV 실시간 수신, 프레임 분할 | [`worker/stream`](../../worker/stream/README.md) | 동작. 다중 RTSP 소스 수신·재연결·샘플링. 로컬 저장은 개발용이며 기본 꺼짐 |
+| 사람·수화기 탐지 | [`worker/inference`](../../worker/inference/README.md), [`deeplearning`](../../deeplearning/README.md) | `예정`. 코드 없음. 둘 사이 경계 `결정 필요` |
+| 상태 판정 | [`worker/state`](../../worker/state/README.md) 또는 `webapps/fastapi` | `예정`. 소유 서비스 `결정 필요`. 아래 [상태 판정은 누가 하는가](#상태-판정은-누가-하는가) 참고 |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 구현됨 |
-| 영상·프레임을 저장소와 추론 모델에 전달 | [`worker`](../../worker/README.md) | `예정`. 저장 범위 미합의 |
+| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | `예정`. 저장 범위 미합의 |
 | 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)만 있다. **수집할 지표가 없어 Prometheus 설정과 알림 규칙은 `예정`** |
 | 사용자용 실시간 영상 모니터링 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. 코드 없음. 디렉터리 경계와 재생 방식이 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
@@ -108,9 +108,11 @@ flowchart TB
 한 서비스가 둘 다 소유하지 않는다.
 
 - 업무 메타데이터: `fastapi`가 MongoDB에 기록한다.
-- 영상·스냅샷: **`worker`가 저장소로 넘긴다.** MinIO에 보관하고 메타데이터에는 참조만 남긴다.
-  실시간 영상을 받아 저장소와 추론 모델에 넘기는 것이 `worker`의 책임이다.
+- 영상·스냅샷: **`worker/recorder`가 저장소로 넘긴다.** MinIO에 보관하고 메타데이터에는
+  참조만 남긴다. 실시간 영상을 받아 저장소와 추론 모델에 넘기는 것이 `worker`의 책임이다.
   **저장 범위와 보존 기간은 아직 `결정 필요`이므로, 확정 전까지 상시 저장 기능을 만들지 않는다.**
+  `worker/stream`의 로컬 저장은 학습 데이터 확보용이며 기본값이 꺼져 있고
+  `APP_ENV=prod`에서는 켤 수 없다.
 
 ### 서비스 간 계약은 문서화된 것만 쓴다
 
@@ -128,8 +130,9 @@ flowchart TB
 ```
 
 ```text
-USB 카메라 → FFmpeg → MediaMTX(RTSP) → OpenCV
-          → 원본 영상 파일 + 학습용 프레임 이미지 (worker 로컬 디스크)
+USB 카메라 → FFmpeg → MediaMTX(RTSP) → OpenCV(worker/stream)
+          → 프레임 샘플링 → (전달 대상 없음)
+          → 원본 영상 파일 + 학습용 프레임 이미지 (개발용, 기본 꺼짐)
 ```
 
 두 흐름은 아직 이어져 있지 않다. 직원 상태와 좌석 관측은 `MOCK_INPUTS_ENABLED`인
@@ -211,7 +214,8 @@ GET 요청은 시간 정책이나 상태 전이를 실행하지 않는다. 시�
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 관련 합의 사항 |
 | 모델 종류와 버전 | 후보: YOLO 계열 | deeplearning |
-| Jetson 적용 범위와 다중 카메라 확장 | 결정 필요 | worker |
+| Jetson 적용 범위 | 결정 필요 | worker |
+| worker 단계 사이의 전달 방식 | 결정 필요 | worker 전체. [0007](./decisions.md#0007--worker를-역할별-워커로-분리)에서 분리만 확정 |
 | 자연어 영상 검색의 질의 해석 방식 | 결정 필요 | fastapi |
 | 알림 채널 | 결정 필요 | fastapi |
 | 통합 실행 수단(docker compose)의 공식화 | 결정 필요 | 전체 |

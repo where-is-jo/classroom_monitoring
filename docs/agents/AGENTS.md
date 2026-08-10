@@ -35,8 +35,10 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 - **`webapps/fastapi`** — 세 제품 역할의 인증·사용자 관리, 직원 상태, 면담 대기,
   강의실 좌석과 마감 후 경고, 인앱 알림, 관리자 대시보드가 memory 또는 MongoDB
   저장소로 동작한다. local/dev에서는 고정 합성 영상 데모도 제공한다.
-- **`worker`** — USB 카메라 1대를 RTSP로 송출하고 수신해 원본 영상과 학습용 프레임을
-  로컬에 저장하는 스크립트가 있다. 다른 서비스와는 아직 연결되어 있지 않다.
+- **`worker/stream`** — 여러 RTSP 소스에 붙어 연결을 유지하고 추론 대상 프레임을
+  골라낸다. USB 카메라를 RTSP로 송출하는 기능도 있다. 다른 서비스와는 아직 연결되어
+  있지 않다. `worker`의 나머지 세 워커(`inference`, `state`, `recorder`)는 README만 있다
+  ([결정 0007](../architecture/decisions.md#0007--worker를-역할별-워커로-분리)).
 
 `deeplearning`, `monitoring`, `RPAs`에는 아직 코드가 없다.
 
@@ -48,7 +50,7 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 | --- | --- | --- |
 | [`webapps/fastapi`](../../webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 외부 진입점. | 추론 연산, 스트림 처리 |
 | [`deeplearning`](../../deeplearning/README.md) | 모델 로딩과 추론. 표준화된 탐지 결과를 반환한다. | 업무 해석, 영속 저장 |
-| [`worker`](../../worker/README.md) | 영상 수신과 프레임 공급. | 추론, 장기 저장 |
+| [`worker`](../../worker/README.md) | 영상 파이프라인 워커 묶음. 단계별로 `stream`·`inference`·`state`·`recorder`로 나눈다. | 웹 요청 처리, 탐지 결과의 조회 API |
 | [`monitoring/internal`](../../monitoring/internal/README.md) | **내부 모니터링.** Prometheus·Grafana 설정. 대상은 서비스 자체, 수요자는 운영자. | 애플리케이션 비즈니스 로직 |
 | [`monitoring/external`](../../monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제공하는 실시간 영상 모니터링. **경계가 아직 확정되지 않았다** — 설정·문서만 둘지 서비스 코드를 둘지 정해지기 전까지 코드를 넣지 않는다. | 지표·대시보드, 추론, 탐지 결과의 업무 해석 |
 | `docs` | 아키텍처, 개발 규칙, 에이전트 규칙, 프롬프트, 템플릿. **AI 에이전트 관련 문서는 모두 여기에 둔다.** | 실행 코드, 특정 서비스의 실행 방법 |
