@@ -4,158 +4,39 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#00685f">
-  <title>{% block title %}캠퍼스 운영 포털{% endblock %}</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300685f'/%3E%3Cpath d='M6 10l10-5 10 5-10 5L6 10zm4 3l6 3 6-3v8l-6 3-6-3v-8z' fill='white'/%3E%3C/svg%3E">
+  <title>{% block title %}학습 모니터링{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
   <script src="{{ url_for('static', path='/forms.js') }}" defer></script>
   {% block head_extra %}{% endblock %}
 </head>
-<body class="{% if current_user %}app-body{% else %}guest-body{% endif %}">
+<body class="app-body">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
-
   {% set current_path = request.url.path %}
-  {% set show_employee_tools = request.state.show_employee_dev_tools | default(show_employee_dev_tools | default(false)) %}
-  {% set show_notification_tools = request.state.show_notification_dev_tools | default(show_notification_dev_tools | default(false)) %}
-  {% if current_user %}
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="주 탐색">
-        <div class="sidebar-brand">
-          <a class="brand" href="/" aria-label="캠퍼스 운영 포털 홈">
-            <span class="brand-mark" aria-hidden="true">
-              <svg viewBox="0 0 32 32" focusable="false"><path d="M5 9.5 16 4l11 5.5L16 15 5 9.5Zm4 3.2 7 3.5 7-3.5V21l-7 3.5L9 21v-8.3Z"/></svg>
-            </span>
-            <span><strong>캠퍼스 운영</strong><small>학생·직원 포털</small></span>
-          </a>
-          <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">
-            <span class="nav-toggle-icon" aria-hidden="true"></span>
-            <span class="nav-toggle-label">메뉴</span>
-          </button>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="주 탐색">
+      <div class="sidebar-brand">
+        <a class="brand" href="/classrooms" aria-label="학습 모니터링 홈">
+          <span class="brand-mark" aria-hidden="true">▦</span>
+          <span><strong>학습 모니터링</strong><small>강의실 운영</small></span>
+        </a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">
+          <span class="nav-toggle-icon" aria-hidden="true"></span><span class="nav-toggle-label">메뉴</span>
+        </button>
+      </div>
+      <nav id="primary-navigation" class="side-nav">
+        <div class="nav-group">
+          <p class="nav-group-title">모니터링</p>
+          <a href="/classrooms"{% if current_path == '/classrooms' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석 현황</span></a>
+          <a href="/monitoring"{% if current_path == '/monitoring' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>실시간 모니터링</span></a>
+          <a href="/video-search"{% if current_path == '/video-search' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>자연어 검색</span></a>
         </div>
-
-        <nav id="primary-navigation" class="side-nav">
-          {% if request.state.is_student | default(false) %}
-            <div class="nav-group">
-              <p class="nav-group-title">학생 메뉴</p>
-              <a href="/employees"{% if current_path.startswith('/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>직원 찾기</span></a>
-              <a href="/my/interview-waits"{% if current_path.startswith('/my/interview-waits') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◷</span><span>내 면담</span></a>
-              <a href="/classrooms"{% if current_path.startswith('/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석</span></a>
-            </div>
-          {% elif request.state.is_staff | default(false) %}
-            <div class="nav-group">
-              <p class="nav-group-title">직원 메뉴</p>
-              <a href="/employees"{% if current_path.startswith('/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>직원 조회</span></a>
-              <a href="/staff/interview-waits"{% if current_path.startswith('/staff/interview-waits') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⇄</span><span>접수된 면담</span></a>
-              <a href="/classrooms"{% if current_path.startswith('/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석</span></a>
-              {% if request.state.show_video_demo | default(false) %}
-                <a href="/monitoring"{% if current_path.startswith('/monitoring') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>데모 모니터링</span></a>
-                <a href="/video-search"{% if current_path.startswith('/video-search') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>데모 영상 검색</span></a>
-              {% endif %}
-            </div>
-          {% elif request.state.is_admin | default(false) %}
-            <div class="nav-group">
-              <p class="nav-group-title">관리자 메뉴</p>
-              <a href="/admin"{% if current_path == '/admin' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▤</span><span>대시보드</span></a>
-              <a href="/employees"{% if current_path.startswith('/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>직원 조회</span></a>
-              <a href="/classrooms"{% if current_path.startswith('/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석</span></a>
-              {% if request.state.show_video_demo | default(false) %}
-                <a href="/monitoring"{% if current_path.startswith('/monitoring') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>데모 모니터링</span></a>
-                <a href="/video-search"{% if current_path.startswith('/video-search') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>데모 영상 검색</span></a>
-              {% endif %}
-              <a href="/admin/users"{% if current_path.startswith('/admin/users') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>사용자 관리</span></a>
-              <a href="/admin/employees"{% if current_path.startswith('/admin/employees') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span><span>직원 관리</span></a>
-              <a href="/admin/classrooms"{% if current_path.startswith('/admin/classrooms') %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 관리</span></a>
-            </div>
-          {% endif %}
-        </nav>
-
-        <div class="account-card">
-          {% set product_notification_type = 'INTERVIEW_WAIT_READY' if request.state.is_student | default(false) else 'AFTER_HOURS_SEAT' %}
-          <details class="notification-popover" data-notification-popover data-notification-type="{{ product_notification_type }}" data-csrf-token="{{ csrf_token }}">
-            <summary class="icon-button" aria-label="알림 열기" title="알림">
-              <span aria-hidden="true">□</span>
-              {% set unread_count = request.state.notification_unread_count | default(0) %}
-              <span class="nav-badge" data-notification-badge{% if not unread_count %} hidden{% endif %} aria-label="읽지 않은 알림 {{ unread_count }}개">{{ unread_count }}</span>
-            </summary>
-            <section class="notification-popover-panel" role="dialog" aria-label="최근 알림" aria-live="polite">
-              <div class="notification-popover-heading">
-                <div><p class="eyebrow">최근 알림</p><h2>알림</h2></div>
-                <button class="icon-button" type="button" data-notification-close aria-label="알림 닫기">×</button>
-              </div>
-              <div data-notification-status role="status">알림을 불러오는 중입니다.</div>
-              <ul class="notification-popover-list" data-notification-list aria-label="최근 알림 목록"></ul>
-              <div class="notification-popover-actions">
-                <button type="button" class="secondary" data-notification-retry hidden>다시 시도</button>
-                <button type="button" class="secondary" data-notification-read-all hidden>모두 읽음</button>
-              </div>
-            </section>
-          </details>
-          <details class="profile-popover">
-            <summary class="profile-trigger" aria-label="프로필 열기">
-              <span class="account-avatar" aria-hidden="true">{{ current_user.name[:1] }}</span>
-              <span class="account-copy"><strong>{{ current_user.name }}</strong><small>{{ current_user.role.value|display_label }}</small></span>
-            </summary>
-            <div class="profile-popover-panel">
-              <p class="eyebrow">내 계정</p>
-              <strong>{{ current_user.name }}</strong>
-              <small>{{ current_user.email }}</small>
-              {% if request.state.is_staff | default(false) %}
-                {% set profile_employee = request.state.profile_employee | default(none) %}
-                <div class="profile-status-control">
-                  <h2>내 근무 상태</h2>
-                  {% if profile_employee %}
-                    <p>현재 <strong>{{ profile_employee.current_status.status.value|display_label }}</strong> · {{ profile_employee.current_status.source.value|display_label }}</p>
-                    <form method="post" action="/employees/{{ profile_employee.id }}/status-override" class="stack" data-submit-state>
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                      <input type="hidden" name="operation_id" value="{{ request.state.profile_set_operation_id }}">
-                      <input type="hidden" name="expected_version" value="{{ profile_employee.version }}">
-                      <label>상태
-                        <select name="status" required>{% for status in request.state.profile_statuses %}<option value="{{ status.value }}"{% if status == profile_employee.current_status.status %} selected{% endif %}>{{ status.value|display_label }}</option>{% endfor %}</select>
-                      </label>
-                      <label>사유(선택)<input name="reason" maxlength="500"></label>
-                      <label>종료 시각(선택)<input name="ends_at" placeholder="2026-08-06T09:00:00+00:00"><span class="help-text">시간대를 포함한 ISO 8601 형식</span></label>
-                      <button type="submit" data-pending-label="변경 중…">근무 상태 변경</button>
-                    </form>
-                    <form method="post" action="/employees/{{ profile_employee.id }}/status-override/clear" data-submit-state>
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                      <input type="hidden" name="operation_id" value="{{ request.state.profile_clear_operation_id }}">
-                      <input type="hidden" name="expected_version" value="{{ profile_employee.version }}">
-                      <button type="submit" class="secondary" data-pending-label="전환 중…">자동 상태 사용</button>
-                    </form>
-                  {% else %}
-                    <div class="empty" role="status">연결된 직원 프로필이 없습니다. 관리자에게 계정 연결을 요청하세요.</div>
-                  {% endif %}
-                </div>
-              {% endif %}
-              <a href="/account/password">비밀번호 변경</a>
-            </div>
-          </details>
-          <form method="post" action="/logout" data-submit-state>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="icon-button" type="submit" data-pending-label="…" aria-label="로그아웃" title="로그아웃">↪</button>
-          </form>
-        </div>
-      </aside>
-
-  {% else %}
-    <header class="guest-header">
-      <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M5 9.5 16 4l11 5.5L16 15 5 9.5Zm4 3.2 7 3.5 7-3.5V21l-7 3.5L9 21v-8.3Z"/></svg></span>
-        <span><strong>캠퍼스 운영</strong><small>학생·직원 포털</small></span>
-      </a>
-      <nav aria-label="보조 탐색">{% if current_path != '/login' %}<a class="button button--small" href="/login">로그인</a>{% endif %}</nav>
-    </header>
-  {% endif %}
-
-  {% if current_user %}<div class="workspace">{% endif %}
-    <main id="main-content" class="content{% if not current_user %} guest-content{% endif %}" tabindex="-1">
-      {% block content %}{% endblock %}
-    </main>
-  {% if current_user %}
-    <footer class="site-footer"><p>데이터는 페이지 이동 또는 명시적 새로고침으로 갱신됩니다.</p></footer>
-    </div></div>
-  {% else %}
-    <footer class="site-footer site-footer--guest"><p>학생과 직원의 일상 업무를 한곳에서 안전하게 연결합니다.</p></footer>
-  {% endif %}
+      </nav>
+    </aside>
+    <div class="workspace">
+      <main id="main-content" class="content" tabindex="-1">{% block content %}{% endblock %}</main>
+      <footer class="site-footer"><p>상태 시각과 데이터 출처를 확인한 뒤 판단하세요.</p></footer>
+    </div>
+  </div>
   {% block scripts %}{% endblock %}
 </body>
 </html>

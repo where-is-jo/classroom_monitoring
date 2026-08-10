@@ -1,8 +1,4 @@
-"""애플리케이션 진입점.
-
-라우터 등록, 정적 파일 마운트, 예외 핸들러를 여기서 조립한다.
-비즈니스 로직을 두지 않는다.
-"""
+"""최소 학습 모니터링 애플리케이션 조립."""
 
 from __future__ import annotations
 
@@ -10,7 +6,6 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
-from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -18,49 +13,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .admin.router import api_router as admin_dashboard_api_router
-from .admin.router import page_router as admin_dashboard_page_router
-from .auth.dependencies import get_optional_page_user, login_redirect, product_home_path
-from .auth.errors import PageAuthenticationRequired, PagePasswordChangeRequired
-from .auth.router import api_router as auth_api_router
-from .auth.router import page_router as auth_page_router
-from .classrooms.router import admin_page_router as classrooms_admin_page_router
-from .classrooms.router import alert_api_router as classroom_alert_api_router
-from .classrooms.router import classroom_api_router, seat_api_router
-from .classrooms.router import development_api_router as classroom_development_api_router
-from .classrooms.router import (
-    development_page_router as classroom_development_page_router,
-)
-from .classrooms.router import page_router as classrooms_page_router
-from .employees.router import admin_page_router as employees_admin_page_router
-from .employees.router import api_router as employees_api_router
-from .employees.router import development_api_router as employee_development_api_router
-from .employees.router import (
-    development_page_router as employee_development_page_router,
-)
-from .employees.router import evaluation_api_router as employee_evaluation_api_router
-from .employees.router import page_router as employees_page_router
-from .events.router import api_router as events_api_router
-from .events.router import page_router as events_page_router
-from .interview_waits.router import api_router as interview_waits_api_router
-from .interview_waits.router import (
-    expiration_api_router as interview_wait_expiration_api_router,
-)
-from .interview_waits.router import my_page_router as interview_waits_my_page_router
-from .interview_waits.router import (
-    staff_page_router as interview_waits_staff_page_router,
-)
-from .notifications.router import api_router as notifications_api_router
-from .notifications.router import (
-    development_api_router as notification_development_api_router,
-)
-from .notifications.router import (
-    development_page_router as notification_development_page_router,
-)
-from .notifications.router import (
-    read_batch_api_router as notification_read_batch_api_router,
-)
-from .shared.config import Settings
+from .classrooms.router import api_router as classroom_api_router
+from .classrooms.router import page_router as classroom_page_router
 from .shared.dependencies import (
     close_data_store,
     get_settings,
@@ -70,11 +24,8 @@ from .shared.dependencies import (
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.schemas import HealthResponse, ReadinessResponse
 from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
-from .users.models import User
-from .users.router import api_router as users_api_router
-from .users.router import page_router as users_page_router
-from .video_monitoring.router import api_router as video_demo_api_router
-from .video_monitoring.router import page_router as video_demo_page_router
+from .video_monitoring.router import api_router as monitoring_api_router
+from .video_monitoring.router import page_router as monitoring_page_router
 
 logger = logging.getLogger(__name__)
 
@@ -89,140 +40,42 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Smart Office Monitoring",
-    description=(
-        "학생·직원·관리자용 직원 상태, 면담 대기, 강의실 좌석, 알림, 운영 대시보드 API와 화면"
-    ),
-    version="0.2.0",
+    title="Learning Monitoring",
+    description="강의실 좌석 현황, 실시간 모니터링, 자연어 검색 API와 화면",
+    version="0.3.0",
     lifespan=lifespan,
 )
-
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.include_router(auth_page_router, include_in_schema=False)
-app.include_router(events_page_router, include_in_schema=False)
-_EVENT_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    404: {"model": ErrorResponse},
-    422: {"model": ErrorResponse},
-    500: {"model": ErrorResponse},
-    503: {"model": ErrorResponse},
-}
-app.include_router(users_page_router, include_in_schema=False)
-app.include_router(
-    events_api_router,
-    responses=_EVENT_ERROR_RESPONSES,
-)
-_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+if get_settings().demo_mode_enabled:
+    app.mount("/demo-assets", StaticFiles(directory=str(DEMO_ASSET_DIR)), name="demo-assets")
+app.include_router(classroom_page_router, include_in_schema=False)
+app.include_router(monitoring_page_router, include_in_schema=False)
+
+_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
-    401: {"model": ErrorResponse},
-    403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
-    429: {"model": ErrorResponse},
     500: {"model": ErrorResponse},
     503: {"model": ErrorResponse},
 }
-app.include_router(auth_api_router, responses=_AUTH_ERROR_RESPONSES)
-app.include_router(users_api_router, responses=_AUTH_ERROR_RESPONSES)
-
-
-def include_notification_routers(application: FastAPI, settings: Settings) -> None:
-    """인앱 알림은 항상, mock delivery 관리 경계는 허용 환경에만 등록한다."""
-    application.include_router(notifications_api_router, responses=_AUTH_ERROR_RESPONSES)
-    application.include_router(notification_read_batch_api_router, responses=_AUTH_ERROR_RESPONSES)
-    if settings.mock_inputs_enabled:
-        application.include_router(
-            notification_development_page_router,
-            include_in_schema=False,
-        )
-        application.include_router(
-            notification_development_api_router,
-            responses=_AUTH_ERROR_RESPONSES,
-        )
-
-
-def include_employee_routers(application: FastAPI, settings: Settings) -> None:
-    """일반 직원 기능은 항상, mock 입력 기능은 허용 환경에만 등록한다."""
-    application.include_router(employees_page_router, include_in_schema=False)
-    application.include_router(employees_admin_page_router, include_in_schema=False)
-    application.include_router(employees_api_router, responses=_AUTH_ERROR_RESPONSES)
-    application.include_router(
-        employee_evaluation_api_router,
-        responses=_AUTH_ERROR_RESPONSES,
-    )
-    if settings.mock_inputs_enabled:
-        application.include_router(employee_development_page_router, include_in_schema=False)
-        application.include_router(
-            employee_development_api_router,
-            responses=_AUTH_ERROR_RESPONSES,
-        )
-
-
-def include_classroom_routers(application: FastAPI, settings: Settings) -> None:
-    """강의실 기능은 항상, 구조화 mock 좌석 입력은 허용 환경에만 등록한다."""
-    application.include_router(classrooms_page_router, include_in_schema=False)
-    application.include_router(classrooms_admin_page_router, include_in_schema=False)
-    application.include_router(classroom_api_router, responses=_AUTH_ERROR_RESPONSES)
-    application.include_router(seat_api_router, responses=_AUTH_ERROR_RESPONSES)
-    application.include_router(classroom_alert_api_router, responses=_AUTH_ERROR_RESPONSES)
-    if settings.mock_inputs_enabled:
-        application.include_router(classroom_development_page_router, include_in_schema=False)
-        application.include_router(
-            classroom_development_api_router,
-            responses=_AUTH_ERROR_RESPONSES,
-        )
-
-
-def include_video_demo_routers(application: FastAPI, settings: Settings) -> None:
-    """Register synthetic catalog, pages, and assets only in an explicit demo mode."""
-    if not settings.demo_mode_enabled or settings.app_env not in {"local", "dev"}:
-        return
-    application.mount(
-        "/demo-assets",
-        StaticFiles(directory=str(DEMO_ASSET_DIR)),
-        name="demo-assets",
-    )
-    application.include_router(video_demo_page_router, include_in_schema=False)
-    application.include_router(video_demo_api_router, responses=_AUTH_ERROR_RESPONSES)
-
-
-include_employee_routers(app, get_settings())
-include_notification_routers(app, get_settings())
-include_classroom_routers(app, get_settings())
-include_video_demo_routers(app, get_settings())
-app.include_router(interview_waits_my_page_router, include_in_schema=False)
-app.include_router(interview_waits_staff_page_router, include_in_schema=False)
-app.include_router(interview_waits_api_router, responses=_AUTH_ERROR_RESPONSES)
-app.include_router(
-    interview_wait_expiration_api_router,
-    responses=_AUTH_ERROR_RESPONSES,
-)
-app.include_router(admin_dashboard_page_router, include_in_schema=False)
-app.include_router(admin_dashboard_api_router, responses=_AUTH_ERROR_RESPONSES)
+app.include_router(classroom_api_router, responses=_ERROR_RESPONSES)
+app.include_router(monitoring_api_router, responses=_ERROR_RESPONSES)
 
 
 def _wants_json(request: Request) -> bool:
-    """API 경로면 JSON 오류 본문, 화면 경로면 오류 페이지를 낸다."""
     return request.url.path.startswith(("/api/", "/health"))
 
 
 def _error_content(
-    *,
-    code: str,
-    message: str,
-    details: dict[str, Any] | None = None,
+    *, code: str, message: str, details: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     return ErrorResponse(
         error=ErrorDetail(code=code, message=message, details=details or {})
     ).model_dump()
 
 
-def _error_page(
-    request: Request,
-    *,
-    status_code: int,
-    message: str,
-) -> Response:
+def _error_page(request: Request, *, status_code: int, message: str) -> Response:
     template_name = "errors/404.html" if status_code == 404 else "errors/error.html"
     return templates.TemplateResponse(
         request=request,
@@ -234,43 +87,12 @@ def _error_page(
 
 @app.exception_handler(DomainError)
 def handle_domain_error(request: Request, exc: DomainError) -> Response:
-    """서비스 계층의 예외를 HTTP 응답으로 바꾼다.
-
-    내부 정보(스택 트레이스, 내부 경로)를 응답에 넣지 않는다.
-    """
     if _wants_json(request):
         return JSONResponse(
             status_code=exc.status_code,
-            content=_error_content(
-                code=exc.code,
-                message=exc.message,
-                details=exc.details,
-            ),
+            content=_error_content(code=exc.code, message=exc.message, details=exc.details),
         )
-    return _error_page(
-        request,
-        status_code=exc.status_code,
-        message=exc.message,
-    )
-
-
-@app.exception_handler(PageAuthenticationRequired)
-def handle_page_authentication_required(
-    _: Request,
-    exc: PageAuthenticationRequired,
-) -> RedirectResponse:
-    return RedirectResponse(url=login_redirect(exc.return_to), status_code=303)
-
-
-@app.exception_handler(PagePasswordChangeRequired)
-def handle_page_password_change_required(
-    _: Request,
-    exc: PagePasswordChangeRequired,
-) -> RedirectResponse:
-    return RedirectResponse(
-        url="/account/password?" + urlencode({"next": exc.return_to}),
-        status_code=303,
-    )
+    return _error_page(request, status_code=exc.status_code, message=exc.message)
 
 
 @app.exception_handler(RequestValidationError)
@@ -293,14 +115,9 @@ def handle_validation_error(request: Request, exc: RequestValidationError) -> Re
 
 @app.exception_handler(StarletteHTTPException)
 def handle_http_error(request: Request, exc: StarletteHTTPException) -> Response:
-    codes = {401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND"}
-    messages = {
-        401: "인증이 필요합니다.",
-        403: "이 요청을 수행할 권한이 없습니다.",
-        404: "요청한 페이지를 찾을 수 없습니다.",
-    }
-    code = codes.get(exc.status_code, "HTTP_ERROR")
-    message = messages.get(exc.status_code, "요청을 처리할 수 없습니다.")
+    is_not_found = exc.status_code == 404
+    message = "요청한 페이지를 찾을 수 없습니다." if is_not_found else "요청을 처리할 수 없습니다."
+    code = "NOT_FOUND" if is_not_found else "HTTP_ERROR"
     if _wants_json(request):
         return JSONResponse(
             status_code=exc.status_code,
@@ -312,7 +129,6 @@ def handle_http_error(request: Request, exc: StarletteHTTPException) -> Response
 
 @app.exception_handler(Exception)
 def handle_unexpected_error(request: Request, exc: Exception) -> Response:
-    # 예외 문자열에는 접속 주소가 포함될 수 있어 유형만 기록한다.
     logger.error("Unhandled application error type=%s", type(exc).__name__)
     message = "서버에서 요청을 처리하지 못했습니다."
     if _wants_json(request):
@@ -324,17 +140,12 @@ def handle_unexpected_error(request: Request, exc: Exception) -> Response:
 
 
 @app.get("/", include_in_schema=False)
-def index(user: User | None = Depends(get_optional_page_user)) -> RedirectResponse:
-    if user is None:
-        return RedirectResponse(url="/login")
-    if user.must_change_password:
-        return RedirectResponse(url="/account/password")
-    return RedirectResponse(url=product_home_path(user.role))
+def index() -> RedirectResponse:
+    return RedirectResponse(url="/classrooms")
 
 
 @app.get("/health", tags=["system"], response_model=HealthResponse)
 def health() -> HealthResponse:
-    """기동 여부 확인용. 의존 서비스 상태는 확인하지 않는다."""
     return HealthResponse(status="ok")
 
 
@@ -345,5 +156,4 @@ def health() -> HealthResponse:
     responses={503: {"model": ErrorResponse}},
 )
 def readiness(_: None = Depends(verify_readiness)) -> ReadinessResponse:
-    """현재 저장소 mode의 의존성이 요청을 처리할 준비가 됐는지 확인한다."""
     return ReadinessResponse(status="ready")
