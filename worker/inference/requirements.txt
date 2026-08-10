@@ -1,0 +1,8 @@
+opencv-python>=4.10
+numpy>=1.26
+pydantic>=2.7
+pydantic-settings>=2.3
+ultralytics>=8.0
+
+# 테스트
+pytest>=8.0

@@ -7,46 +7,71 @@
 사람이 명시적으로 다른 지시를 하면 그 지시가 우선하지만,
 [금지 사항](#prohibited-actions)은 명시적 승인 없이 넘어서지 않는다.
 
+**모든 문서와 코드 주석, 커밋 메시지는 한국어로 쓴다.**
+
+## 사용하는 에이전트 도구
+
+팀원마다 쓰는 도구가 다르다. 규칙의 정본은 항상 이 저장소의 문서이고,
+도구별 설정은 그 문서를 가리키기만 한다.
+
+| 도구 | 진입점 |
+| --- | --- |
+| Claude Code | 저장소 밖 `CLAUDE.md`와 `.claude/skills/` — 둘 다 `.gitignore` 대상이다 |
+| Codex | 저장소 밖 `.agents/` — `.gitignore` 대상이다 |
+| 웹 GPT (저장소를 읽지 못함) | [GPT 코딩 프롬프트](../prompts/gpt-agent.md)를 대화에 붙여넣는다 |
+
+**규칙을 도구 설정 파일에 복사해 두지 않는다.** 복사하면 한쪽만 갱신되어 갈라진다.
+규칙이 바뀌면 이 저장소의 문서를 고치고, 도구 설정은 그 문서를 참조하게 둔다.
+GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 내용인지 문서에 밝힌다.
+
 ## Project Overview
 
 스마트 오피스 모니터링 시스템이다.
-오피스의 CCTV·Jetson 영상을 수신해 컴퓨터 비전 모델로 분석하고,
-그 결과를 API로 제공해 대시보드에서 확인할 수 있게 한다.
-반복 사무 업무는 별도의 RPA 자동화로 처리한다.
+사무실의 카메라 영상을 컴퓨터 비전 모델로 분석해 직원의 재석·통화 상태를 파악하고,
+그 결과를 API와 화면으로 제공한다. 반복 사무 업무는 별도의 RPA 자동화로 처리한다.
 
-현재 구현된 서비스는 **`webapps/fastapi` 하나다.** 세 제품 역할의 인증·사용자 관리,
-직원 상태, 면담 대기, 강의실 좌석과 마감 후 경고, 인앱 알림, 관리자 대시보드가
-memory 또는 MongoDB 저장소로 동작한다. local/dev에서는 고정 합성 영상 데모도 제공한다.
-`deeplearning`, `worker`, `monitoring`, `RPAs`에는 아직 코드가 없다.
+현재 실행 코드가 있는 곳은 두 곳이다.
 
-에이전트는 존재하지 않는 코드의 동작을 전제한 문서나 설명을 만들지 않는다.
+- **`webapps/fastapi`** — 세 제품 역할의 인증·사용자 관리, 직원 상태, 면담 대기,
+  강의실 좌석과 마감 후 경고, 인앱 알림, 관리자 대시보드가 memory 또는 MongoDB
+  저장소로 동작한다. local/dev에서는 고정 합성 영상 데모도 제공한다.
+- **`worker/stream`** — 여러 RTSP 소스에 붙어 연결을 유지하고 추론 대상 프레임을
+  골라낸다. USB 카메라를 RTSP로 송출하는 기능도 있다. 다른 서비스와는 아직 연결되어
+  있지 않다. `worker`의 나머지 세 워커(`inference`, `state`, `recorder`)는 README만 있다
+  ([결정 0007](../architecture/decisions.md#0007--worker를-역할별-워커로-분리)).
+
+`deeplearning`, `monitoring`, `RPAs`에는 아직 코드가 없다.
+
+**에이전트는 존재하지 않는 코드의 동작을 전제한 문서나 설명을 만들지 않는다.**
 
 ## Repository Structure
 
 | 영역 | 책임 | 여기에 두지 않는 것 |
 | --- | --- | --- |
 | [`webapps/fastapi`](../../webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 외부 진입점. | 추론 연산, 스트림 처리 |
-| [`deeplearning`](../../deeplearning/README.md) | 모델 로딩과 추론. 표준화된 탐지 결과를 반환한다. | 비즈니스 해석, 영속 저장 |
-| [`worker`](../../worker/README.md) | 영상 수신과 프레임 공급. | 추론, 장기 저장 |
-| [`monitoring`](../../monitoring/README.md) | Prometheus·Grafana 설정. | 애플리케이션 비즈니스 로직 |
-| `docs` | 아키텍처, 개발 규칙, 에이전트 규칙, 작업 절차, 프롬프트, 템플릿. **AI 에이전트 관련 문서는 모두 여기에 둔다.** | 실행 코드 |
+| [`deeplearning`](../../deeplearning/README.md) | 모델 로딩과 추론. 표준화된 탐지 결과를 반환한다. | 업무 해석, 영속 저장 |
+| [`worker`](../../worker/README.md) | 영상 파이프라인 워커 묶음. 단계별로 `stream`·`inference`·`state`·`recorder`로 나눈다. | 웹 요청 처리, 탐지 결과의 조회 API |
+| [`monitoring/internal`](../../monitoring/internal/README.md) | **내부 모니터링.** Prometheus·Grafana 설정. 대상은 서비스 자체, 수요자는 운영자. | 애플리케이션 비즈니스 로직 |
+| [`monitoring/external`](../../monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제공하는 실시간 영상 모니터링. **경계가 아직 확정되지 않았다** — 설정·문서만 둘지 서비스 코드를 둘지 정해지기 전까지 코드를 넣지 않는다. | 지표·대시보드, 추론, 탐지 결과의 업무 해석 |
+| `docs` | 아키텍처, 개발 규칙, 에이전트 규칙, 프롬프트, 템플릿. **AI 에이전트 관련 문서는 모두 여기에 둔다.** | 실행 코드, 특정 서비스의 실행 방법 |
 | [`RPAs`](../../RPAs/README.md) | 업무 자동화 프로젝트. 프로젝트별 독립 디렉터리로 관리한다. | 상시 실행 서비스 |
 
-최상위에는 `webapps/`, `deeplearning/`, `worker/`, `monitoring/`, `docs/`, `RPAs/`, `README.md`만 둔다.
-최상위에 `AGENTS.md`, 빌드 설정, 인프라 파일, `scripts/`를 새로 만들지 않는다.
+최상위에는 `webapps/`, `deeplearning/`, `worker/`, `monitoring/`, `docs/`, `RPAs/`,
+`README.md`만 둔다. 최상위에 `AGENTS.md`, 빌드 설정, 인프라 파일, `scripts/`를 새로 만들지 않는다.
 
 `webapps/`는 웹 애플리케이션 전용이며 현재 `fastapi` 하나를 담는다.
 추론·스트림·관측처럼 웹 요청을 처리하지 않는 서비스는 최상위에 독립 디렉터리로 둔다.
 
-**예외**: 저장소 운영 자체에 필요한 `.gitignore`는 최상위에 둔다.
+**예외**: 저장소 운영에 필요한 `.gitignore`는 최상위에 둔다.
 또한 `.gitignore`로 추적에서 제외된 로컬 파일과 디렉터리는 저장소 내용물이 아니므로
 이 제약의 대상이 아니다. 작업 중 최상위에서 보이지만 저장소에는 없는 것들이다.
 
 | 항목 | 용도 |
 | --- | --- |
-| `.env` | 로컬 환경변수 값 |
-| `CLAUDE.md` | Claude Code 프로젝트 지침 |
-| `.claude/` | Claude Code 설정과 스킬 |
+| `.env`, `env/` | 로컬 환경변수 값 |
+| `.docker/` | 개인 로컬 docker compose 구성. 팀 공식 실행 수단이 아니다 |
+| `CLAUDE.md`, `.claude/` | Claude Code 지침·설정·스킬 |
+| `.agents/`, `.cursor/` | 다른 에이전트 도구 설정 |
 | `initial_prompt.md`, `individual_tasks/` | 개인 작업 자료 |
 
 **이 예외를 근거로 새 설정 파일을 최상위에 추가하지 않는다.**
@@ -59,30 +84,37 @@ memory 또는 MongoDB 저장소로 동작한다. local/dev에서는 고정 합�
 
 | 주제 | 기준 |
 | --- | --- |
-| 시스템 구조, 서비스 관계, 결정 이력 | [`docs/architecture`](../architecture/overview.md) |
+| 시스템 구조, 서비스 관계, 미결정 항목 | [`docs/architecture/README.md`](../architecture/README.md) |
+| 확정된 기술 결정과 그 근거 | [`docs/architecture/decisions.md`](../architecture/decisions.md) |
 | Git·코딩·API·환경변수·문서 규칙 | [`docs/conventions`](../conventions/) |
-| 반복 작업의 실행 절차 | Claude Code 스킬 (`.claude/skills/`, 저장소 밖) |
-| 작업 지시 템플릿 | [`docs/prompts`](../prompts/) |
+| 실행·검증 명령 | [`docs/guides/README.md`](../guides/README.md)와 각 서비스 README |
+| 에이전트에게 지시하는 방법 | [`docs/prompts`](../prompts/) |
 | 역할별 에이전트 규칙 | [`docs/agents`](./) |
+| 반복 작업의 실행 절차 | Claude Code 스킬 (`.claude/skills/`, 저장소 밖) |
 | 개별 서비스의 책임과 범위 | 해당 서비스 디렉터리의 `README.md` |
 | RPA 공통 규칙 | [`RPAs/README.md`](../../RPAs/README.md) |
-| 저장소 진입점과 미결정 항목 목록 | [루트 `README.md`](../../README.md) |
+| 저장소 진입점 | [루트 `README.md`](../../README.md) |
 
 문서와 실제 코드가 다르면 **코드가 사실**이다.
 이 경우 임의로 코드를 고치지 말고, 불일치를 보고한 뒤 어느 쪽을 고칠지 확인받는다.
 
 ## Architecture Rules
 
-아래는 서비스 구현 시 지켜야 할 구조 원칙이다. 위반이 필요하면 먼저 [ADR](../architecture/decisions/)로 남긴다.
+아래는 서비스 구현 시 지켜야 할 구조 원칙이다.
+예외가 필요하면 먼저 [결정 기록](../architecture/decisions.md)에 항목을 남긴다.
 새 코드를 어디에 둘지, 의존 방향이 규칙에 맞는지 판단할 때는 `architecture-review` 스킬을 따른다.
 
 1. **브라우저는 `fastapi`만 호출한다.** `deeplearning`과 `worker`에 직접 접근하지 않는다.
 2. **외부 클라이언트 요청은 `fastapi`를 통해 처리한다.** `fastapi`가 유일한 외부 진입점이다.
-3. **영상 데이터와 메타데이터의 저장 책임을 분리한다.** 한 서비스가 둘을 모두 소유하지 않는다.
-4. **서비스 간 계약은 문서화된 API 또는 이벤트 스키마를 따른다.** 상대 서비스의 내부 구조에 의존하지 않는다.
-5. **비즈니스 로직과 프레임워크 코드를 분리한다.** 라우터·컴포넌트 안에 판단 로직을 두지 않는다.
-6. **각 서비스는 독립적으로 실행·테스트할 수 있어야 한다.** 다른 서비스가 떠 있어야만 테스트되는 구조를 기본으로 만들지 않는다.
-7. **공통 설정을 서비스 코드에 복사하지 않는다.** 설정값은 환경변수로 주입하고, 규칙은 기준 문서를 참조한다.
+3. **탐지와 해석을 분리한다.** `deeplearning`의 출력은 "사람 1명 탐지, 신뢰도 0.87"까지다.
+   업무 의미를 부여하는 것은 `fastapi`의 일이다.
+   (상태 판정 로직을 어느 서비스가 소유할지는
+   [아직 확정되지 않았다](../architecture/README.md#상태-판정은-누가-하는가).)
+4. **영상 데이터와 메타데이터의 저장 책임을 분리한다.** 한 서비스가 둘을 모두 소유하지 않는다.
+5. **서비스 간 계약은 문서화된 API 또는 이벤트 스키마를 따른다.** 상대 서비스의 내부 구조에 의존하지 않는다.
+6. **비즈니스 로직과 프레임워크 코드를 분리한다.** 라우터·템플릿 안에 판단 로직을 두지 않는다.
+7. **각 서비스는 독립적으로 실행·테스트할 수 있어야 한다.** 다른 서비스가 떠 있어야만 테스트되는 구조를 기본으로 만들지 않는다.
+8. **공통 설정을 서비스 코드에 복사하지 않는다.** 설정값은 환경변수로 주입하고, 규칙은 기준 문서를 참조한다.
 
 ## Agent Workflow
 
@@ -94,6 +126,7 @@ memory 또는 MongoDB 저장소로 동작한다. local/dev에서는 고정 합�
 4. **범위 판단** — 변경 대상과 영향받는 서비스·문서를 정리한다. 계약 변경이면 소비자 측 영향을 먼저 확인한다.
 5. **구현** — 요청된 범위만 최소한으로 구현한다. 요청하지 않은 리팩터링을 끼워 넣지 않는다.
 6. **검증** — 실행 가능한 테스트와 검사를 실제로 돌린다.
+   명령은 [개발 가이드](../guides/README.md#fastapi-검증)에 있다.
 7. **문서 확인** — 갱신이 필요한 문서가 있는지 확인하고 반영한다.
 8. **보고** — 아래 [Completion Report](#completion-report) 형식으로 보고한다.
 
@@ -121,6 +154,7 @@ memory 또는 MongoDB 저장소로 동작한다. local/dev에서는 고정 합�
 - **실행하지 않은 테스트를 실행했다고 보고하지 않는다.**
 - **불확실한 내용을 사실처럼 문서화하지 않는다.** 미확정 항목은 `예정`, `후보`, `결정 필요`로 표시한다.
 - **요청 범위를 벗어난 파일을 삭제하거나 덮어쓰지 않는다.**
+- **영상 저장 기능을 먼저 만들지 않는다.** 보존 기간과 접근 권한이 합의되지 않았다.
 
 ## Completion Report
 

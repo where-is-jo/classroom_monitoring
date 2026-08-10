@@ -3,12 +3,21 @@
 **목적**: 브랜치와 커밋을 다루는 최소한의 공통 규칙을 정한다.
 **대상 독자**: 이 저장소에 커밋하는 모든 사람과 AI 에이전트.
 
-복잡한 Git Flow는 쓰지 않는다. `main`에서 브랜치를 따고, 작업이 끝나면
+복잡한 Git Flow는 쓰지 않는다. `develop`에서 브랜치를 따고, 작업이 끝나면
 Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 
 ## 브랜치
 
-`main`이 기준 브랜치다. `main`에 직접 커밋하지 않는다.
+**`develop`이 기준 브랜치다.** 작업 브랜치는 `develop`에서 따고, Pull Request도
+`develop`으로 연다. `main`에는 배포하는 시점에만 `develop`을 병합한다.
+
+`main`과 `develop` 어느 쪽에도 직접 커밋하지 않는다.
+
+| 브랜치 | 역할 |
+| --- | --- |
+| `main` | 배포된 상태. `develop`에서만 병합해 들어온다 |
+| `develop` | 통합 기준. 작업 브랜치의 분기점이자 PR 대상 |
+| `<타입>/<간단한-설명>` | 실제 작업 |
 
 ```text
 <타입>/<간단한-설명>
@@ -62,7 +71,7 @@ Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 | --- | --- |
 | 서비스 | `fastapi`, `deeplearning`, `worker`, `monitoring`, `rpa` |
 | fastapi 기능 | `events`, `cameras`, `auth` |
-| 문서 영역 | `docs`, `agents`, `adr` |
+| 문서 영역 | `docs`, `agents` |
 | 저장소 설정 | `config` |
 
 목록에 없는 스코프가 필요하면 억지로 만들지 말고 생략한다.

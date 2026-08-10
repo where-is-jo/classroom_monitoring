@@ -26,7 +26,7 @@
 작업 전 다음을 읽는다.
 
 - [`deeplearning/README.md`](../../deeplearning/README.md), [`worker/README.md`](../../worker/README.md)
-- [데이터 흐름](../architecture/data-flow.md) — 프레임 전달 경로와 미확정 지점
+- [아키텍처](../architecture/README.md) — 프레임 전달 경로와 미확정 지점
 - [코딩 규칙](../conventions/coding-convention.md)
 - `add-monitoring-metric` 스킬 — 성능 지표 추가 시
 - 기존 입출력 스키마와 결과 소비자(fastapi)의 사용 방식
@@ -55,7 +55,7 @@
 - **worker에 추론 로직을, deeplearning에 스트림 연결 관리를 넣지 않는다.**
 - **영상 원본과 개인정보가 로그·테스트 자산에 남지 않게 한다.**
 - 모델 종류·버전, 프레임 전달 방식, 실행 장치는 **결정 필요** 항목이다.
-  확정 전이면 특정 선택에 강하게 결합된 구조를 굳히지 않고, 확정 시 [ADR](../architecture/decisions/)로 남긴다.
+  확정 전이면 특정 선택에 강하게 결합된 구조를 굳히지 않고, 확정 시 [결정 기록](../architecture/decisions.md)에 남긴다.
 
 ## Expected Outputs
 
