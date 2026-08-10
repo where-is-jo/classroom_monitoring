@@ -1,322 +1,121 @@
-# Smart Office Monitoring System
-## Camera Streaming & Data Collection Architecture
-
-## 1. 개요
-스마트 오피스 모니터링 시스템의 영상 수집 단계 구현 내용이다.
-
-목표:
-- USB Camera 영상 수집
-- RTSP 기반 영상 스트리밍
-- 원본 영상 저장
-- 객체 탐지 학습용 프레임 이미지 저장
-- 추후 Jetson Nano 기반 다중 카메라 확장
-
-현재 USB Camera 1대를 기준으로 개발 및 테스트 진행.
-
-## 2. 전체 구조
-
-
-USB Camera → FFmpeg → MediaMTX → OpenCV → 저장
-├ Video Recorder
-└ Frame Capture
-
-
-구성 역할:
-- USB Camera: 영상 입력
-- FFmpeg: USB Camera 영상을 RTSP Stream으로 변환
-- MediaMTX: RTSP Stream 관리 서버
-- OpenCV: RTSP 영상 수신 및 Frame 처리
-- Video Recorder: 원본 영상 저장
-- Frame Capture: AI 학습용 이미지 저장
-
-## 3. 사용 기술
-
-### Python
-전체 시스템 개발 언어.
-
-### OpenCV
-사용 목적:
-- RTSP 영상 수신
-- Frame 처리
-- 이미지 저장
-- 영상 저장
-
-### FFmpeg
-USB Camera 입력을 RTSP Stream으로 변환.
-
-구조:
-
-USB Camera → FFmpeg → RTSP Stream
-
-
-### MediaMTX
-RTSP Stream 관리 서버.
-
-역할:
-- FFmpeg Stream 수신
-- RTSP Endpoint 제공
-- Client 연결 관리
-
-## 4. 통신 방식
-
-### USB Camera → FFmpeg
-방식: DirectShow
-
-Windows 환경에서 USB Camera 접근.
-
-예:
-
-video=ABKO APC480 SD WEBCAM
-
-
-### FFmpeg → MediaMTX
-통신: RTSP TCP
-
-사용 이유:
-- 영상 저장 목적
-- AI 분석 목적
-- UDP 대비 안정적인 데이터 전달
-
-### MediaMTX → OpenCV
-통신: RTSP
-
-현재 URL:
-
-rtsp://localhost:8554/camera
-
-
-## 5. 프로젝트 구조
-
-
-worker
-├── config.py
-├── camera.py
-├── camera_stream.py
-├── camera_run.py
-├── video_recorder.py
-├── frame_capture.py
-└── data
-├── video
-└── frames
-
-
-## 6. 파일별 역할
-
-### config.py
-전체 설정 관리.
-
-관리 항목:
-- Camera 이름
-- RTSP URL
-- 저장 경로
-- FPS
-- Frame Size
-
-현재 설정:
-
-VIDEO_FPS = 20
-VIDEO_FRAME_SIZE = (640,480)
-FRAME_INTERVAL = 20
-
-
-### camera_stream.py
-USB Camera → RTSP Stream 변환 담당.
-
-사용:
-FFmpeg subprocess 실행.
-
-구조:
-
-USB Camera → FFmpeg → MediaMTX RTSP
-
-
-목적:
-- 실시간 스트리밍
-- FPS 유지
-- Jetson Nano 확장 대비
-
-### camera.py
-RTSP Client 역할.
-
-기능:
-- RTSP 연결
-- Frame 읽기
-- Camera Release
-
-입력:
-
-rtsp://localhost:8554/camera
-
-
-출력:
-Frame 데이터.
-
-### video_recorder.py
-원본 영상 저장 담당.
-
-저장 위치:
-
-data/video
-
-
-현재:
-- MP4 저장
-- FPS 기준 저장
-
-추후:
-- 10분 단위 영상 분할 저장
-- 장시간 녹화 관리
-
-### frame_capture.py
-객체 탐지 학습용 이미지 저장 담당.
-
-저장 위치:
-
-data/frames
-
-
-현재 설정:
-
-FRAME_INTERVAL = 20
-
-
-20 FPS 기준:
-약 1초당 1장 저장.
-
-### camera_run.py
-전체 실행 담당.
-
-실행 순서:
-1. FFmpeg Stream 시작
-2. RTSP Camera 연결
-3. Video Recorder 실행
-4. Frame Capture 실행
-5. Frame Loop 실행
-6. 저장 처리
-7. 종료 처리
-
-## 7. 현재 영상 설정
-
-Camera Input:
-
-20 FPS
-
-
-Recording:
-
-20 FPS
-
-
-Frame Capture:
-
-20 frame 당 1장
-
-
-목표:
-- 영상 안정성 확보
-- AI 학습 데이터 확보
-
-## 8. 발생했던 문제 및 해결 방향
+# 카메라 수집 구성
+
+**목적**: stream worker가 어떤 구성 요소로 영상을 받는지, 설정값을 왜 그 값으로
+정했는지, 수집을 붙이면서 겪은 문제와 대응을 남긴다.
+**대상 독자**: 실제 카메라를 붙여 stream worker를 돌리는 팀원.
+
+실행 절차와 환경변수 목록은 [stream README](./README.md)에 있다. 여기서 반복하지 않는다.
+
+## 1. 전체 구조
+
+```text
+USB 카메라 → FFmpeg → MediaMTX → OpenCV → stream worker
+                                              ├→ 프레임 샘플링 (→ inference, 예정)
+                                              ├→ 원본 영상 저장 (개발용, 기본 꺼짐)
+                                              └→ 학습용 프레임 저장 (개발용, 기본 꺼짐)
+```
+
+| 구성 요소 | 역할 |
+| --- | --- |
+| USB 카메라 | 영상 입력 |
+| FFmpeg | USB 카메라 영상을 RTSP 스트림으로 변환 |
+| MediaMTX | RTSP 스트림 관리 서버. 엔드포인트 제공과 클라이언트 연결 관리 |
+| OpenCV | RTSP 수신과 프레임 처리 |
+
+Jetson이나 CCTV가 직접 RTSP를 내보내는 구성에서는 FFmpeg 단계가 필요 없다.
+`RTSP_PUBLISH_ENABLED=false`로 두고 `STREAM_SOURCES`만 채운다.
+
+## 2. 통신 방식
+
+| 구간 | 방식 | 비고 |
+| --- | --- | --- |
+| USB 카메라 → FFmpeg | DirectShow(`dshow`) | Windows 기준. Linux는 `v4l2`, macOS는 `avfoundation` |
+| FFmpeg → MediaMTX | RTSP over TCP | UDP 대비 손실이 적다. 아래 5절 참고 |
+| MediaMTX → OpenCV | RTSP | |
+
+입력 형식은 OS를 코드에서 판별하지 않고 `RTSP_PUBLISH_INPUT_FORMAT` 설정으로 고른다.
+
+dshow는 장치를 이름으로 지정한다. 장치 이름은 다음으로 확인한다.
+
+```bash
+ffmpeg -list_devices true -f dshow -i dummy
+```
+
+## 3. 파일별 역할
+
+| 파일 | 역할 |
+| --- | --- |
+| `config.py` | 환경변수 읽기와 시작 시 검증, `STREAM_SOURCES` 파싱 |
+| `errors.py` | 도메인 예외 |
+| `camera_reader.py` | RTSP 클라이언트. 연결·재연결·프레임 읽기와 연결 상태 |
+| `rtsp_publisher.py` | FFmpeg subprocess로 USB 카메라를 RTSP로 송출 |
+| `video_recorder.py` | 원본 영상 세그먼트 저장 |
+| `frame_capture.py` | 샘플링한 프레임을 JPEG으로 저장 |
+| `worker.py` | 카메라별 파이프라인을 스레드로 관리 |
+| `main.py` | 진입점 |
+
+저장 경로는 `stream/data/` 아래이며 `.gitignore` 대상이다.
+
+```text
+stream/data/
+├── video/<카메라 식별자>/<YYYY-MM-DD>/<YYYYMMDD_HHMMSS>.mp4
+└── frames/<카메라 식별자>/<YYYY-MM-DD>/<YYYYMMDD_HHMMSS_ffffff>.jpg
+```
+
+## 4. 현재 설정값과 근거
+
+| 값 | 설정 이름 | 근거 |
+| --- | --- | --- |
+| 20 FPS | `RTSP_PUBLISH_FRAMERATE`, `RECORDING_FPS` | 30에서 낮췄다. 5절 참고 |
+| 20프레임마다 1장 | `FRAME_SAMPLE_INTERVAL_FRAMES` | 20 FPS 기준 약 1초에 한 장 |
+| RTSP TCP | 고정 | 5절 참고 |
+| GOP = 프레임률 × 2 | 고정 | 5절 참고 |
+| 버퍼 크기 1 | 고정 | 읽기가 느릴 때 지연이 쌓이지 않게 한다 |
+
+해상도는 설정이 아니라 **실제 프레임에서 가져온다.** 설정한 해상도와 실제 해상도가
+어긋나면 OpenCV `VideoWriter`가 오류 없이 빈 파일을 만들기 때문이다.
+
+## 5. 겪은 문제와 대응
 
 ### H264 corrupted macroblock
 
-원인:
-RTSP Stream Packet Loss.
-
-발생:
-FFmpeg → MediaMTX 전달 과정에서 영상 데이터 손실 발생.
-
-대응:
-- RTSP TCP 사용
-- FPS 30 → 20 감소
-- Buffer 조정
-- GOP 조절
+- **원인**: RTSP 스트림 패킷 손실. FFmpeg → MediaMTX 전달 과정에서 영상 데이터가 유실됐다.
+- **대응**: RTSP를 TCP로 보내고, 프레임률을 30에서 20으로 낮추고, 버퍼와 GOP를 조정했다.
 
 ### Frame duplicated 증가
 
-원인:
-입력 Frame 부족 또는 Stream 지연.
-
-대응:
-- FPS 고정
-- RTSP 안정화
-- Buffer 증가
+- **원인**: 입력 프레임 부족 또는 스트림 지연.
+- **대응**: 프레임률을 고정하고 `-rtbufsize`를 키웠다.
 
 ### reader is too slow
 
-원인:
-RTSP Client 처리 속도 부족.
+- **원인**: RTSP 클라이언트 처리 속도 부족.
+- **대응**: TCP를 쓰고 `CAP_PROP_BUFFERSIZE`를 1로 두어 오래된 프레임이 쌓이지 않게 했다.
+  카메라별 스레드 처리는 이후 `worker.py`에 반영했다.
 
-대응:
-- TCP 사용
-- 추후 Thread 기반 처리 적용
+## 6. 확장 계획
 
-## 9. 현재 안정화 상태
+| 단계 | 내용 | 상태 |
+| --- | --- | --- |
+| 장시간 안정화 | 30분 이상 무중단 수집 | `예정`. 측정하지 않았다 |
+| 자동 복구 | FFmpeg 종료 감지와 재시작, 카메라 재연결 | 구현됨 |
+| 다중 카메라 | 워커 하나가 여러 소스를 스레드로 관리 | 구현됨. 실제 3대 검증은 `예정` |
+| Jetson 적용 | `USB 카메라 → Jetson → RTSP 네트워크 → 서버` | `예정` |
+| 추론 연결 | 샘플링한 프레임을 inference worker에 공급 | `예정`. 전달 방식 `결정 필요` |
 
-현재 설정:
-- FPS: 20
-- 해상도: 640x480
-- RTSP TCP 사용
-- USB Camera 1대 테스트
+다중 카메라는 `STREAM_SOURCES`에 소스를 늘려 설정한다.
 
-목표:
-- 장시간 녹화 안정화
-- Frame Loss 최소화
-- 자동 복구 구조 추가
+```bash
+STREAM_SOURCES=camera-01=rtsp://host:8554/camera1,camera-02=rtsp://host:8554/camera2
+```
 
-## 10. 향후 확장 계획
+## 7. 확인하지 못한 것
 
-### Phase 3: 장시간 안정화
-목표:
-- 30분 이상 무중단 녹화
-- RTSP 오류 최소화
+이 문서의 설정값과 문제 대응은 **USB 카메라 1대 기준**으로 얻은 것이다.
+다중 카메라 구성과 Jetson 구성에서 같은 값이 통하는지는 확인하지 않았다.
+장시간 수집의 안정성도 측정하지 않았다. 측정한 사람이 이 절을 갱신한다.
 
-### Phase 4: 자동 복구
-추가 예정:
-- FFmpeg Watchdog
-- Stream 종료 감지
-- 자동 재시작
+## 관련 문서
 
-### Phase 5: Jetson Nano 적용
-
-현재:
-
-USB Camera → PC
-
-
-변경:
-
-USB Camera → Jetson Nano → RTSP Network → Server PC
-
-
-### Phase 6: 다중 카메라 지원
-
-목표:
-카메라 3대 운영.
-
-예상:
-
-camera1
-rtsp://host:8554/camera1
-
-camera2
-rtsp://host:8554/camera2
-
-camera3
-rtsp://host:8554/camera3
-
-
-## 현재 상태
-
-완료:
-- USB Camera 연결
-- FFmpeg RTSP Streaming
-- MediaMTX 구성
-- OpenCV RTSP 수신
-- 원본 영상 저장
-- Frame 이미지 저장
-
-진행 중:
-- 장시간 안정화 테스트
-- RTSP Stream 안정성 개선
-- Jetson Nano 적용 준비
+- [stream README](./README.md) — 실행 절차, 환경변수, 테스트
+- [worker 개요](../README.md) — 워커 구성과 경계
