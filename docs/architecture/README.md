@@ -44,7 +44,7 @@ flowchart TB
 | 사람·수화기 탐지 | [`worker/inference`](../../worker/inference/README.md) | 동작. YOLOv8n으로 탐지까지. 결과 전달 경로는 `예정`. [`deeplearning`](../../deeplearning/README.md)과의 경계는 `결정 필요` |
 | 상태 판정 | [`worker/state`](../../worker/state/README.md) 또는 `webapps/fastapi` | `예정`. 소유 서비스 `결정 필요`. 아래 [상태 판정은 누가 하는가](#상태-판정은-누가-하는가) 참고 |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 구현됨 |
-| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | `예정`. 저장 범위 미합의 |
+| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작. **저장 범위·보존 기간은 여전히 미합의**([결정 0009](./decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)) |
 | 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)만 있다. **수집할 지표가 없어 Prometheus 설정과 알림 규칙은 `예정`** |
 | 사용자용 실시간 영상 모니터링 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. 코드 없음. 디렉터리 경계와 재생 방식이 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
@@ -110,7 +110,10 @@ flowchart TB
 - 업무 메타데이터: `fastapi`가 MongoDB에 기록한다.
 - 영상·스냅샷: **`worker/recorder`가 저장소로 넘긴다.** MinIO에 보관하고 메타데이터에는
   참조만 남긴다. 실시간 영상을 받아 저장소와 추론 모델에 넘기는 것이 `worker`의 책임이다.
-  **저장 범위와 보존 기간은 아직 `결정 필요`이므로, 확정 전까지 상시 저장 기능을 만들지 않는다.**
+  **저장 범위·보존 기간·접근 권한은 아직 `결정 필요`다.** 0004는 합의 전까지 상시 저장
+  기능을 만들지 않기로 했으나 `recorder`가 먼저 구현됐다. 그 경위와 남은 위험은
+  [결정 0009](./decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)에 있다.
+  보존 기간 기본값 30일은 팀 합의값이 아니며, `APP_ENV=prod`에서 로컬 저장소는 거부한다.
   `worker/stream`의 로컬 저장은 학습 데이터 확보용이며 기본값이 꺼져 있고
   `APP_ENV=prod`에서는 켤 수 없다.
 
@@ -130,10 +133,14 @@ flowchart TB
 ```
 
 ```text
-USB 카메라 → FFmpeg → MediaMTX(RTSP) → OpenCV(worker/stream)
-          → 프레임 샘플링 → 프레임 버퍼(최신 1장) → worker/inference(YOLOv8n)
-          → 탐지 결과 로그 (fastapi로 넘기는 경로는 아직 없다)
-          → 원본 영상 파일 + 학습용 프레임 이미지 (개발용, 기본 꺼짐)
+USB 카메라 → FFmpeg → MediaMTX(RTSP) ┬→ OpenCV(worker/stream)
+                                     │   → 프레임 샘플링 → 프레임 버퍼(최신 1장)
+                                     │   → worker/inference(YOLOv8n) → 탐지 결과 로그
+                                     │   (fastapi로 넘기는 경로는 아직 없다)
+                                     │
+                                     └→ FFmpeg 세그먼트(worker/recorder)
+                                         → 객체 저장소 적재 → 보존 기간 경과분 삭제
+                                         (객체 참조를 fastapi에 알리는 경로는 아직 없다)
 ```
 
 두 흐름은 아직 이어져 있지 않다. 직원 상태와 좌석 관측은 `MOCK_INPUTS_ENABLED`인
@@ -183,7 +190,7 @@ GET 요청은 시간 정책이나 상태 전이를 실행하지 않는다. 시�
 | --- | --- | --- |
 | USB 카메라 / CCTV / Jetson | 영상 스트림 공급 | USB 카메라 1대 연동됨. Jetson은 `예정` |
 | MongoDB | 운영 메타데이터 보관 | 구현됨 |
-| MinIO | 영상·스냅샷 보관 | 확정됐으나 연동 `예정` |
+| MinIO | 영상·스냅샷 보관 | `worker/recorder`가 적재·삭제한다. 로컬 서버로 확인됨 |
 | 알림 채널 | 이벤트 발생 시 담당자에게 알림 | `결정 필요`. 현재는 인앱 알림만 |
 | 사내 업무 시스템 | RPA가 접근해 업무 대행 | 대상 미확정 |
 
@@ -199,8 +206,9 @@ GET 요청은 시간 정책이나 상태 전이를 실행하지 않는다. 시�
 
 ### 제약
 
-- **영상은 개인정보를 포함한다.** 저장 범위·보존 기간·접근 권한을 정하지 않은 상태로
-  영상을 저장하는 기능을 만들지 않는다.
+- **영상은 개인정보를 포함한다.** 저장 범위·보존 기간·접근 권한이 아직 정해지지 않았다.
+  `worker/recorder`가 이 합의보다 먼저 만들어졌으므로([0009](./decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)),
+  합의를 미룰수록 지우기 어려운 데이터가 쌓인다.
 - **장치는 자주 끊긴다.** 카메라 연결 실패를 예외가 아니라 정상 운영 중 발생하는 상태로 다룬다.
 - **외부 시스템 접근 정보는 저장소에 두지 않는다.**
   [환경변수 규칙](../conventions/environment-convention.md)을 따른다.
@@ -217,7 +225,7 @@ GET 요청은 시간 정책이나 상태 전이를 실행하지 않는다. 시�
 | `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 결정 필요 | monitoring, fastapi |
 | 실시간 영상에서 "브라우저는 fastapi만 호출한다"를 유지할지 | 결정 필요 | fastapi, monitoring |
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
-| 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 관련 합의 사항 |
+| 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 관련 합의 사항. **코드가 먼저 만들어져 기본값으로 동작 중**([0009](./decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)) |
 | 모델 종류와 버전 | 후보: YOLO 계열 | deeplearning |
 | Jetson 적용 범위 | 결정 필요 | worker |
 | 자연어 영상 검색의 질의 해석 방식 | 결정 필요 | fastapi |
