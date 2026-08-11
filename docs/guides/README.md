@@ -8,15 +8,16 @@
 ## 먼저 읽을 문서
 
 1. [루트 README](../../README.md) — 저장소 전체 구조
-2. [아키텍처](../architecture/README.md) — 서비스 관계와 미결정 항목
-3. 담당 영역의 서비스 README —
+2. [학생 모니터링 MVP 명세](../specs/student-monitoring-mvp.md) — 무엇을 만드는가
+3. [아키텍처](../architecture/README.md) — 서비스 관계와 미결정 항목
+4. 담당 영역의 서비스 README —
    [fastapi](../../webapps/fastapi/README.md) ·
    [worker](../../worker/README.md) ·
    [deeplearning](../../deeplearning/README.md) ·
    [monitoring/internal](../../monitoring/internal/README.md) ·
    [monitoring/external](../../monitoring/external/README.md) ·
    [RPAs](../../RPAs/README.md)
-4. [개발 규칙](../conventions/) — 전부 읽을 필요는 없다. 필요할 때 본다
+5. [개발 규칙](../conventions/) — 전부 읽을 필요는 없다. 필요할 때 본다
 
 | 상황 | 문서 |
 | --- | --- |
@@ -34,20 +35,20 @@ Python 3.12 이상. 외부 서비스 없이 기동한다.
 cd webapps/fastapi
 python -m pip install -r requirements.txt
 cp .env.example .env
-# .env의 JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, CSRF_SECRET,
-# AUDIT_IP_HASH_SECRET을 각각 32자 이상 값으로 채운다.
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-`http://127.0.0.1:8000`을 열면 비로그인 사용자는 `/login`으로 이동한다.
-`WEB_ORIGIN`은 브라우저에서 접속하는 origin과 정확히 같아야 한다.
+`http://127.0.0.1:8000`을 열면 `/classrooms`로 이동한다. **로그인은 없다.**
+비밀값을 채우지 않아도 기동한다.
 
-로그인할 계정이 필요하면 `.env`에서 `AUTH_SEED_ENABLED=true`로 바꾸고
-`AUTH_SEED_*_PASSWORD` 세 값을 채운다. `DEMO_MODE_ENABLED=true`를 함께 켜면
-직원·면담·강의실·좌석·경고·알림 fixture까지 채워져 역할별 흐름을 바로 볼 수 있다.
+`.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 합성 영상과 고정 검색
+catalog가 붙어 `/monitoring`과 `/video-search`를 시연할 수 있다.
+`APP_ENV=prod`에서는 활성화를 거부한다.
 
-계정 목록, 역할별 화면, 환경변수 전체는
-[fastapi README](../../webapps/fastapi/README.md)가 기준이다.
+화면과 환경변수 전체는 [fastapi README](../../webapps/fastapi/README.md)가 기준이다.
+
+> **`APP_ENV=prod`로 배포하지 않는다.** 운영 접근 통제 방식이 아직 정해지지 않았다
+> ([결정 0010](../architecture/decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)).
 
 MongoDB를 붙이려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_NAME`을 준다.
 `memory` mode는 `APP_ENV=local`에서만 허용된다.
@@ -71,8 +72,8 @@ python -m pytest -q
 단일 테스트 실행:
 
 ```bash
-python -m pytest tests/employees                                # 기능 단위
-python -m pytest tests/employees/test_service.py                # 파일 단위
+python -m pytest tests/classrooms                               # 기능 단위
+python -m pytest tests/classrooms/test_mongo_adapter.py         # 파일 단위
 python -m pytest -k "임계값"                                     # 이름으로 필터
 python -m pytest -q -m mongodb                                  # MongoDB 통합 테스트
 ```
@@ -86,7 +87,7 @@ URL 경로에 `test_`로 시작하는 database 이름을 넣는다.
 ## worker 실행
 
 `worker`는 파이프라인 단계별 워커로 나뉜다
-([결정 0007](../architecture/decisions.md#0007--worker를-역할별-워커로-분리)).
+([결정 0005](../architecture/decisions.md#0005--worker를-역할별-워커로-분리)).
 `stream`과 `inference`는 프레임 버퍼로 이어져 `pipeline` 진입점으로 함께 돌고,
 `recorder`는 별도 진입점으로 돈다. USB 카메라를 직접 쓰면 FFmpeg와 MediaMTX가 필요하다.
 
@@ -147,8 +148,9 @@ python -m recorder.main
 
 ## 작업할 때 지킬 것
 
-- **실제 사무실 영상을 개발용으로 로컬에 두지 않는다.** 테스트에는 공개 샘플이나
+- **학생이 찍힌 영상을 개발용으로 로컬에 두지 않는다.** 테스트에는 공개 샘플이나
   직접 촬영한 무인 영상을 쓴다. 화면 캡처를 문서·이슈에 올릴 때 사람이 찍히지 않았는지 확인한다.
+- **테스트 자산에 실제 사람의 얼굴을 쓰지 않는다.** 합성 이미지나 고정 벡터를 쓴다.
 - **운영 데이터를 로컬로 복사하지 않는다.**
 - **없는 서비스를 흉내 내는 코드를 제품 코드에 넣지 않는다.** 대역이 필요하면
   테스트 코드나 로컬 설정으로 분리한다.

@@ -70,7 +70,8 @@ Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 | 구분 | 값 |
 | --- | --- |
 | 서비스 | `fastapi`, `deeplearning`, `worker`, `monitoring`, `rpa` |
-| fastapi 기능 | `events`, `cameras`, `auth` |
+| fastapi 기능 | `students`, `classrooms`, `face-enrollment`, `student-monitoring`, `video-monitoring` |
+| worker 단계 | `stream`, `inference`, `recorder` |
 | 문서 영역 | `docs`, `agents` |
 | 저장소 설정 | `config` |
 
@@ -133,8 +134,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 
 - 계정, 비밀번호, API 키, 토큰, 인증서
 - 실제 값이 담긴 `.env`
+- **학생 얼굴이 담긴 영상·이미지·화면 캡처**, 얼굴 embedding 파일
 - 개인정보가 포함된 데이터·영상·스크린샷
 - 실행 로그, 대용량 모델 가중치, 빌드 산출물
+
+수집한 영상과 프레임은 `worker/**/data/` 아래에 쌓이며 `.gitignore` 대상이다.
+얼굴이 담기므로 어떤 경우에도 커밋하지 않는다.
 
 `.env.example`에는 변수 이름과 설명만 넣는다.
 자세한 내용은 [환경변수 규칙](./environment-convention.md)에 있다.

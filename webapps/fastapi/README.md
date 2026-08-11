@@ -1,11 +1,16 @@
 # fastapi
 
-학생·직원·관리자가 사용하는 캠퍼스 운영 포털의 HTTP API와 Jinja2 화면을 제공한다.
-이 저장소에서 실행 가능한 유일한 서비스이자 브라우저의 단일 진입점이다.
+관리자가 사용하는 강의실 모니터링 화면과 HTTP API를 제공한다.
+이 저장소에서 실행 가능한 웹 서비스이자 브라우저의 단일 진입점이다.
 
-현재 v2 범위는 인증·사용자 관리, 직원 상태, 면담 대기, 강의실 좌석과 마감 후 경고,
-인앱 알림, 관리자 대시보드다. `local`·`dev`에서는 실제 영상이나 개인정보 없이 고정 합성
-데이터로 모니터링·영상 검색 흐름을 시연할 수 있다.
+**이 서비스가 학생 상태 판정을 소유한다.** 탐지 결과를 `PRESENT` / `WRONG_SEAT` /
+`ABSENT`로 바꾸는 규칙은 여기 있고, `worker`나 `deeplearning`에 두지 않는다
+([결정 0008](../../docs/architecture/decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)).
+
+> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색 세 화면이다.**
+> 학생 원장, 얼굴 등록, 지정 좌석, 학생 상태 판정은 **아직 구현되지 않았다.**
+> 현재 좌석 상태는 "자리가 찼는지"를 뜻하며 "누가 앉았는지"가 아니다.
+> 앞으로 만들 도메인과 계약은 [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md)에 있다.
 
 ## 빠른 시작
 
@@ -15,194 +20,143 @@ Python 3.12 환경에서 실행한다.
 cd webapps/fastapi
 python -m pip install -r requirements.txt
 cp .env.example .env
-# .env의 JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, CSRF_SECRET,
-# AUDIT_IP_HASH_SECRET을 각각 32자 이상 값으로 채운다.
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
 기본 예제는 `APP_ENV=local`, `DATABASE_MODE=memory`라서 외부 서비스 없이 기동한다.
-`WEB_ORIGIN`은 브라우저에서 접속하는 origin과 정확히 같아야 한다. 브라우저에서
-`http://127.0.0.1:8000`을 열면 비로그인 사용자는 `/login`으로 이동한다.
+**로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8000`을 열면
+`/classrooms`로 이동한다.
 
-개발용 계정이 필요하면 `.env`에서 `AUTH_SEED_ENABLED=true`로 바꾸고 세
-`AUTH_SEED_*_PASSWORD` 값을 채운다. seed 계정은 바로 로그인할 수 있다. 여기에
-`DEMO_MODE_ENABLED=true`를 함께 설정하면 memory 저장소에 직원·면담·강의실·좌석·경고·알림
-fixture도 멱등하게 채워져 별도 입력 없이 역할별 흐름을 시연할 수 있다.
-
-| 이메일                     | 역할      |
-| -------------------------- | --------- |
-| `student@example.invalid`  | `STUDENT` |
-| `staff@example.invalid`    | `STAFF`   |
-| `staff-02@example.invalid` | `STAFF`   |
-| `admin@example.invalid`    | `ADMIN`   |
+`.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 합성 영상 source와 고정
+검색 catalog가 붙고, memory 저장소에 강의실·좌석 fixture가 멱등하게 채워진다.
+`APP_ENV=prod`에서는 활성화를 거부한다.
 
 MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_NAME`을
 주입한다. 앱은 요청을 받기 전에 연결을 확인하고 필요한 index를 idempotent하게 초기화한다.
 `memory` mode는 `local`에서만 허용한다.
 
-## 역할별 제품 흐름
-
-| 역할      | 로그인 후 시작 화면      | 할 수 있는 일                                                                                     |
-| --------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
-| `STUDENT` | `/employees`             | 직원 상태 조회, 본인 면담 신청·취소·완료, 강의실 좌석 조회                                        |
-| `STAFF`   | `/staff/interview-waits` | 접수된 본인 면담 처리, 직원 상태 조회와 본인 근무 상태 override, 강의실 좌석 조회, 합성 영상 데모 |
-| `ADMIN`   | `/admin`                 | 운영 요약·최근 활동·열린 경고 해결, 사용자·직원·강의실 관리, 합성 영상 데모                       |
-
-알림은 별도 제품 페이지가 아니라 공통 화면의 알림 팝오버로 제공한다. 학생은 준비된 면담
-알림, STAFF와 ADMIN은 담당 강의실의 마감 후 좌석 경고를 확인하고 개별 또는 전체 읽음
-처리할 수 있다.
-
-제품 역할은 위 세 가지뿐이다. 저장된 레거시 문서를 읽기 위해 `SYSTEM_OPERATOR` enum은
-남아 있지만 로그인·토큰 인증·관리 권한·신규 생성·seed 대상이 아니다. 레거시 경계와 이전
-정책은 [결정 0006](../../docs/architecture/decisions.md#0006--v2-제품-경계와-레거시-호환성)에 있다.
+> **`APP_ENV=prod`로 배포하지 않는다.** 현재 인증이 없고, 운영 접근 통제 방식이
+> 아직 정해지지 않았다
+> ([결정 0010](../../docs/architecture/decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)).
 
 ## 화면과 API
 
 실행 중인 설정에서 공개되는 정확한 JSON 계약은 `/docs`와 `/openapi.json`에서 확인한다.
-Jinja2 화면과 form 경로, 레거시 호환 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
+Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 `{"error": {"code", "message", "details"}}` envelope를 사용한다.
 
-### 기본 화면
+### 화면
 
-| 경로                              | 접근            | 설명                                                          |
-| --------------------------------- | --------------- | ------------------------------------------------------------- |
-| `/login`, `/account/password`     | 비로그인·로그인 | 로그인과 최초/본인 비밀번호 변경                              |
-| `/employees`, `/employees/{id}`   | 로그인          | 직원 현재 상태와 이력 조회; 연결된 STAFF는 본인 상태 override |
-| `/my/interview-waits*`            | `STUDENT`       | 본인 면담 대기 신청·상세·상태 전이                            |
-| `/staff/interview-waits*`         | `STAFF`         | 본인에게 접수된 면담 대기 조회·완료                           |
-| `/classrooms`, `/classrooms/{id}` | 로그인          | 운영 강의실과 좌석 점유 현황                                  |
-| `/admin`                          | `ADMIN`         | 직원·강의실·경고 요약, 최근 핵심 활동, 열린 경고 해결         |
-| `/admin/users`                    | `ADMIN`         | 세 제품 역할 사용자 생성·수정·soft deactivate                 |
-| `/admin/employees`                | `ADMIN`         | 직원 프로필과 STAFF 계정 연결 관리                            |
-| `/admin/classrooms`               | `ADMIN`         | 강의실·담당 STAFF·요일 일정·좌석 관리                         |
+| 경로 | 설명 |
+| --- | --- |
+| `/` | `/classrooms`로 이동 |
+| `/classrooms` | 강의실 선택, 좌석 지도, 재석·부재·확인 필요 집계와 마지막 관측 시각 |
+| `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
+| `/video-search` | 한국어 문장과 강의실·기간·결과 수 조건으로 검색. demo가 꺼져 있으면 빈 결과 |
 
-### 기본 API
+`/classrooms/{id}` 상세 페이지는 없다. `/classrooms?classroom_id={id}`에서 같은
+정보를 선택해 본다.
 
-| 경로 묶음                                                               | 설명                                                           |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `/api/v1/auth/*`                                                        | 로그인, refresh rotation, 로그아웃, 현재 사용자, 비밀번호 변경 |
-| `/api/v1/users*`                                                        | ADMIN 사용자 조회·생성·수정·soft deactivate                    |
-| `/api/v1/employees*`, `/api/v1/employee-status-evaluations`             | 직원·상태 이력·override·명시적 시간 정책 평가                  |
-| `/api/v1/interview-waits*`, `/api/v1/interview-wait-expirations`        | 역할 범위 면담 대기와 명시적 만료 평가                         |
-| `/api/v1/classrooms*`, `/api/v1/seats*`                                 | 강의실·일정·좌석·점유·점유 이력                                |
-| `/api/v1/after-hours-alerts*`                                           | ADMIN 마감 후 경고 조회·해결                                   |
-| `/api/v1/notifications*`, `/api/v1/notification-read-batches`           | 본인 알림 조회·읽음·전체 읽음                                  |
-| `/api/v1/admin/dashboard-summary`, `/api/v1/admin/dashboard-activities` | ADMIN 운영 집계와 최근 핵심 활동                               |
-| `/health`, `/health/ready`                                              | 프로세스 기동과 현재 저장소 준비 상태                          |
+### API
 
-쓰기 API는 로그인 때 발급된 `som_csrf` cookie 값을 `X-CSRF-Token` header로 보내고,
-`Origin`을 `WEB_ORIGIN`과 일치시켜야 한다. Jinja2 form은 hidden field로 같은 검증을 한다.
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| `GET` | `/api/v1/classrooms` | 활성 강의실 목록 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
+| `GET` | `/api/v1/video-streams` | 영상 source 목록. `q`·`classroom_id`·`status` 필터 |
+| `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
+| `POST` | `/api/v1/video-searches` | 부작용 없는 검색 실행 |
+| `GET` | `/health` | 프로세스 기동 상태 |
+| `GET` | `/health/ready` | 현재 저장소 준비 상태 |
 
-### 합성 영상 데모
+**쓰기 API가 없다.** 로그인, 사용자 관리, 강의실·좌석 CRUD, 알림, 관리자 대시보드는
+현재 구현되어 있지 않다.
 
-`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 다음 경로를 등록한다.
-`STUDENT`는 접근할 수 없고 `STAFF`, `ADMIN`만 사용할 수 있다.
+### 좌석 상태 표기
 
-| 경로                                               | 설명                                                            |
-| -------------------------------------------------- | --------------------------------------------------------------- |
-| `/monitoring`                                      | 연결된 합성 feed 2개와 영상 없음 상태 1개                       |
-| `/video-search`                                    | 고정 한국어 metadata와 기간·강의실 조건을 이용한 영상 검색 시연 |
-| `/api/v1/video-streams*`, `/api/v1/video-searches` | 같은 고정 catalog의 JSON API                                    |
-| `/demo-assets/*`                                   | 개인정보 없는 SVG poster와 브라우저 합성 영상 자산              |
+| 저장 값 | 화면 문구 | 의미 |
+| --- | --- | --- |
+| `OCCUPIED` | 재석 | 좌석 점유 관측이 confidence 기준 이상이다. **학생 신원을 뜻하지 않는다** |
+| `VACANT` | 부재 | 좌석 비점유 관측이 confidence 기준 이상이다. **지정 학생의 부재를 확정하지 않는다** |
+| `UNKNOWN` | 확인 필요 | 미관측, 낮은 confidence 또는 신뢰할 수 없는 관측이다 |
+
+색만으로 상태를 구분하지 않고 문구와 기호를 함께 쓴다.
+**관측 실패나 영상 없음을 `VACANT`로 바꾸지 않는다.**
+
+### 합성 데모
+
+`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 합성 영상 source와
+고정 검색 catalog를 제공하고 `/demo-assets/*`를 mount한다. demo 응답은 `is_demo=true`를
+유지한다.
 
 이 기능은 카메라·스트림·추론·영상 저장을 구현하지 않는다. 외부 미디어, 사용자 업로드,
-운영 데이터도 사용하지 않는다. `APP_ENV=prod`에서는 설정 검증 단계에서 활성화를 거부한다.
-
-### 테스트·개발 전용 입력
-
-`APP_ENV=local|dev`와 `MOCK_INPUTS_ENABLED=true`일 때만 구조화 직원·좌석 관측과 mock
-알림 delivery 라우터를 등록한다. 제품 탐색에는 링크하지 않으며 외부 네트워크나 SDK를
-사용하지 않는다. `APP_ENV=prod`에서는 활성화를 거부한다.
-
-### 레거시 직접 호출
-
-`/events*`, `/api/v1/events*`는 제품 탐색과 OpenAPI에서 빠졌지만 이전 기간 동안 직접
-호출을 유지한다. 이벤트 API 응답은 `Deprecation: true`를 보낸다. 감사 기록 저장은 내부
-통제로 유지하며 `/admin/audit-logs` 화면은 404다. `/api/v1/admin/audit-logs` 직접 호출은
-OpenAPI에서 숨기고 `Deprecation: true`를 보낸다.
-
-### 구현 전 API 설계 명세
-
-`individual_tasks/api명세서.md`(Draft v0.1)를 OpenAPI 3.1로 옮긴 `api-spec/openapi.json`을
-별도 경로로 제공한다. 로그인/비밀번호 변경, 직원 상태·좌석·면담 조회, 직원 전용 모니터링(근무
-상태 변경, CCTV, 영상 검색), 관리자 대시보드·사용자/직원/강의실 관리의 **아직 구현되지 않은**
-계약이다.
-
-| 경로              | 설명                             |
-| ----------------- | -------------------------------- |
-| `/docs/api-spec`  | 설계 명세 Swagger UI             |
-| `/api-spec.json`  | 설계 명세 OpenAPI JSON           |
-
-- 위의 실제 API와 섞이지 않도록 경로를 나눴고 `/openapi.json`에도 넣지 않는다.
-  현재 구현은 화면 mockup 용도라, 경로가 겹치더라도 명세 쪽 정의를 목표 계약으로 본다.
-- 구현되지 않았으므로 이 화면에서는 요청 실행(Try it out)을 끈다.
-- 인증·권한, 실시간 갱신 방식, 영상 보존 범위는 **결정 필요** 상태다.
-- 구현이 끝나면 자동 생성 OpenAPI가 정본이 되고 이 명세 문서는 폐기한다.
+운영 데이터도 사용하지 않는다. demo가 꺼져 있으면 `/monitoring`과 `/video-search`는
+404가 아니라 빈 상태를 반환한다.
 
 ## 핵심 도메인 규칙
 
-- 직원 목록·상세 GET은 저장된 상태나 version을 바꾸지 않는다. 시간 정책은 명시적 평가
-  요청 또는 관련 쓰기에서만 적용한다. 연결된 STAFF는 본인 상태를 `WORKING`, `ON_CALL`,
-  `AWAY`, `OFFSITE`로 override하거나 자동 상태로 복귀할 수 있다.
-- 면담 대기는 요청자와 직원 조합당 활성 건이 하나다. 직원이 재석이면 `READY`, 아니면
-  `WAITING`으로 만들고 부재→재석 전이에서 준비 알림을 dedupe한다.
-- STAFF는 본인에게 접수된 면담만 조회·완료한다. ADMIN은 면담 목록·상세·변경에 접근하지 않는다.
-- 좌석 관측은 batch 전체를 먼저 검증하고 event ID로 멱등 처리한다. confidence 기준 미만은
-  `UNKNOWN`이고 오래된 관측은 현재 상태를 되돌리지 않는다.
-- 마감과 grace 이후 `OCCUPIED` 전이만 영업일별 경고를 만든다. 알림은 담당 활성 STAFF와
-  모든 활성 ADMIN에게 수신자별로 dedupe한다.
-- 사용자 비활성화 또는 STAFF 역할 해제 시 직원·강의실 연결을 명시적으로 해제한다.
-- 관리자 대시보드는 별도 materialized view 없이 원본 컬렉션을 bounded query로 집계한다.
-  하나의 원본 조회라도 실패하면 부분 수치를 섞지 않고 요청 전체를 503으로 처리한다.
+- 좌석 관측은 batch 전체를 먼저 검증하고 event ID로 멱등 처리한다. confidence 기준
+  미만은 `UNKNOWN`이고 오래된 관측은 현재 상태를 되돌리지 않는다.
+- 조회 GET은 저장된 상태를 바꾸지 않는다. 시간 기반 평가는 명시적인 쓰기 요청에서만
+  수행한다.
+- 신뢰도 등급 같은 해석은 서비스 계층이 계산해 템플릿에 넘긴다. 템플릿은 enum을
+  새로 판정하지 않는다.
+- 저장소를 사용할 수 없으면 부분 데이터나 demo로 대체하지 않고 503을 반환한다.
+
+학생 식별과 상태 판정이 들어오면 지킬 규칙은
+[MVP 명세](../../docs/specs/student-monitoring-mvp.md)와
+[fastapi 에이전트 규칙](../../docs/agents/fastapi-agent.md#학생-상태-판정)에 있다.
 
 ## 내부 구조
 
 기능별 디렉터리와 `router → service → port ← adapter` 호출 방향을 사용한다. 라우터는
 HTTP 변환만, 서비스는 프레임워크와 분리된 판단만 담당한다. 저장소 구현의 조립은
 `app/shared/dependencies.py` 한 곳에 둔다. 배경은
-[결정 0002](../../docs/architecture/decisions.md#0002--fastapi-계층형-구조와-경계-포트)에 있다.
+[결정 0001](../../docs/architecture/decisions.md#0001--fastapi-계층형-구조와-경계-포트)에 있다.
 
 ```text
 app/
-├─ main.py              앱 조립, 조건부 라우터, 예외 처리
-├─ auth/                로그인, JWT, refresh, CSRF, 인증 dependency
-├─ users/               세 제품 역할 사용자 관리와 레거시 읽기 호환
-├─ employees/           직원 프로필, 상태 정책, override
-├─ interview_waits/     학생 신청과 STAFF 처리 흐름
-├─ classrooms/          강의실, 담당자, 일정, 좌석, 마감 후 경고
-├─ notifications/       사용자별 알림, 읽음, dedupe, mock delivery
-├─ video_monitoring/    local/dev 고정 합성 catalog와 검색
-├─ admin/               운영 집계, 최근 활동, 내부 감사 조회 호환
-├─ audit/               민감정보를 제거한 감사 기록
-├─ events/              단계적 폐기 중인 이벤트 조회 호환
-└─ shared/              설정, 저장소 조립, 보안, 공통 오류·템플릿
+├─ main.py              앱 조립, 라우터 등록, 예외 처리
+├─ classrooms/          강의실, 좌석, 좌석 점유 관측
+├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
+├─ shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마
+└─ demo_seed.py         demo fixture 멱등 생성
 
 templates/              기능별 Jinja2 화면
 static/                 CSS와 화면 보조 JavaScript
 demo_assets/            합성 데모 SVG 자산
+api-spec/               구현 전 API 설계 명세 JSON
 tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스트
 ```
 
-추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다. 영상 저장
-범위·보존 기간·권한은 여전히 결정이 필요하다.
+추가 예정 도메인은 `students`, `face_enrollment`, `student_monitoring` 셋이다.
+책임과 목표 계약은 [MVP 명세의 도메인 구조](../../docs/specs/student-monitoring-mvp.md#도메인-구조-예정)에 있다.
+
+추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.
+영상과 얼굴 데이터의 저장 범위·보존 기간·권한은 여전히 결정이 필요하다.
 
 ## 환경변수
 
 전체 이름과 기본값은 [`.env.example`](./.env.example)이 기준이다.
 
-| 묶음                | 주요 변수                                                                                 | 제약                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 실행·저장소         | `APP_ENV`, `DATABASE_MODE`, `DATABASE_URL`, `DATABASE_NAME`                               | memory는 local 전용; MongoDB mode는 URL·이름 필수              |
-| 보안                | `JWT_*_SECRET`, `CSRF_SECRET`, `AUDIT_IP_HASH_SECRET`, `WEB_ORIGIN`                       | 비밀값 32자 이상; origin exact match                           |
-| 인증 정책           | `AUTH_*_TTL_SECONDS`, 실패·잠금 제한, `AUTH_PASSWORD_MIN_LENGTH`                          | 시작 시 범위 검증                                              |
-| 가상 사용자·fixture | `AUTH_SEED_ENABLED`, 세 `AUTH_SEED_*_PASSWORD`, `DEMO_MODE_ENABLED`                       | local memory의 전체 fixture는 두 mode를 함께 활성화; prod 금지 |
-| 직원·면담·좌석      | `EMPLOYEE_*`, `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS`, `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 시간·confidence 범위 검증                                      |
-| 개발 경계           | `MOCK_INPUTS_ENABLED`, `DEMO_MODE_ENABLED`, `NOTIFICATION_MOCK_*`                         | local/dev opt-in; prod 금지                                    |
-| 목록·레거시 이벤트  | `PAGE_SIZE_*`, `HIGH_CONFIDENCE_THRESHOLD`, `MEDIUM_CONFIDENCE_THRESHOLD`                 | 페이지 최대 200; medium ≤ high                                 |
+| 이름 | 용도 | 제약 |
+| --- | --- | --- |
+| `APP_ENV` | 실행 환경 | `local` / `dev` / `prod` |
+| `DATABASE_MODE` | 저장소 종류 | `memory` / `mongodb`. memory는 `local` 전용 |
+| `DATABASE_URL`, `DATABASE_NAME` | MongoDB 접속 정보 | mongodb mode에서 필수. URL은 비밀값 |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | 연결 타임아웃 | 기본 5. `0 < x ≤ 60` |
+| `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
+| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 ≤ x ≤ 1` |
+| `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
+| `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
+
+학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
+`ABSENCE_GRACE_PERIOD_SECONDS` 등)은 아직 없다. 목록은
+[MVP 명세의 설정](../../docs/specs/student-monitoring-mvp.md#설정-예정)에 있다.
 
 환경변수의 저장·명명 규칙은
-[환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다. 실제 비밀값과 `.env`는
-커밋하지 않는다.
+[환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
+실제 비밀값과 `.env`는 커밋하지 않는다.
 
 ## 검증
 
@@ -225,7 +179,9 @@ python -m pytest -q -m mongodb
 
 ## 관련 문서
 
+- [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md) — 앞으로 만들 것
 - [FastAPI 에이전트 규칙](../../docs/agents/fastapi-agent.md)
 - [API 규칙](../../docs/conventions/api-convention.md)
+- [테스트 배치 기준](./tests/README.md)
 - [아키텍처](../../docs/architecture/README.md)
 - [결정 기록](../../docs/architecture/decisions.md)

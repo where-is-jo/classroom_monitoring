@@ -43,7 +43,7 @@ recorder ─┘
 `queue.Queue`를 쓰지 않은 이유는 오래된 항목을 버리는 동작이 없기 때문이다.
 꺼내고 다시 넣는 방식으로 흉내 내면 생산자가 여럿일 때 어느 프레임이 남는지
 보장할 수 없다. 자세한 배경은
-[결정 0008](../../docs/architecture/decisions.md#0008--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)에 있다.
+[결정 0006](../../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)에 있다.
 
 버린 프레임 수는 `stats`로 드러난다. `dropped`가 계속 늘면 추론이 수신을
 못 따라가고 있다는 뜻이다.
@@ -61,4 +61,4 @@ python -m pytest shared/tests -q
 
 - [worker 개요](../README.md)
 - [조립 진입점](../pipeline/README.md)
-- [결정 0008](../../docs/architecture/decisions.md#0008--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)
+- [결정 0006](../../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)

@@ -4,10 +4,10 @@
 
 ## 저장 정책이 아직 합의되지 않았다
 
-**이 워커는 팀 합의 전에 만들어졌다.** [결정 0004](../../docs/architecture/decisions.md#0004--영상스냅샷-저장소로-minio-채택)가
-"저장 범위·보존 기간·접근 권한이 정해지기 전까지 상시 저장 기능을 만들지 않는다"고
-정했고, 그 항목들은 지금도 `결정 필요`다. 코드가 먼저 생긴 경위는
-[결정 0009](../../docs/architecture/decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)에 있다.
+**이 워커는 팀 합의 전에 만들어졌다.** [결정 0004](../../docs/architecture/decisions.md#0004--영상과-얼굴-이미지-저장소로-minio-채택)가
+"저장 범위·보존 기간·접근 권한이 정해지기 전까지 저장 범위를 넓히는 기능을 만들지
+않는다"고 정했고, 그 항목들은 지금도 `결정 필요`다. 코드가 먼저 생긴 경위는
+[결정 0007](../../docs/architecture/decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)에 있다.
 
 | 항목 | 상태 | 코드에서 |
 | --- | --- | --- |
@@ -19,6 +19,9 @@
 **기본값 30일은 팀이 합의한 값이 아니다.** 워커는 시작할 때 현재 보존 기간과
 저장소를 경고 로그로 남겨, 합의 없이 운영에 쓰이는 것이 눈에 띄게 한다.
 합의되면 이 표와 `.env.example`의 주석을 함께 갱신한다.
+
+**강의실 영상에는 학생의 얼굴이 담기고 미성년자가 포함될 수 있다.**
+기술 부채가 아니라 미해결 합의 사항이다.
 
 ## 어떻게 동작하는가
 
@@ -86,6 +89,8 @@ ffprobe를 부르지 않고 최상위 box만 훑는다.
 예) camera-01/2026-08-10/20260810T090000Z.mp4
 ```
 
+규칙의 근거는 [결정 0007](../../docs/architecture/decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)에 있다.
+
 - **카메라가 맨 앞이다.** 카메라 단위로 권한을 나누거나 통째로 지우는 일이 잦다.
 - **날짜 디렉터리를 둔다.** 보존 기간 삭제와 날짜 조회가 접두사 하나로 끝난다.
 - **시각은 UTC다.** 로컬 시각으로 두면 서버 시각대가 바뀔 때 같은 순간의 객체가
@@ -142,7 +147,7 @@ MinIO 접속 정보와 카메라 접속 정보는 비밀값이다.
 | `RECORDING_RETENTION_DAYS` | 보존 기간 | 기본 30. **팀 합의값이 아니다** |
 | `RECORDING_RETENTION_INTERVAL_SECONDS` | 보존 기간 정리 주기 | 기본 3600 |
 | `OBJECT_STORAGE_BACKEND` | 저장소 종류 | `local` / `minio`. `prod`에서 `local` 금지 |
-| `OBJECT_STORAGE_BUCKET` | 영상 버킷 이름 | 기본 `office-recordings` |
+| `OBJECT_STORAGE_BUCKET` | 영상 버킷 이름 | 기본 `office-recordings`. **이전 주제에서 온 이름이며 변경 검토 대상** |
 | `OBJECT_STORAGE_LOCAL_DIR` | local backend 경로 | 기본 `recorder/data/objects` |
 | `OBJECT_STORAGE_ENDPOINT` | MinIO 주소 | `minio`일 때 필수. `host:port` |
 | `OBJECT_STORAGE_ACCESS_KEY` | 접근 키 | 비밀값. `minio`일 때 필수 |
@@ -159,6 +164,7 @@ MinIO 없이 적재 경로를 돌려보기 위한 것이다. 결정 0004가 로�
 ## 포함하지 않는 것
 
 - 메타데이터 저장 → `fastapi`가 MongoDB에 기록한다. 여기서는 객체만 만든다
+- 얼굴 등록 이미지 적재 → `fastapi`가 별도 버킷에 넣는다(`예정`). 이 워커는 영상만 다룬다
 - 영상 조회 API와 접근 권한 판정 → `fastapi` 책임
 - 프레임 샘플링·추론 → [`stream`](../stream/README.md), [`inference`](../inference/README.md) 책임
 - 적재한 객체의 참조를 `fastapi`에 알리는 일 → **`예정`.** 전달 방식이 `결정 필요`다
@@ -195,6 +201,6 @@ python -m pytest recorder/tests -q
 ## 관련 문서
 
 - [worker 개요](../README.md)
-- [결정 0004 · 영상·스냅샷 저장소로 MinIO 채택](../../docs/architecture/decisions.md#0004--영상스냅샷-저장소로-minio-채택)
-- [결정 0009 · recorder worker의 저장 구조와 보존 정책](../../docs/architecture/decisions.md#0009--recorder-worker의-저장-구조와-보존-정책)
+- [결정 0004 · 영상과 얼굴 이미지 저장소로 MinIO 채택](../../docs/architecture/decisions.md#0004--영상과-얼굴-이미지-저장소로-minio-채택)
+- [결정 0007 · recorder worker의 저장 구조와 보존 정책](../../docs/architecture/decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)
 - [환경변수 규칙](../../docs/conventions/environment-convention.md)

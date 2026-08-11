@@ -14,8 +14,8 @@
 | 변수 | 설명 | 예 |
 | --- | --- | --- |
 | `{{PROJECT_TYPE}}` | `webapp` 또는 `rpa` | `webapp` |
-| `{{PROJECT_NAME}}` | 디렉터리 이름(소문자·하이픈) | `alert-dispatcher` |
-| `{{PURPOSE}}` | 이 프로젝트가 해결할 문제 | `탐지 이벤트를 담당자에게 알림` |
+| `{{PROJECT_NAME}}` | 디렉터리 이름(소문자·하이픈) | `absence-report` |
+| `{{PURPOSE}}` | 이 프로젝트가 해결할 문제 | `승인된 미등원 건을 담당자에게 알림` |
 | `{{RESPONSIBILITIES}}` | 담당할 책임 목록 | |
 | `{{OUT_OF_SCOPE}}` | 담당하지 않을 것 | |
 | `{{TECH_CANDIDATES}}` | 기술 후보와 확정 여부 | `Python / FastAPI (확정), 큐 (결정 필요)` |
@@ -24,7 +24,7 @@
 ## 프롬프트
 
 ```text
-스마트 오피스 모니터링 저장소에 새 프로젝트를 초기화한다.
+강의실 학생 모니터링 저장소에 새 프로젝트를 초기화한다.
 
 ## 작업 목적
 {{PURPOSE}}
