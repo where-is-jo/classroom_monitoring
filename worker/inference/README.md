@@ -1,6 +1,20 @@
 # inference worker
 
-`stream` worker가 고른 프레임에서 사람과 수화기를 탐지하는 워커다.
+`stream` worker가 고른 프레임을 꺼내 모델을 호출하는 **실행 단계**다.
+
+## 이 워커는 모델을 소유하지 않는다
+
+[결정 0009](../../docs/architecture/decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)가
+추론 책임을 둘로 나눴다.
+
+| 담당 | 무엇을 아는가 |
+| --- | --- |
+| [`deeplearning`](../../deeplearning/README.md) | 모델 종류, 가중치, 전처리, 후처리, 탐지 결과 스키마 |
+| `worker/inference` | 언제 호출하는가, 실패하면 어떻게 하는가, 언제 멈추는가 |
+
+**현재 코드는 이 경계를 아직 만족하지 않는다.** `deeplearning`에 코드가 없어서
+이 워커가 ultralytics를 직접 부른다. 잠정 상태이며, `deeplearning` 구현 시
+`model.py`의 모델 호출을 그쪽으로 옮긴다. 새 모델 코드는 여기에 만들지 않는다.
 
 ## 현재 상태
 
@@ -10,8 +24,12 @@ YOLOv8n으로 프레임 한 장에서 `person`과 `cell phone`을 탐지한다. 
   실행은 [`pipeline`](../pipeline/README.md) 진입점이다.
 - **이미지 파일** — `python -m inference.main <이미지경로>`로 한 장만 확인한다.
 
-**아직 없는 것**: 탐지 결과를 `state`나 `fastapi`로 넘기는 경로. 전달 방식이
-`결정 필요`라 현재는 로그로만 출력한다. 추론 지연·처리량 지표도 `예정`이다.
+**`cell phone` 클래스는 이전 주제(직원 통화 판정)에서 온 것으로 강의실 학생
+모니터링에서 쓰이지 않는다.** 모델 이관 때 함께 정리한다.
+
+**아직 없는 것**: 얼굴 탐지와 얼굴 인식(`deeplearning` `예정`), 탐지 결과를
+`fastapi`로 넘기는 경로. 전달 방식이 `결정 필요`라 현재는 로그로만 출력한다.
+추론 지연·처리량·식별 성공률 지표도 `예정`이다.
 
 ## 서비스 목적
 
@@ -45,15 +63,22 @@ InferenceResult(
 
 `bbox`는 `(x1, y1, x2, y2)` 픽셀 좌표다.
 
-**여기까지가 이 워커의 출력이다.** "재실 중", "통화중" 같은 업무 의미는 붙이지 않는다.
-그 해석은 [`state`](../state/README.md) 또는 `fastapi`의 일이며, 소유 서비스는
-아직 `결정 필요`다.
+얼굴 인식이 붙으면 여기에 `student_id`와 식별 신뢰도가 더해진다(`예정`).
+스키마는 [`deeplearning`](../../deeplearning/README.md)이 소유한다.
+
+**여기까지가 이 워커의 출력이다.** `PRESENT`, `WRONG_SEAT`, `ABSENT` 같은 업무
+의미는 붙이지 않는다. 그 해석은 `webapps/fastapi`의 일이다
+([결정 0008](../../docs/architecture/decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)).
+
+**식별하지 못한 것을 억지로 식별하지 않는다.** 신뢰도가 기준 미만이면 `UNKNOWN`으로
+두고 가장 가까운 학생을 고르지 않는다. 오인식은 다른 학생의 정보를 노출하는 사고다.
 
 ## 포함하지 않아야 할 기능
 
 - 스트림 연결 관리와 재연결 → [`stream`](../stream/README.md) 책임
-- 탐지 결과의 업무 해석 → [`state`](../state/README.md) 또는 `fastapi` 책임
-- 탐지 결과의 영속 저장 → `fastapi` 책임
+- 모델 종류·가중치·전처리 → [`deeplearning`](../../deeplearning/README.md) 책임
+- 탐지 결과의 업무 해석 → `webapps/fastapi` 책임
+- 탐지 결과의 영속 저장 → `webapps/fastapi` 책임
 - 영상 저장 → [`recorder`](../recorder/README.md) 책임
 
 ## 기술
@@ -61,9 +86,11 @@ InferenceResult(
 | 항목 | 상태 | 비고 |
 | --- | --- | --- |
 | 언어 | Python | 3.12 이상 |
-| 모델 | YOLOv8n (ultralytics) | 버전 고정은 `결정 필요` |
+| 사람 탐지 모델 | YOLOv8n (ultralytics) | 버전 고정은 `결정 필요`. 소유는 `deeplearning`으로 이관 `예정` |
+| 얼굴 탐지 모델 | `후보`: SCRFD | `deeplearning` 책임 |
+| 얼굴 인식 모델 | `후보`: AdaFace R50, ArcFace | 비교 후 결정. `deeplearning` 책임 |
 | 실행 장치 | CPU 기본, CUDA 선택 | `INFERENCE_DEVICE`로 고른다 |
-| 프레임 수신 | 프레임 버퍼 | [결정 0008](../../docs/architecture/decisions.md#0008--워커-사이-프레임-전달을-최신-우선-버퍼로-한다) |
+| 프레임 수신 | 프레임 버퍼 | [결정 0006](../../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다) |
 | 결과 전달 방식 | `결정 필요` | 현재는 로그 출력 |
 
 **모델 가중치 파일은 저장소에 커밋하지 않는다.** 경로는 `MODEL_PATH`로 주입한다.
@@ -126,10 +153,12 @@ python -m pytest inference/tests -q
 
 실제 가중치가 필요한 확인은 기본 실행에 넣지 않는다.
 측정하지 않은 성능 수치를 문서나 보고에 적지 않는다.
+**테스트 자산에 실제 사람의 얼굴을 쓰지 않는다.**
 
 ## 관련 문서
 
 - [worker 개요](../README.md)
+- [deeplearning](../../deeplearning/README.md) — 모델 책임 범위
 - [조립 진입점](../pipeline/README.md) · [shared 프레임 버퍼](../shared/README.md)
 - [AI 에이전트 규칙](../../docs/agents/ai-agent.md)
 - [아키텍처](../../docs/architecture/README.md)

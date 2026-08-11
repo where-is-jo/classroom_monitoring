@@ -19,8 +19,8 @@ RTSP 영상 소스에 붙어 연결을 유지하고, 추론 대상 프레임을 
 
 ## 포함하지 않는 것
 
-- 객체 탐지·모델 추론 → `inference` worker 책임
-- 탐지 결과의 업무 해석 → `state` worker 또는 `fastapi` 책임 (`결정 필요`)
+- 객체 탐지·모델 추론 → `inference` worker와 `deeplearning` 책임
+- 탐지 결과의 업무 해석(학생 상태 판정) → `webapps/fastapi` 책임
 - 영상의 운영 보관 → `recorder` worker 책임
 - 사용자 대상 API·화면 제공 → `fastapi` 책임
 
@@ -57,7 +57,7 @@ reader.read() ─▶ video_recorder (모든 프레임)
 ```
 
 `inference`로 넘기는 방식은
-[결정 0008](../../docs/architecture/decisions.md#0008--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)을 따른다.
+[결정 0006](../../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)을 따른다.
 `stream`은 `inference`를 import하지 않고 [`shared`의 버퍼](../shared/README.md)에만 넣는다.
 
 ## 기술
@@ -65,7 +65,7 @@ reader.read() ─▶ video_recorder (모든 프레임)
 | 항목 | 상태 | 비고 |
 | --- | --- | --- |
 | 언어 | Python | 3.12 이상 |
-| 수신 프로토콜 | RTSP (TCP) | [결정 0007](../../docs/architecture/decisions.md#0007--worker를-역할별-워커로-분리) |
+| 수신 프로토콜 | RTSP (TCP) | [결정 0005](../../docs/architecture/decisions.md#0005--worker를-역할별-워커로-분리) |
 | 스트림 서버 | MediaMTX | 같은 결정 |
 | 프레임 처리 | OpenCV | 같은 결정 |
 | 다중 카메라 | 스레드 | 같은 결정 |
@@ -126,11 +126,14 @@ python -m stream.main
 
 ### 저장 기능이 기본으로 꺼져 있는 이유
 
-영상에는 사무실 구성원의 얼굴이 담긴다. 저장 범위·보존 기간·접근 권한이
-합의되기 전까지 상시 저장 기능을 만들지 않기로 했다
-([결정 0004](../../docs/architecture/decisions.md#0004--영상스냅샷-저장소로-minio-채택)).
+강의실 영상에는 학생의 얼굴이 담기고 미성년자가 포함될 수 있다. 저장 범위·보존
+기간·접근 권한이 합의되기 전까지 저장 범위를 넓히는 기능을 만들지 않기로 했다
+([결정 0004](../../docs/architecture/decisions.md#0004--영상과-얼굴-이미지-저장소로-minio-채택)).
 학습 데이터 수집이 필요한 개발 환경에서만 명시적으로 켠다.
 `APP_ENV=prod`에서 켜면 프로세스가 시작 시점에 거부한다.
+
+저장된 영상과 프레임은 `stream/data/` 아래에 쌓이며 `.gitignore` 대상이다.
+**어떤 경우에도 커밋하지 않는다.**
 
 ## 테스트 전략
 
