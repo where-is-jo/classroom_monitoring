@@ -20,12 +20,32 @@ from ..ports import StoredObject
 
 logger = logging.getLogger(__name__)
 
+# 두 import를 따로 감싼다. 한 블록에 묶으면 minio가 없을 때 urllib3 이름까지 함께
+# 비어, 아래 예외 목록이 bare Exception이 되어 모든 오류를 삼킨다.
 try:
     from minio import Minio
-    from minio.error import S3Error
+    from minio.error import MinioException
 except ImportError:  # pragma: no cover - 패키지가 없는 환경에서의 경로
     Minio = None  # type: ignore[assignment, misc]
-    S3Error = Exception  # type: ignore[assignment, misc]
+    MinioException = None  # type: ignore[assignment, misc]
+
+try:
+    from urllib3.exceptions import HTTPError as Urllib3HTTPError
+except ImportError:  # pragma: no cover - 패키지가 없는 환경에서의 경로
+    Urllib3HTTPError = None  # type: ignore[assignment, misc]
+
+# 저장소 호출이 실패하는 세 갈래를 모두 잡아 ObjectStorageError로 바꾼다.
+# - MinioException: S3Error·ServerError·InvalidResponseError의 상위. 서버가 거절한 경우
+# - Urllib3HTTPError: MaxRetryError 등 접속 자체가 안 된 경우. **OSError가 아니다.**
+#   이걸 빠뜨리면 MinIO가 꺼져 있을 때 예외가 그대로 새어 나가 워커 스레드가 죽는다.
+#   실제 서버를 내린 상태로 확인한 사실이다.
+# - OSError: 올릴 로컬 파일을 읽지 못한 경우
+# 프로그래밍 오류(TypeError 등)는 그대로 올려 보낸다. 감추면 버그를 가린다.
+_STORAGE_FAILURES: tuple[type[BaseException], ...] = tuple(
+    error_type
+    for error_type in (MinioException, Urllib3HTTPError, OSError)
+    if error_type is not None
+)
 
 _CONTENT_TYPE = "video/mp4"
 
@@ -63,20 +83,18 @@ class MinioObjectStorage:
             if not self._client.bucket_exists(self._bucket):
                 self._client.make_bucket(self._bucket)
                 logger.info("버킷을 만들었다: %s", self._bucket)
-        except S3Error as error:
+        except _STORAGE_FAILURES as error:
+            # 주소와 사유는 남기되 자격 증명은 남기지 않는다.
             raise ObjectStorageError(
                 f"버킷을 확인하지 못했습니다: {self._bucket} ({error})"
             ) from error
-        except OSError as error:
-            # 접속 실패. 주소는 남기되 자격 증명은 남기지 않는다.
-            raise ObjectStorageError(f"객체 저장소에 접속하지 못했습니다: {error}") from error
 
     def put_object(self, key: str, source_path: Path) -> StoredObject:
         try:
             self._client.fput_object(
                 self._bucket, key, str(source_path), content_type=_CONTENT_TYPE
             )
-        except (S3Error, OSError) as error:
+        except _STORAGE_FAILURES as error:
             raise ObjectStorageError(f"객체를 저장하지 못했습니다: {key} ({error})") from error
 
         stat = source_path.stat()
@@ -103,19 +121,19 @@ class MinioObjectStorage:
                     size_bytes=item.size or 0,
                     last_modified=last_modified,
                 )
-        except (S3Error, OSError) as error:
+        except _STORAGE_FAILURES as error:
             raise ObjectStorageError(f"객체 목록을 읽지 못했습니다: {error}") from error
 
     def remove_object(self, key: str) -> None:
         try:
             self._client.remove_object(self._bucket, key)
-        except (S3Error, OSError) as error:
+        except _STORAGE_FAILURES as error:
             raise ObjectStorageError(f"객체를 지우지 못했습니다: {key} ({error})") from error
 
     def _stat_object(self, key: str) -> StoredObject | None:
         try:
             stat = self._client.stat_object(self._bucket, key)
-        except (S3Error, OSError):
+        except _STORAGE_FAILURES:
             return None
 
         last_modified = stat.last_modified

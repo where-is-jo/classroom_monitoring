@@ -121,3 +121,19 @@ def test_설정을_문자열로_찍어도_비밀값이_노출되지_않는다() 
     assert "SuperSecret" not in rendered
     assert "TopSecretKey" not in rendered
     assert "AKIAEXAMPLE" not in rendered
+
+
+def test_잘못된_버킷_이름을_시작_시점에_거부한다() -> None:
+    """SDK는 첫 호출 때 ValueError를 던진다. 그때는 이미 세그먼트가 쌓이는 중이다."""
+    with pytest.raises(ValidationError, match="버킷 이름은"):
+        build_settings(object_storage_bucket="b")
+
+
+@pytest.mark.parametrize("name", ["Office-Recordings", "office_recordings", "-office", "office-"])
+def test_S3_규칙에_어긋나는_버킷_이름을_거부한다(name: str) -> None:
+    with pytest.raises(ValidationError, match="버킷 이름은"):
+        build_settings(object_storage_bucket=name)
+
+
+def test_유효한_버킷_이름은_통과한다() -> None:
+    assert build_settings(object_storage_bucket="office-recordings-2026").object_storage_bucket

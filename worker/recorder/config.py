@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal, Self
 
@@ -11,6 +12,10 @@ from shared.camera_sources import CameraSource, parse_stream_sources
 
 _RECORDER_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = _RECORDER_DIR / "data"
+
+# S3 버킷 이름 규칙. MinIO SDK도 같은 규칙으로 검사하지만 첫 호출 시점에 ValueError를
+# 던진다. 그때는 이미 세그먼트가 쌓이는 중이라, 시작 시점에 미리 걸러낸다.
+_BUCKET_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 
 __all__ = ["DEFAULT_DATA_DIR", "CameraSource", "RecorderSettings"]
 
@@ -71,6 +76,16 @@ class RecorderSettings(BaseSettings):
     def _blank_object_dir_uses_default(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
             return DEFAULT_DATA_DIR / "objects"
+        return value
+
+    @field_validator("object_storage_bucket")
+    @classmethod
+    def _validate_bucket_name(cls, value: str) -> str:
+        if not _BUCKET_NAME_PATTERN.match(value):
+            raise ValueError(
+                "버킷 이름은 소문자·숫자·하이픈·점으로 3~63자여야 하고 "
+                "소문자나 숫자로 시작하고 끝나야 합니다."
+            )
         return value
 
     @model_validator(mode="after")
