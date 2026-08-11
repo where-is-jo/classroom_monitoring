@@ -1,1 +1,1 @@
-"""Classroom, seat occupancy, and after-hours alert feature."""
+"""Classroom seat-occupancy monitoring feature."""
