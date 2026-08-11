@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ..uploader import SegmentUploader, find_completed_segments
-from .conftest import FakeStorage, write_segment
+from .conftest import PLAYABLE_MP4, FakeStorage, segment_name, write_segment
 
 NOW = datetime(2026, 8, 10, 9, 30, 0, tzinfo=UTC)
 
@@ -24,8 +24,8 @@ class TestFindCompletedSegments:
         completed = find_completed_segments(segment_dir, now=NOW, stale_after_seconds=900)
 
         assert [segment.path.name for segment in completed] == [
-            "20260810T090000Z.mp4",
-            "20260810T091000Z.mp4",
+            segment_name(datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC)),
+            segment_name(datetime(2026, 8, 10, 9, 10, 0, tzinfo=UTC)),
         ]
 
     def test_오래된_순으로_돌려준다(self, segment_dir: Path) -> None:
@@ -35,9 +35,9 @@ class TestFindCompletedSegments:
 
         completed = find_completed_segments(segment_dir, now=NOW, stale_after_seconds=900)
 
-        assert [segment.recorded_at.hour * 60 + segment.recorded_at.minute for segment in completed] == [
-            9 * 60,
-            9 * 60 + 10,
+        assert [segment.recorded_at for segment in completed] == [
+            datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC),
+            datetime(2026, 8, 10, 9, 10, 0, tzinfo=UTC),
         ]
 
     def test_한_장뿐이면_아무것도_올리지_않는다(self, segment_dir: Path) -> None:
@@ -66,7 +66,9 @@ class TestFindCompletedSegments:
 
         completed = find_completed_segments(segment_dir, now=NOW, stale_after_seconds=900)
 
-        assert [segment.path.name for segment in completed] == ["20260810T090000Z.mp4"]
+        assert [segment.path.name for segment in completed] == [
+            segment_name(datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC))
+        ]
 
 
 class TestSegmentUploader:
@@ -187,3 +189,76 @@ def test_경과_시간_계산에_timedelta를_옳게_쓴다(segment_dir: Path) -
     )
 
     assert len(completed) == 1
+
+
+class TestPlayabilityGuard:
+    """FFmpeg이 완성하지 못한 파일을 저장소에 올리지 않는지 본다."""
+
+    def _uploader(self, segment_dir: Path, storage: FakeStorage) -> SegmentUploader:
+        return SegmentUploader(
+            camera_id="camera-01",
+            segment_dir=segment_dir,
+            storage=storage,
+            stale_after_seconds=900,
+            now=lambda: NOW,
+        )
+
+    def test_moov가_없으면_올리지_않는다(
+        self, segment_dir: Path, storage: FakeStorage
+    ) -> None:
+        """실제 FFmpeg을 강제 종료했을 때 남는 파일이 이 형태다(ftyp만, 48바이트)."""
+        broken = write_segment(
+            segment_dir,
+            datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC),
+            content=(32).to_bytes(4, "big") + b"ftyp" + b"isom" + bytes(24),
+        )
+        write_segment(segment_dir, datetime(2026, 8, 10, 9, 20, 0, tzinfo=UTC))
+
+        result = self._uploader(segment_dir, storage).upload_pending()
+
+        assert result.skipped == 1
+        assert result.uploaded == 0
+        assert storage.put_calls == []
+        assert broken.exists(), "사람이 확인할 수 있게 로컬에 남긴다"
+
+    def test_moov가_있으면_올린다(
+        self, segment_dir: Path, storage: FakeStorage
+    ) -> None:
+        write_segment(
+            segment_dir,
+            datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC),
+            content=PLAYABLE_MP4,
+        )
+        write_segment(segment_dir, datetime(2026, 8, 10, 9, 20, 0, tzinfo=UTC))
+
+        result = self._uploader(segment_dir, storage).upload_pending()
+
+        assert result.uploaded == 1
+        assert result.skipped == 0
+
+    def test_빈_파일을_올리지_않는다(
+        self, segment_dir: Path, storage: FakeStorage
+    ) -> None:
+        write_segment(segment_dir, datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC), content=b"")
+        write_segment(segment_dir, datetime(2026, 8, 10, 9, 20, 0, tzinfo=UTC))
+
+        assert self._uploader(segment_dir, storage).upload_pending().uploaded == 0
+
+
+class TestIncludeInProgress:
+    def test_종료할_때는_마지막_세그먼트까지_올린다(
+        self, segment_dir: Path, storage: FakeStorage
+    ) -> None:
+        """FFmpeg을 세운 뒤에는 쓰는 중인 파일이 없다. 안 올리면 로컬에만 남는다."""
+        content = PLAYABLE_MP4
+        write_segment(segment_dir, datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC), content=content)
+        write_segment(segment_dir, datetime(2026, 8, 10, 9, 20, 0, tzinfo=UTC), content=content)
+
+        uploader = SegmentUploader(
+            camera_id="camera-01", segment_dir=segment_dir, storage=storage,
+            stale_after_seconds=900, now=lambda: NOW,
+        )
+
+        assert uploader.upload_pending().uploaded == 1
+        assert uploader.upload_pending(include_in_progress=True).uploaded == 1
+        assert len(storage.objects) == 2

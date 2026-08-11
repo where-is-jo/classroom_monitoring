@@ -500,4 +500,10 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
 **남은 일**: 0004의 네 항목 합의 — 특히 보존 기간과 접근 권한. 합의되면
 `RECORDING_RETENTION_DAYS` 기본값과 recorder README의 표, `.env.example` 주석을
 함께 갱신한다. 적재한 객체의 참조를 `fastapi`에 넘기는 경로는 전달 방식과 함께
-아직 `결정 필요`다. 실제 FFmpeg·MinIO로 녹화와 적재를 확인하는 것도 남아 있다.
+아직 `결정 필요`다. 실제 카메라를 붙인 녹화와 장시간·다중 카메라 안정성 측정도
+남아 있다.
+
+> FFmpeg·MediaMTX·MinIO를 붙인 전 구간 검증은 마쳤다. 그 과정에서 드러난 세 가지
+> — FFmpeg `-strftime`이 로컬 시각을 쓴다는 것, Windows `terminate`가 마지막
+> 세그먼트를 완성하지 못한다는 것, 완성되지 않은 파일이 적재될 수 있다는 것 —
+> 은 코드에서 고쳤고 recorder README에 배경을 적었다.

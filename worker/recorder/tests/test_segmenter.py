@@ -9,6 +9,7 @@ import pytest
 from shared.camera_sources import CameraSource
 
 from ..errors import SegmentationError
+from ..object_keys import build_object_key
 from ..segmenter import Segmenter, parse_segment_recorded_at
 from .conftest import FakeProcess, FakeRunner
 
@@ -49,7 +50,7 @@ class TestBuildCommand:
     def test_출력_경로에_UTC_시각_패턴을_쓴다(self, tmp_path: Path) -> None:
         command = build_segmenter(FakeRunner(), tmp_path).build_command()
 
-        assert command[-1] == str(tmp_path / "%Y%m%dT%H%M%SZ.mp4")
+        assert command[-1] == str(tmp_path / "%Y%m%d_%H%M%S.mp4")
         assert command[command.index("-strftime") + 1] == "1"
 
 
@@ -90,17 +91,53 @@ class TestLifecycle:
 
         assert len(runner.commands) == 1
 
-    def test_stop은_kill이_아니라_terminate로_끝낸다(self, tmp_path: Path) -> None:
-        """kill로 끊으면 마지막 세그먼트의 moov atom이 안 써져 재생 불가가 된다."""
+    def test_stop은_stdin으로_q를_보내_스스로_끝내게_한다(self, tmp_path: Path) -> None:
+        """Windows에서 terminate는 TerminateProcess라 moov atom을 못 쓴다.
+
+        그러면 마지막 세그먼트가 48바이트짜리 재생 불가 파일로 남는다.
+        실제 FFmpeg으로 확인한 차이다.
+        """
         process = FakeProcess()
         segmenter = build_segmenter(FakeRunner([process]), tmp_path)
         segmenter.start()
 
         segmenter.stop()
 
-        assert process.terminated
+        assert process.stdin.written == b"q"
+        assert process.stdin.closed
+        assert not process.terminated, "정상 종료했으면 강제 종료하지 않는다"
         assert not process.killed
         assert not segmenter.is_running()
+
+    def test_q에_응답하지_않으면_terminate로_넘어간다(self, tmp_path: Path) -> None:
+        process = FakeProcess(ignores_quit=True)
+        segmenter = build_segmenter(FakeRunner([process]), tmp_path)
+        segmenter.start()
+
+        segmenter.stop()
+
+        assert process.terminated
+        assert not process.killed, "terminate로 끝났으면 kill까지 가지 않는다"
+
+    def test_terminate에도_응답하지_않으면_kill한다(self, tmp_path: Path) -> None:
+        """끝나지 않는 FFmpeg을 남기면 다음 실행이 장치를 잡지 못한다."""
+        process = FakeProcess(ignores_quit=True, ignores_terminate=True)
+        segmenter = build_segmenter(FakeRunner([process]), tmp_path)
+        segmenter.start()
+
+        segmenter.stop()
+
+        assert process.killed
+
+    def test_stdin이_이미_닫혔으면_강제_종료로_넘어간다(self, tmp_path: Path) -> None:
+        """프로세스가 먼저 죽었을 때 파이프 쓰기가 실패한다."""
+        process = FakeProcess(broken_stdin=True)
+        segmenter = build_segmenter(FakeRunner([process]), tmp_path)
+        segmenter.start()
+
+        segmenter.stop()
+
+        assert process.terminated
 
     def test_시작하지_않았으면_stop은_아무것도_하지_않는다(self, tmp_path: Path) -> None:
         build_segmenter(FakeRunner(), tmp_path).stop()
@@ -125,13 +162,33 @@ class TestLifecycle:
 
 
 class TestParseRecordedAt:
-    def test_파일_이름에서_시각을_읽는다(self) -> None:
-        recorded_at = parse_segment_recorded_at(Path("20260810T090530Z.mp4"))
+    def test_파일_이름을_로컬_시각으로_읽는다(self) -> None:
+        """FFmpeg의 -strftime은 localtime을 쓴다. 실제 FFmpeg으로 확인한 사실이다."""
+        recorded_at = parse_segment_recorded_at(Path("20260810_090530.mp4"))
 
-        assert recorded_at == datetime(2026, 8, 10, 9, 5, 30, tzinfo=UTC)
+        assert recorded_at == datetime(2026, 8, 10, 9, 5, 30).astimezone()
+
+    def test_읽은_시각에는_시각대가_붙는다(self) -> None:
+        """naive로 두면 보존 기간·객체 키 계산에서 UTC와 섞인다."""
+        recorded_at = parse_segment_recorded_at(Path("20260810_090530.mp4"))
+
+        assert recorded_at is not None
+        assert recorded_at.tzinfo is not None
+
+    def test_객체_키는_UTC로_바뀐다(self) -> None:
+        """이름은 로컬, 키는 UTC. 이 변환이 빠지면 키의 시각이 시각대만큼 어긋난다."""
+        recorded_at = parse_segment_recorded_at(Path("20260810_090530.mp4"))
+
+        assert recorded_at is not None
+        expected = datetime(2026, 8, 10, 9, 5, 30).astimezone().astimezone(UTC)
+        assert build_object_key("camera-01", recorded_at) == (
+            f"camera-01/{expected:%Y-%m-%d}/{expected:%Y%m%dT%H%M%SZ}.mp4"
+        )
 
     @pytest.mark.parametrize(
-        "name", ["recording.mp4", "20260810.mp4", "메모.txt", "20260810T99Z.mp4"]
+        "name",
+        ["recording.mp4", "20260810.mp4", "메모.txt", "20260810_99.mp4",
+         "20260810T090530Z.mp4"],
     )
     def test_형식이_다르면_None이다(self, name: str) -> None:
         assert parse_segment_recorded_at(Path(name)) is None

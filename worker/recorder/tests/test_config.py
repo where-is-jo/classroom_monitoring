@@ -16,7 +16,9 @@ VALID_ENV = {
 
 
 def build_settings(**overrides: object) -> RecorderSettings:
-    return RecorderSettings(**{**VALID_ENV, **overrides})  # type: ignore[arg-type]
+    # _env_file=None으로 recorder/.env를 무시한다. 개발자가 로컬 .env를 두면
+    # 그 값이 기본값 검증을 덮어써서 테스트가 사람마다 다르게 통과한다.
+    return RecorderSettings(_env_file=None, **{**VALID_ENV, **overrides})  # type: ignore[arg-type]
 
 
 def test_소스_목록을_stream과_같은_형식으로_읽는다() -> None:

@@ -40,17 +40,59 @@ class UploadResult:
         return self.failed > 0
 
 
+def is_playable_mp4(path: Path) -> bool:
+    """mp4에 moov atom이 있는지 본다. 없으면 어떤 재생기도 열지 못한다.
+
+    FFmpeg이 파일을 완성하지 못하고 죽으면 ftyp만 있는 수십 바이트짜리 파일이
+    남는다. 그대로 올리면 저장소에 재생 불가 객체가 쌓이고, 목록만 봐서는
+    멀쩡해 보인다. ffprobe를 부르지 않고 최상위 box만 훑는다 — 세그먼트마다
+    외부 프로세스를 띄우는 비용을 들일 만한 검사가 아니다.
+    """
+    try:
+        with path.open("rb") as file:
+            offset = 0
+            size_bytes = path.stat().st_size
+            while offset < size_bytes:
+                header = file.read(8)
+                if len(header) < 8:
+                    return False
+                box_size = int.from_bytes(header[:4], "big")
+                box_type = header[4:8]
+                if box_type == b"moov":
+                    return True
+                if box_size == 1:
+                    # 64비트 확장 크기. 다음 8바이트에 실제 크기가 있다.
+                    extended = file.read(8)
+                    if len(extended) < 8:
+                        return False
+                    box_size = int.from_bytes(extended, "big")
+                elif box_size == 0:
+                    # 파일 끝까지가 이 box다. 여기까지 moov가 없었으면 없는 것이다.
+                    return False
+                if box_size < 8:
+                    return False
+                offset += box_size
+                file.seek(offset)
+    except OSError:
+        return False
+    return False
+
+
 def find_completed_segments(
     segment_dir: Path,
     *,
     now: datetime,
     stale_after_seconds: float,
+    include_latest: bool = False,
 ) -> list[SegmentFile]:
     """녹화가 끝난 세그먼트만 골라 오래된 순으로 돌려준다.
 
     가장 최근 파일은 FFmpeg이 아직 쓰고 있다고 보고 제외한다. 다만 그 파일의
     수정 시각이 `stale_after_seconds`보다 오래됐으면 FFmpeg이 죽은 것이므로
     포함한다. 그러지 않으면 마지막 세그먼트가 영원히 올라가지 않는다.
+
+    `include_latest`는 FFmpeg을 세운 뒤에만 쓴다. 쓰는 중인 파일이 없다는 것이
+    확실할 때 마지막 세그먼트까지 올리기 위한 것이다.
     """
     if not segment_dir.exists():
         return []
@@ -69,6 +111,9 @@ def find_completed_segments(
         return []
 
     segments.sort(key=lambda segment: segment.recorded_at)
+    if include_latest:
+        return segments
+
     newest = segments[-1]
     try:
         modified_at = datetime.fromtimestamp(newest.path.stat().st_mtime, tz=UTC)
@@ -106,23 +151,40 @@ class SegmentUploader:
         self._delete_after_upload = delete_after_upload
         self._now = now
 
-    def upload_pending(self) -> UploadResult:
-        """올릴 수 있는 세그먼트를 모두 올린다."""
+    def upload_pending(self, *, include_in_progress: bool = False) -> UploadResult:
+        """올릴 수 있는 세그먼트를 모두 올린다.
+
+        `include_in_progress`는 종료 시점에만 켠다. FFmpeg을 세운 뒤라 쓰는 중인
+        파일이 없고, 이걸 켜지 않으면 마지막 세그먼트가 로컬에만 남는다.
+        """
         segments = find_completed_segments(
             self._segment_dir,
             now=self._now(),
             stale_after_seconds=self._stale_after_seconds,
+            include_latest=include_in_progress,
         )
 
         uploaded = 0
         failed = 0
+        skipped = 0
         for segment in segments:
+            if not is_playable_mp4(segment.path):
+                # moov atom이 없으면 재생할 수 없다. 저장소에 깨진 객체를 남기느니
+                # 로컬에 두고 사람이 확인하게 한다.
+                logger.error(
+                    "카메라 %s 세그먼트가 완성되지 않아 적재하지 않는다: %s (%d bytes)",
+                    self._camera_id,
+                    segment.path.name,
+                    segment.path.stat().st_size,
+                )
+                skipped += 1
+                continue
             if self._upload_one(segment):
                 uploaded += 1
             else:
                 failed += 1
 
-        return UploadResult(uploaded=uploaded, failed=failed, skipped=0)
+        return UploadResult(uploaded=uploaded, failed=failed, skipped=skipped)
 
     def _upload_one(self, segment: SegmentFile) -> bool:
         key = build_object_key(self._camera_id, segment.recorded_at)

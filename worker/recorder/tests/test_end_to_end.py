@@ -13,7 +13,7 @@ from pathlib import Path
 from ..adapters.local import LocalObjectStorage
 from ..retention import RetentionPolicy
 from ..uploader import SegmentUploader
-from .conftest import write_segment
+from .conftest import PLAYABLE_MP4, write_segment
 
 # 완성 판정은 파일 mtime과 현재 시각을 비교한다. 고정된 가짜 시각을 쓰면 방금 만든
 # 파일이 몇 시간 지난 것으로 읽혀 판정이 뒤집힌다. 여기서는 실제 시각을 쓴다.
@@ -35,8 +35,8 @@ def test_녹화본이_객체_저장소로_옮겨지고_로컬에서_사라진다
     segment_dir = tmp_path / "segments" / "camera-01"
     storage = LocalObjectStorage(tmp_path / "objects")
 
-    first = write_segment(segment_dir, datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC), content=b"aaa")
-    second = write_segment(segment_dir, datetime(2026, 8, 10, 9, 10, 0, tzinfo=UTC), content=b"bbb")
+    first = write_segment(segment_dir, datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC), content=PLAYABLE_MP4 + b"aaa")
+    second = write_segment(segment_dir, datetime(2026, 8, 10, 9, 10, 0, tzinfo=UTC), content=PLAYABLE_MP4 + b"bbb")
     # 마지막 파일은 FFmpeg이 쓰는 중이라고 본다.
     writing = write_segment(segment_dir, datetime(2026, 8, 10, 9, 20, 0, tzinfo=UTC))
 
@@ -52,7 +52,7 @@ def test_녹화본이_객체_저장소로_옮겨지고_로컬에서_사라진다
         "camera-01/2026-08-10/20260810T090000Z.mp4",
         "camera-01/2026-08-10/20260810T091000Z.mp4",
     ]
-    assert (storage.root_dir / keys[0]).read_bytes() == b"aaa"
+    assert (storage.root_dir / keys[0]).read_bytes() == PLAYABLE_MP4 + b"aaa"
 
 
 def test_보존_기간이_지난_녹화본이_지워진다(tmp_path: Path) -> None:

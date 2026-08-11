@@ -73,7 +73,9 @@ class CameraRecorder:
         # FFmpeg을 먼저 정상 종료시켜 마지막 세그먼트를 완성한 뒤 올린다.
         # 순서를 바꾸면 마지막 녹화분이 항상 유실된다.
         self._segmenter.stop()
-        result = self._uploader.upload_pending()
+        # 쓰는 중이던 파일까지 올린다. FFmpeg이 멈춘 뒤라 더 쓰는 것이 없다.
+        # 이걸 켜지 않으면 마지막 세그먼트가 "가장 최근 파일"로 걸러져 로컬에만 남는다.
+        result = self._uploader.upload_pending(include_in_progress=True)
         self._uploaded += result.uploaded
         self._failed += result.failed
         logger.info(

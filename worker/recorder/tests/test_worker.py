@@ -48,10 +48,12 @@ class FakeUploader:
     def __init__(self, results: list[UploadResult] | None = None) -> None:
         self._results = results or [UploadResult(uploaded=0, failed=0, skipped=0)]
         self.calls = 0
+        self.include_in_progress_calls: list[bool] = []
 
-    def upload_pending(self) -> UploadResult:
+    def upload_pending(self, *, include_in_progress: bool = False) -> UploadResult:
         result = self._results[min(self.calls, len(self._results) - 1)]
         self.calls += 1
+        self.include_in_progress_calls.append(include_in_progress)
         return result
 
 
@@ -128,9 +130,9 @@ class TestCameraRecorder:
                 super().stop()
 
         class OrderedUploader(FakeUploader):
-            def upload_pending(self) -> UploadResult:
+            def upload_pending(self, *, include_in_progress: bool = False) -> UploadResult:
                 order.append("upload")
-                return super().upload_pending()
+                return super().upload_pending(include_in_progress=include_in_progress)
 
         build_recorder(OrderedSegmenter(), OrderedUploader(), StopAfter(0)).run()
 
@@ -212,3 +214,14 @@ class TestRecorderWorker:
         stopper.start()
         worker.run()
         stopper.cancel()
+
+
+def test_종료할_때만_쓰던_세그먼트까지_올린다() -> None:
+    """켜지 않으면 마지막 세그먼트가 "가장 최근 파일"로 걸러져 로컬에만 남는다."""
+    uploader = FakeUploader()
+
+    build_recorder(FakeSegmenter(), uploader, StopAfter(2)).run()
+
+    # 루프에서는 끄고, 종료 시 한 번만 켠다.
+    assert uploader.include_in_progress_calls[:-1] == [False] * (uploader.calls - 1)
+    assert uploader.include_in_progress_calls[-1] is True

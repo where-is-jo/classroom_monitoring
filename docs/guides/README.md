@@ -85,20 +85,32 @@ URL 경로에 `test_`로 시작하는 database 이름을 넣는다.
 
 ## worker 실행
 
-`worker`는 파이프라인 단계별 워커로 나뉘며 현재 `stream`만 동작한다
+`worker`는 파이프라인 단계별 워커로 나뉜다
 ([결정 0007](../architecture/decisions.md#0007--worker를-역할별-워커로-분리)).
-여러 RTSP 소스에 붙어 연결을 유지하고 추론 대상 프레임을 골라낸다.
-USB 카메라를 직접 쓰면 FFmpeg와 MediaMTX가 별도로 필요하다.
+`stream`과 `inference`는 프레임 버퍼로 이어져 `pipeline` 진입점으로 함께 돌고,
+`recorder`는 별도 진입점으로 돈다. USB 카메라를 직접 쓰면 FFmpeg와 MediaMTX가 필요하다.
 
 ```bash
 cd worker
-python -m pip install -r stream/requirements.txt
-cp stream/.env.example stream/.env    # STREAM_SOURCES를 채운다
-python -m stream.main
-python -m pytest stream/tests -q      # 장비 없이 도는 단위 테스트
+python -m pytest -q                       # 장비도 모델도 MinIO도 없이 도는 전체 테스트
+
+python -m pip install -r pipeline/requirements.txt
+cp pipeline/.env.example pipeline/.env    # STREAM_SOURCES를 채운다
+python -m pipeline.main                   # 수신 + 추론
 ```
 
-실행 절차와 환경변수는 [stream README](../../worker/stream/README.md)에,
+`recorder`는 별도 진입점으로 영상을 세그먼트로 나눠 객체 저장소에 적재한다.
+FFmpeg과 MinIO가 필요하다.
+
+```bash
+cd worker
+python -m pip install -r recorder/requirements.txt
+cp recorder/.env.example recorder/.env    # STREAM_SOURCES와 저장소 접속 정보를 채운다
+python -m recorder.main
+```
+
+실행 절차와 환경변수는 [stream README](../../worker/stream/README.md)와
+[recorder README](../../worker/recorder/README.md)에,
 설정값의 근거와 겪은 문제는 [카메라 수집 구성](../../worker/stream/camera-guides.md)에 있다.
 
 `deeplearning`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다.
