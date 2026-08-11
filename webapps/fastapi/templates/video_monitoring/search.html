@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}데모 영상 검색 · 캠퍼스 운영 포털{% endblock %}
-{% block head_extra %}<script src="/demo-assets/demo-video.js" defer></script>{% endblock %}
+{% block title %}자연어 검색 · 학습 모니터링{% endblock %}
+{% block head_extra %}{% if demo_enabled %}<script src="/demo-assets/demo-video.js" defer></script>{% endif %}{% endblock %}
 
 {% block content %}
   <header class="page-header">
-    <div><p class="eyebrow">고정 catalog · 데모 전용</p><h1>자연어 데모 영상 검색</h1><p class="summary">LLM·임베딩·외부 API를 사용하지 않습니다. 입력 문장을 고정 메타데이터의 강의실·시각·태그와 단순 매칭합니다.</p></div>
+    <div><p class="eyebrow">한국어 metadata 검색</p><h1>자연어 검색</h1>{% if demo_enabled %}<p class="summary">local/dev 고정 metadata를 규칙으로 매칭합니다. LLM·임베딩·외부 API를 사용하지 않습니다.</p>{% else %}<p class="summary">운영 검색 metadata 공급원이 아직 연결되지 않았습니다.</p>{% endif %}</div>
   </header>
 
   <section class="panel" aria-labelledby="video-search-form-title">
@@ -18,32 +18,27 @@
         <label>종료 시각(선택)<input type="datetime-local" name="to" value="{{ selected_to.strftime('%Y-%m-%dT%H:%M') if selected_to else '' }}"></label>
         <label>최대 결과<input type="number" name="limit" value="{{ selected_limit }}" min="1" max="50"></label>
       </div>
-      <div><button type="submit">메타데이터 검색</button></div>
+      <div><button type="submit">검색</button></div>
     </form>
   </section>
 
   {% if results is none %}
-    <section class="panel" aria-labelledby="video-search-examples"><h2 id="video-search-examples">데모 검색 예시</h2><ul class="example-list"><li><a href="/video-search?query=어제+5시+이후+A101에+사람이+남아+있던+영상">어제 5시 이후 A101에 사람이 남아 있던 영상</a></li><li><a href="/video-search?query=B203+장비+구역+이동">B203 장비 구역 이동</a></li><li><a href="/video-search?query=마감+후+비어+있는+영상">마감 후 비어 있는 영상</a></li></ul></section>
+    {% if demo_enabled %}<section class="panel" aria-labelledby="search-examples"><h2 id="search-examples">검색 예시</h2><ul class="example-list"><li><a href="/video-search?query=어제+5시+이후+A101에+사람이+남아+있던+영상">어제 5시 이후 A101에 사람이 남아 있던 영상</a></li><li><a href="/video-search?query=B203+장비+구역+이동">B203 장비 구역 이동</a></li></ul></section>{% else %}<div class="empty" role="status">검색할 운영 metadata가 없습니다.</div>{% endif %}
   {% elif results.items %}
-    <section aria-labelledby="video-search-results-title">
-      <div class="section-heading"><div><h2 id="video-search-results-title">데모 검색 결과</h2><p class="summary">총 {{ results.total }}건 · 단순 키워드 매칭</p></div></div>
+    <section aria-labelledby="search-results-title">
+      <div class="section-heading"><div><h2 id="search-results-title">검색 결과</h2><p class="summary">총 {{ results.total }}건 · 규칙 기반 metadata 일치</p></div></div>
       <div class="demo-video-grid">
         {% for result in results.items %}
           <article class="demo-video-card">
-            <div class="demo-video-frame">
-              <video data-synthetic-video data-variant="{{ result.clip.synthetic_variant }}" muted playsinline loop controls poster="{{ result.clip.poster_path }}" aria-label="{{ result.clip.title }} 합성 영상"></video>
-              <div class="demo-video-error" data-video-error hidden role="alert">합성 영상을 불러오지 못했습니다.</div>
-              <span class="demo-ribbon">데모 검색 결과</span>
-            </div>
+            <div class="demo-video-frame"><video data-synthetic-video data-variant="{{ result.clip.synthetic_variant }}" muted playsinline loop controls poster="{{ result.clip.poster_path }}" aria-label="{{ result.clip.title }} 합성 영상"></video><div class="demo-video-error" data-video-error hidden role="alert">합성 영상을 불러오지 못했습니다.</div><span class="demo-ribbon">합성 demo</span></div>
             <div class="demo-video-copy"><div><p class="eyebrow">{{ result.clip.classroom_code }}</p><h3>{{ result.clip.title }}</h3><p>{{ result.clip.summary }}</p></div></div>
             <p class="match-reason">{{ result.match_reason }}</p>
-            <ul class="tag-list" aria-label="이벤트 태그">{% for tag in result.clip.tags %}<li>{{ tag }}</li>{% endfor %}</ul>
-            <p class="card-meta"><span>{{ result.clip.started_at|kst_datetime }} ~ {{ result.clip.ended_at|kst_datetime }}</span><span>{{ result.clip.duration_seconds }}초</span></p>
+            <p class="card-meta"><span>{{ result.clip.started_at|kst_datetime }} ~ {{ result.clip.ended_at|kst_datetime }}</span><span>is_demo=true</span></p>
           </article>
         {% endfor %}
       </div>
     </section>
   {% else %}
-    <section class="panel"><div class="empty" role="status"><strong>일치하는 데모 영상이 없습니다.</strong><p>“A101 마감 후”, “B203 장비 이동”, “비어 있는 영상”처럼 강의실과 상태 태그를 조합해 보세요.</p></div></section>
+    <div class="empty" role="status"><strong>일치하는 검색 결과가 없습니다.</strong><p>검색 문장이나 기간을 바꿔 보세요.</p></div>
   {% endif %}
 {% endblock %}

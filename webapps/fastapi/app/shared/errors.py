@@ -26,15 +26,6 @@ class DomainError(Exception):
         self.details = details or {}
 
 
-class EventNotFoundError(DomainError):
-    code = "EVENT_NOT_FOUND"
-    status_code = 404
-
-    def __init__(self, event_id: str) -> None:
-        super().__init__("요청한 이벤트를 찾을 수 없습니다.")
-        self.event_id = event_id
-
-
 class RepositoryUnavailableError(DomainError):
     code = "REPOSITORY_UNAVAILABLE"
     status_code = 503
