@@ -39,6 +39,7 @@ READMEs처럼 대상이 자명한 문서는 한 줄 설명으로 대신해도 �
 | 이 서비스는 무엇을 맡는가 | `webapps/<service>/README.md` |
 | 시스템이 어떻게 구성되는가 | `docs/architecture/README.md` |
 | 왜 이렇게 결정했는가 | `docs/architecture/decisions.md` |
+| 구현 전에 무엇을 만들기로 했는가 | `docs/specs/` |
 | 결과물이 어떤 형식이어야 하는가 | `docs/conventions/` |
 | 이 작업을 어떤 순서로 하는가 | `.claude/skills/` (저장소 밖) |
 | 에이전트가 무엇을 지켜야 하는가 | `docs/agents/` |

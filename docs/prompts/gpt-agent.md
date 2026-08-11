@@ -64,11 +64,22 @@ Claude Code나 Codex는 저장소 안의 규칙 문서를 스스로 읽지만, �
 # 프로젝트 규칙
 
 ## 프로젝트
-스마트 오피스 모니터링. CCTV 영상으로 직원의 재석·통화 상태를 파악하고
-웹 화면에서 확인한다. 실행 가능한 코드는 두 곳이다.
-- webapps/fastapi : FastAPI + Jinja2. 브라우저의 유일한 진입점
-- worker          : USB 카메라 → RTSP 수집. 아직 fastapi와 연결되어 있지 않다
-deeplearning(추론), monitoring(지표), RPAs(업무 자동화)는 아직 코드가 없다.
+강의실 학생 모니터링. 강의실 카메라 영상에서 학생을 식별하고, 현재 위치를
+지정 좌석과 수업 시간 정책에 결합해 학생 상태를 판정한다.
+얼굴 인식은 식별 수단이고, 제품이 내놓는 것은 학생 상태다.
+
+상태: PRESENT(지정 좌석에 있음) / WRONG_SEAT(다른 자리) /
+      ABSENT(수업 중 유예 시간 초과 미식별) / UNKNOWN(판정 불가)
+IN_CLASSROOM(좌석엔 없지만 교실 안)은 MVP 범위 밖이다.
+제품 사용자는 관리자 하나다. 학생은 관찰 대상이지 사용자가 아니다.
+
+실행 가능한 코드는 두 곳이다.
+- webapps/fastapi : FastAPI + Jinja2. 브라우저의 유일한 진입점.
+                    현재 강의실 좌석 현황 / 실시간 모니터링 / 자연어 검색 세 화면.
+                    인증 없음. 학생 식별·얼굴 등록·상태 판정은 아직 없다
+- worker          : 카메라 → RTSP 수신(stream) → 탐지(inference) → 녹화(recorder).
+                    탐지 결과를 fastapi로 넘기는 경로가 없어 로그로만 나간다
+deeplearning(모델), monitoring(지표), RPAs(업무 자동화)는 아직 코드가 없다.
 
 ## 최상위 구조
 webapps/ deeplearning/ worker/ monitoring/ docs/ RPAs/ README.md 만 둔다.
@@ -77,10 +88,13 @@ webapps/ deeplearning/ worker/ monitoring/ docs/ RPAs/ README.md 만 둔다.
 ## fastapi 내부 구조
 기술 계층별이 아니라 기능(도메인)별 디렉터리다.
 
-app/<기능>/{router,service,schemas,models,ports}.py + adapters/
-app/shared/{config,errors,dependencies,templating}.py
+app/<기능>/{router,service,schemas,models,ports,errors}.py + adapters/
+app/shared/{config,errors,dependencies,templating,database}.py
 templates/   Jinja2. app/ 밖에 둔다
 tests/
+
+현재 기능: classrooms, video_monitoring
+추가 예정: students, face_enrollment, student_monitoring
 
 호출 방향: router → service → port ← adapter
 
@@ -92,7 +106,7 @@ tests/
 
 ## 포트와 설계 패턴
 포트는 "프로세스 밖으로 나가는 I/O인가"에 예라고 답할 때만 만든다.
-현재 포트는 저장소 / 추론 클라이언트 / 객체 저장소 / 알림 4곳뿐이다.
+포트를 두기로 한 경계는 저장소 / 추론 클라이언트 / 객체 저장소 / 알림 4곳이다.
 같은 프로세스 안의 호출, 순수 계산에는 만들지 않는다.
 
 설계 패턴은 기본값이 "만들지 않는다"이다.
@@ -100,10 +114,12 @@ tests/
 - 한 기능 안에 facade.py를 만들지 않는다. service.py가 이미 파사드다.
 - 분기를 없애려고 Strategy 클래스를 만들지 않는다. 변형이 실제로 2개 이상
   생기기 전까지 판단 로직은 순수 함수로 둔다.
+  상태 판정 규칙을 상태별 클래스로 나누는 것도 여기 해당한다.
 - Factory, Singleton, Observer 등은 쓰지 않는다.
 
 ## API 규칙
 - 경로 /api/v1/<복수형 리소스>, 필드는 snake_case
+- 서비스 사이의 내부 호출은 /internal 아래에 둔다 (예: POST /internal/inference/events)
 - 목록은 limit(기본 50 / 최대 200)와 offset, 응답에 items/total/limit/offset
 - 오류 본문 {"error": {"code": "대문자_스네이크", "message": "...", "details": {}}}
 - 성공 응답에 래퍼를 쓰지 않는다. 리소스를 그대로 반환한다
@@ -114,16 +130,22 @@ tests/
 ## 화면 규칙
 화면은 fastapi가 Jinja2로 직접 렌더링한다. 별도 프론트엔드 서비스가 없다.
 router.py에 page_router(HTML)와 api_router(JSON)를 두고 같은 서비스 함수를 부른다.
-- 템플릿에 비즈니스 판단을 두지 않는다. 임계값 해석·분류는 서비스에서 끝낸다.
+- 템플릿에 비즈니스 판단을 두지 않는다. 임계값 해석·상태 분류는 서비스에서 끝낸다.
 - 정상·빈 상태·오류 상태를 모두 만들고 "데이터 없음"과 "조회 실패"를 구분한다.
 - 상태를 색으로만 구분하지 않는다. 문구나 아이콘을 함께 쓴다.
+- 미식별(UNKNOWN)을 부재(ABSENT)로 표시하지 않는다.
 - 브라우저 스크립트는 화면 보조에만 쓴다.
 
 ## 아키텍처 규칙
 - 브라우저는 fastapi만 호출한다. deeplearning·worker에 직접 접근하지 않는다
-- deeplearning의 출력은 "사람 1명 탐지, 신뢰도 0.87"까지다. 업무 해석은 fastapi가 한다
-- 영상과 메타데이터의 저장 책임을 분리한다 (MinIO / MongoDB)
-- 영상 저장 기능을 먼저 만들지 않는다. 보존 기간·접근 권한이 합의되지 않았다
+- 모델은 상태를 결정하지 않는다. 추론 출력은 student_id·bbox·신뢰도까지다.
+  PRESENT/WRONG_SEAT/ABSENT 판정은 fastapi가 소유한다.
+  추론 코드와 탐지 결과 스키마에 업무 상태 어휘를 넣지 않는다
+- 모델을 아는 곳은 deeplearning 하나다. worker/inference는 실행 단계다
+- 미관측을 부재로 바꾸지 않는다. 신뢰도 미달 식별에 이름을 붙이지 않는다
+- 영상·얼굴 데이터와 메타데이터의 저장 책임을 분리한다 (MinIO / MongoDB)
+- 영상 저장 범위를 넓히는 기능을 먼저 만들지 않는다. 보존 기간·접근 권한 미합의
+- 얼굴 데이터 정책(동의·보관·보존·접근·삭제)이 미합의다. 합의 전에 만들지 않는다
 
 ## 코딩 규칙
 - Python. 공개 함수의 인자와 반환값에 타입 힌트를 붙인다 (mypy strict)
@@ -131,18 +153,21 @@ router.py에 page_router(HTML)와 api_router(JSON)를 두고 같은 서비스 �
 - 불리언은 참일 때의 상태로 짓는다 (is_active). 부정형 이름을 쓰지 않는다
 - 한 함수는 한 가지 일만 한다. 불리언 인자로 동작을 분기하지 않는다
 - 오류를 조용히 삼키지 않는다. except: pass 를 쓰지 않는다
-- 설정값(주소, 포트, 임계값, 경로, 타임아웃)을 하드코딩하지 않는다
-- 로그에 토큰, 비밀번호, 개인정보를 남기지 않는다
+- 설정값(주소, 포트, 임계값, 경로, 타임아웃)을 하드코딩하지 않는다.
+  유예 시간·신뢰도 임계값 같은 판정 기준값도 설정으로 뺀다
+- 로그에 토큰, 비밀번호, 개인정보를 남기지 않는다.
+  학생 실명, 얼굴 이미지 경로, embedding 값이 여기 해당한다
 - 외부 호출에 타임아웃을 지정한다
 - 주석은 무엇이 아니라 왜를 쓴다
 - 같은 코드가 세 번째 나타나면 공통화를 검토한다. 두 번째는 아직 아니다
 
 ## 테스트
-- pytest를 쓴다. webapps/fastapi/tests/ 에 test_<대상>.py 로 둔다
+- pytest를 쓴다. webapps/fastapi/tests/<기능>/ 에 app과 같은 파일 이름으로 둔다
 - 변경한 동작에는 테스트를 남긴다
-- 실패 케이스(잘못된 입력, 권한 없음, 대상 없음)와 경계값(0건, 빈 목록, 최대값)을 테스트한다
+- 실패 케이스(잘못된 입력, 대상 없음, 저장소 실패)와 경계값(0건, 빈 목록, 최대값)을 테스트한다
 - 테스트를 통과시키려고 단언을 약화시키거나 삭제하지 않는다
 - 실제 DB·카메라·모델이 필요한 테스트는 기본 실행에서 분리한다
+- 테스트 자산에 실제 사람의 얼굴을 쓰지 않는다
 
 ## Git
 - develop이 기준 브랜치다. develop에서 <타입>/<설명> 브랜치를 따고 PR도 develop으로 연다
@@ -150,7 +175,7 @@ router.py에 page_router(HTML)와 api_router(JSON)를 두고 같은 서비스 �
 - 커밋 첫 줄은 <타입>(<스코프>): <무엇을 했는지>. 타입은 feat fix docs refactor test chore
 - 본문에는 왜 그렇게 했는지를 쓴다. 본문을 생략하지 않는다
 - 한 커밋은 한 가지 일만 한다. 기능 추가와 리팩터링을 섞지 않는다
-- .env, 실행 로그, 모델 가중치, 개인정보가 담긴 영상·캡처를 커밋하지 않는다
+- .env, 실행 로그, 모델 가중치, 학생 얼굴이 담긴 영상·이미지·캡처를 커밋하지 않는다
 
 ## 금지
 - 비밀키와 실제 환경변수 값을 코드에 쓰지 않는다. .env.example에는 이름과 설명만 쓴다
@@ -159,6 +184,8 @@ router.py에 page_router(HTML)와 api_router(JSON)를 두고 같은 서비스 �
 - 테스트를 통과시키기 위해 테스트를 삭제하거나 무력화하지 않는다
 - 근거 없이 새 프레임워크나 의존성을 추가하지 않는다
 - 확정되지 않은 기술 결정을 확정처럼 다루지 않는다
+- 얼굴 embedding과 원본 이미지를 API 응답·로그·화면 목록에 노출하지 않는다
+- APP_ENV=prod 배포를 전제한 코드를 만들지 않는다. 운영 접근 통제 방식이 미정이다
 ```
 
 ## 3단계: 작업 요청
@@ -174,7 +201,7 @@ GPT는 저장소를 볼 수 없으므로, 보여 주지 않은 파일은 지어�
 (무엇이 되면 끝인지. 비워두지 않는다)
 
 ## 대상 위치
-(예: webapps/fastapi/app/employees/)
+(예: webapps/fastapi/app/students/)
 
 ## 기존 코드
 (수정 대상 파일과, 참고할 비슷한 기능의 파일을 그대로 붙여넣는다.
@@ -200,7 +227,9 @@ GPT가 낸 코드는 **실행되지 않은 상태**다. 저장소에 넣기 전�
 - [ ] 서비스 계층이 `Request`·`HTTPException`이나 어댑터 구현체를 직접 쓰지 않는가
 - [ ] 구현체가 하나뿐인 인터페이스나 불필요한 패턴을 만들지 않았는가
 - [ ] 테스트가 함께 왔는가. 실패 케이스가 있는가
-- [ ] 설정값을 하드코딩하지 않았는가
+- [ ] 설정값과 판정 기준값을 하드코딩하지 않았는가
+- [ ] 추론 쪽 코드에 업무 상태 어휘가 들어가지 않았는가
+- [ ] 얼굴 embedding·원본 이미지가 응답·로그에 노출되지 않는가
 - [ ] 기존 API 계약의 필드를 지우거나 이름을 바꾸지 않았는가
 - [ ] 요청하지 않은 파일을 함께 고치지 않았는가
 
