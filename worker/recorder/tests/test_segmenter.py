@@ -9,7 +9,7 @@ import pytest
 from shared.camera_sources import CameraSource
 
 from ..errors import SegmentationError
-from ..object_keys import build_object_key
+from shared.object_keys import build_object_key
 from ..segmenter import Segmenter, parse_segment_recorded_at
 from .conftest import FakeProcess, FakeRunner
 

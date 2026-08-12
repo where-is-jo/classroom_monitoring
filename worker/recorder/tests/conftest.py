@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ..errors import ObjectStorageError
-from ..ports import StoredObject
+from shared.object_storage import ObjectStorageError
+from shared.object_storage import StoredObject
 
 # 최소한의 재생 가능한 mp4 흉내. ftyp와 moov 두 box만 있으면 is_playable_mp4를 통과한다.
 # 이스케이프 없이 조립해 소스에 널 바이트가 섞이지 않게 한다.
@@ -113,15 +113,28 @@ class FakeStorage:
         self.objects: dict[str, StoredObject] = {}
         self.fail_keys = fail_keys or set()
         self.put_calls: list[tuple[str, Path]] = []
+        self.put_bytes_calls: list[tuple[str, bytes, str]] = []
         self.removed: list[str] = []
 
-    def put_object(self, key: str, source_path: Path) -> StoredObject:
+    def put_object(
+        self, key: str, source_path: Path, *, content_type: str = "video/mp4"
+    ) -> StoredObject:
+        del content_type
         self.put_calls.append((key, source_path))
         if key in self.fail_keys:
             raise ObjectStorageError(f"적재 실패 대역: {key}")
+        return self._store(key, source_path.stat().st_size)
+
+    def put_bytes(self, key: str, data: bytes, *, content_type: str) -> StoredObject:
+        self.put_bytes_calls.append((key, data, content_type))
+        if key in self.fail_keys:
+            raise ObjectStorageError(f"적재 실패 대역: {key}")
+        return self._store(key, len(data))
+
+    def _store(self, key: str, size_bytes: int) -> StoredObject:
         stored = StoredObject(
             key=key,
-            size_bytes=source_path.stat().st_size,
+            size_bytes=size_bytes,
             last_modified=datetime(2026, 8, 10, 9, 0, 0, tzinfo=UTC),
         )
         self.objects[key] = stored

@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from ..adapters.minio_storage import MinioObjectStorage
-from ..errors import ObjectStorageError
+from shared.object_storage.minio import MinioObjectStorage
+from shared.object_storage import ObjectStorageError
 
 minio_error = pytest.importorskip(
     "minio.error", reason="minio 패키지가 없으면 예외 변환을 검증할 수 없다"
@@ -148,7 +148,7 @@ def test_예외_목록에_bare_Exception이_없다() -> None:
     minio와 urllib3의 import를 한 블록에 묶으면 한쪽이 없을 때 두 이름이 함께
     비어 이 목록이 (Exception, Exception, OSError)가 된다.
     """
-    from ..adapters.minio_storage import _STORAGE_FAILURES
+    from shared.object_storage.minio import _STORAGE_FAILURES
 
     assert Exception not in _STORAGE_FAILURES
     assert BaseException not in _STORAGE_FAILURES

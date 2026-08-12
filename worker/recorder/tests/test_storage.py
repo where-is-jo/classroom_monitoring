@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from ..adapters.local import LocalObjectStorage
-from ..errors import ObjectStorageError
-from ..object_keys import build_object_key, camera_prefix
+from shared.object_storage import LocalObjectStorage
+from shared.object_storage import ObjectStorageError
+from shared.object_keys import build_object_key, camera_prefix
 
 
 class TestObjectKey:
