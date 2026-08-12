@@ -1,4 +1,4 @@
-"""최소 모니터링 앱 설정과 시작 시 검증."""
+"""Minimal monitoring app settings and startup validation."""
 
 from __future__ import annotations
 
@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
 
+    # SSE settings
+    sse_heartbeat_interval_seconds: int = Field(default=30, ge=1)
+    sse_reconnection_timeout_seconds: int = Field(default=60, ge=1)
+
+    # Detection event settings
+    detection_event_max_detections_per_event: int = Field(default=100, ge=1)
+    detection_event_stale_seconds: int = Field(default=300, ge=1)
+
     @field_validator("database_name", mode="before")
     @classmethod
     def _empty_database_name_is_missing(cls, value: object) -> object:
@@ -31,7 +39,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _validate_environment_contract(self) -> Self:
         if self.database_mode == "memory" and self.app_env != "local":
-            raise ValueError("DATABASE_MODE=memory는 APP_ENV=local에서만 사용할 수 있습니다.")
+            raise ValueError("DATABASE_MODE=memory can only be used with APP_ENV=local.")
         if self.database_mode == "mongodb":
             has_url = bool(self.database_url and self.database_url.get_secret_value().strip())
             missing = [
@@ -43,9 +51,9 @@ class Settings(BaseSettings):
                 if not present
             ]
             if missing:
-                raise ValueError("MongoDB mode에 필요한 환경변수가 없습니다: " + ", ".join(missing))
+                raise ValueError("Missing required environment variables for MongoDB mode: " + ", ".join(missing))
         if self.app_env == "prod" and self.demo_mode_enabled:
-            raise ValueError("APP_ENV=prod에서는 DEMO_MODE_ENABLED를 활성화할 수 없습니다.")
+            raise ValueError("DEMO_MODE_ENABLED cannot be enabled with APP_ENV=prod.")
         if self.page_size_default > self.page_size_max:
-            raise ValueError("PAGE_SIZE_DEFAULT는 PAGE_SIZE_MAX 이하여야 합니다.")
+            raise ValueError("PAGE_SIZE_DEFAULT must be less than or equal to PAGE_SIZE_MAX.")
         return self

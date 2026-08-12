@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .models import DemoStream, VideoSearchResult, VideoSearchResultPage
+from .models import DemoStream, SourceStatus, VideoSearchResult, VideoSearchResultPage, VideoStream
 
 
 class DemoStreamResponse(BaseModel):
@@ -39,6 +39,38 @@ class DemoStreamResponse(BaseModel):
             poster_path=item.poster_path,
             last_updated_at=item.last_updated_at,
         )
+
+
+class RealStreamResponse(BaseModel):
+    id: str
+    camera_id: str
+    classroom_id: str
+    camera_label: str
+    status: str
+    playback_kind: str
+    playback_path: str | None
+    last_frame_at: datetime | None
+    last_detection_at: datetime | None
+    is_demo: Literal[False] = False
+
+    @classmethod
+    def from_domain(cls, item: VideoStream, status: SourceStatus) -> RealStreamResponse:
+        return cls(
+            id=item.id,
+            camera_id=item.camera_id,
+            classroom_id=item.classroom_id,
+            camera_label=item.camera_label,
+            status=status.value,
+            playback_kind=item.playback_kind.value,
+            playback_path=item.playback_path,
+            last_frame_at=item.last_frame_at,
+            last_detection_at=item.last_detection_at,
+        )
+
+
+class StreamListResponse(BaseModel):
+    items: list[DemoStreamResponse | RealStreamResponse]
+    total: int
 
 
 class DemoStreamListResponse(BaseModel):

@@ -12,6 +12,18 @@ class DemoStreamStatus(StrEnum):
     NO_VIDEO = "NO_VIDEO"
 
 
+class PlaybackKind(StrEnum):
+    WEBRTC = "WEBRTC"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class SourceStatus(StrEnum):
+    CONNECTED = "CONNECTED"
+    STALE = "STALE"
+    NO_VIDEO = "NO_VIDEO"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass(frozen=True)
 class DemoStream:
     id: str
@@ -56,3 +68,20 @@ class VideoSearchResultPage:
     items: list[VideoSearchResult]
     total: int
     limit: int
+
+
+@dataclass(frozen=True)
+class VideoStream:
+    """Real camera source metadata."""
+    id: str
+    camera_id: str
+    classroom_id: str
+    camera_label: str
+    playback_kind: PlaybackKind
+    playback_path: str | None
+    enabled: bool
+    last_frame_at: datetime | None
+    last_detection_at: datetime | None
+    is_demo: bool
+    created_at: datetime
+    updated_at: datetime
