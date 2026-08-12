@@ -9,9 +9,13 @@
   };
 
   /* ── WebRTC player ── */
-  function initWebRTCPlayer(videoEl, streamId) {
-    /* WHEP signaling: POST /webrtc/{streamId} 로 SDP offer를 보내고 answer를 받는다 */
-    const pc = new RTCPeerConfiguration();
+  function initWebRTCPlayer(videoEl, cameraId) {
+    /* WHEP signaling: MediaMTX에 SDP offer를 보내고 answer를 받는다 */
+    const pc = new RTCPeerConnection();
+
+    /* 수신 전용 트랜시버 추가 (WHEP는 서버→클라이언트 스트림) */
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
 
     pc.addEventListener("track", (event) => {
       if (event.streams && event.streams[0]) {
@@ -20,24 +24,38 @@
     });
 
     pc.createOffer()
-      .then((offer) => pc.setLocalDescription(offer))
+      .then((offer) => {
+        console.log("SDP offer 생성:", offer.sdp.substring(0, 100));
+        return pc.setLocalDescription(offer);
+      })
       .then(() => {
-        return fetch("/webrtc/" + streamId, {
+        const whepUrl = "http://" + window.location.hostname + ":8889/" + cameraId + "/whep";
+        console.log("WHEP signaling 요청:", whepUrl);
+        return fetch(whepUrl, {
           method: "POST",
           headers: { "Content-Type": "application/sdp" },
           body: pc.localDescription.sdp,
         });
       })
       .then((response) => {
-        if (!response.ok) throw new Error("WebRTC signaling failed: " + response.status);
+        console.log("WHEP 응답 상태:", response.status);
+        if (!response.ok) {
+          return response.text().then((text) => {
+            throw new Error("WebRTC signaling failed: " + response.status + " " + text);
+          });
+        }
         return response.text();
       })
       .then((sdp) => {
+        console.log("SDP answer 수신:", sdp.substring(0, 100));
         return pc.setRemoteDescription({ type: "answer", sdp: sdp });
+      })
+      .then(() => {
+        console.log("WebRTC 연결 성공:", cameraId);
       })
       .catch((err) => {
         console.error("WebRTC 오류:", err);
-        showVideoError(videoEl.closest(".demo-video-frame"), "영상 연결 실패");
+        showVideoError(videoEl.closest(".demo-video-frame"), "영상 연결 실패: " + err.message);
       });
 
     /* cleanup */
@@ -160,25 +178,18 @@
     }
   }
 
-  /* ── 카메라 ID 추출 ── */
-  function getCameraIdFromStreamId(streamId) {
-    /* streamId가 "stream-camera-a" 형태이면 "camera-a" 추출 */
-    if (streamId.startsWith("stream-")) return streamId.slice(7);
-    return streamId;
-  }
-
   /* ── 초기화 ── */
   function init() {
     /* 실제 source 카드만 대상 (demo 제외) */
     document.querySelectorAll("[data-real-stream]").forEach((card) => {
-      const streamId = card.dataset.streamId;
-      const cameraId = getCameraIdFromStreamId(streamId);
+      const cameraId = card.dataset.cameraId;
+      if (!cameraId) return;
 
       const videoEl = card.querySelector("video[data-webrtc]");
       const overlay = createOverlayContainer(videoEl);
 
-      /* WebRTC player 시작 */
-      if (videoEl) initWebRTCPlayer(videoEl, streamId);
+      /* WebRTC player 시작 (camera_id로 signaling) */
+      if (videoEl) initWebRTCPlayer(videoEl, cameraId);
 
       /* SSE 구독 */
       subscribeSSE(cameraId, videoEl, overlay);
