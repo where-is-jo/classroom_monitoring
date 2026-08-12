@@ -42,7 +42,7 @@
 cd webapps/fastapi
 python -m pip install -r requirements.txt
 cp .env.example .env
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
 FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 지원한다.
