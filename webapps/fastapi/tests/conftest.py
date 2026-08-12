@@ -9,6 +9,7 @@ import pytest
 os.environ["APP_ENV"] = "local"
 os.environ["DATABASE_MODE"] = "memory"
 os.environ["DEMO_MODE_ENABLED"] = "false"
+os.environ["FACE_ANALYZER_MODE"] = "synthetic"
 
 
 def pytest_configure(config: pytest.Config) -> None:

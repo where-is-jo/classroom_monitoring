@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#00685f">
+  <link rel="icon" href="{{ url_for('static', path='/favicon.svg') }}" type="image/svg+xml">
   <title>{% block title %}학습 모니터링{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
   <script src="{{ url_for('static', path='/forms.js') }}" defer></script>
@@ -29,6 +30,10 @@
           <a href="/classrooms"{% if current_path == '/classrooms' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석 현황</span></a>
           <a href="/monitoring"{% if current_path == '/monitoring' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>실시간 모니터링</span></a>
           <a href="/video-search"{% if current_path == '/video-search' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>자연어 검색</span></a>
+        </div>
+        <div class="nav-group nav-group-spaced">
+          <p class="nav-group-title">등록 관리</p>
+          <a href="/students/demo-student/face-enrollment"{% if '/face-enrollment' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>얼굴 등록</span></a>
         </div>
       </nav>
     </aside>

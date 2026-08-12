@@ -43,7 +43,7 @@ MVP의 범위, 도메인 구조, 계약, 완료 조건을 정한다.
 | `worker/stream` | 다중 RTSP 수신·재연결·프레임 샘플링 |
 | `worker/inference` | 프레임 버퍼에서 최신 프레임을 꺼내 YOLOv8n으로 탐지. 결과는 로그로만 나간다 |
 | `worker/recorder` | FFmpeg 세그먼트를 객체 저장소에 적재하고 보존 기간 경과분 삭제 |
-| `deeplearning` | 코드 없음 |
+| `deeplearning` | SCRFD 얼굴 검출·MediaPipe 자세 내부 HTTP 서비스. 나머지 품질·얼굴 인식은 미구현 |
 | 학생 식별, 얼굴 등록, 지정 좌석, 상태 판정 | 구현되어 있지 않다 |
 
 **끊긴 지점은 `worker/inference` → `fastapi` 하나다.** 전달 방식이 `결정 필요`다.

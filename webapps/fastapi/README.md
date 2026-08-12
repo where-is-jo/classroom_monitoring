@@ -23,6 +23,30 @@ cp .env.example .env
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
+얼굴 등록 기능을 로컬에서 실행할 때는 SCRFD·MediaPipe·품질 검사를 담당하는
+`deeplearning` 서버도 필요하다. 필요한 패키지가 설치된 Python 또는 Conda 환경을
+활성화한 뒤 아래 스크립트를 실행하면 분석 서버(`8100`)와 웹 서버(`8000`)가 함께
+시작된다.
+
+```powershell
+cd webapps/fastapi
+.\run-face-enrollment.ps1
+```
+
+PowerShell 실행 정책으로 차단되면 현재 실행에만 우회 정책을 적용할 수 있다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-face-enrollment.ps1
+```
+
+특정 Python 실행 파일을 사용하려면 `-PythonPath`로 지정한다.
+
+```powershell
+.\run-face-enrollment.ps1 -PythonPath "$env:CONDA_PREFIX\python.exe"
+```
+
+스크립트를 실행한 창에서 Enter를 누르면 두 서버를 함께 종료한다.
+
 기본 예제는 `APP_ENV=local`, `DATABASE_MODE=memory`라서 외부 서비스 없이 기동한다.
 **로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8000`을 열면
 `/classrooms`로 이동한다.
@@ -119,6 +143,7 @@ app/
 ├─ main.py              앱 조립, 라우터 등록, 예외 처리
 ├─ classrooms/          강의실, 좌석, 좌석 점유 관측
 ├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
+├─ face_enrollment/     능동형 얼굴 등록 세션·품질·pose 완료 판정
 ├─ shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마
 └─ demo_seed.py         demo fixture 멱등 생성
 
@@ -129,7 +154,9 @@ api-spec/               구현 전 API 설계 명세 JSON
 tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스트
 ```
 
-추가 예정 도메인은 `students`, `face_enrollment`, `student_monitoring` 셋이다.
+추가 예정 도메인은 `students`, `student_monitoring` 둘이다. `face_enrollment`는 memory
+저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다. MongoDB·MinIO
+운영 어댑터와 자세·품질·인식 모델은 아직 연결되지 않았다.
 책임과 목표 계약은 [MVP 명세의 도메인 구조](../../docs/specs/student-monitoring-mvp.md#도메인-구조-예정)에 있다.
 
 추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.
@@ -148,6 +175,12 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
 | `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 ≤ x ≤ 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
+| `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 유효본 수 | 기본 300 |
+| `FACE_POSE_*_QUOTA` | 방향별 필수 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 방향별 60장, 합계 300장 |
+| `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
+| `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
+| `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
+| `FACE_LOCAL_SAMPLE_STORAGE_DIR` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
 학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
@@ -157,6 +190,25 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 환경변수의 저장·명명 규칙은
 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
 실제 비밀값과 `.env`는 커밋하지 않는다.
+
+## 얼굴 등록 API와 화면
+
+- 화면: `/students/{student_id}/face-enrollment`
+- 세션 생성: `POST /api/v1/students/{student_id}/face-enrollments`
+- 상태 조회·취소: `GET`, `DELETE /api/v1/face-enrollments/{enrollment_id}`
+- 실시간 프레임: `WS /api/v1/face-enrollments/{enrollment_id}/frames`
+- 프로필 조회·삭제: `GET`, `DELETE /api/v1/students/{student_id}/face-profile`
+
+현재 local 구현은 SCRFD 중앙 분석 서비스와 메모리 메타데이터 저장소를 사용한다.
+실제 얼굴 원본을 운영에서 처리하려면 관리자 인증과 MongoDB·MinIO 접근 통제가 선행돼야 한다.
+
+수집된 JPEG를 local에서 직접 확인하려면 `.env`에
+`FACE_LOCAL_SAMPLE_STORAGE_ENABLED=true`를 설정한다. 완료된 세션은
+`local_face_data/<YYYYMMDD-HHMMSS-student_id>/`에 카메라와 같은 해상도의 JPEG가
+`<student_id>_<pose>_<sequence>.jpg` 형식으로 남는다. 타원 바깥은 분석 전에 어두운
+단색으로 제거되며 취소·연결 중단 세션 폴더는 즉시 삭제된다. 메뉴의 `demo-student`는
+학생 원장·선택 화면이 구현되기 전의 local 테스트용 ID이며, 실제 학생 ID는
+`/students/{student_id}/face-enrollment` 경로로 전달된다.
 
 ## 검증
 

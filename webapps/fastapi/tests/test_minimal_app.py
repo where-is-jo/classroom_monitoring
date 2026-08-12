@@ -78,7 +78,7 @@ def minimal_client() -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
-def test_product_has_exactly_three_navigation_pages(minimal_client: TestClient) -> None:
+def test_product_navigation_includes_face_enrollment(minimal_client: TestClient) -> None:
     root = minimal_client.get("/", follow_redirects=False)
     assert root.status_code in {302, 307}
     assert root.headers["location"] == "/classrooms"
@@ -91,7 +91,7 @@ def test_product_has_exactly_three_navigation_pages(minimal_client: TestClient) 
         response = minimal_client.get(path)
         assert response.status_code == 200
         assert heading in response.text
-        assert response.text.count('class="nav-group-title"') == 1
+        assert response.text.count('class="nav-group-title"') == 2
         for label in ("강의실 좌석 현황", "실시간 모니터링", "자연어 검색"):
             assert label in response.text
         for removed in ("로그인", "사용자 관리", "직원 관리", "면담", "알림"):
@@ -131,6 +131,9 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
         "/api/v1/video-streams",
         "/api/v1/video-streams/{stream_id}",
         "/api/v1/video-searches",
+        "/api/v1/students/{student_id}/face-enrollments",
+        "/api/v1/face-enrollments/{enrollment_id}",
+        "/api/v1/students/{student_id}/face-profile",
         "/health",
         "/health/ready",
     }
@@ -348,3 +351,12 @@ def test_settings_reject_unsafe_or_incomplete_modes(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_pose_quota_total_must_equal_required_sample_count() -> None:
+    with pytest.raises(ValidationError, match="Pose quota"):
+        Settings(
+            app_env="local",
+            database_mode="memory",
+            face_enrollment_required_samples=301,
+        )

@@ -58,7 +58,7 @@ flowchart TB
 | FastAPI 백엔드 API | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`app/`) | 좌석 점유 조회와 데모 영상·검색까지. **학생 식별·얼굴 등록·상태 판정은 `예정`** |
 | 카메라 실시간 수신, 프레임 샘플링 | [`worker/stream`](../../worker/stream/README.md) | 동작. 다중 RTSP 소스 수신·재연결·샘플링. 로컬 저장은 개발용이며 기본 꺼짐 |
 | 추론 실행 단계 | [`worker/inference`](../../worker/inference/README.md) | 동작. 결과 전달 경로는 `예정`. 모델 호출은 `deeplearning` 이관 대상([결정 0009](./decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)) |
-| 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | `예정`. 코드 없음. 모델 선정 `결정 필요` |
+| 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | SCRFD 검출·MediaPipe 자세 내부 HTTP 서비스 구현. 나머지 품질·인식은 `예정` |
 | 학생 상태 판정 | `webapps/fastapi` | `예정`. 소유 서비스는 fastapi로 확정([결정 0008](./decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)) |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 강의실·좌석·관측 컬렉션만 구현됨 |
 | 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작. **저장 범위·보존 기간은 미합의**([결정 0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
@@ -280,7 +280,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 
 | 항목 | 상태 | 영향 |
 | --- | --- | --- |
-| 얼굴 데이터 정책 — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 | 결정 필요 | **개인정보 합의 사항.** face_enrollment 구현을 막는다 |
+| 얼굴 데이터 운영 접근 권한과 재학 종료 자동 삭제 실행 주체 | 결정 필요 | local 구현은 가능하지만 **실제 얼굴의 prod 처리를 막는다**. 동의·보관·중단 삭제 정책은 [0011](./decisions.md#0011--얼굴-등록-실시간-경계와-데이터-수명)로 확정 |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 합의 사항. **코드가 먼저 만들어져 기본값으로 동작 중**([0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
 | 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | 결정 필요 | **prod 배포를 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
 | 탐지 결과 전달 방식(동기 HTTP / 메시지 큐) | 결정 필요 | 전체. 자동 상태 갱신을 막는다 |
@@ -294,7 +294,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 카메라 배치(대수·높이·화각·거리) | 결정 필요 | 실제 촬영으로 확정한다 |
 | 작은 얼굴 대응 — Super Resolution 도입 여부 | 후보. 카메라 배치·렌즈·crop 개선을 먼저 시도한다 | deeplearning |
 | Tracking(ByteTrack 등) 도입과 `IN_CLASSROOM` | 결정 필요 | MVP 범위 밖 |
-| 실시간 화면 갱신 방식(폴링 / SSE / WebSocket) | 결정 필요 | fastapi |
+| 일반 모니터링 화면 갱신 방식(폴링 / SSE / WebSocket) | 결정 필요 | 얼굴 등록은 [0011](./decisions.md#0011--얼굴-등록-실시간-경계와-데이터-수명)에 따라 WebSocket 확정. 일반 모니터링은 미정 |
 | 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | 결정 필요 | fastapi, worker, monitoring |
 | `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 결정 필요 | monitoring, fastapi |
 | 자연어 검색 방식(LLM + 허용된 조회 Tool) | 후보: LangGraph | fastapi. MVP 이후 |
