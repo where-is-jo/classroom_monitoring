@@ -13,9 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .errors import ObjectStorageError
-from .object_keys import build_object_key
-from .ports import ObjectStorage
+from shared.object_keys import build_object_key
+from shared.object_storage import ObjectStorage, ObjectStorageError
 from .segmenter import parse_segment_recorded_at
 
 logger = logging.getLogger(__name__)

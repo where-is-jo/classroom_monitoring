@@ -57,6 +57,8 @@ warn_unused_ignores = true
 warn_unreachable = true
 
 # 타입 스텁이 없는 서드파티는 오류로 만들지 않는다. 우리 코드의 문제와 구분한다.
+# minio·urllib3은 SNAPSHOT_STORAGE_BACKEND=memory로만 돌리는 환경에는 설치되지 않을 수
+# 있다. 어댑터가 ImportError를 직접 처리하므로 없는 것도 정상 상태다.
 [[tool.mypy.overrides]]
-module = ["uvicorn.*"]
+module = ["uvicorn.*", "minio.*", "urllib3.*"]
 ignore_missing_imports = true

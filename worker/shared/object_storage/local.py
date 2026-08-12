@@ -12,8 +12,8 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..errors import ObjectStorageError
-from ..ports import StoredObject
+from .errors import ObjectStorageError
+from .ports import StoredObject
 
 
 class LocalObjectStorage:
@@ -26,7 +26,12 @@ class LocalObjectStorage:
     def root_dir(self) -> Path:
         return self._root_dir
 
-    def put_object(self, key: str, source_path: Path) -> StoredObject:
+    def put_object(
+        self, key: str, source_path: Path, *, content_type: str = "video/mp4"
+    ) -> StoredObject:
+        # content_type은 받기만 한다. 파일 시스템에는 담을 곳이 없고, 포트 서명을
+        # MinIO 어댑터와 맞추기 위해 인자로 둔다.
+        del content_type
         target_path = self._resolve(key)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -34,6 +39,20 @@ class LocalObjectStorage:
         except OSError as error:
             raise ObjectStorageError(f"객체를 저장하지 못했습니다: {key} ({error})") from error
 
+        return self._stat(key, target_path)
+
+    def put_bytes(self, key: str, data: bytes, *, content_type: str) -> StoredObject:
+        del content_type
+        target_path = self._resolve(key)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target_path.write_bytes(data)
+        except OSError as error:
+            raise ObjectStorageError(f"객체를 저장하지 못했습니다: {key} ({error})") from error
+
+        return self._stat(key, target_path)
+
+    def _stat(self, key: str, target_path: Path) -> StoredObject:
         stat = target_path.stat()
         return StoredObject(
             key=key,
