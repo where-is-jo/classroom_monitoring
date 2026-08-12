@@ -13,12 +13,15 @@ import sys
 import threading
 from types import FrameType
 
+from inference.config import DEFAULT_DATA_DIR as INFERENCE_DATA_DIR
 from inference.config import InferenceSettings
-from inference.consumer import InferenceConsumer
+from inference.consumer import InferenceConsumer, ResultHandler, log_result
 from inference.model import Yolo8nDetector
 from inference.processor import InferenceProcessor
+from inference.snapshot import SnapshotResultHandler
 from pydantic import ValidationError
 from shared.config_errors import format_validation_error
+from shared.object_storage.factory import build_object_storage
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
 from stream.config import StreamSettings
@@ -30,6 +33,33 @@ from .config import PIPELINE_ENV_FILE, PipelineSettings
 from .runner import PipelineRunner
 
 logger = logging.getLogger(__name__)
+
+
+def build_result_handler(settings: InferenceSettings) -> ResultHandler:
+    """탐지 결과를 무엇으로 받을지 정한다.
+
+    스냅샷이 꺼져 있으면 저장소를 만들지 않는다. MinIO 접속 정보 없이도 파이프라인이
+    돌아야 하고, 저장은 명시적으로 켜는 것이라는 규칙(결정 0011)에 맞춘다.
+    """
+    if not settings.snapshot_enabled:
+        return log_result
+
+    storage = build_object_storage(
+        settings, local_fallback_dir=INFERENCE_DATA_DIR / "snapshots"
+    )
+    logger.info(
+        "탐지 스냅샷 적재를 켠다. 긴 변 %dpx, 품질 %d, 카메라당 최소 간격 %.0f초. "
+        "영상 원본은 저장하지 않는다(결정 0011).",
+        settings.snapshot_max_long_side_px,
+        settings.snapshot_jpeg_quality,
+        settings.snapshot_min_interval_seconds,
+    )
+    return SnapshotResultHandler(
+        storage=storage,
+        min_interval_seconds=settings.snapshot_min_interval_seconds,
+        max_long_side_px=settings.snapshot_max_long_side_px,
+        jpeg_quality=settings.snapshot_jpeg_quality,
+    )
 
 
 def build_runner(
@@ -54,6 +84,7 @@ def build_runner(
         shutdown_event=shutdown_event,
         poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
         max_consecutive_failures=pipeline_settings.inference_max_consecutive_failures,
+        result_handler=build_result_handler(inference_settings),
     )
     stream_worker = StreamWorker(
         stream_settings,

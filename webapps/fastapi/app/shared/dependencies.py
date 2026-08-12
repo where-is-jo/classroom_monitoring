@@ -13,6 +13,9 @@ from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
 from ..demo_seed import seed_demo_data
+from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
+from ..snapshots.ports import SnapshotStorage
+from ..snapshots.service import SnapshotService
 from ..video_monitoring.service import VideoDemoService
 from .config import Settings
 from .database import (
@@ -82,6 +85,43 @@ def get_classroom_service(
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         clock=utc_now,
     )
+
+
+@lru_cache
+def _snapshot_storage() -> SnapshotStorage:
+    """스냅샷 저장소를 한 번만 만든다. 조립은 여기 한 곳에서만 한다.
+
+    MinIO SDK import를 함수 안에 둔 이유는 memory backend로 도는 환경(테스트·로컬)에
+    패키지가 없어도 기동해야 하기 때문이다.
+    """
+    settings = get_settings()
+    if settings.snapshot_storage_backend == "memory":
+        return InMemorySnapshotStorage()
+
+    # 검증이 세 값의 존재를 이미 보장한다.
+    assert settings.snapshot_storage_endpoint is not None
+    assert settings.snapshot_storage_access_key is not None
+    assert settings.snapshot_storage_secret_key is not None
+
+    from ..snapshots.adapters.minio_storage import (
+        MinioSnapshotStorage,
+        build_minio_client,
+    )
+
+    client = build_minio_client(
+        endpoint=settings.snapshot_storage_endpoint,
+        access_key=settings.snapshot_storage_access_key.get_secret_value(),
+        secret_key=settings.snapshot_storage_secret_key.get_secret_value(),
+        secure=settings.snapshot_storage_secure,
+        timeout_seconds=settings.snapshot_storage_timeout_seconds,
+    )
+    return MinioSnapshotStorage(client, settings.snapshot_storage_bucket)
+
+
+def get_snapshot_service(
+    settings: Settings = Depends(get_settings),
+) -> SnapshotService:
+    return SnapshotService(_snapshot_storage(), page_size_max=settings.page_size_max)
 
 
 def get_video_demo_service(

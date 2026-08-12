@@ -11,5 +11,7 @@ class SegmentationError(RecorderError):
     """RTSP를 세그먼트 파일로 떨구는 FFmpeg 프로세스를 띄우지 못했다."""
 
 
-class ObjectStorageError(RecorderError):
-    """객체 저장소에 적재하거나 삭제하지 못했다."""
+# ObjectStorageError는 여기 없다. 객체 저장소를 inference도 쓰게 되면서
+# shared/object_storage/errors.py로 옮겼다(결정 0011).
+# **RecorderError를 더 이상 상속하지 않는다.** RecorderError만 잡는 곳은
+# ObjectStorageError를 함께 잡아야 한다 — main.py가 그렇게 되어 있다.

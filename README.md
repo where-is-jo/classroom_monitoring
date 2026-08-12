@@ -35,8 +35,12 @@
   찼는지"를 뜻하며 "누가 앉았는지"가 아니다. local/dev에서는 실제 영상이나 개인정보
   없이 합성 모니터링·검색 흐름을 시연할 수 있다.
 - **`worker`** — 카메라 영상을 받아(`stream`) 프레임을 골라 탐지하고(`inference`),
-  영상을 세그먼트로 객체 저장소에 적재한다(`recorder`). **탐지 결과를 fastapi로
-  넘기는 경로가 아직 없어 로그로만 나간다.**
+  탐지 인원 수가 바뀌면 스냅샷을 객체 저장소에 올린다.
+  **영상 원본은 저장하지 않는다**
+  ([결정 0011](./docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+  세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
+  **탐지 결과 자체를 fastapi로 넘기는 경로는 아직 없어 로그로만 나간다** — fastapi는
+  스냅샷을 저장소에서 직접 읽는다.
 
 ```bash
 cd webapps/fastapi
@@ -50,7 +54,9 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 기준이고, 서비스를 실행하고 검증하는 명령은 [개발 가이드](./docs/guides/README.md)에
 모여 있다.
 
-`deeplearning`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다.
+`deeplearning`에는 추론 코드가 없고, 모델 학습용 Jupyter 노트북만 있다
+([결정 0012](./docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+`monitoring`, `RPAs`에는 아직 실행 코드가 없다.
 얼굴 탐지·인식, 학생 상태 판정, 실시간 갱신은 구현되지 않았다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
@@ -76,7 +82,7 @@ README.md      이 문서
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
-| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | 코드 없음 |
+| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | 추론 코드 없음. 학습 노트북 있음 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | Grafana 설정만 있음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 
@@ -161,7 +167,7 @@ README.md      이 문서
 [아키텍처의 미결정 항목](./docs/architecture/README.md#미결정-항목)이 정본이다.
 
 - **얼굴 데이터 정책** — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 절차
-- **영상 저장 범위·보존 기간·접근 권한** — 개인정보가 걸린 합의 사항
+- **스냅샷 접근 권한** — 개인정보가 걸린 합의 사항. 지금은 root 키로 붙는다
 - **운영 접근 통제 방식** — 정해지기 전까지 `APP_ENV=prod` 배포를 하지 않는다
 - 얼굴 탐지·인식 모델과 사람 탐지 모델 버전
 - 결석 유예 시간 값과 좌석 판정 방식 — 실제 촬영이 선행되어야 한다

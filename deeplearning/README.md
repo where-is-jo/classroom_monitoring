@@ -3,7 +3,9 @@
 컴퓨터 비전 모델을 실행해 영상 프레임에서 **사람을 찾고, 얼굴을 찾고, 학생을 식별**하는
 추론 디렉터리다.
 
-> 현재 상태: **구현 전. 코드가 없다.** 모델 종류와 실행 환경은 아직 확정되지 않았다.
+> 현재 상태: **추론 코드는 아직 없다.** 모델 종류와 실행 환경은 아직 확정되지 않았다.
+> 모델 학습용 Jupyter 노트북은 [`training/`](./training/README.md)에 있다
+> ([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 성능 수치나 정확도를 측정 없이 이 문서에 기록하지 않는다.
 
 ## 서비스 목적
@@ -73,7 +75,9 @@ student_id + 신뢰도 ──기준 미만──▶ UNKNOWN
 - 탐지 결과와 embedding의 영속 저장 → `webapps/fastapi` 책임
 - 스트림 연결 유지와 프레임 수명 관리 → [`worker`](../worker/README.md) 책임
 - 모델 가중치 파일의 저장소 커밋
-- 학습과 데이터셋 구축 — 이 프로젝트 범위 밖이다
+- 자동 재학습 파이프라인, 데이터셋 라벨링 도구, 얼굴 데이터를 다루는 학습 — 여전히
+  이 프로젝트 범위 밖이다. `training/`의 수동 Jupyter 노트북만 예외이며, 사람 탐지
+  모델 fine-tuning까지만 다룬다([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다))
 
 ## 모델 선정
 
@@ -100,6 +104,19 @@ student_id + 신뢰도 ──기준 미만──▶ UNKNOWN
 5. 그래도 부족하면 Super Resolution 검토
 
 모델을 하나 더 붙이는 것이 가장 비싸고, 앞 네 단계가 더 큰 효과를 내는 경우가 많다.
+
+## 모델 학습
+
+공용 GPU 서버에서 팀원이 Jupyter 노트북으로 셀 단위로 실행하며 모델을 학습하는 절차는
+[`training/`](./training/README.md)에 있다([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+
+- **범위는 사람 탐지(Person Detection) 모델의 수동 fine-tuning까지다.** 얼굴 탐지·인식
+  모델 학습은 아직 없다 — 개인정보 합의가 먼저 필요하다([얼굴 데이터 취급](#얼굴-데이터-취급)).
+- **학습 데이터셋과 산출물(가중치, `runs/`)은 저장소에 커밋하지 않는다.** 공용 서버
+  디스크 여유가 약 17~20 GB뿐이라([결정 0011](../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다))
+  로컬에도 오래 남기지 않는다.
+- **학습된 가중치를 `worker/inference`가 쓰는 실행 환경까지 전달하는 방식은 아직
+  정해지지 않았다.** [모델 파일 취급](#모델-파일-취급)의 미결정 사항이 그대로 적용된다.
 
 ## 모델 파일 취급
 
@@ -176,5 +193,6 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 - [AI 에이전트 규칙](../docs/agents/ai-agent.md)
 - [worker README](../worker/README.md) — 프레임 공급과 실행 단계
 - [학생 모니터링 MVP 명세](../docs/specs/student-monitoring-mvp.md) — 탐지 결과가 어떻게 쓰이는지
+- [training README](./training/README.md) — 모델 학습용 Jupyter 노트북 사용법
 - `add-monitoring-metric` 스킬
 - [아키텍처](../docs/architecture/README.md)

@@ -17,8 +17,21 @@ TARGET_CLASS_IDS: dict[int, str] = {0: "person", 67: "cell phone"}
 DEFAULT_MODEL_PATH = "yolov8n.pt"
 
 
+def _to_numpy(value: Any) -> NDArray[Any]:
+    """모델 출력을 numpy 배열로 바꾼다.
+
+    **GPU에서 돌면 출력이 CUDA 텐서다.** `np.asarray`는 그것을 바로 변환하지 못하고
+    "can't convert cuda:0 device type tensor to numpy"로 죽는다. 호스트 메모리로
+    먼저 옮겨야 한다. torch를 직접 import하지 않는 이유는 이 워커가 ultralytics
+    뒤의 프레임워크를 알 필요가 없기 때문이다.
+    """
+    if hasattr(value, "detach"):
+        value = value.detach().cpu()
+    return np.asarray(value)
+
+
 def _to_scalar(value: Any) -> float:
-    array = np.asarray(value)
+    array = _to_numpy(value)
     if array.size == 0:
         raise ValueError("박스 정보가 비어 있습니다.")
     return float(array.flatten()[0])
@@ -82,7 +95,7 @@ class Yolo8nDetector:
                 if class_id not in self._target_class_ids:
                     continue
                 confidence = float(_to_scalar(getattr(box, "conf", getattr(box, "confidence", 0.0))))
-                xyxy = np.asarray(getattr(box, "xyxy", getattr(box, "xyxys", None)))
+                xyxy = _to_numpy(getattr(box, "xyxy", getattr(box, "xyxys", None)))
                 if xyxy is None or xyxy.size < 4:
                     continue
                 xyxy = xyxy.reshape(-1)[:4].tolist()
