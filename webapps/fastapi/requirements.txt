@@ -3,6 +3,10 @@ uvicorn[standard]
 jinja2
 pydantic-settings
 pymongo>=4.17,<5
+
+# 탐지 스냅샷 조회용 객체 저장소 어댑터(결정 0011).
+# SNAPSHOT_STORAGE_BACKEND=memory만 쓴다면 없어도 된다.
+minio>=7.2
 tzdata
 
 # 테스트

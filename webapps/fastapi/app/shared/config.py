@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
 
+    # --- 탐지 스냅샷 저장소 (결정 0011) ---
+    # worker가 적재한 스냅샷을 읽기만 한다. fastapi는 만들지도 지우지도 않는다.
+    # memory는 MinIO 없이 화면을 띄우기 위한 개발용이며 빈 목록을 돌려준다.
+    snapshot_storage_backend: Literal["memory", "minio"] = "memory"
+    snapshot_storage_bucket: str = "classroom-snapshots"
+    snapshot_storage_endpoint: str | None = None
+    snapshot_storage_access_key: SecretStr | None = None
+    snapshot_storage_secret_key: SecretStr | None = None
+    snapshot_storage_secure: bool = True
+    snapshot_storage_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
     @field_validator("database_name", mode="before")
     @classmethod
     def _empty_database_name_is_missing(cls, value: object) -> object:
@@ -48,4 +59,19 @@ class Settings(BaseSettings):
             raise ValueError("APP_ENV=prod에서는 DEMO_MODE_ENABLED를 활성화할 수 없습니다.")
         if self.page_size_default > self.page_size_max:
             raise ValueError("PAGE_SIZE_DEFAULT는 PAGE_SIZE_MAX 이하여야 합니다.")
+        if self.snapshot_storage_backend == "minio":
+            missing_storage = [
+                name
+                for name, value in (
+                    ("SNAPSHOT_STORAGE_ENDPOINT", self.snapshot_storage_endpoint),
+                    ("SNAPSHOT_STORAGE_ACCESS_KEY", self.snapshot_storage_access_key),
+                    ("SNAPSHOT_STORAGE_SECRET_KEY", self.snapshot_storage_secret_key),
+                )
+                if value is None or not str(value).strip()
+            ]
+            if missing_storage:
+                raise ValueError(
+                    "SNAPSHOT_STORAGE_BACKEND=minio에 필요한 환경변수가 없습니다: "
+                    + ", ".join(missing_storage)
+                )
         return self

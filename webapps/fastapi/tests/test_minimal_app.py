@@ -131,6 +131,9 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
         "/api/v1/video-streams",
         "/api/v1/video-streams/{stream_id}",
         "/api/v1/video-searches",
+        # 탐지 스냅샷 조회(결정 0011). 영상 원본을 저장하지 않는 대신 남기는 정지 이미지다.
+        "/api/v1/snapshots",
+        "/api/v1/snapshots/image/{key}",
         "/health",
         "/health/ready",
     }
