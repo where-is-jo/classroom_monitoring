@@ -14,8 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from .errors import ObjectStorageError
-from .ports import ObjectStorage
+from shared.object_storage import ObjectStorage, ObjectStorageError
 
 logger = logging.getLogger(__name__)
 

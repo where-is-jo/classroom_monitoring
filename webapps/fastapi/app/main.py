@@ -26,6 +26,8 @@ from .shared.schemas import HealthResponse, ReadinessResponse
 from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
 from .student_monitoring.router import api_router as student_api_router
 from .student_monitoring.router import internal_router as student_internal_router
+from .snapshots.router import api_router as snapshot_api_router
+from .snapshots.router import page_router as snapshot_page_router
 from .video_monitoring.router import api_router as monitoring_api_router
 from .video_monitoring.router import page_router as monitoring_page_router
 
@@ -52,6 +54,7 @@ if get_settings().demo_mode_enabled:
     app.mount("/demo-assets", StaticFiles(directory=str(DEMO_ASSET_DIR)), name="demo-assets")
 app.include_router(classroom_page_router, include_in_schema=False)
 app.include_router(monitoring_page_router, include_in_schema=False)
+app.include_router(snapshot_page_router, include_in_schema=False)
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
@@ -65,6 +68,7 @@ app.include_router(classroom_api_router, responses=_ERROR_RESPONSES)
 app.include_router(monitoring_api_router, responses=_ERROR_RESPONSES)
 app.include_router(student_internal_router, responses=_ERROR_RESPONSES)
 app.include_router(student_api_router, responses=_ERROR_RESPONSES)
+app.include_router(snapshot_api_router, responses=_ERROR_RESPONSES)
 
 
 def _wants_json(request: Request) -> bool:

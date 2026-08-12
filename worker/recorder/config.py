@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 from shared.camera_sources import CameraSource, parse_stream_sources
+from shared.object_storage import ObjectStorageSettings
 
 _RECORDER_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = _RECORDER_DIR / "data"
 
-# S3 버킷 이름 규칙. MinIO SDK도 같은 규칙으로 검사하지만 첫 호출 시점에 ValueError를
-# 던진다. 그때는 이미 세그먼트가 쌓이는 중이라, 시작 시점에 미리 걸러낸다.
-_BUCKET_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
-
 __all__ = ["DEFAULT_DATA_DIR", "CameraSource", "RecorderSettings"]
 
 
-class RecorderSettings(BaseSettings):
-    """recorder worker가 쓰는 전체 설정."""
+class RecorderSettings(ObjectStorageSettings):
+    """recorder worker가 쓰는 전체 설정.
+
+    객체 저장소 값(`OBJECT_STORAGE_*`)은 `ObjectStorageSettings`에서 온다.
+    inference도 같은 mixin을 쓰므로 두 워커가 같은 변수를 같게 해석한다.
+    """
 
     model_config = SettingsConfigDict(env_file=_RECORDER_DIR / ".env", extra="ignore")
 
@@ -44,17 +44,9 @@ class RecorderSettings(BaseSettings):
     recording_retention_days: int = Field(default=30, ge=1, le=3650)
     recording_retention_interval_seconds: float = Field(default=3600.0, gt=0, le=86400)
 
-    # --- 객체 저장소 ---
-    # local은 MinIO 없이 적재 경로를 확인하기 위한 개발용이다. 운영 보관 수단이 아니다.
-    object_storage_backend: Literal["local", "minio"] = "local"
-    object_storage_bucket: str = "office-recordings"
+    # shared는 기본값을 None으로 두고 조립 시점에 정하게 한다. recorder는 예전부터
+    # 자기 data 디렉터리를 기본값으로 써 왔고, 그 동작을 바꾸지 않는다.
     object_storage_local_dir: Path = DEFAULT_DATA_DIR / "objects"
-
-    # MinIO 접속 정보는 비밀값이라 기본값을 주지 않는다.
-    object_storage_endpoint: str | None = None
-    object_storage_access_key: SecretStr | None = None
-    object_storage_secret_key: SecretStr | None = None
-    object_storage_secure: bool = True
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -78,16 +70,6 @@ class RecorderSettings(BaseSettings):
             return DEFAULT_DATA_DIR / "objects"
         return value
 
-    @field_validator("object_storage_bucket")
-    @classmethod
-    def _validate_bucket_name(cls, value: str) -> str:
-        if not _BUCKET_NAME_PATTERN.match(value):
-            raise ValueError(
-                "버킷 이름은 소문자·숫자·하이픈·점으로 3~63자여야 하고 "
-                "소문자나 숫자로 시작하고 끝나야 합니다."
-            )
-        return value
-
     @model_validator(mode="after")
     def _validate_environment_contract(self) -> Self:
         # 형식 오류를 요청 처리 중이 아니라 시작 시점에 드러낸다.
@@ -99,26 +81,5 @@ class RecorderSettings(BaseSettings):
                 "그러지 않으면 아직 쓰는 중인 세그먼트를 올리게 됩니다."
             )
 
-        if self.object_storage_backend == "minio":
-            missing_names = [
-                name
-                for name, value in (
-                    ("OBJECT_STORAGE_ENDPOINT", self.object_storage_endpoint),
-                    ("OBJECT_STORAGE_ACCESS_KEY", self.object_storage_access_key),
-                    ("OBJECT_STORAGE_SECRET_KEY", self.object_storage_secret_key),
-                )
-                if value is None or not str(value).strip()
-            ]
-            if missing_names:
-                raise ValueError(
-                    "OBJECT_STORAGE_BACKEND=minio에 필요한 환경변수가 없습니다: "
-                    + ", ".join(missing_names)
-                )
-
-        # 로컬 디렉터리는 운영 보관 수단이 아니다. 결정 0004가 기각한 방식이다.
-        if self.app_env == "prod" and self.object_storage_backend == "local":
-            raise ValueError(
-                "APP_ENV=prod에서는 OBJECT_STORAGE_BACKEND=local을 쓸 수 없습니다. "
-                "로컬 디렉터리는 개발용이며 보존 기간·접근 권한을 분리할 수 없습니다."
-            )
+        self.validate_object_storage(app_env=self.app_env)
         return self

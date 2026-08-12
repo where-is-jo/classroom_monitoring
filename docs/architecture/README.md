@@ -58,10 +58,12 @@ flowchart TB
 | FastAPI 백엔드 API | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`app/`) | 좌석 점유 조회와 데모 영상·검색까지. **학생 식별·얼굴 등록·상태 판정은 `예정`** |
 | 카메라 실시간 수신, 프레임 샘플링 | [`worker/stream`](../../worker/stream/README.md) | 동작. 다중 RTSP 소스 수신·재연결·샘플링. 로컬 저장은 개발용이며 기본 꺼짐 |
 | 추론 실행 단계 | [`worker/inference`](../../worker/inference/README.md) | 동작. 결과 전달 경로는 `예정`. 모델 호출은 `deeplearning` 이관 대상([결정 0009](./decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)) |
-| 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | `예정`. 코드 없음. 모델 선정 `결정 필요` |
+| 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | `예정`(추론 코드 없음). 학습 노트북은 있음([결정 0012](./decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)). 모델 선정 `결정 필요` |
 | 학생 상태 판정 | `webapps/fastapi` | `예정`. 소유 서비스는 fastapi로 확정([결정 0008](./decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)) |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 강의실·좌석·관측 컬렉션만 구현됨 |
-| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작. **저장 범위·보존 기간은 미합의**([결정 0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
+| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
+| 탐지 시점 스냅샷 적재 | [`worker/inference`](../../worker/inference/README.md) | 동작. 탐지 개수가 바뀌면 JPEG를 MinIO에 올린다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)). 기본은 꺼짐 |
+| 스냅샷 조회 화면·API | `webapps/fastapi`의 `app/snapshots/` | 동작. MinIO 목록을 읽어 보여준다. 이미지는 fastapi가 프록시한다 |
 | 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)만 있다. **수집할 지표가 없어 Prometheus 설정과 알림 규칙은 `예정`** |
 | 사용자용 실시간 영상 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. WebRTC로 확정. 코드 없음. 디렉터리 경계·접근 보호는 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
@@ -151,16 +153,23 @@ MediaMTX와 signaling·미디어 연결을 맺는다. 제품 API와 탐지 SSE�
 한 서비스가 둘 다 소유하지 않는다.
 
 - 업무 메타데이터: `fastapi`가 MongoDB에 기록한다.
-- 영상: **`worker/recorder`가 저장소로 넘긴다.** MinIO에 보관하고 메타데이터에는
-  참조만 남긴다.
+- **영상 원본: 저장하지 않는다.** 탐지 시점의 스냅샷만 MinIO에 남기고 메타데이터에는
+  참조만 둔다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+  `worker/recorder`는 코드가 남아 있으나 공용 서버 스택에서 실행하지 않는다.
 - 얼굴 등록 이미지: `fastapi`가 MinIO의 별도 버킷에 넣는다(`예정`). 영상과 버킷을
   나누는 이유는 보존 기간과 열람 주체가 다르고, 학생 요청으로 삭제할 수 있어야
   하기 때문이다([결정 0004](./decisions.md#0004--영상과-얼굴-이미지-저장소로-minio-채택)).
 
-**저장 범위·보존 기간·접근 권한은 아직 `결정 필요`다.** 0004는 합의 전까지 저장
-범위를 넓히지 않기로 했으나 `recorder`가 먼저 구현됐다. 그 경위와 남은 위험은
-[결정 0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)에 있다.
-보존 기간 기본값 30일은 팀 합의값이 아니며, `APP_ENV=prod`에서 로컬 저장소는 거부한다.
+**상시 녹화는 하지 않는다.** 공용 GPU 서버의 가용 용량이 약 48 GB인데 1080p 카메라
+한 대가 시간당 약 0.9 GB라 성립하지 않는다. 그래서
+[결정 0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)의 상시 녹화와
+보존 기간 30일 기본값은 0011로 대체됐다.
+
+스냅샷 값은 720p / JPEG 80 / 보존 30일 / 카메라당 최소 간격 60초로 정했다.
+삭제는 앱이 아니라 MinIO lifecycle 규칙이 한다.
+
+**접근 권한과 얼굴 데이터 정책은 여전히 `결정 필요`다 — 스냅샷에도 얼굴이 담긴다.**
+지금은 worker와 fastapi가 모두 root 자격 증명으로 저장소에 붙는다.
 `worker/stream`의 로컬 저장은 학습 데이터 확보용이며 기본값이 꺼져 있고
 `APP_ENV=prod`에서는 켤 수 없다.
 
@@ -182,18 +191,24 @@ worker가 fastapi의 내부 HTTP API를 호출하며, 구체 스키마는
 ```
 
 ```text
-카메라 ─RTSP─▶ MediaMTX ┬→ OpenCV(worker/stream)
-                        │   → 프레임 샘플링 → 프레임 버퍼(최신 1장)
-                        │   → worker/inference → 탐지 결과 로그
-                        │   (fastapi로 넘기는 경로는 아직 없다)
-                        │
-                        └→ FFmpeg 세그먼트(worker/recorder)
-                            → 객체 저장소 적재 → 보존 기간 경과분 삭제
-                            (객체 참조를 fastapi에 알리는 경로는 아직 없다)
+카메라 ─RTSP─▶ MediaMTX → OpenCV(worker/stream)
+                          → 프레임 샘플링 → 프레임 버퍼(최신 1장)
+                          → worker/inference ┬→ 탐지 결과 로그
+                                             │  (fastapi로 넘기는 경로는 아직 없다)
+                                             │
+                                             └→ 탐지 개수가 바뀌면 JPEG 스냅샷
+                                                → MinIO (lifecycle이 30일 뒤 삭제)
+                                                       ▲
+                                    fastapi ───목록·이미지 읽기───┘
 ```
 
-두 흐름은 아직 이어져 있지 않다. 화면의 좌석 상태는 실제 관측이 아니라 저장된
-관측 기록을 보여 주는 것이며, 운영 공급원이 없으면 `UNKNOWN`·미관측 상태로 남는다.
+**영상 원본은 저장하지 않는다**(결정 0011). `worker/recorder`의 세그먼트 녹화 경로는
+코드가 남아 있으나 공용 서버에서 실행하지 않는다.
+
+fastapi는 스냅샷을 **저장소에서 직접 읽는다.** 객체 키에 카메라와 시각이 담겨 있어
+메타데이터 저장소 없이도 목록이 된다. 탐지 결과 자체(신뢰도·bbox)를 넘기는 경로는
+여전히 없으므로, 화면의 좌석 상태는 실제 관측이 아니라 저장된 관측 기록을 보여 주는
+것이며 운영 공급원이 없으면 `UNKNOWN`·미관측 상태로 남는다.
 
 ### 예정 학생 상태 흐름
 
@@ -288,9 +303,14 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 얼굴 데이터 정책 — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 | 결정 필요 | **개인정보 합의 사항.** face_enrollment 구현을 막는다 |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 합의 사항. **코드가 먼저 만들어져 기본값으로 동작 중**([0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
 | 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | MVP 동안 미도입([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | **prod 배포를 계속 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
+| 스냅샷 버킷의 접근 권한과 전용 자격 증명 | 결정 필요 | 지금은 root 키로 붙는다. worker(쓰기)·fastapi(읽기)를 나눠야 한다 |
+| 영상·스냅샷 접근 권한 | 결정 필요 | 개인정보 합의 사항. 스냅샷에도 얼굴이 담긴다 |
+| 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | 결정 필요 | **prod 배포를 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
 | 얼굴 탐지 모델 | 후보: SCRFD | deeplearning |
 | 얼굴 인식 모델 | 후보: AdaFace R50, ArcFace (비교 후 결정) | deeplearning |
 | 사람 탐지 모델 버전 | 후보: YOLO 계열 (현재 코드는 YOLOv8n) | deeplearning, worker |
+| 학습 데이터셋 확보·라벨링 정책 | 결정 필요 | deeplearning |
+| 학습 가중치를 `worker/inference` 실행 환경까지 전달하는 방식 | 후보: MinIO | deeplearning, worker |
 | `deeplearning` 호출 방식(라이브러리 import / 별도 프로세스) | 결정 필요 | worker, deeplearning |
 | 결석 유예 시간 값 | 후보: 5 / 10 / 20 / 30분 | fastapi. 실제 촬영과 운영 요구 필요 |
 | 좌석 판정 방식(bbox 중심점·하단점 / ROI 겹침 비율) | 결정 필요 | fastapi. 실제 촬영 필요 |

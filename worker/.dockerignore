@@ -1,0 +1,25 @@
+# 이미지에 들어가면 안 되는 것과 넣을 이유가 없는 것.
+# .env: 비밀값(STREAM_SOURCES에 카메라 자격 증명이 들어간다). 실행 시 주입한다.
+**/.env
+**/.env.example
+
+# 얼굴이 담긴 영상·프레임. 어떤 경우에도 이미지에 넣지 않는다.
+data/
+**/data/
+
+# 모델 가중치. 대용량이고 실행 환경에서 마운트한다.
+*.pt
+*.pth
+*.onnx
+*.engine
+
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# 실행에 필요 없는 것
+**/tests/
+**/README.md
+**/*.md
