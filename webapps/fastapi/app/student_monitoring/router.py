@@ -133,7 +133,7 @@ def list_detections(
     detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
 ) -> DetectionEventListResponse:
     """List detection events for a video stream."""
-    stream = stream_repository.find_by_camera_id(stream_id)
+    stream = stream_repository.find_by_id(stream_id) or stream_repository.find_by_camera_id(stream_id)
     if stream is None:
         from ..video_monitoring.errors import DemoStreamNotFoundError
         raise DemoStreamNotFoundError()
@@ -192,7 +192,7 @@ async def stream_detection_events(
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
 ) -> StreamingResponse:
     """SSE endpoint for real-time detection events."""
-    stream = stream_repository.find_by_camera_id(stream_id)
+    stream = stream_repository.find_by_id(stream_id) or stream_repository.find_by_camera_id(stream_id)
     if stream is None:
         from ..video_monitoring.errors import DemoStreamNotFoundError
         raise DemoStreamNotFoundError()

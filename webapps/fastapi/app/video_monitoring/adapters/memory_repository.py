@@ -13,6 +13,13 @@ class MemoryVideoStreamRepository:
     def __init__(self) -> None:
         self._streams: dict[str, VideoStream] = {}
 
+    def find_by_id(self, stream_id: str) -> VideoStream | None:
+        """Find stream by ID."""
+        for stream in self._streams.values():
+            if stream.id == stream_id:
+                return stream
+        return None
+
     def find_by_camera_id(self, camera_id: str) -> VideoStream | None:
         """Find stream by camera ID."""
         return self._streams.get(camera_id)

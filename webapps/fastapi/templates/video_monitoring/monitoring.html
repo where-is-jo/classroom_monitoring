@@ -3,7 +3,7 @@
 {% block title %}실시간 모니터링 · 학습 모니터링{% endblock %}
 {% block head_extra %}
 {% if demo_enabled %}<script src="/demo-assets/demo-video.js" defer></script>{% endif %}
-<script src="{{ url_for(''static'', path=''/monitoring.js'') }}" defer></script>
+<script src="{{ url_for('static', path='/monitoring.js') }}" defer></script>
 {% endblock %}
 
 {% block content %}

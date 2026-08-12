@@ -33,6 +33,14 @@ class MongoVideoStreamRepository:
             name="video_streams_classroom_enabled",
         )
 
+    def find_by_id(self, stream_id: str) -> VideoStream | None:
+        """Find stream by ID."""
+        try:
+            document = self._collection.find_one({"_id": stream_id})
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return None if document is None else self._to_domain(document)
+
     def find_by_camera_id(self, camera_id: str) -> VideoStream | None:
         """Find stream by camera ID."""
         try:

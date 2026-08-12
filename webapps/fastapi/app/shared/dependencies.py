@@ -12,7 +12,7 @@ from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
-from ..demo_seed import seed_demo_data
+from ..demo_seed import seed_demo_data, seed_video_streams
 from ..student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
     MemoryVideoSegmentRepository,
@@ -213,6 +213,7 @@ def initialize_data_store() -> None:
         seed_demo_data(
             get_classroom_service(get_classroom_repository(settings), settings), now=utc_now()
         )
+        seed_video_streams(_video_stream_repository(), now=utc_now())
 
 
 def close_data_store() -> None:

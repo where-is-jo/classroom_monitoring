@@ -11,6 +11,10 @@ from .models import VideoStream
 class VideoStreamRepository(Protocol):
     """Video stream repository port."""
 
+    def find_by_id(self, stream_id: str) -> VideoStream | None:
+        """Find stream by ID."""
+        ...
+
     def find_by_camera_id(self, camera_id: str) -> VideoStream | None:
         """Find stream by camera ID."""
         ...

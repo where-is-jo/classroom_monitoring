@@ -14,6 +14,8 @@ from .classrooms.models import (
     SeatObservation,
 )
 from .classrooms.service import ClassroomService
+from .video_monitoring.models import PlaybackKind, VideoStream
+from .video_monitoring.ports import VideoStreamRepository
 
 
 def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
@@ -65,6 +67,35 @@ def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
                     )
                     for index, seat in enumerate(seats, start=1)
                 ),
+            )
+        )
+
+
+def seed_video_streams(repository: VideoStreamRepository, *, now: datetime) -> None:
+    """실제 source를 등록한다. WebRTC 재생·탐지 수신 테스트용 fixture다."""
+    if now.tzinfo is None:
+        raise ValueError("demo seed 시각은 timezone-aware 값이어야 합니다.")
+    for camera_id, classroom_id, label in (
+        ("camera-01", "classroom-a101", "A101 전면 카메라"),
+        ("camera-02", "classroom-b203", "B203 전면 카메라"),
+    ):
+        existing = repository.find_by_camera_id(camera_id)
+        if existing is not None:
+            continue
+        repository.save(
+            VideoStream(
+                id=_entity_id(f"stream-{camera_id}"),
+                camera_id=camera_id,
+                classroom_id=classroom_id,
+                camera_label=label,
+                playback_kind=PlaybackKind.WEBRTC,
+                playback_path=f"/webrtc/{camera_id}",
+                enabled=True,
+                last_frame_at=None,
+                last_detection_at=None,
+                is_demo=False,
+                created_at=now,
+                updated_at=now,
             )
         )
 
