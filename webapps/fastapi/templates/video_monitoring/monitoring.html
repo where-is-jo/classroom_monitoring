@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 
 {% block title %}실시간 모니터링 · 학습 모니터링{% endblock %}
-{% block head_extra %}{% if demo_enabled %}<script src="/demo-assets/demo-video.js" defer></script>{% endif %}{% endblock %}
+{% block head_extra %}
+{% if demo_enabled %}<script src="/demo-assets/demo-video.js" defer></script>{% endif %}
+<script src="{{ url_for(''static'', path=''/monitoring.js'') }}" defer></script>
+{% endblock %}
 
 {% block content %}
   <header class="page-header">
@@ -23,8 +26,42 @@
     </form>
   </section>
 
+  {# ── 실제 source ── #}
+  {% if real_streams %}
+  <section aria-labelledby="real-streams-title">
+    <div class="section-heading"><div><h2 id="real-streams-title">실제 영상 source</h2><p class="summary">{{ real_streams|length }}개 표시 중</p></div></div>
+    <div class="demo-video-grid">
+      {% for stream in real_streams %}
+        {% set source_status = stream_service.get_source_status(stream) %}
+        <article class="demo-video-card" data-real-stream data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}">
+          <div class="demo-video-frame">
+            <video data-webrtc muted autoplay playsinline aria-label="{{ stream.camera_label }} 실시간 영상"></video>
+            <div class="demo-video-error" data-video-error hidden role="alert">영상을 불러오지 못했습니다.</div>
+            <span class="demo-ribbon" style="background:#00685f;color:#fff;">실시간</span>
+          </div>
+          <div class="demo-video-copy">
+            <div>
+              <p class="eyebrow">{{ stream.camera_id }}</p>
+              <h3>{{ stream.camera_label }}</h3>
+              <p>{{ stream.classroom_id }}</p>
+            </div>
+            <span class="status-label status-label--{{ 'active' if source_status.value == 'CONNECTED' else ('stale' if source_status.value == 'STALE' else 'unknown') }}">
+              {{ '연결됨' if source_status.value == 'CONNECTED' else ('지연' if source_status.value == 'STALE' else ('영상 없음' if source_status.value == 'NO_VIDEO' else '알 수 없음')) }}
+            </span>
+          </div>
+          <p class="card-meta">
+            <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime if stream.last_detection_at else '없음' }}</strong></span>
+            <span>탐지 <strong data-detection-count>0</strong>건</span>
+          </p>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── demo source ── #}
   <section aria-labelledby="feed-list-title">
-    <div class="section-heading"><div><h2 id="feed-list-title">영상 source</h2><p class="summary">{{ feeds|length }}개 표시 중</p></div><a class="button-link secondary" href="/monitoring">필터 초기화</a></div>
+    <div class="section-heading"><div><h2 id="feed-list-title">{{ '합성 데모 source' if real_streams else '영상 source' }}</h2><p class="summary">{{ feeds|length }}개 표시 중</p></div>{% if not real_streams %}<a class="button-link secondary" href="/monitoring">필터 초기화</a>{% endif %}</div>
     {% if feeds %}
       <div class="demo-video-grid">
         {% for feed in feeds %}

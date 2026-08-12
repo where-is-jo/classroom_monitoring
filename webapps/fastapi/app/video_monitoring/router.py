@@ -13,7 +13,6 @@ from ..shared.templating import templates
 from .errors import VideoSearchInputError
 from .models import DemoStreamStatus
 from .schemas import (
-    DemoStreamListResponse,
     DemoStreamResponse,
     RealStreamResponse,
     StreamListResponse,
