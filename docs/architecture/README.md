@@ -287,7 +287,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | --- | --- | --- |
 | 얼굴 데이터 정책 — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 | 결정 필요 | **개인정보 합의 사항.** face_enrollment 구현을 막는다 |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 합의 사항. **코드가 먼저 만들어져 기본값으로 동작 중**([0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
-| 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | 결정 필요 | **prod 배포를 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
+| 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | MVP 동안 미도입([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | **prod 배포를 계속 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
 | 얼굴 탐지 모델 | 후보: SCRFD | deeplearning |
 | 얼굴 인식 모델 | 후보: AdaFace R50, ArcFace (비교 후 결정) | deeplearning |
 | 사람 탐지 모델 버전 | 후보: YOLO 계열 (현재 코드는 YOLOv8n) | deeplearning, worker |
@@ -298,7 +298,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 카메라 배치(대수·높이·화각·거리) | 결정 필요 | 실제 촬영으로 확정한다 |
 | 작은 얼굴 대응 — Super Resolution 도입 여부 | 후보. 카메라 배치·렌즈·crop 개선을 먼저 시도한다 | deeplearning |
 | Tracking(ByteTrack 등) 도입과 `IN_CLASSROOM` | 결정 필요 | MVP 범위 밖 |
-| `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 결정 필요 | monitoring, fastapi |
+| `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 설정·문서만([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | monitoring, fastapi |
 | 자연어 검색 방식(LLM + 허용된 조회 Tool) | 후보: LangGraph | fastapi. MVP 이후 |
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
 | Jetson 적용 범위 | 결정 필요 | worker |

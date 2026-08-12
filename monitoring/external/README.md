@@ -40,8 +40,9 @@
 | 브라우저 영상 재생 방식 | WebRTC로 확정([결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
 | 실시간 화면 갱신 방식 | SSE로 확정(같은 결정) |
 | 영상 저장 범위·보존 기간·접근 권한 | `결정 필요` (개인정보 관련 합의 사항) |
-| 운영 접근 통제 방식 | `결정 필요`. **정해지기 전까지 실시간 영상을 운영에 노출하지 않는다** |
-| worker의 영상 수신 프로토콜과 MediaMTX 경로·인증 | `결정 필요` |
+| 운영 접근 통제 방식 | MVP 동안 미도입([결정 0012](../../docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)). **정해지기 전까지 실시간 영상을 운영에 노출하지 않는다** |
+| worker의 영상 수신 프로토콜과 MediaMTX 경로·인증 | 인증 없음 + 카메라 ID 경로([결정 0012](../../docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) |
+| MediaMTX 설정 위치 | 설정·문서만 이 디렉터리에 둠([결정 0012](../../docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) |
 
 탐지 결과는 worker가 HTTP로 fastapi에 전달하고, fastapi가 저장을 마친 이벤트를
 SSE로 화면에 보낸다. 영상 바이트는 fastapi가 중계하지 않고 MediaMTX가 WebRTC로
@@ -60,8 +61,10 @@ SSE로 화면에 보낸다. 영상 바이트는 fastapi가 중계하지 않고 M
 signaling·미디어 연결을 맺는다. 브라우저가 worker나 deeplearning을 직접 호출하는
 것은 계속 금지한다.
 
-운영 접근 통제 방식과 WebRTC signaling 보호 방식은 아직 `결정 필요`다. 정해지기
-전에는 실제 학생 영상을 prod에 노출하지 않는다.
+[결정 0012](../../docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)에
+따라 운영 접근 통제·WebRTC signaling 보호·MediaMTX 인증은 MVP 동안 도입하지
+않는다. local/dev에서만 실시간 영상을 확인하고, 실제 학생 영상을 prod에 노출하지
+않는다.
 
 ### 2. 이 디렉터리에 코드가 들어가도 되는가
 
@@ -75,7 +78,10 @@ external이 제품 기능이라면 성격이 다르다. 두 가지 중 하나를
   독립 서비스가 되므로, 최상위 구조 제약과 `docs/architecture/README.md`의
   블록·디렉터리 대응표를 함께 갱신해야 한다
 
-**아직 고르지 않았다.** 고르기 전에는 여기에 코드를 넣지 않는다.
+**설정·문서만 두는 쪽으로 정했다**
+([결정 0012](../../docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)).
+MediaMTX 설정(`mediamtx.yml` 또는 `MTX_*` 환경변수 구성)은 이 디렉터리에 두고,
+화면·API는 계속 fastapi의 `video_monitoring` 기능이 담당한다.
 
 ## 포함하지 않아야 할 기능
 
