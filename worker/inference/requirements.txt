@@ -4,5 +4,9 @@ pydantic>=2.7
 pydantic-settings>=2.3
 ultralytics>=8.0
 
+# 탐지 스냅샷을 객체 저장소에 올린다(결정 0011).
+# OBJECT_STORAGE_BACKEND=local만 쓴다면 없어도 된다.
+minio>=7.2
+
 # 테스트
 pytest>=8.0
