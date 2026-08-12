@@ -106,7 +106,7 @@ stream/data/
 | 강의실 배치 | 좌석 라인별 카메라 2대. 얼굴 크기·가림·역광 확인 | `예정`. 실제 촬영으로 확정한다 |
 | Jetson 적용 | `카메라 → Jetson → RTSP 네트워크 → 서버` | `예정` |
 | 얼굴 인식 연결 | 샘플링한 프레임에서 학생 식별 | `예정`. 모델이 `deeplearning`에 없다 |
-| 결과 전달 | 탐지 결과를 fastapi로 전달 | `예정`. 전달 방식 `결정 필요` |
+| 결과 전달 | 탐지 결과를 fastapi로 전달 | `예정`. HTTP로 확정([결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
 
 다중 카메라는 `STREAM_SOURCES`에 소스를 늘려 설정한다.
 

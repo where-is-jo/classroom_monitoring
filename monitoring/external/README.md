@@ -25,44 +25,43 @@
 | --- | --- | --- |
 | 모니터링 화면과 스트림 목록 API | `webapps/fastapi`의 `app/video_monitoring/` (`/monitoring`, `/api/v1/video-streams`) | **합성 데모까지만.** 고정 카탈로그를 반환한다. 실제 스트림이 아니다 |
 | USB 카메라 → RTSP 송출 | [`worker`](../../worker/README.md) | 단일 카메라 기준 동작. 다른 서비스와 연결되어 있지 않다 |
-| RTSP 수신·재배포(HLS/WebRTC) | 로컬 docker 스택의 MediaMTX | 컨테이너는 뜨지만 **등록된 스트림 경로도 인증도 없다** |
+| RTSP 수신·WebRTC 재배포 | 로컬 docker 스택의 MediaMTX | WebRTC로 확정. 컨테이너는 뜨지만 **등록된 스트림 경로도 인증도 없다** |
 | 카메라 영상과 학생 상태의 연결 | 없음 | 미구현 |
 
 즉 **카메라에서 브라우저까지 이어지는 경로가 아직 한 번도 연결된 적이 없다.**
 
-## 결정되지 않은 것
+## 확정된 전달 방식과 남은 결정
 
 미결정 항목의 정본은 [`docs/architecture/README.md`](../../docs/architecture/README.md)의 표다.
 아래는 그중 이 디렉터리에 직접 걸리는 것들이다. **여기서 확정하지 않는다.**
 
 | 항목 | 상태 |
 | --- | --- |
-| 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | `결정 필요` |
-| 실시간 화면 갱신 방식(폴링 / SSE / WebSocket) | `결정 필요` |
+| 브라우저 영상 재생 방식 | WebRTC로 확정([결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
+| 실시간 화면 갱신 방식 | SSE로 확정(같은 결정) |
 | 영상 저장 범위·보존 기간·접근 권한 | `결정 필요` (개인정보 관련 합의 사항) |
 | 운영 접근 통제 방식 | `결정 필요`. **정해지기 전까지 실시간 영상을 운영에 노출하지 않는다** |
 | worker의 영상 수신 프로토콜과 MediaMTX 경로·인증 | `결정 필요` |
 
-**WebRTC는 현재 후보이지 확정이 아니다.** 팀이 WebRTC로 확정하면
-[`docs/architecture/decisions.md`](../../docs/architecture/decisions.md)에 항목을 추가하고
-위 표의 상태를 함께 갱신해야 한다. 그 전까지 이 문서는 WebRTC를 전제로 쓰지 않는다.
+탐지 결과는 worker가 HTTP로 fastapi에 전달하고, fastapi가 저장을 마친 이벤트를
+SSE로 화면에 보낸다. 영상 바이트는 fastapi가 중계하지 않고 MediaMTX가 WebRTC로
+브라우저에 전달한다. 세 방식의 근거와 실패 경계는
+[결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)이 정본이다.
 
-## 먼저 풀어야 할 경계 문제
+## 구현 전에 남은 경계 문제
 
 이 디렉터리를 만들면서 기존 규칙과 부딪히는 지점이 생겼다. **코드를 넣기 전에 정해야 한다.**
 
 ### 1. 브라우저가 무엇을 직접 호출하는가
 
-`docs/agents/AGENTS.md`의 아키텍처 규칙은 **"브라우저는 `fastapi`만 호출한다"** 이다.
-그런데 WebRTC든 HLS든 실시간 영상은 보통 브라우저가 미디어 서버(MediaMTX)에
-직접 붙는 형태가 된다. 영상 바이트를 fastapi로 전부 중계하면 규칙은 지켜지지만
-fastapi가 대역폭 병목이 된다.
+제품 API와 탐지 SSE는 fastapi만 호출한다. 실시간 영상은
+[결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)의
+예외에 따라, fastapi가 허용한 WebRTC 세션에 한해 브라우저가 MediaMTX와
+signaling·미디어 연결을 맺는다. 브라우저가 worker나 deeplearning을 직접 호출하는
+것은 계속 금지한다.
 
-선택지는 세 가지다. **어느 쪽이든 규칙 문서를 함께 고쳐야 한다.**
-
-- fastapi가 중계한다 — 규칙 유지, 성능 부담
-- 미디어 서버에 직접 붙되 **접근 토큰은 fastapi가 발급한다** — 규칙에 예외를 명시해야 함
-- reverse proxy(Caddy) 뒤에 두고 하나의 origin으로 노출 — 경로 설계 필요
+운영 접근 통제 방식과 WebRTC signaling 보호 방식은 아직 `결정 필요`다. 정해지기
+전에는 실제 학생 영상을 prod에 노출하지 않는다.
 
 ### 2. 이 디렉터리에 코드가 들어가도 되는가
 

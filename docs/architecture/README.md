@@ -63,7 +63,7 @@ flowchart TB
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 강의실·좌석·관측 컬렉션만 구현됨 |
 | 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작. **저장 범위·보존 기간은 미합의**([결정 0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
 | 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)만 있다. **수집할 지표가 없어 Prometheus 설정과 알림 규칙은 `예정`** |
-| 사용자용 실시간 영상 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. 코드 없음. 디렉터리 경계와 재생 방식이 `결정 필요` |
+| 사용자용 실시간 영상 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. WebRTC로 확정. 코드 없음. 디렉터리 경계·접근 보호는 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
 
 ## 지금 동작하는 것과 목표의 거리
@@ -110,14 +110,16 @@ FastAPI                       FastAPI (좌석 대조 + 시간 정책)
 아래는 [AGENTS.md의 Architecture Rules](../agents/AGENTS.md#architecture-rules)와 같은 내용이며,
 여기서는 그 배경을 설명한다.
 
-### 브라우저는 fastapi만 호출한다
+### 제품 요청은 fastapi를 통하고 영상만 WebRTC로 MediaMTX에 연결한다
 
 `deeplearning`과 `worker`를 브라우저에서 직접 부르지 않는다.
 접근 통제를 한 곳에서 하고, 추론 결과 형식이 바뀌어도 영향 범위를
 `fastapi` 안에 가두기 위해서다.
 
-영상 스트림을 브라우저에서 직접 재생해야 하면 이 규칙의 예외가 필요할 수 있다.
-`결정 필요` 항목이며, 확정 시 [결정 기록](./decisions.md)에 남긴다.
+실시간 영상은 예외다. [결정 0011](./decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)에
+따라 fastapi가 재생 가능한 source를 판단하고, 브라우저는 허용된 WebRTC 세션에 한해
+MediaMTX와 signaling·미디어 연결을 맺는다. 제품 API와 탐지 SSE는 계속 fastapi만
+호출한다.
 
 ### 모델은 상태를 결정하지 않는다
 
@@ -165,7 +167,9 @@ FastAPI                       FastAPI (좌석 대조 + 시간 정책)
 ### 서비스 간 계약은 문서화된 것만 쓴다
 
 각 서비스는 상대의 내부 구조를 모른 채 동작해야 한다.
-현재 실행 중인 서비스 사이의 계약은 없다. 첫 계약은 탐지 결과 전달이며, 정의할 때
+현재 실행 중인 서비스 사이에 구현된 계약은 없다. 첫 계약인 탐지 결과 전달은
+[결정 0011](./decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)에 따라
+worker가 fastapi의 내부 HTTP API를 호출하며, 구체 스키마는
 [API 규칙](../conventions/api-convention.md)을 따른다.
 
 ## 데이터 흐름
@@ -199,7 +203,7 @@ FastAPI                       FastAPI (좌석 대조 + 시간 정책)
 | 2. 샘플링 | 연속 프레임 | 추론 대상 프레임 | worker/stream | 구현됨 |
 | 3. 사람 탐지 | 프레임 | 사람 ROI·좌표·신뢰도 | deeplearning | `예정`(현재 worker/inference가 대신함) |
 | 4. 얼굴 탐지·인식 | 사람 ROI | `student_id` 또는 `UNKNOWN`·신뢰도 | deeplearning | `예정` |
-| 5. 전달 | 탐지 결과 | 수신된 이벤트 | 전달 방식 `결정 필요` | `예정` |
+| 5. 전달 | 탐지 결과 | 수신된 이벤트 | worker → fastapi HTTP | `예정`([결정 0011](./decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
 | 6. 좌석 대조 | 위치 + 좌석 ROI | 현재 좌석 / 지정 좌석 일치 여부 | fastapi | `예정` |
 | 7. 상태 판정 | 좌석 대조 + 수업 시간 + 유예 시간 | 학생 상태 | fastapi | `예정` |
 | 8. 저장·표시 | 상태·이벤트 | 이력과 화면 | fastapi | 화면 골격만 구현됨 |
@@ -213,7 +217,8 @@ FastAPI                       FastAPI (좌석 대조 + 시간 정책)
 **2→3단계에서 추론이 밀리면 프레임을 버린다.** 쌓아두면 결과가 가리키는 시점이
 계속 과거로 밀리기 때문이며, 배경은
 [결정 0006](./decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)에 있다.
-5단계의 실패 정책은 전달 방식과 함께 아직 `결정 필요`다.
+5단계는 HTTP timeout·제한 재시도·`event_id` 멱등 처리를 사용한다. 구체 timeout,
+재시도 횟수, worker 전송 버퍼 정책과 내부 인증은 구현 계약에서 정한다.
 
 ### 얼굴 등록 흐름 (`예정`)
 
@@ -283,7 +288,6 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 얼굴 데이터 정책 — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 | 결정 필요 | **개인정보 합의 사항.** face_enrollment 구현을 막는다 |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 합의 사항. **코드가 먼저 만들어져 기본값으로 동작 중**([0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
 | 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | 결정 필요 | **prod 배포를 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
-| 탐지 결과 전달 방식(동기 HTTP / 메시지 큐) | 결정 필요 | 전체. 자동 상태 갱신을 막는다 |
 | 얼굴 탐지 모델 | 후보: SCRFD | deeplearning |
 | 얼굴 인식 모델 | 후보: AdaFace R50, ArcFace (비교 후 결정) | deeplearning |
 | 사람 탐지 모델 버전 | 후보: YOLO 계열 (현재 코드는 YOLOv8n) | deeplearning, worker |
@@ -294,8 +298,6 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 카메라 배치(대수·높이·화각·거리) | 결정 필요 | 실제 촬영으로 확정한다 |
 | 작은 얼굴 대응 — Super Resolution 도입 여부 | 후보. 카메라 배치·렌즈·crop 개선을 먼저 시도한다 | deeplearning |
 | Tracking(ByteTrack 등) 도입과 `IN_CLASSROOM` | 결정 필요 | MVP 범위 밖 |
-| 실시간 화면 갱신 방식(폴링 / SSE / WebSocket) | 결정 필요 | fastapi |
-| 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | 결정 필요 | fastapi, worker, monitoring |
 | `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 결정 필요 | monitoring, fastapi |
 | 자연어 검색 방식(LLM + 허용된 조회 Tool) | 후보: LangGraph | fastapi. MVP 이후 |
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
