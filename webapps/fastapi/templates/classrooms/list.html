@@ -43,12 +43,13 @@
           <li><span class="legend-swatch legend-swatch--unknown" aria-hidden="true"></span>확인 필요</li>
         </ul>
         <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
-          <div class="seat-map" aria-label="좌석 배치">
+          <div class="seat-map" data-classroom-id="{{ summary.classroom.id }}" aria-label="좌석 배치">
             {% for seat in geometry_seats %}
-              <div class="seat-card seat-card--{{ seat.current_occupancy.state.value|lower }}" style="position:absolute;left:{{ seat.geometry.x*100 }}%;top:{{ seat.geometry.y*100 }}%;width:{{ seat.geometry.width*100 }}%;height:{{ seat.geometry.height*100 }}%;">
+              <div class="seat-card seat-card--{{ seat.current_occupancy.state.value|lower }}" data-seat-id="{{ seat.id }}" style="position:absolute;left:{{ seat.geometry.x*100 }}%;top:{{ seat.geometry.y*100 }}%;width:{{ seat.geometry.width*100 }}%;height:{{ seat.geometry.height*100 }}%;">
                 <strong>{{ seat.label }}</strong>
-                <span aria-label="좌석 상태 {{ seat.current_occupancy.state.value|display_label }}">{% if seat.current_occupancy.state.value == 'OCCUPIED' %}●{% elif seat.current_occupancy.state.value == 'VACANT' %}○{% else %}?{% endif %} {{ seat.current_occupancy.state.value|display_label }}</span>
-                <small>{{ seat.current_occupancy.observed_at|kst_datetime }}</small>
+                <span class="state" aria-label="좌석 상태 {{ seat.current_occupancy.state.value|display_label }}"><span class="state-icon" aria-hidden="true">{% if seat.current_occupancy.state.value == 'OCCUPIED' %}●{% elif seat.current_occupancy.state.value == 'VACANT' %}○{% else %}?{% endif %}</span><span class="state-label">{{ seat.current_occupancy.state.value|display_label }}</span></span>
+                <small class="confidence">{% if seat.current_occupancy.confidence is not none %}{{ (seat.current_occupancy.confidence * 100)|round|int }}%{% endif %}</small>
+                <small class="observed-at">{{ seat.current_occupancy.observed_at|kst_datetime }}</small>
               </div>
             {% endfor %}
           </div>
@@ -66,3 +67,5 @@
     {% if not summary.seats %}<div class="empty" role="status">선택한 강의실에 표시할 좌석이 없습니다.</div>{% endif %}
   {% endif %}
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classrooms.js') }}" defer></script>{% endblock %}
