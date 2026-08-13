@@ -42,9 +42,34 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         initialize_data_store()
+        _ensure_default_classroom()
         yield
     finally:
         close_data_store()
+
+
+def _ensure_default_classroom() -> None:
+    """memory 모드에서 강의실이 하나도 없을 때만 네비게이션용 기본 강의실을 생성한다."""
+    from .classrooms.models import CreateClassroomCommand
+    from .shared.dependencies import (
+        get_classroom_repository,
+        get_classroom_service,
+    )
+
+    settings = get_settings()
+    if settings.database_mode != "memory":
+        return
+    service = get_classroom_service(get_classroom_repository(settings), settings)
+    page = service.list_classrooms(limit=1, offset=0)
+    if not page.items:
+        service.seed_classroom(
+            CreateClassroomCommand(
+                id="default-classroom",
+                code="DEFAULT",
+                name="기본 강의실",
+                location="미지정",
+            )
+        )
 
 
 app = FastAPI(

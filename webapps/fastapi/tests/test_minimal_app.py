@@ -302,22 +302,9 @@ def test_demo_seed_is_idempotent() -> None:
     seed_demo_data(service, now=NOW)
     seed_demo_data(service, now=NOW)
     classrooms = service.list_classrooms(limit=10, offset=0)
-    # base.html 네비게이션용 demo-classroom(좌석 없음)까지 시드된다.
-    assert classrooms.total == 3
+    # A101·B203 두 강의실만 시드된다.
+    assert classrooms.total == 2
     assert sum(service.occupancy_summary(item.id).total for item in classrooms.items) == 12
-
-
-def test_demo_seed_creates_navigation_classroom() -> None:
-    """데모 시드는 base.html 네비게이션 링크가 가리키는 demo-classroom을 만든다."""
-    service = ClassroomService(
-        InMemoryClassroomRepository(),
-        occupancy_confidence_threshold=0.6,
-        clock=lambda: NOW,
-    )
-    seed_demo_data(service, now=NOW)
-    classroom = service.get_classroom("demo-classroom")
-    assert classroom.code == "DEMO"
-    assert service.list_all_seats("demo-classroom") == []
 
 
 def test_occupancy_summary_does_not_truncate_after_one_repository_page() -> None:

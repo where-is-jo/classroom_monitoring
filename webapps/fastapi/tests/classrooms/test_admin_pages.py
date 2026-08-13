@@ -435,8 +435,8 @@ def test_student_states_page_renders(client: TestClient) -> None:
     assert "selected" in response.text
     # 네비게이션 "학생 현황" nav-group에 학생 상태·좌석-학생 지정 링크가 있다 (UI-REQ-011)
     assert "학생 현황" in response.text
-    assert 'href="/classrooms/demo-classroom/student-states"' in response.text
-    assert 'href="/classrooms/demo-classroom/seat-assignments"' in response.text
+    assert '/student-states"' in response.text
+    assert '/seat-assignments"' in response.text
 
 
 def test_student_states_page_renders_empty_state(client: TestClient) -> None:
@@ -517,3 +517,38 @@ def test_seat_validation_error_has_displayable_message(client: TestClient) -> No
     assert duplicate_code.status_code == 409
     message = duplicate_code.json()["error"]["message"]
     assert isinstance(message, str) and message
+
+
+# --- /any/ 리다이렉트 라우트 테스트 -------------------------------------------
+
+
+def test_seat_assignments_any_redirects_to_first_classroom(client: TestClient) -> None:
+    """강의실이 있을 때 /any/seat-assignments는 첫 번째 강의실로 리다이렉트한다."""
+    classroom = _create_classroom(client, code="X101")
+    classroom_id = str(classroom["id"])
+    response = client.get("/classrooms/any/seat-assignments", follow_redirects=False)
+    assert response.status_code == 302
+    assert f"/classrooms/{classroom_id}/seat-assignments" in response.headers["location"]
+
+
+def test_student_states_any_redirects_to_first_classroom(client: TestClient) -> None:
+    """강의실이 있을 때 /any/student-states는 첫 번째 강의실로 리다이렉트한다."""
+    classroom = _create_classroom(client, code="Y101")
+    classroom_id = str(classroom["id"])
+    response = client.get("/classrooms/any/student-states", follow_redirects=False)
+    assert response.status_code == 302
+    assert f"/classrooms/{classroom_id}/student-states" in response.headers["location"]
+
+
+def test_seat_assignments_any_redirects_to_create_when_empty(client: TestClient) -> None:
+    """강의실이 없을 때 /any/seat-assignments는 /classrooms/create로 리다이렉트한다."""
+    response = client.get("/classrooms/any/seat-assignments", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/classrooms/create"
+
+
+def test_student_states_any_redirects_to_create_when_empty(client: TestClient) -> None:
+    """강의실이 없을 때 /any/student-states는 /classrooms/create로 리다이렉트한다."""
+    response = client.get("/classrooms/any/student-states", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/classrooms/create"

@@ -357,6 +357,20 @@ def seats_page(
     )
 
 
+@page_router.get("/any/seat-assignments")
+def seat_assignments_page_any(
+    service: ClassroomService = Depends(get_classroom_service),
+) -> Response:
+    """classroom_id 미지정 시 첫 번째 강의실로 리다이렉트."""
+    page = service.list_classrooms(limit=1, offset=0)
+    if not page.items:
+        return RedirectResponse(url="/classrooms/create", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(
+        url=f"/classrooms/{page.items[0].id}/seat-assignments",
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
 @page_router.get("/{classroom_id}/seat-assignments")
 def seat_assignments_page(
     classroom_id: str,
@@ -393,6 +407,20 @@ def seat_assignments_page(
             "assignments": assignments,
             "students": students_page.items,
         },
+    )
+
+
+@page_router.get("/any/student-states")
+def student_states_page_any(
+    service: ClassroomService = Depends(get_classroom_service),
+) -> Response:
+    """classroom_id 미지정 시 첫 번째 강의실로 리다이렉트."""
+    page = service.list_classrooms(limit=1, offset=0)
+    if not page.items:
+        return RedirectResponse(url="/classrooms/create", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(
+        url=f"/classrooms/{page.items[0].id}/student-states",
+        status_code=status.HTTP_302_FOUND,
     )
 
 

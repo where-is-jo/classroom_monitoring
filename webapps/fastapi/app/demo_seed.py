@@ -21,22 +21,12 @@ from .video_monitoring.ports import VideoStreamRepository
 def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
     if now.tzinfo is None:
         raise ValueError("demo seed 시각은 timezone-aware 값이어야 합니다.")
-    classrooms = (
-        ("A101", "A101 일반 강의실", "A동 1층"),
-        ("B203", "B203 실습실", "B동 2층"),
-    )
-    # base.html의 네비게이션(학생 상태·좌석-학생 지정)이 고정 ID로 연결하므로
-    # 해당 ID의 강의실을 항상 시드한다. seed_classroom은 멱등이라 재실행해도 안전하다.
-    # 좌석은 없어도 화면은 정상 렌더링된다.
-    service.seed_classroom(
-        CreateClassroomCommand(
-            id="demo-classroom",
-            code="DEMO",
-            name="데모 강의실",
-            location="데모동 1층",
+    for classroom_index, (code, name, location) in enumerate(
+        (
+            ("A101", "A101 일반 강의실", "A동 1층"),
+            ("B203", "B203 실습실", "B동 2층"),
         )
-    )
-    for classroom_index, (code, name, location) in enumerate(classrooms):
+    ):
         classroom = service.seed_classroom(
             CreateClassroomCommand(
                 id=_entity_id(f"classroom-{code.lower()}"),
