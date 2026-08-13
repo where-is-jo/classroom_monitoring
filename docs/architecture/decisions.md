@@ -73,6 +73,7 @@
 | [0011](#0012--영상-원본을-저장하지-않고-스냅샷만-남긴다) | 영상 원본을 저장하지 않고 스냅샷만 남긴다 | 확정 |
 | [0012](#0013--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다) | deeplearning에 모델 학습용 Jupyter 노트북 도구를 둔다 | 확정 |
 | [0014](#0014--github-actions로-develop-병합-시-ci-검증과-ghcr-이미지-자동-빌드) | GitHub Actions로 develop 병합 시 CI 검증과 GHCR 이미지 자동 빌드 | 확정 |
+| [0015](#0015--서비스-설정을-localdevprod-env와-공용-configsettingsyml로-분리한다) | 서비스 설정을 local/dev/prod .env와 공용 config/settings.yml로 분리한다 | 확정 |
 | [0016](#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다) | 자연어 검색에서 LLM은 계획만 만들고 검증·조회는 fastapi가 소유한다 | 확정 |
 
 ---
@@ -799,6 +800,75 @@ GHCR 패키지 쓰기 권한(저장소 Settings → Actions → Workflow permiss
 - `worker` 이미지 경량화가 끝나면 자동 빌드 job 도입을 새 항목으로 기록한다.
   `worker/recorder`를 배포 대상에 넣기로 결정되면 전용 Dockerfile과 빌드 job을 추가한다.
 - `main` 브랜치 배포 시점의 릴리스 태깅 전략(`latest`를 언제 붙일지)은 아직 다루지 않았다.
+---
+
+## 0015 · 서비스 설정을 local/dev/prod .env와 공용 config/settings.yml로 분리한다
+
+**상태**: 확정
+
+**배경**: `webapps/fastapi`와 `worker`의 네 서브패키지(`stream`·`inference`·`recorder`·
+`pipeline`) 모두 `.env` 파일 하나에 "환경마다 달라야 하는 값(비밀값·서비스 주소·
+로컬 대역과 실제 외부 연동을 고르는 백엔드 선택)"과 "환경과 무관하게 항상 같은 값
+(재시도 횟수·타임아웃·신뢰도 임계값)"이 섞여 있었다. local(개발자 PC)·dev(공용 GPU
+서버)·prod(배포) 세 실행 환경을 명확히 나누려는 작업 중 이 뒤섞임이 값을 옮길 때마다
+걸림돌이 됐다. 조사 과정에서 `webapps/fastapi`의 `Settings`(`app/shared/config.py`)에
+없는 필드(JWT·인증·알림·직원 관련 18개)가 실제 `.env`에는 남아 있는 것도 확인했다 —
+`extra="ignore"`라 조용히 무시되던 이전 "사무실 모니터링" 주제의 죽은 값이다.
+
+**결정**:
+
+1. 서비스별 설정 파일을 둘로 나눈다. `<서비스>/.env.{local,dev,prod}`에는 환경 의존
+   설정과 비밀값을(예: `APP_ENV`, `DATABASE_MODE`, `DATABASE_URL`, `INFERENCE_DEVICE`,
+   `OBJECT_STORAGE_BACKEND`와 접속 정보), `<서비스>/config/settings.yml`에는 일반 설정과
+   판정 기준값을 둔다(예: 타임아웃, 재시도 횟수, quota, 신뢰도 임계값). 분류 기준은
+   [환경변수 규칙](../conventions/environment-convention.md)의 4단 표를 그대로 쓴다.
+2. 실제 OS 환경변수 `APP_ENV`(셸에서 export하거나 docker-compose `environment:`로 주입)가
+   어떤 `.env.{app_env}` 파일을 읽을지 정한다. export하지 않으면 `local`로 본다.
+   `config/settings.yml`은 환경과 무관하게 서비스마다 하나다.
+3. 값을 읽는 우선순위는 실제 OS 환경변수 > `.env.{app_env}` 파일 >
+   `config/settings.yml` 순으로 고정한다(Pydantic Settings의
+   `settings_customise_sources`). worker 네 서브패키지는
+   `worker/shared/settings_sources.py`의 공용 함수 하나로 이 순서를 통일해서 쓴다.
+4. `.env.example`은 `Settings` 클래스의 실제 필드만 담도록 다시 쓴다. 코드에 없는
+   필드는 옮기지 않고 버린다 — 이번에 확인한 18개 죽은 변수가 대상이다.
+5. 필드의 필수 여부와 Python 기본값은 바꾸지 않는다. 이 결정은 "어느 파일에 있어야
+   찾기 쉬운가"만 다루며, 검증 강도를 높이거나 낮추지 않는다.
+
+**대안**:
+
+- **모든 값을 `.env.{local,dev,prod}`에만 두고 yml을 두지 않는다** — 지금까지 해오던
+  방식이다. 그러나 재시도 횟수나 신뢰도 임계값처럼 코드 리뷰로 값을 조정하고 싶은
+  항목까지 커밋되지 않는 개인 파일에 있어 "지금 운영 중인 값이 무엇인지" 저장소만
+  보고는 알 수 없었다. 이번 조사에서 드러난 죽은 변수 문제도 이 방식에서 계속
+  반복될 수 있다.
+- **프로젝트 전체를 env 파일 하나로 통합** — worker 네 서브패키지는 독립 실행(카메라
+  수신만, 추론만 등)을 지원하기 위해 서로 다른 필수 값을 요구하도록 의도적으로 설계돼
+  있다([결정 0005](#0005--worker를-역할별-워커로-분리)). 하나로 합치면 이 독립 실행이
+  깨진다.
+- **`.env` 파일 이름을 그대로 두고 내용만 환경별 주석으로 구분** — 파일 하나에 세
+  환경 값이 다 있으면 실수로 다른 환경 값을 활성화하기 쉽고, "지금 이 프로세스가 어떤
+  값을 읽고 있는지"가 파일을 열어보기 전까지 드러나지 않는다.
+
+**결과**: 서비스가 읽는 값이 "커밋된 공용 기본값(yml)"과 "환경별 비공개 값(.env.*)"으로
+분리돼, 코드 리뷰로 조정할 수 있는 값과 그렇지 않은 값이 파일 위치만으로 구분된다.
+worker 조립 실행(`pipeline`)의 "같은 변수가 여러 파일에 흩어지지 않게 한다"는 기존
+설계도 그대로 유지된다. 대신 실행 전에 `APP_ENV`를 export해야 하는 절차가 하나
+늘었다 — export하지 않으면 항상 `local`로 동작하므로 로컬 개발은 지금과 다르지 않다.
+
+이 결정은 각 서비스가 설정을 **어떻게 읽는가**만 다룬다. `docker-compose` 통합 실행
+수단의 공식화와 배포 환경·방식 자체는 여전히 `결정 필요`로 남는다
+([미결정 항목](./README.md#미결정-항목) 참고) — `.docker/`와 `env/*.env`(docker compose
+전용 값 파일)는 이번 결정의 대상이 아니다.
+
+**남은 일**: 팀원 각자 실제 `.env`(구 이름) 값을 새 `.env.local`/`.env.dev`/`.env.prod`로
+옮겨야 한다 — 자동 이관하지 않았다. `worker/recorder`의 `OBJECT_STORAGE_BUCKET` 기본값
+`office-recordings`처럼 이전 주제의 이름이 남은 값은 이번에 위치만 옮기고 이름은
+바꾸지 않았다([결정 0007](#0007--recorder-worker의-저장-구조와-보존-정책)이 이미
+"결정 필요"로 남긴 별도 사안). `docs/architecture/decisions.md` 자체의 기존 결함(이
+문서의 0011~0013 번호 대역에 목차만 있고 본문이 빠진 항목 세 개)은 이번 작업과
+무관하게 발견했으며 별도로 다뤄야 한다.
+
+---
 
 ## 0016 · 자연어 검색에서 LLM은 계획만 만들고 검증·조회는 fastapi가 소유한다
 

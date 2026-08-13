@@ -2,6 +2,8 @@
 # FFmpeg은 pip 패키지가 아니라 시스템에 따로 설치한다. README를 따른다.
 pydantic>=2.7
 pydantic-settings>=2.3
+# config/settings.yml(환경과 무관한 일반 설정·판정 기준값)을 읽는 데 필요하다.
+pyyaml
 
 # MinIO 어댑터용. OBJECT_STORAGE_BACKEND=local만 쓴다면 없어도 된다.
 minio>=7.2

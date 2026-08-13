@@ -4,6 +4,12 @@ env/*
 .env
 atlas-credentials.env
 
+# 서비스별 local/dev/prod 환경 파일 — 실제 값이 들어가므로 커밋하지 않는다.
+# 일반 설정·판정 기준값은 이 패턴에 걸리지 않는 <서비스>/config/settings.yml에 두고 커밋한다.
+**/.env.local
+**/.env.dev
+**/.env.prod
+
 # 프로젝트 생성 지시 프롬프트 — 저장소 산출물이 아닌 작업 입력물.
 initial_prompt.md
 

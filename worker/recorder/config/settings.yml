@@ -1,0 +1,31 @@
+# recorder worker의 일반 설정·판정 기준값. 환경(local/dev/prod)과 무관하게 같은 값을 쓴다.
+# 환경마다 달라야 하는 값과 비밀값은 .env.{local,dev,prod}에 둔다.
+# 규칙: docs/conventions/environment-convention.md
+
+# --- 세그먼트 녹화 ---
+# 영상 파일 하나의 길이(초). 짧으면 객체 수가 늘고, 길면 유실 시 잃는 분량이 커진다.
+recording_segment_seconds: 600
+# recording_segment_dir는 여기 적지 않는다. 비우면 recorder/data/segments를 쓴다.
+
+# 마지막 세그먼트가 이 시간 동안 변하지 않으면 FFmpeg이 죽은 것으로 보고 적재한다.
+# recording_segment_seconds보다 커야 한다. 작으면 쓰는 중인 파일을 올리게 된다.
+recording_stale_after_seconds: 900.0
+
+# 적재를 시도하는 주기(초)
+recording_upload_interval_seconds: 30.0
+
+# --- 보존 기간 ---
+# 이 값은 아직 팀이 합의한 값이 아니다(결정 0004). 합의되면 이 주석과 함께 갱신한다.
+# 영상에는 사무실 구성원의 얼굴이 담긴다.
+recording_retention_days: 30
+# 보존 기간이 지난 객체를 찾아 지우는 주기(초)
+recording_retention_interval_seconds: 3600.0
+
+# --- 객체 저장소 ---
+# 영상 버킷 이름. "office-recordings"는 이전 사무실 모니터링 주제의 이름이 남은 것이다 —
+# 강의실 주제에 맞는 이름으로 바꾸는 것은 결정 0007이 "결정 필요"로 남긴 별도 사안이라
+# 이번에는 값을 그대로 옮기기만 한다.
+object_storage_bucket: office-recordings
+# object_storage_local_dir는 여기 적지 않는다. 비우면 recorder/data/objects를 쓴다.
+# TLS 사용 여부. 로컬 MinIO는 보통 false다.
+object_storage_secure: true

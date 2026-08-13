@@ -19,9 +19,14 @@ Python 3.12 환경에서 실행한다.
 ```bash
 cd webapps/fastapi
 python -m pip install -r requirements.txt
-cp .env.example .env
+cp .env.example .env.local
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
 python -m uvicorn app.main:app --reload --port 8001
 ```
+
+실행 환경마다 `.env.local` / `.env.dev` / `.env.prod` 중 해당하는 파일을 만든다.
+어떤 파일을 읽을지는 실제 OS 환경변수 `APP_ENV`가 정한다. 재시도 횟수·타임아웃·판정
+임계값처럼 환경과 무관한 값은 `.env.*`가 아니라 커밋된 [`config/settings.yml`](./config/settings.yml)에 있다.
 
 얼굴 등록 기능을 로컬에서 실행할 때는 SCRFD·MediaPipe·품질 검사를 담당하는
 `deeplearning` 서버도 필요하다. 필요한 패키지가 설치된 Python 또는 Conda 환경을
@@ -51,8 +56,9 @@ powershell -ExecutionPolicy Bypass -File .\run-face-enrollment.ps1
 **로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8001`을 열면
 `/classrooms`로 이동한다.
 
-`.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 합성 영상 source와 고정
-검색 catalog가 붙고, memory 저장소에 강의실·좌석 fixture가 멱등하게 채워진다.
+`config/settings.yml`에서 `demo_mode_enabled: true`로 바꾸면(또는 실행 시 실제 OS
+환경변수 `DEMO_MODE_ENABLED=true`로 즉석 재정의하면) 개인정보 없는 합성 영상 source와
+고정 검색 catalog가 붙고, memory 저장소에 강의실·좌석 fixture가 멱등하게 채워진다.
 `APP_ENV=prod`에서는 활성화를 거부한다.
 
 MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_NAME`을
@@ -190,30 +196,23 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.
 영상과 얼굴 데이터의 저장 범위·보존 기간·권한은 여전히 결정이 필요하다.
 
-## 환경변수
+## 환경변수와 설정
 
-전체 이름과 기본값은 [`.env.example`](./.env.example)이 기준이다.
+값은 두 파일에 나뉘어 있다. 환경마다 달라야 하는 값과 비밀값은 `.env.{local,dev,prod}`
+(전체 이름은 [`.env.example`](./.env.example)이 기준), 환경과 무관한 값은 커밋된
+[`config/settings.yml`](./config/settings.yml)에 있다. 어떤 `.env.*`를 읽을지는 실제
+OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
+
+### `.env.{local,dev,prod}`
 
 | 이름 | 용도 | 제약 |
 | --- | --- | --- |
 | `APP_ENV` | 실행 환경 | `local` / `dev` / `prod` |
 | `DATABASE_MODE` | 저장소 종류 | `memory` / `mongodb`. memory는 `local` 전용 |
 | `DATABASE_URL`, `DATABASE_NAME` | MongoDB 접속 정보 | mongodb mode에서 필수. URL은 비밀값 |
-| `DATABASE_CONNECT_TIMEOUT_SECONDS` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
-| `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
-| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
-| `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
-| `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
-| `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
-| `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
-| `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
-| `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
-| `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
-| `FACE_LOCAL_SAMPLE_STORAGE_DIR` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
-| `SSE_HEARTBEAT_INTERVAL_SECONDS` | SSE heartbeat 간격 | 기본 30 |
-| `SSE_RECONNECTION_TIMEOUT_SECONDS` | SSE 재연결 타임아웃 | 기본 60 |
-| `DETECTION_EVENT_MAX_DETECTIONS_PER_EVENT` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
-| `DETECTION_EVENT_STALE_SECONDS` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `FACE_ANALYZER_MODE`, `FACE_ANALYZER_URL` | 얼굴 분석 companion 방식과 주소 | local은 보통 `synthetic`, dev/prod는 `http` |
+| `SNAPSHOT_STORAGE_BACKEND` | 탐지 스냅샷 저장소 | `memory` / `minio`. local은 보통 `memory` |
+| `SNAPSHOT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필수. 비밀값 |
 | `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `stub`. `stub`은 LLM 없이 "오늘 하루"만 돌려주는 대역, `llama`는 llama-server 호출 |
 | `LLM_SEARCH_URL` | llama-server의 OpenAI 호환 API 주소 | `llama` mode에서 필수. 기본 `http://127.0.0.1:8008` |
 | `LLM_SEARCH_TIMEOUT_SECONDS` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
@@ -222,13 +221,34 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `LLM_SEARCH_SCAN_LIMIT` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
+### `config/settings.yml`
+
+| 이름 | 용도 | 제약 |
+| --- | --- | --- |
+| `database_connect_timeout_seconds` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
+| `demo_mode_enabled` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
+| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
+| `page_size_default`, `page_size_max` | 목록 페이지 크기 | 최대 200 |
+| `face_enrollment_required_samples` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
+| `face_enrollment_augmented_samples` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
+| `face_pose_*_quota` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
+| `face_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 설정 파일로 조정 |
+| `face_motion_speed_dps_max` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
+| `face_local_sample_storage_enabled` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
+| `face_local_sample_storage_dir` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
+| `sse_heartbeat_interval_seconds` | SSE heartbeat 간격 | 기본 30 |
+| `sse_reconnection_timeout_seconds` | SSE 재연결 타임아웃 | 기본 60 |
+| `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
+| `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
+
 학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
 `ABSENCE_GRACE_PERIOD_SECONDS` 등)은 아직 없다. 목록은
 [MVP 명세의 설정](../../docs/specs/student-monitoring-mvp.md#설정-예정)에 있다.
 
-환경변수의 저장·명명 규칙은
+환경변수·yml의 저장·명명 규칙은
 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
-실제 비밀값과 `.env`는 커밋하지 않는다.
+실제 비밀값과 `.env.local`/`.env.dev`/`.env.prod`는 커밋하지 않는다.
 
 ## 얼굴 등록 API와 화면
 
@@ -241,8 +261,8 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 현재 local 구현은 SCRFD 중앙 분석 서비스와 메모리 메타데이터 저장소를 사용한다.
 실제 얼굴 원본을 운영에서 처리하려면 관리자 인증과 MongoDB·MinIO 접근 통제가 선행돼야 한다.
 
-수집된 JPEG를 local에서 직접 확인하려면 `.env`에
-`FACE_LOCAL_SAMPLE_STORAGE_ENABLED=true`를 설정한다. 완료된 세션은
+수집된 JPEG를 local에서 직접 확인하려면 `config/settings.yml`에서
+`face_local_sample_storage_enabled: true`로 바꾼다. 완료된 세션은
 `local_face_data/<YYYYMMDD-HHMMSS-student_id>/`에 카메라와 같은 해상도의 JPEG가
 `originals/<student_id>_<pose>_<sequence>.jpg` 형식으로 남는다. 실제 촬영본 120장이
 완료되면 `augmented/`에 교실 카메라의 저해상도·조명·흐림·압축·미세 회전을 모사한

@@ -1,23 +1,38 @@
-"""stream worker 설정. 환경변수에서 읽고 프로세스 시작 시 검증한다.
+"""stream worker 설정. 환경변수·yml에서 읽고 프로세스 시작 시 검증한다.
 
 설정을 읽는 코드를 여기 한 곳에 모은다. 흩어지면 무엇이 필수인지 알 수 없게 된다.
 값의 취급과 명명 규칙은 docs/conventions/environment-convention.md를 따른다.
+
+값은 두 곳에서 온다.
+
+- `.env.{APP_ENV}` — 환경마다 달라야 하는 값과 비밀값(`STREAM_SOURCES`,
+  `RTSP_PUBLISH_DEVICE_NAME`, `RTSP_PUBLISH_TARGET_URL`). 커밋하지 않는다.
+- `config/settings.yml` — 환경과 무관하게 같은 값(재시도·샘플링 주기 등). 커밋한다.
+
+우선순위는 실제 OS 환경변수 > `.env.{APP_ENV}` > `config/settings.yml`이다
+(`shared.settings_sources.customise_sources_with_yaml`).
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from shared.camera_sources import CameraSource, mask_url_credentials, parse_stream_sources
+from shared.settings_sources import customise_sources_with_yaml
 
-# 저장 경로와 .env 위치를 실행 위치(CWD)가 아니라 이 파일 기준으로 잡는다.
+# 저장 경로와 설정 파일 위치를 실행 위치(CWD)가 아니라 이 파일 기준으로 잡는다.
 # 상대 경로로 두면 저장소 루트에서 실행했을 때 worker 밖에 영상 디렉터리가 생기고,
 # .gitignore 규칙에서도 벗어난다.
 _STREAM_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = _STREAM_DIR / "data"
+
+# 실제 OS 환경변수로 어떤 .env.{APP_ENV} 파일을 읽을지 정한다. 없으면 local로 본다 —
+# 손이 덜 가는 local을 기본값으로 두는 기존 원칙과 같다.
+_APP_ENV_FOR_FILE_SELECTION = os.environ.get("APP_ENV", "local")
 
 # 소스 목록 형식은 recorder와 함께 쓰므로 shared에 있다. 여기서는 다시 내보내기만 한다.
 __all__ = ["CameraSource", "StreamSettings", "mask_url_credentials", "parse_stream_sources"]
@@ -26,7 +41,14 @@ __all__ = ["CameraSource", "StreamSettings", "mask_url_credentials", "parse_stre
 class StreamSettings(BaseSettings):
     """stream worker가 쓰는 전체 설정."""
 
-    model_config = SettingsConfigDict(env_file=_STREAM_DIR / ".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_STREAM_DIR / f".env.{_APP_ENV_FOR_FILE_SELECTION}",
+        yaml_file=_STREAM_DIR / "config" / "settings.yml",
+        # PyYAML의 기본 파일 인코딩은 OS 로캘을 따른다. 한국어 Windows에서는 cp949라
+        # yml의 한국어 주석을 읽다가 UnicodeDecodeError가 난다. 명시적으로 고정한다.
+        yaml_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: Literal["local", "dev", "prod"]
 
@@ -68,6 +90,19 @@ class StreamSettings(BaseSettings):
     @property
     def camera_sources(self) -> tuple[CameraSource, ...]:
         return parse_stream_sources(self.stream_sources.get_secret_value())
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return customise_sources_with_yaml(
+            settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+        )
 
     # .env.example은 경로 항목을 비워 둔다. 빈 문자열이 그대로 오면 Path(".")가 되어
     # 실행 위치에 영상이 쌓인다. 비어 있으면 기본 경로를 쓰게 한다.
