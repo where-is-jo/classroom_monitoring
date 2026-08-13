@@ -14,39 +14,42 @@ from .models import (
     DemoStream,
     DemoStreamStatus,
     DemoVideoClip,
+    SourceStatus,
     VideoSearchResult,
     VideoSearchResultPage,
+    VideoStream,
 )
+from .ports import VideoStreamRepository
 
 _KST = ZoneInfo("Asia/Seoul")
-_TOKEN_PATTERN = re.compile(r"[0-9a-z가-힣]+")
-_HOUR_PATTERN = re.compile(r"(?P<hour>\d{1,2})\s*시\s*(?P<direction>이후|전|이전)")
+_TOKEN_PATTERN = re.compile(r"[0-9a-z\uac00-\ud7a3]+")
+_HOUR_PATTERN = re.compile(r"(?P<hour>\d{1,2})\s*\uc2dc\s*(?P<direction>\uc774\ud6c4|\uc804|\uc774\uc804)")
 _GENERIC_TERMS = frozenset(
     {
-        "영상",
-        "데모",
-        "검색",
-        "찾아줘",
-        "보여줘",
-        "있던",
-        "있는",
-        "강의실",
-        "에서",
-        "어제",
-        "오늘",
-        "이후",
-        "이전",
+        "\uc601\uc0c1",
+        "\ub370\ubaa8",
+        "\uac80\uc0c9",
+        "\ucc3e\uc544\uc8fc",
+        "\ubcf4\uc5ec\uc8fc",
+        "\uc788\ub358",
+        "\uc788\ub294",
+        "\uac15\uc758\uc2e4",
+        "\uc5d0\uc11c",
+        "\uc5b4\uc81c",
+        "\uc624\ub298",
+        "\uc774\ud6c4",
+        "\uc774\uc804",
     }
 )
 _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
-    "인원 잔류": ("사람", "인원", "남아", "잔류"),
-    "마감 후": ("마감", "업무 외", "방과 후"),
-    "좌석 점유": ("좌석", "점유", "사용 중"),
-    "입실": ("입실", "들어", "입장"),
-    "이동": ("이동", "움직임", "움직이는"),
-    "장비 구역": ("장비", "실습"),
-    "비어 있음": ("비어", "빈 공간", "아무도 없"),
-    "움직임 없음": ("움직임 없", "정지"),
+    "\uc778\uc6d0 \uc794\ub954": ("\uc0ac\ub78c", "\uc778\uc6d0", "\ub0a8\uc544", "\uc794\ub954"),
+    "\ub9c8\uac10 \ud6c4": ("\ub9c8\uac10", "\uc5c5\ubb34 \uc678", "\ubc29\uacfc \ud6c4"),
+    "\uc88c\uc11d \uc810\uc720": ("\uc88c\uc11d", "\uc810\uc720", "\uc0ac\uc6a9 \uc911"),
+    "\uc785\uc2e4": ("\uc785\uc2e4", "\ub4e4\uc5b4", "\uc785\uc7a5"),
+    "\uc774\ub3d9": ("\uc774\ub3d9", "\uc6b4\ub3d9\uc785", "\uc6b4\ub3d9\ud558\ub294"),
+    "\uc7a5\ube44 \uad6c\uc5ed": ("\uc7a5\ube44", "\uc2e4\uc2b5"),
+    "\ube44\uc5b4 \uc788\uc74c": ("\ube44\uc5b4", "\ube48 \uacf5\uac04", "\uc544\ubb34\ub3c4 \uc5c6"),
+    "\uc6b4\ub3d9\uc785 \uc5c6\uc74c": ("\uc6b4\ub3d9\uc785 \uc5c6", "\uc815\uc9c0"),
 }
 
 
@@ -105,13 +108,13 @@ class VideoDemoService:
     ) -> VideoSearchResultPage:
         normalized_query = self._normalize(query)
         if not normalized_query or len(query.strip()) > 200:
-            raise VideoSearchInputError("검색 문장은 1자 이상 200자 이하여야 합니다.")
+            raise VideoSearchInputError("Search query must be 1-200 characters.")
         from_at = self._aware_utc(from_at)
         to_at = self._aware_utc(to_at)
         if from_at is not None and to_at is not None and from_at > to_at:
-            raise VideoSearchInputError("검색 시작 시각은 종료 시각보다 늦을 수 없습니다.")
+            raise VideoSearchInputError("Start time must not be later than end time.")
         if limit < 1 or limit > 50:
-            raise VideoSearchInputError("검색 결과 수는 1~50이어야 합니다.")
+            raise VideoSearchInputError("Result count must be 1-50.")
 
         concepts = self._semantic_concepts(normalized_query)
         raw_terms = self._raw_terms(normalized_query, concepts)
@@ -148,12 +151,12 @@ class VideoDemoService:
             if any(term not in haystack for term in raw_terms):
                 continue
             matched = tuple(dict.fromkeys((*concepts, *raw_terms)))
-            reason = " · ".join(matched) if matched else "전체 데모 카탈로그"
+            reason = " \u00b7 ".join(matched) if matched else "\uc804\uccb4 \ub370\ubaa8 \uce90\ud0c8\ub85c\uadf8"
             matches.append(
                 VideoSearchResult(
                     clip=clip,
                     matched_terms=matched,
-                    match_reason=f"고정 메타데이터 일치: {reason}",
+                    match_reason=f"\uace0\uc815 \uba54\ud0c0\ub370\uc774\ud130 \uc77c\uce58: {reason}",
                 )
             )
         matches.sort(key=lambda item: (item.clip.started_at, item.clip.id), reverse=True)
@@ -171,9 +174,9 @@ class VideoDemoService:
         if not self._clips:
             return None
         reference = max(item.started_at.astimezone(_KST).date() for item in self._clips)
-        if "어제" in query:
+        if "\uc5b4\uc81c" in query:
             return reference
-        if "오늘" in query:
+        if "\uc624\ub298" in query:
             return reference + timedelta(days=1)
         return None
 
@@ -184,10 +187,10 @@ class VideoDemoService:
             return None
         hour = int(match.group("hour"))
         if hour < 0 or hour > 23:
-            raise VideoSearchInputError("검색 문장의 시각은 0~23시여야 합니다.")
+            raise VideoSearchInputError("Hour must be 0-23.")
         if 1 <= hour <= 7:
             hour += 12
-        return hour, match.group("direction") == "이후"
+        return hour, match.group("direction") == "\uc774\ud6c4"
 
     @staticmethod
     def _semantic_concepts(query: str) -> tuple[str, ...]:
@@ -212,9 +215,9 @@ class VideoDemoService:
                 len(token) < 2
                 or token in _GENERIC_TERMS
                 or token.isdigit()
-                or bool(re.fullmatch(r"\d{1,2}시", token))
+                or bool(re.fullmatch(r"\d{1,2}\uc2dc", token))
                 or any(alias in token or token in alias for alias in covered_aliases)
-                or token.endswith(("에는", "에서", "으로", "이후", "이전"))
+                or token.endswith(("\uc5d0\ub294", "\uc5d0\uc11c", "\uc73c\ub85c", "\uc774\ud6c4", "\uc774\uc804"))
             ):
                 continue
             terms.append(token)
@@ -223,21 +226,21 @@ class VideoDemoService:
     @staticmethod
     def _strip_particle(token: str) -> str:
         for suffix in (
-            "에서는",
-            "으로",
-            "에서",
-            "에게",
-            "부터",
-            "까지",
-            "에는",
-            "에",
-            "의",
-            "을",
-            "를",
-            "이",
-            "가",
-            "은",
-            "는",
+            "\uc5d0\uc11c\ub294",
+            "\uc73c\ub85c",
+            "\uc5d0\uc11c",
+            "\uc5d0\uac8c",
+            "\ubd80\ud130",
+            "\uae4c\uc9c0",
+            "\uc5d0\ub294",
+            "\uc5d0",
+            "\uc758",
+            "\uc744",
+            "\ub97c",
+            "\uc774",
+            "\uac00",
+            "\uc740",
+            "\ub294",
         ):
             if token.endswith(suffix) and len(token) > len(suffix) + 1:
                 return token[: -len(suffix)]
@@ -248,9 +251,49 @@ class VideoDemoService:
         if value is None:
             return None
         if value.tzinfo is None:
-            raise VideoSearchInputError("검색 시각은 timezone을 포함해야 합니다.")
+            raise VideoSearchInputError("Search time must include timezone.")
         return value.astimezone(UTC)
 
     @staticmethod
     def _normalize(value: str) -> str:
         return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+class VideoStreamService:
+    """Real video stream service."""
+
+    def __init__(
+        self,
+        repository: VideoStreamRepository,
+        stale_seconds: int,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._repository = repository
+        self._stale_seconds = stale_seconds
+        self._clock = clock
+
+    def list_streams(self) -> list[VideoStream]:
+        """List all enabled streams."""
+        return self._repository.find_all_enabled()
+
+    def get_stream(self, camera_id: str) -> VideoStream:
+        """Get stream by camera ID."""
+        stream = self._repository.find_by_camera_id(camera_id)
+        if stream is None:
+            raise DemoStreamNotFoundError()
+        return stream
+
+    def get_source_status(self, stream: VideoStream) -> SourceStatus:
+        """Calculate source status based on last detection time."""
+        if stream.last_detection_at is None:
+            return SourceStatus.UNKNOWN
+
+        now = self._clock().astimezone(UTC)
+        elapsed = (now - stream.last_detection_at).total_seconds()
+
+        if elapsed < self._stale_seconds:
+            return SourceStatus.CONNECTED
+        elif elapsed < self._stale_seconds * 2:
+            return SourceStatus.STALE
+        else:
+            return SourceStatus.NO_VIDEO

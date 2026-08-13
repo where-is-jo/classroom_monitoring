@@ -28,7 +28,9 @@ YOLOv8n으로 프레임 한 장에서 `person`과 `cell phone`을 탐지한다. 
 모니터링에서 쓰이지 않는다.** 모델 이관 때 함께 정리한다.
 
 **아직 없는 것**: 얼굴 탐지와 얼굴 인식(`deeplearning` `예정`), 탐지 결과를
-`fastapi`로 넘기는 경로. 전달 방식이 `결정 필요`라 현재는 로그로만 출력한다.
+HTTP로 `fastapi`에 넘기는 경로. 방식은
+[결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)로
+확정됐고 현재는 로그로만 출력한다.
 추론 지연·처리량·식별 성공률 지표도 `예정`이다.
 
 ## 서비스 목적
@@ -91,7 +93,7 @@ InferenceResult(
 | 얼굴 인식 모델 | `후보`: AdaFace R50, ArcFace | 비교 후 결정. `deeplearning` 책임 |
 | 실행 장치 | CPU 기본, CUDA 선택 | `INFERENCE_DEVICE`로 고른다 |
 | 프레임 수신 | 프레임 버퍼 | [결정 0006](../../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다) |
-| 결과 전달 방식 | `결정 필요` | 현재는 로그 출력 |
+| 결과 전달 방식 | HTTP | `예정`. 현재는 로그 출력 |
 
 **모델 가중치 파일은 저장소에 커밋하지 않는다.** 경로는 `MODEL_PATH`로 주입한다.
 파일이 없으면 ultralytics가 이름을 보고 내려받는다.

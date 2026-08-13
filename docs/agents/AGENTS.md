@@ -110,8 +110,12 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 예외가 필요하면 먼저 [결정 기록](../architecture/decisions.md)에 항목을 남긴다.
 새 코드를 어디에 둘지, 의존 방향이 규칙에 맞는지 판단할 때는 `architecture-review` 스킬을 따른다.
 
-1. **브라우저는 `fastapi`만 호출한다.** `deeplearning`과 `worker`에 직접 접근하지 않는다.
-2. **외부 클라이언트 요청은 `fastapi`를 통해 처리한다.** `fastapi`가 유일한 외부 진입점이다.
+1. **브라우저의 제품 API와 탐지 SSE는 `fastapi`만 호출한다.** 실시간 영상은
+   [결정 0011](../architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)에
+   따라 fastapi가 허용한 WebRTC 세션에 한해 MediaMTX에 연결할 수 있다.
+   `deeplearning`과 `worker`에는 직접 접근하지 않는다.
+2. **외부 클라이언트의 제품 요청은 `fastapi`를 통해 처리한다.** WebRTC 미디어 연결을
+   제외하면 `fastapi`가 유일한 외부 진입점이다.
 3. **모델은 상태를 결정하지 않는다.** 추론의 출력은 `student_001, 신뢰도 0.87, bbox`까지다.
    이것을 `PRESENT`나 `WRONG_SEAT`으로 바꾸는 것은 `fastapi`의 일이며, 상태 판정은
    `fastapi`가 소유한다

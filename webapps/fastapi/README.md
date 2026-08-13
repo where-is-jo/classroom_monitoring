@@ -20,11 +20,11 @@ Python 3.12 환경에서 실행한다.
 cd webapps/fastapi
 python -m pip install -r requirements.txt
 cp .env.example .env
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
 기본 예제는 `APP_ENV=local`, `DATABASE_MODE=memory`라서 외부 서비스 없이 기동한다.
-**로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8000`을 열면
+**로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8001`을 열면
 `/classrooms`로 이동한다.
 
 `.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 합성 영상 source와 고정
@@ -63,14 +63,20 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | --- | --- | --- |
 | `GET` | `/api/v1/classrooms` | 활성 강의실 목록 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
-| `GET` | `/api/v1/video-streams` | 영상 source 목록. `q`·`classroom_id`·`status` 필터 |
+| `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
+| `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
+| `GET` | `/api/v1/video-streams/{stream_id}/detection-events` | SSE 실시간 탐지 이벤트 구독 |
+| `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
 | `POST` | `/api/v1/video-searches` | 부작용 없는 검색 실행 |
+| `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
+| `POST` | `/internal/video-segments` | worker 영상 세그먼트 수신 (멱등) |
 | `GET` | `/health` | 프로세스 기동 상태 |
 | `GET` | `/health/ready` | 현재 저장소 준비 상태 |
 
-**쓰기 API가 없다.** 로그인, 사용자 관리, 강의실·좌석 CRUD, 알림, 관리자 대시보드는
-현재 구현되어 있지 않다.
+**내부 쓰기 API가 있다.** worker가 탐지 이벤트(`/internal/inference/events`)와
+영상 세그먼트(`/internal/video-segments`)를 보낼 수 있다. 로그인, 사용자 관리,
+강의실·좌석 CRUD, 알림, 관리자 대시보드는 현재 구현되어 있지 않다.
 
 ### 좌석 상태 표기
 
@@ -109,18 +115,19 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 
 ## 내부 구조
 
-기능별 디렉터리와 `router → service → port ← adapter` 호출 방향을 사용한다. 라우터는
+기능별 디렉터리와 `router -> service -> port <- adapter` 호출 방향을 사용한다. 라우터는
 HTTP 변환만, 서비스는 프레임워크와 분리된 판단만 담당한다. 저장소 구현의 조립은
 `app/shared/dependencies.py` 한 곳에 둔다. 배경은
 [결정 0001](../../docs/architecture/decisions.md#0001--fastapi-계층형-구조와-경계-포트)에 있다.
 
 ```text
 app/
-├─ main.py              앱 조립, 라우터 등록, 예외 처리
-├─ classrooms/          강의실, 좌석, 좌석 점유 관측
-├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
-├─ shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마
-└─ demo_seed.py         demo fixture 멱등 생성
++-- main.py              앱 조립, 라우터 등록, 예외 처리
++-- classrooms/          강의실, 좌석, 좌석 점유 관측
++-- video_monitoring/    영상 source 목록·검색·실제 source 관리
++-- student_monitoring/  탐지 이벤트 수신·SSE·영상 세그먼트 메타데이터
++-- shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마·broadcaster
++-- demo_seed.py         demo fixture 멱등 생성
 
 templates/              기능별 Jinja2 화면
 static/                 CSS와 화면 보조 JavaScript
@@ -129,7 +136,8 @@ api-spec/               구현 전 API 설계 명세 JSON
 tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스트
 ```
 
-추가 예정 도메인은 `students`, `face_enrollment`, `student_monitoring` 셋이다.
+`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장·SSE 발행이
+동작한다. 추가 예정 도메인은 `students`, `face_enrollment` 둘이다.
 책임과 목표 계약은 [MVP 명세의 도메인 구조](../../docs/specs/student-monitoring-mvp.md#도메인-구조-예정)에 있다.
 
 추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.
@@ -144,10 +152,14 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `APP_ENV` | 실행 환경 | `local` / `dev` / `prod` |
 | `DATABASE_MODE` | 저장소 종류 | `memory` / `mongodb`. memory는 `local` 전용 |
 | `DATABASE_URL`, `DATABASE_NAME` | MongoDB 접속 정보 | mongodb mode에서 필수. URL은 비밀값 |
-| `DATABASE_CONNECT_TIMEOUT_SECONDS` | 연결 타임아웃 | 기본 5. `0 < x ≤ 60` |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
-| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 ≤ x ≤ 1` |
+| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
+| `SSE_HEARTBEAT_INTERVAL_SECONDS` | SSE heartbeat 간격 | 기본 30 |
+| `SSE_RECONNECTION_TIMEOUT_SECONDS` | SSE 재연결 타임아웃 | 기본 60 |
+| `DETECTION_EVENT_MAX_DETECTIONS_PER_EVENT` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
+| `DETECTION_EVENT_STALE_SECONDS` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
 학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,

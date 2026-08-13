@@ -46,7 +46,7 @@
 cd webapps/fastapi
 python -m pip install -r requirements.txt
 cp .env.example .env
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
 FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 지원한다.
@@ -167,14 +167,13 @@ README.md      이 문서
 [아키텍처의 미결정 항목](./docs/architecture/README.md#미결정-항목)이 정본이다.
 
 - **얼굴 데이터 정책** — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 절차
+- **영상 저장 범위·보존 기간·접근 권한** — 개인정보가 걸린 합의 사항
 - **스냅샷 접근 권한** — 개인정보가 걸린 합의 사항. 지금은 root 키로 붙는다
 - **운영 접근 통제 방식** — 정해지기 전까지 `APP_ENV=prod` 배포를 하지 않는다
-- 탐지 결과를 fastapi로 넘기는 방식(동기 HTTP / 메시지 큐)
 - 얼굴 탐지·인식 모델과 사람 탐지 모델 버전
 - 결석 유예 시간 값과 좌석 판정 방식 — 실제 촬영이 선행되어야 한다
 - 카메라 배치(대수·높이·화각·거리)
 - 수업 시간표의 원본 관리 주체
-- 실시간 화면 갱신 방식과 브라우저 영상 재생 방식
 - Tracking 도입과 `IN_CLASSROOM` 지원
 - 자연어 검색 방식, 캐시·큐 도입 여부, 알림 채널
 - 통합 실행 수단(docker compose) 공식화, 배포 환경과 방식
@@ -182,4 +181,8 @@ README.md      이 문서
 확정된 결정은 [결정 기록](./docs/architecture/decisions.md)에 있다.
 fastapi 내부 구조, 설계 패턴 판단 기준, 메타데이터 저장소(MongoDB),
 영상·얼굴 이미지 저장소(MinIO), worker 분리와 프레임 전달, 상태 판정 소유 서비스,
-추론 책임 경계, MVP 제품 사용자 범위가 여기에 해당한다.
+추론 책임 경계, MVP 제품 사용자 범위, 실시간 관제의 HTTP·WebRTC·SSE 구성,
+실시간 영상의 인증 최소화([0012](./docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다))가
+여기에 해당한다. **운영 접근 통제는 MVP 동안 도입하지 않기로 했지만
+([0012](./docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)),
+정해지기 전까지 `APP_ENV=prod` 배포는 하지 않는다.**

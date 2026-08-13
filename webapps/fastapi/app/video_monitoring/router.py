@@ -1,4 +1,4 @@
-"""인증 없이 모니터링 조회와 규칙 기반 검색을 제공하는 라우터."""
+"""Router for monitoring queries and rule-based search without authentication."""
 
 from __future__ import annotations
 
@@ -8,41 +8,64 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 
-from ..shared.dependencies import get_video_demo_service
+from ..shared.dependencies import get_video_demo_service, get_video_stream_service
 from ..shared.templating import templates
 from .errors import VideoSearchInputError
 from .models import DemoStreamStatus
 from .schemas import (
-    DemoStreamListResponse,
     DemoStreamResponse,
+    RealStreamResponse,
+    StreamListResponse,
     VideoSearchRequest,
     VideoSearchResponse,
 )
-from .service import VideoDemoService
+from .service import VideoDemoService, VideoStreamService
 
 api_router = APIRouter(prefix="/api/v1", tags=["monitoring"])
 page_router = APIRouter(tags=["monitoring-pages"])
 
 
-@api_router.get("/video-streams", response_model=DemoStreamListResponse)
+@api_router.get("/video-streams", response_model=StreamListResponse)
 def list_video_streams(
     q: str | None = Query(default=None, max_length=100),
     classroom_id: str | None = Query(default=None, max_length=128),
     stream_status: DemoStreamStatus | None = Query(default=None, alias="status"),
-    service: VideoDemoService = Depends(get_video_demo_service),
-) -> DemoStreamListResponse:
-    items = service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
-    return DemoStreamListResponse(
-        items=[DemoStreamResponse.from_domain(item) for item in items], total=len(items)
-    )
+    demo_service: VideoDemoService = Depends(get_video_demo_service),
+    stream_service: VideoStreamService = Depends(get_video_stream_service),
+) -> StreamListResponse:
+    items: list[DemoStreamResponse | RealStreamResponse] = []
+
+    # Add demo streams
+    demo_streams = demo_service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
+    items.extend(DemoStreamResponse.from_domain(item) for item in demo_streams)
+
+    # Add real streams
+    real_streams = stream_service.list_streams()
+    for stream in real_streams:
+        if classroom_id and stream.classroom_id != classroom_id:
+            continue
+        status = stream_service.get_source_status(stream)
+        items.append(RealStreamResponse.from_domain(stream, status))
+
+    return StreamListResponse(items=items, total=len(items))
 
 
-@api_router.get("/video-streams/{stream_id}", response_model=DemoStreamResponse)
+@api_router.get("/video-streams/{stream_id}", response_model=DemoStreamResponse | RealStreamResponse)
 def get_video_stream(
     stream_id: str,
-    service: VideoDemoService = Depends(get_video_demo_service),
-) -> DemoStreamResponse:
-    return DemoStreamResponse.from_domain(service.get_stream(stream_id))
+    demo_service: VideoDemoService = Depends(get_video_demo_service),
+    stream_service: VideoStreamService = Depends(get_video_stream_service),
+) -> DemoStreamResponse | RealStreamResponse:
+    # Try demo stream first
+    try:
+        return DemoStreamResponse.from_domain(demo_service.get_stream(stream_id))
+    except Exception:
+        pass
+
+    # Try real stream
+    stream = stream_service.get_stream(stream_id)
+    status = stream_service.get_source_status(stream)
+    return RealStreamResponse.from_domain(stream, status)
 
 
 @api_router.post("/video-searches", response_model=VideoSearchResponse)
@@ -67,21 +90,25 @@ def monitoring_page(
     q: str | None = Query(default=None, max_length=100),
     classroom_id: str | None = Query(default=None, max_length=128),
     stream_status: DemoStreamStatus | None = Query(default=None, alias="status"),
-    service: VideoDemoService = Depends(get_video_demo_service),
+    demo_service: VideoDemoService = Depends(get_video_demo_service),
+    stream_service: VideoStreamService = Depends(get_video_stream_service),
 ) -> Response:
-    feeds = service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
-    options = service.classroom_options()
+    demo_feeds = demo_service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
+    real_streams = stream_service.list_streams()
+    options = demo_service.classroom_options()
     return templates.TemplateResponse(
         request=request,
         name="video_monitoring/monitoring.html",
         context={
-            "feeds": feeds,
+            "feeds": demo_feeds,
+            "real_streams": real_streams,
+            "stream_service": stream_service,
             "classroom_options": options,
             "statuses": list(DemoStreamStatus),
             "selected_query": q or "",
             "selected_classroom_id": classroom_id or "",
             "selected_status": stream_status,
-            "current_time": service.current_time(),
+            "current_time": demo_service.current_time(),
             "demo_enabled": bool(options),
         },
     )
@@ -131,7 +158,7 @@ def _page_datetime(value: str | None) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
-        raise VideoSearchInputError("검색 시각 형식이 올바르지 않습니다.") from None
+        raise VideoSearchInputError("Invalid datetime format.") from None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=ZoneInfo("Asia/Seoul"))
     return parsed

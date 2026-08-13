@@ -16,7 +16,7 @@
 # 실행 환경: local | dev | prod
 APP_ENV=local
 
-# fastapi API 주소 (예: http://localhost:8000)
+# fastapi API 주소 (예: http://localhost:8001)
 API_BASE_URL=
 
 # 메타데이터 저장소 접속 정보 — 비밀값, 운영에서는 별도 주입

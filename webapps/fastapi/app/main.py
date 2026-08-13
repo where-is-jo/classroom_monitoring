@@ -1,4 +1,4 @@
-"""최소 학습 모니터링 애플리케이션 조립."""
+"""Minimal learning monitoring application assembly."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ from .shared.dependencies import (
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.schemas import HealthResponse, ReadinessResponse
 from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
+from .student_monitoring.router import api_router as student_api_router
+from .student_monitoring.router import internal_router as student_internal_router
 from .snapshots.router import api_router as snapshot_api_router
 from .snapshots.router import page_router as snapshot_page_router
 from .video_monitoring.router import api_router as monitoring_api_router
@@ -43,7 +45,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Learning Monitoring",
-    description="강의실 좌석 현황, 실시간 모니터링, 자연어 검색 API와 화면",
+    description="Classroom seat monitoring, real-time monitoring, natural language search API and screens",
     version="0.3.0",
     lifespan=lifespan,
 )
@@ -64,11 +66,13 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 app.include_router(classroom_api_router, responses=_ERROR_RESPONSES)
 app.include_router(monitoring_api_router, responses=_ERROR_RESPONSES)
+app.include_router(student_internal_router, responses=_ERROR_RESPONSES)
+app.include_router(student_api_router, responses=_ERROR_RESPONSES)
 app.include_router(snapshot_api_router, responses=_ERROR_RESPONSES)
 
 
 def _wants_json(request: Request) -> bool:
-    return request.url.path.startswith(("/api/", "/health"))
+    return request.url.path.startswith(("/api/", "/health", "/internal"))
 
 
 def _error_content(
@@ -101,7 +105,7 @@ def handle_domain_error(request: Request, exc: DomainError) -> Response:
 
 @app.exception_handler(RequestValidationError)
 def handle_validation_error(request: Request, exc: RequestValidationError) -> Response:
-    message = "요청 값이 올바르지 않습니다."
+    message = "Request value is invalid."
     if not _wants_json(request):
         return _error_page(request, status_code=422, message=message)
     sanitized_errors = [
@@ -120,7 +124,7 @@ def handle_validation_error(request: Request, exc: RequestValidationError) -> Re
 @app.exception_handler(StarletteHTTPException)
 def handle_http_error(request: Request, exc: StarletteHTTPException) -> Response:
     is_not_found = exc.status_code == 404
-    message = "요청한 페이지를 찾을 수 없습니다." if is_not_found else "요청을 처리할 수 없습니다."
+    message = "Requested page not found." if is_not_found else "Request could not be processed."
     code = "NOT_FOUND" if is_not_found else "HTTP_ERROR"
     if _wants_json(request):
         return JSONResponse(
@@ -134,7 +138,7 @@ def handle_http_error(request: Request, exc: StarletteHTTPException) -> Response
 @app.exception_handler(Exception)
 def handle_unexpected_error(request: Request, exc: Exception) -> Response:
     logger.error("Unhandled application error type=%s", type(exc).__name__)
-    message = "서버에서 요청을 처리하지 못했습니다."
+    message = "Server could not process the request."
     if _wants_json(request):
         return JSONResponse(
             status_code=500,
