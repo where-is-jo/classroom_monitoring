@@ -20,6 +20,9 @@ from .schemas import (
     ClassroomResponse,
     ClassroomUpdateRequest,
     OccupancySummaryResponse,
+    SeatAssignmentListResponse,
+    SeatAssignmentRequest,
+    SeatAssignmentResponse,
     SeatCreateRequest,
     SeatListResponse,
     SeatResponse,
@@ -172,6 +175,44 @@ def delete_seat(
 ) -> Response:
     service.delete_seat(seat_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@api_router.put("/{classroom_id}/seats/{seat_id}/assignment", response_model=SeatAssignmentResponse)
+def assign_student_to_seat(
+    classroom_id: str,
+    seat_id: str,
+    payload: SeatAssignmentRequest,
+    service: ClassroomService = Depends(get_classroom_service),
+) -> SeatAssignmentResponse:
+    """좌석에 학생을 지정한다."""
+    info = service.assign_student(seat_id, payload.student_id)
+    return SeatAssignmentResponse.from_domain(info)
+
+
+@api_router.delete(
+    "/{classroom_id}/seats/{seat_id}/assignment",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def unassign_student_from_seat(
+    classroom_id: str,
+    seat_id: str,
+    service: ClassroomService = Depends(get_classroom_service),
+) -> Response:
+    """좌석-학생 지정을 해제한다."""
+    service.unassign_student(seat_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@api_router.get("/{classroom_id}/seat-assignments", response_model=SeatAssignmentListResponse)
+def list_seat_assignments(
+    classroom_id: str,
+    service: ClassroomService = Depends(get_classroom_service),
+) -> SeatAssignmentListResponse:
+    """강의실의 전체 좌석-학생 지정 현황을 조회한다."""
+    infos = service.list_assignments(classroom_id)
+    return SeatAssignmentListResponse(
+        items=[SeatAssignmentResponse.from_domain(info) for info in infos]
+    )
 
 
 @api_router.get("/{classroom_id}/occupancy", response_model=OccupancySummaryResponse)

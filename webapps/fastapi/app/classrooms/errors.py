@@ -57,3 +57,28 @@ class ClassroomInputError(DomainError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+# ============================================================
+# 좌석-학생 지정 오류
+# ============================================================
+
+
+class StudentInactiveForAssignmentError(DomainError):
+    """비활성화된 학생을 좌석에 지정 시도."""
+
+    code = "STUDENT_INACTIVE_FOR_ASSIGNMENT"
+    status_code = 422
+
+    def __init__(self) -> None:
+        super().__init__("비활성화된 학생은 좌석에 지정할 수 없습니다.")
+
+
+class SeatInactiveForAssignmentError(DomainError):
+    """비활성화된 좌석에 학생 지정 시도."""
+
+    code = "SEAT_INACTIVE_FOR_ASSIGNMENT"
+    status_code = 422
+
+    def __init__(self) -> None:
+        super().__init__("비활성화된 좌석에는 학생을 지정할 수 없습니다.")

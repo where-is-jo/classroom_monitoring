@@ -8,6 +8,7 @@ from .models import (
     Classroom,
     ClassroomPage,
     Seat,
+    SeatAssignment,
     SeatObservationBatchRecord,
     SeatOccupancyHistory,
     SeatPage,
@@ -40,3 +41,31 @@ class ClassroomRepository(Protocol):
         self, event_id: str, seat_id: str
     ) -> SeatOccupancyHistory | None: ...
     def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory: ...
+
+
+class SeatAssignmentRepository(Protocol):
+    """좌석-학생 지정 저장소 추상화."""
+
+    def assign(self, assignment: SeatAssignment) -> SeatAssignment:
+        """학생을 좌석에 지정한다."""
+        ...
+
+    def unassign(self, seat_id: str) -> None:
+        """좌석-학생 지정을 해제한다."""
+        ...
+
+    def get_by_seat(self, seat_id: str) -> SeatAssignment | None:
+        """좌석 ID로 지정을 조회한다."""
+        ...
+
+    def get_by_student(self, student_id: str, classroom_id: str) -> SeatAssignment | None:
+        """학생 ID와 강의실 ID로 지정을 조회한다."""
+        ...
+
+    def list_by_classroom(self, classroom_id: str) -> list[SeatAssignment]:
+        """강의실의 모든 지정을 조회한다."""
+        ...
+
+    def unassign_by_student(self, student_id: str) -> int:
+        """학생의 모든 좌석 지정을 해제한다. 해제된 지정 수를 반환한다."""
+        ...

@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from math import isfinite
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from ..students.errors import StudentNotFoundError
+from ..students.ports import StudentRepository
 from .errors import (
     ClassroomConcurrentUpdateError,
     ClassroomDuplicateError,
@@ -15,7 +17,9 @@ from .errors import (
     ClassroomNotFoundError,
     SeatBatchConflictError,
     SeatDuplicateError,
+    SeatInactiveForAssignmentError,
     SeatNotFoundError,
+    StudentInactiveForAssignmentError,
 )
 from .models import (
     Classroom,
@@ -27,6 +31,8 @@ from .models import (
     OccupancySource,
     RecordSeatObservationBatchCommand,
     Seat,
+    SeatAssignment,
+    SeatAssignmentInfo,
     SeatCurrentOccupancy,
     SeatGeometry,
     SeatObservation,
@@ -36,7 +42,7 @@ from .models import (
     SeatOccupancyHistory,
     SeatPage,
 )
-from .ports import ClassroomRepository
+from .ports import ClassroomRepository, SeatAssignmentRepository
 
 
 class ClassroomService:
@@ -44,10 +50,14 @@ class ClassroomService:
         self,
         repository: ClassroomRepository,
         *,
+        student_repository: StudentRepository | None = None,  # 학생 활성 검증용
+        assignment_repository: SeatAssignmentRepository | None = None,  # 좌석-학생 지정 관리용
         occupancy_confidence_threshold: float,
         clock: Callable[[], datetime],
     ) -> None:
         self._repository = repository
+        self._student_repository = student_repository
+        self._assignment_repository = assignment_repository
         self._threshold = occupancy_confidence_threshold
         self._clock = clock
 
@@ -242,6 +252,121 @@ class ClassroomService:
         if not seat.is_active:
             raise SeatNotFoundError()
         self._repository.delete_seat(seat.id)
+
+    # ============================================================
+    # 좌석-학생 지정
+    # ============================================================
+
+    def assign_student(
+        self,
+        seat_id: str,
+        student_id: str,
+    ) -> SeatAssignmentInfo:
+        """좌석에 학생을 지정한다.
+
+        - 같은 학생을 같은 좌석에 다시 지정하면 멱등하게 동작한다.
+        - 이미 같은 강의실의 다른 좌석에 지정된 학생이면 기존 지정을 해제하고 새 좌석에 지정한다.
+        - 비활성화된 학생/좌석이면 예외를 발생시킨다.
+        """
+        if self._assignment_repository is None:
+            raise ClassroomInputError("지정 저장소가 연결되지 않았습니다.")
+
+        seat = self._required_seat(seat_id)
+        if not seat.is_active:
+            raise SeatInactiveForAssignmentError()
+
+        if self._student_repository is not None:
+            student = self._student_repository.get_by_id(student_id)
+            if student is None:
+                raise StudentNotFoundError()
+            if not student.is_active:
+                raise StudentInactiveForAssignmentError()
+
+        # 같은 강의실 내에서 이미 지정된 학생이 있으면 기존 지정 해제 (이동)
+        existing = self._assignment_repository.get_by_student(student_id, seat.classroom_id)
+        if existing is not None and existing.seat_id != seat_id:
+            self._assignment_repository.unassign(existing.seat_id)
+
+        now = self._aware_datetime(self._clock())
+        assignment = SeatAssignment(
+            seat_id=seat_id,
+            student_id=student_id,
+            classroom_id=seat.classroom_id,
+            assigned_at=now,
+        )
+        saved = self._assignment_repository.assign(assignment)
+
+        # SeatAssignmentInfo 조회 (학생 이름/학번 보강)
+        student_name = ""
+        student_no = ""
+        if self._student_repository is not None:
+            student = self._student_repository.get_by_id(student_id)
+            if student is not None:
+                student_name = student.name
+                student_no = student.student_no
+
+        return SeatAssignmentInfo(
+            seat_id=saved.seat_id,
+            seat_label=seat.label,
+            student_id=saved.student_id,
+            student_name=student_name,
+            student_no=student_no,
+            assigned_at=saved.assigned_at,
+        )
+
+    def unassign_student(self, seat_id: str) -> None:
+        """좌석-학생 지정을 해제한다."""
+        if self._assignment_repository is None:
+            raise ClassroomInputError("지정 저장소가 연결되지 않았습니다.")
+        self._assignment_repository.unassign(seat_id)
+
+    def unassign_by_student(self, student_id: str) -> int:
+        """학생의 모든 좌석 지정을 해제한다. 해제된 지정 수를 반환한다."""
+        if self._assignment_repository is None:
+            raise ClassroomInputError("지정 저장소가 연결되지 않았습니다.")
+        return self._assignment_repository.unassign_by_student(student_id)
+
+    def list_assignments(self, classroom_id: str) -> list[SeatAssignmentInfo]:
+        """강의실의 전체 좌석-학생 지정 현황을 반환한다."""
+        if self._assignment_repository is None:
+            return []
+
+        assignments = self._assignment_repository.list_by_classroom(classroom_id)
+        result: list[SeatAssignmentInfo] = []
+        for assignment in assignments:
+            student_name = ""
+            student_no = ""
+            if self._student_repository is not None:
+                student = self._student_repository.get_by_id(assignment.student_id)
+                if student is not None:
+                    student_name = student.name
+                    student_no = student.student_no
+
+            seat = self._repository.get_seat(assignment.seat_id)
+            seat_label = seat.label if seat else ""
+
+            result.append(
+                SeatAssignmentInfo(
+                    seat_id=assignment.seat_id,
+                    seat_label=seat_label,
+                    student_id=assignment.student_id,
+                    student_name=student_name,
+                    student_no=student_no,
+                    assigned_at=assignment.assigned_at,
+                )
+            )
+        return result
+
+    def list_assignments_raw(self, classroom_id: str) -> list[SeatAssignment]:
+        """강의실의 전체 좌석-학생 지정을 도메인 모델 그대로 돌려준다.
+
+        list_assignments는 학생 이름·학번을 보강한 조회용 객체를 만드는 반면,
+        학생 상태 판정처럼 원시 지정(seat_id·student_id)만 필요한 호출자는
+        이 메서드를 사용한다.
+        """
+        if self._assignment_repository is None:
+            return []
+        return self._assignment_repository.list_by_classroom(classroom_id)
 
     def occupancy_summary(self, classroom_id: str) -> ClassroomOccupancySummary:
         classroom = self._required_active_classroom(classroom_id)

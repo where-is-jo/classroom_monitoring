@@ -156,3 +156,46 @@ class RecordSeatObservationBatchCommand:
     source: OccupancySource
     observed_at: datetime
     observations: tuple[SeatObservation, ...]
+
+
+# ============================================================
+# 좌석-학생 지정 모델
+# ============================================================
+
+
+@dataclass(frozen=True)
+class SeatAssignment:
+    """좌석-학생 지정."""
+
+    seat_id: str
+    student_id: str
+    classroom_id: str
+    assigned_at: datetime
+
+
+@dataclass(frozen=True)
+class SeatAssignmentInfo:
+    """좌석-학생 지정 상세 (조회용)."""
+
+    seat_id: str
+    seat_label: str
+    student_id: str
+    student_name: str
+    student_no: str
+    assigned_at: datetime
+
+
+@dataclass(frozen=True)
+class AssignStudentCommand:
+    """학생 지정 명령."""
+
+    seat_id: str
+    student_id: str
+    classroom_id: str
+
+
+@dataclass(frozen=True)
+class UnassignStudentCommand:
+    """학생 지정 해제 명령."""
+
+    seat_id: str

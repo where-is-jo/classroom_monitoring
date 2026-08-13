@@ -16,6 +16,7 @@ from ..models import (
     Classroom,
     ClassroomPage,
     Seat,
+    SeatAssignment,
     SeatObservationBatchRecord,
     SeatOccupancyHistory,
     SeatPage,
@@ -29,6 +30,8 @@ class InMemoryClassroomRepository:
         self._batches: dict[str, SeatObservationBatchRecord] = {}
         self._history: dict[str, SeatOccupancyHistory] = {}
         self._lock = RLock()
+        # 좌석-학생 지정 저장소 (key: seat_id)
+        self._assignments: dict[str, SeatAssignment] = {}
 
     def create_classroom(self, classroom: Classroom) -> Classroom:
         with self._lock:
@@ -180,6 +183,57 @@ class InMemoryClassroomRepository:
             self._history[history.id] = history
             return history
 
+    # ============================================================
+    # 좌석-학생 지정
+    # ============================================================
+
+    def assign(self, assignment: SeatAssignment) -> SeatAssignment:
+        """학생을 좌석에 지정한다. 이미 지정되어 있으면 덮어쓴다."""
+        with self._lock:
+            self._assignments[assignment.seat_id] = assignment
+            return assignment
+
+    def unassign(self, seat_id: str) -> None:
+        """좌석-학생 지정을 해제한다."""
+        with self._lock:
+            self._assignments.pop(seat_id, None)
+
+    def get_assignment_by_seat(self, seat_id: str) -> SeatAssignment | None:
+        """좌석 ID로 지정을 조회한다."""
+        with self._lock:
+            return self._assignments.get(seat_id)
+
+    def get_assignment_by_student(
+        self, student_id: str, classroom_id: str
+    ) -> SeatAssignment | None:
+        """학생 ID와 강의실 ID로 지정을 조회한다."""
+        with self._lock:
+            for assignment in self._assignments.values():
+                if assignment.student_id == student_id and assignment.classroom_id == classroom_id:
+                    return assignment
+            return None
+
+    def list_assignments_by_classroom(self, classroom_id: str) -> list[SeatAssignment]:
+        """강의실의 모든 지정을 조회한다."""
+        with self._lock:
+            return [
+                assignment
+                for assignment in self._assignments.values()
+                if assignment.classroom_id == classroom_id
+            ]
+
+    def unassign_by_student(self, student_id: str) -> int:
+        """학생의 모든 좌석 지정을 해제한다. 해제된 지정 수를 반환한다."""
+        with self._lock:
+            to_remove = [
+                seat_id
+                for seat_id, assignment in self._assignments.items()
+                if assignment.student_id == student_id
+            ]
+            for seat_id in to_remove:
+                del self._assignments[seat_id]
+            return len(to_remove)
+
     def _seat_by_code(self, classroom_id: str, code: str) -> Seat | None:
         return next(
             (
@@ -199,3 +253,61 @@ def _same_batch(left: SeatObservationBatchRecord, right: SeatObservationBatchRec
         and left.observed_at == right.observed_at
         and left.observations == right.observations
     )
+
+
+class InMemorySeatAssignmentRepository:
+    """좌석-학생 지정 전용 in-memory 저장소.
+
+    `InMemoryClassroomRepository`에 이미 지정 메서드가 있지만,
+    ClassroomService가 `SeatAssignmentRepository` 포트를 직접 주입받도록
+    별도 어댑터로 분리한다 (포트 메서드명 계약에 따른다).
+    """
+
+    def __init__(self) -> None:
+        self._assignments: dict[str, SeatAssignment] = {}
+        self._lock = RLock()
+
+    def assign(self, assignment: SeatAssignment) -> SeatAssignment:
+        """학생을 좌석에 지정한다. 이미 지정되어 있으면 덮어쓴다."""
+        with self._lock:
+            self._assignments[assignment.seat_id] = assignment
+            return assignment
+
+    def unassign(self, seat_id: str) -> None:
+        """좌석-학생 지정을 해제한다."""
+        with self._lock:
+            self._assignments.pop(seat_id, None)
+
+    def get_by_seat(self, seat_id: str) -> SeatAssignment | None:
+        """좌석 ID로 지정을 조회한다."""
+        with self._lock:
+            return self._assignments.get(seat_id)
+
+    def get_by_student(self, student_id: str, classroom_id: str) -> SeatAssignment | None:
+        """학생 ID와 강의실 ID로 지정을 조회한다."""
+        with self._lock:
+            for assignment in self._assignments.values():
+                if assignment.student_id == student_id and assignment.classroom_id == classroom_id:
+                    return assignment
+            return None
+
+    def list_by_classroom(self, classroom_id: str) -> list[SeatAssignment]:
+        """강의실의 모든 지정을 조회한다."""
+        with self._lock:
+            return [
+                assignment
+                for assignment in self._assignments.values()
+                if assignment.classroom_id == classroom_id
+            ]
+
+    def unassign_by_student(self, student_id: str) -> int:
+        """학생의 모든 좌석 지정을 해제한다. 해제된 지정 수를 반환한다."""
+        with self._lock:
+            to_remove = [
+                seat_id
+                for seat_id, assignment in self._assignments.items()
+                if assignment.student_id == student_id
+            ]
+            for seat_id in to_remove:
+                del self._assignments[seat_id]
+            return len(to_remove)

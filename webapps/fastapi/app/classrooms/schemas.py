@@ -11,6 +11,7 @@ from .models import (
     ClassroomOccupancySummary,
     ClassroomPage,
     Seat,
+    SeatAssignmentInfo,
     SeatGeometry,
     SeatPage,
 )
@@ -187,3 +188,38 @@ class OccupancySummaryResponse(BaseModel):
             unknown_count=value.unknown_count,
             last_observed_at=value.last_observed_at,
         )
+
+
+# ============================================================
+# 좌석-학생 지정 스키마
+# ============================================================
+
+
+class SeatAssignmentRequest(BaseModel):
+    """좌석-학생 지정 요청."""
+
+    student_id: str
+
+
+class SeatAssignmentResponse(BaseModel):
+    """좌석-학생 지정 응답."""
+
+    seat_id: str
+    student_id: str
+    student_name: str
+    assigned_at: datetime
+
+    @classmethod
+    def from_domain(cls, info: SeatAssignmentInfo) -> SeatAssignmentResponse:
+        return cls(
+            seat_id=info.seat_id,
+            student_id=info.student_id,
+            student_name=info.student_name,
+            assigned_at=info.assigned_at,
+        )
+
+
+class SeatAssignmentListResponse(BaseModel):
+    """좌석-학생 지정 목록 응답."""
+
+    items: list[SeatAssignmentResponse]
