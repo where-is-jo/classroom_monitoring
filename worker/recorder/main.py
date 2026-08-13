@@ -15,11 +15,11 @@ from pydantic import ValidationError
 from shared.config_errors import format_validation_error
 from shared.logging_setup import configure_logging, use_utf8_console
 
-from .adapters.local import LocalObjectStorage
-from .adapters.minio_storage import MinioObjectStorage, build_minio_client
-from .config import RecorderSettings
+from shared.object_storage import ObjectStorage, ObjectStorageError
+from shared.object_storage.factory import build_object_storage
+
+from .config import DEFAULT_DATA_DIR, RecorderSettings
 from .errors import RecorderError
-from .ports import ObjectStorage
 from .retention import RetentionPolicy
 from .segmenter import Segmenter
 from .uploader import SegmentUploader
@@ -29,29 +29,8 @@ logger = logging.getLogger(__name__)
 
 
 def build_storage(settings: RecorderSettings) -> ObjectStorage:
-    """설정에 맞는 객체 저장소를 만든다. SDK를 아는 곳은 어댑터뿐이다."""
-    if settings.object_storage_backend == "local":
-        logger.warning(
-            "객체 저장소가 로컬 디렉터리다. 개발용이며 운영 보관 수단이 아니다: %s",
-            settings.object_storage_local_dir,
-        )
-        return LocalObjectStorage(settings.object_storage_local_dir)
-
-    # 검증이 세 값의 존재를 이미 보장한다.
-    assert settings.object_storage_endpoint is not None
-    assert settings.object_storage_access_key is not None
-    assert settings.object_storage_secret_key is not None
-
-    client = build_minio_client(
-        endpoint=settings.object_storage_endpoint,
-        access_key=settings.object_storage_access_key.get_secret_value(),
-        secret_key=settings.object_storage_secret_key.get_secret_value(),
-        secure=settings.object_storage_secure,
-    )
-    storage = MinioObjectStorage(client, settings.object_storage_bucket)
-    # 적재할 때가 되어서야 버킷이 없는 것을 알면 이미 세그먼트가 쌓여 있다.
-    storage.ensure_bucket()
-    return storage
+    """설정에 맞는 객체 저장소를 만든다. 조립은 shared가 한다."""
+    return build_object_storage(settings, local_fallback_dir=DEFAULT_DATA_DIR / "objects")
 
 
 def build_worker(settings: RecorderSettings, storage: ObjectStorage) -> RecorderWorker:
@@ -131,7 +110,10 @@ def main() -> int:
 
     try:
         storage = build_storage(settings)
-    except RecorderError as error:
+    except (RecorderError, ObjectStorageError) as error:
+        # ObjectStorageError는 더 이상 RecorderError가 아니다. shared로 옮기면서
+        # 상속이 끊어졌으므로(결정 0011) 여기서 함께 잡지 않으면 MinIO 장애 때
+        # 깔끔한 종료 대신 traceback이 그대로 올라온다.
         logger.error("객체 저장소를 준비하지 못했다: %s", error)
         return 1
 

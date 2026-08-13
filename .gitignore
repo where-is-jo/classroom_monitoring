@@ -50,3 +50,9 @@ deeplearning/.models/
 *.pth
 *.onnx
 *.engine
+
+# 모델 학습 데이터셋과 산출물(결정 0012) — 대용량이고 공용 서버 로컬에만 둔다.
+# deeplearning/training/README.md 참고.
+deeplearning/**/data/
+deeplearning/**/runs/
+deeplearning/**/weights/

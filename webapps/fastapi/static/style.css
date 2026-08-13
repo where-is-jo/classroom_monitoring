@@ -153,7 +153,9 @@ input, select {
 .demo-video-copy p:last-child { margin-bottom: 0; }
 .status-label { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; white-space: nowrap; font-size: .78rem; font-weight: 800; }
 .status-label--active { color: #004f3d; background: #c8ede2; }
+.status-label--stale { color: #674300; background: #fff3cd; }
 .status-label--unknown { color: #674300; background: #ffedbd; }
+.status-label--no-video { color: #ba1a1a; background: #ffdad6; }
 .card-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 6px 18px 18px; font-size: .8rem; }
 .match-reason { margin: 10px 18px; padding: 10px 12px; color: #264e49; background: var(--primary-soft); border-radius: 9px; font-size: .85rem; }
 .example-list { display: grid; gap: 10px; margin-bottom: 0; }

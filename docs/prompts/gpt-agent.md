@@ -137,7 +137,9 @@ router.py에 page_router(HTML)와 api_router(JSON)를 두고 같은 서비스 �
 - 브라우저 스크립트는 화면 보조에만 쓴다.
 
 ## 아키텍처 규칙
-- 브라우저는 fastapi만 호출한다. deeplearning·worker에 직접 접근하지 않는다
+- 브라우저의 제품 API와 탐지 SSE는 fastapi만 호출한다. 실시간 영상은 fastapi가
+  허용한 WebRTC 세션에 한해 MediaMTX에 연결하며, deeplearning·worker에는 직접
+  접근하지 않는다
 - 모델은 상태를 결정하지 않는다. 추론 출력은 student_id·bbox·신뢰도까지다.
   PRESENT/WRONG_SEAT/ABSENT 판정은 fastapi가 소유한다.
   추론 코드와 탐지 결과 스키마에 업무 상태 어휘를 넣지 않는다

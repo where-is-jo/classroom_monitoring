@@ -35,10 +35,10 @@ Python 3.12 이상. 외부 서비스 없이 기동한다.
 cd webapps/fastapi
 python -m pip install -r requirements.txt
 cp .env.example .env
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
-`http://127.0.0.1:8000`을 열면 `/classrooms`로 이동한다. **로그인은 없다.**
+`http://127.0.0.1:8001`을 열면 `/classrooms`로 이동한다. **로그인은 없다.**
 비밀값을 채우지 않아도 기동한다.
 
 `.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 합성 영상과 고정 검색

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ..adapters.local import LocalObjectStorage
+from shared.object_storage import LocalObjectStorage
 from ..retention import RetentionPolicy
 from ..uploader import SegmentUploader
 from .conftest import PLAYABLE_MP4, write_segment

@@ -28,8 +28,28 @@ recorder ─┘
 | `frame_buffer.py` | `FrameBuffer` — stream과 inference 사이의 프레임 큐 |
 | `sampling.py` | `should_sample` — 몇 프레임마다 한 장을 고를지 |
 | `camera_sources.py` | `STREAM_SOURCES` 형식 파싱과 자격 증명 가리기 |
+| `object_keys.py` | 객체 키 규칙 — `<카메라>/<날짜>/<시각><확장자>` |
+| `object_storage/` | 객체 저장소 포트와 어댑터. `inference`(스냅샷)와 `recorder`(영상)가 함께 쓴다 |
 | `logging_setup.py` | 진입점의 로깅·콘솔 인코딩 설정 |
 | `config_errors.py` | 설정 오류를 값 노출 없이 사람이 읽을 형태로 |
+
+## object_storage
+
+원래 `recorder` 안에 있었다. [결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)로
+적재 주체가 `inference`(탐지 스냅샷)로 옮겨가면서 두 워커가 함께 쓰게 되어 여기로 옮겼다.
+
+| 파일 | 역할 |
+| --- | --- |
+| `ports.py` | `ObjectStorage` Protocol, `StoredObject` |
+| `errors.py` | `ObjectStorageError` |
+| `local.py` | 로컬 디렉터리 어댑터(개발용). `APP_ENV=prod`에서 거부된다 |
+| `minio.py` | MinIO 어댑터. **SDK import는 이 파일에만 있다** |
+| `settings.py` | `OBJECT_STORAGE_*` 설정 mixin. 두 워커가 같은 변수를 같게 읽는다 |
+| `factory.py` | 설정에서 저장소를 만든다 |
+
+**`ObjectStorageError`는 `RecorderError`를 상속하지 않는다.** shared가 특정 워커의 예외
+계층을 알 수 없어서다. `RecorderError`만 잡던 곳은 둘을 함께 잡아야 한다
+(`recorder/main.py`가 그렇게 되어 있다).
 
 ## FrameBuffer
 

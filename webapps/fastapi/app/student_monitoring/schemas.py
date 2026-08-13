@@ -1,0 +1,176 @@
+"""Student monitoring HTTP schemas."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field, field_validator
+
+from .models import DetectionEvent, VideoSegment
+
+
+class FrameSchema(BaseModel):
+    """Frame size schema."""
+    width_pixels: int = Field(..., gt=0)
+    height_pixels: int = Field(..., gt=0)
+
+
+class DetectionSchema(BaseModel):
+    """Detection result schema."""
+    detection_id: str
+    class_id: int
+    class_name: str
+    confidence: float = Field(..., ge=0, le=1)
+    bbox: tuple[int, int, int, int]
+    student_id: str | None = None
+    identity_confidence: float | None = None
+    face_bbox: tuple[int, int, int, int] | None = None
+
+    @field_validator("bbox")
+    @classmethod
+    def validate_bbox(cls, v: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        x_min, y_min, x_max, y_max = v
+        if x_min >= x_max:
+            raise ValueError("x_min must be less than x_max")
+        if y_min >= y_max:
+            raise ValueError("y_min must be less than y_max")
+        if x_min < 0 or y_min < 0:
+            raise ValueError("bbox coordinates must be non-negative")
+        return v
+
+
+class InferenceEventRequest(BaseModel):
+    """Inference event request schema."""
+    event_id: str
+    camera_id: str
+    captured_at: datetime
+    sequence: int = Field(..., ge=0)
+    frame: FrameSchema
+    detections: list[DetectionSchema] = Field(
+        default_factory=list,
+        max_length=100,  # Will be overridden by settings
+    )
+
+    @field_validator("captured_at")
+    @classmethod
+    def validate_timezone(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("captured_at must have timezone")
+        return v
+
+
+class InferenceEventResponse(BaseModel):
+    """Inference event response schema."""
+    event_id: str
+    received_at: datetime
+
+
+class VideoSegmentRequest(BaseModel):
+    """Video segment request schema."""
+    segment_id: str
+    camera_id: str
+    recorded_from: datetime
+    recorded_to: datetime
+    storage: str
+    bucket_alias: str
+    object_key: str
+    size_bytes: int = Field(..., ge=0)
+
+    @field_validator("recorded_from", "recorded_to")
+    @classmethod
+    def validate_timezone(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("Timestamp must have timezone")
+        return v
+
+
+class VideoSegmentResponse(BaseModel):
+    """Video segment response schema."""
+    segment_id: str
+    received_at: datetime
+
+
+class DetectionResponse(BaseModel):
+    """Detection response for public API."""
+    detection_id: str
+    class_id: int
+    class_name: str
+    confidence: float
+    bbox: tuple[int, int, int, int]
+    student_id: str | None = None
+
+
+class DetectionEventResponse(BaseModel):
+    """Detection event response for public API."""
+    event_id: str
+    camera_id: str
+    captured_at: datetime
+    sequence: int
+    frame: FrameSchema
+    detections: list[DetectionResponse]
+    received_at: datetime
+
+    @classmethod
+    def from_domain(cls, event: DetectionEvent) -> DetectionEventResponse:
+        return cls(
+            event_id=event.event_id,
+            camera_id=event.camera_id,
+            captured_at=event.captured_at,
+            sequence=event.sequence,
+            frame=FrameSchema(
+                width_pixels=event.frame.width_pixels,
+                height_pixels=event.frame.height_pixels,
+            ),
+            detections=[
+                DetectionResponse(
+                    detection_id=d.detection_id,
+                    class_id=d.class_id,
+                    class_name=d.class_name,
+                    confidence=d.confidence,
+                    bbox=d.bbox,
+                    student_id=d.student_id,
+                )
+                for d in event.detections
+            ],
+            received_at=event.received_at,
+        )
+
+
+class DetectionEventListResponse(BaseModel):
+    """Detection event list response."""
+    items: list[DetectionEventResponse]
+    total: int
+    next_cursor: str | None = None
+
+
+class VideoSegmentDetailResponse(BaseModel):
+    """Video segment detail response."""
+    segment_id: str
+    camera_id: str
+    recorded_from: datetime
+    recorded_to: datetime
+    storage: str
+    bucket_alias: str
+    object_key: str
+    size_bytes: int
+    received_at: datetime
+
+    @classmethod
+    def from_domain(cls, segment: VideoSegment) -> VideoSegmentDetailResponse:
+        return cls(
+            segment_id=segment.segment_id,
+            camera_id=segment.camera_id,
+            recorded_from=segment.recorded_from,
+            recorded_to=segment.recorded_to,
+            storage=segment.storage,
+            bucket_alias=segment.bucket_alias,
+            object_key=segment.object_key,
+            size_bytes=segment.size_bytes,
+            received_at=segment.received_at,
+        )
+
+
+class VideoSegmentListResponse(BaseModel):
+    """Video segment list response."""
+    items: list[VideoSegmentDetailResponse]
+    total: int
