@@ -710,17 +710,35 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
    변경(문서 등)은 모든 job이 스킵되며, 깃허브는 스킵된 job을 성공으로 취급하므로
    필수 상태 체크로 지정해도 병합을 막지 않는다. `paths-ignore`로 워크플로우 자체를
    안 돌게 하는 방식은 쓰지 않는다 — 트리거되지 않은 필수 체크는 영원히 "대기 중"으로
-   남아 오히려 병합을 막기 때문이다.
+   남아 오히려 병합을 막기 때문이다. 워크플로우 파일 자신(`.github/workflows/ci.yml`)은
+   양쪽 필터에 모두 넣는다. 넣지 않으면 CI를 고치는 PR이 아무 검증 없이 병합된다.
 3. fastapi 검증은 `ruff check` → `ruff format --check` → `mypy` → `pytest -q` 순으로
    돌린다(CLAUDE.md가 병합 전 필수로 정한 순서와 같다). worker 검증은 `pytest -q`만
    돌린다 — worker에는 아직 lint·타입 검사 설정이 없다.
-4. 이미지 빌드·GHCR push는 `push` 이벤트(즉 `develop` 병합 이후)에서만, 그리고 해당
+4. 브랜치 보호 규칙에 등록할 필수 체크는 `ci-gate` job 하나로 고정한다. 깃허브의 필수
+   체크는 job id가 아니라 job의 `name` 표시값으로 등록되므로, 검사 job의 이름을 바꾸면
+   필수 체크가 이름 불일치로 조용히 풀린다. 이름이 고정된 게이트를 두면 검사 job을
+   자유롭게 늘리고 고칠 수 있다. 게이트는 `if: always()`로 돌면서 선행 job 중
+   `failure`·`cancelled`가 있으면 실패하고, `skipped`는 통과로 본다.
+5. 이미지 빌드·GHCR push는 `push` 이벤트(즉 `develop` 병합 이후)에서만, 그리고 해당
    서비스 검증이 통과한 뒤에만 실행한다. PR 단계에서는 절대 push하지 않는다.
-5. 인증은 `GITHUB_TOKEN`만 쓴다(별도 PAT을 만들지 않는다). 이미지 이름은
-   `ghcr.io/${{ github.repository_owner }}` 뒤에 `classroom-monitoring-fastapi`·
-   `classroom-monitoring-worker`를 붙인 것으로 하며, 조직명을 하드코딩하지 않고
-   저장소 소유자를 그대로 쓴다. 태그는 `latest`와 `sha-<짧은 커밋 해시>` 두 가지를 붙인다.
-6. `worker/recorder`는 이번 빌드 대상에서 뺀다. 전용 Dockerfile이 없고, 결정
+   동시성 설정의 `cancel-in-progress`는 `pull_request`에만 적용한다 — `push`까지 취소하면
+   연달아 병합될 때 앞 커밋의 이미지가 영영 올라가지 않는다(뒤 커밋이 다른 서비스만
+   건드리면 앞 커밋의 빌드를 아무도 대신해 주지 않는다).
+6. 인증은 `GITHUB_TOKEN`만 쓴다(별도 PAT을 만들지 않는다). 워크플로우 최상위 권한은
+   `contents: read`로 내리고, push가 필요한 job에서만 `packages: write`를 올린다.
+   이미지 이름은 `ghcr.io/${{ github.repository_owner }}` 뒤에
+   `classroom-monitoring-fastapi`를 붙인 것으로 하며, 조직명을 하드코딩하지 않고
+   저장소 소유자를 그대로 쓴다. 태그는 `develop`과 `sha-<짧은 커밋 해시>` 두 가지다.
+   **`latest`는 붙이지 않는다** — `.docker/compose.main.yml`의 기본값이 `:latest`라
+   `develop` 병합 결과가 곧바로 운영 서버로 흘러가기 때문이다. `latest`는 `main` 배포
+   시점에만 붙인다.
+7. **`worker` 이미지는 자동 빌드하지 않는다.** 이미지가 14.9GB라(torch 휠이 번들하는
+   CUDA 런타임만 3.6GB) 깃허브 호스팅 러너의 디스크 여유를 넘길 위험이 크고, Actions
+   캐시는 저장소당 10GB 상한이라 `mode=max`로 밀어 넣으면 들어가지도 못하면서 fastapi
+   캐시까지 밀어낸다. 이미지 경량화 전까지는 GPU가 달린 PC에서 수동으로 빌드해 push한다.
+   MVP 단계에서는 검증 자동화의 값어치가 크고 무거운 빌드의 값어치는 작다는 판단이다.
+8. `worker/recorder`는 이번 빌드 대상에서 뺀다. 전용 Dockerfile이 없고, 결정
    0011(영상 원본 미저장)에 따라 공용 서버에 배포하지 않기 때문이다.
 
 **대안**:
@@ -734,13 +752,49 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
 - **GHCR 인증에 개인 액세스 토큰(PAT) 사용** — 같은 저장소 안에서 push하는 것뿐이라
   `GITHUB_TOKEN`의 `packages: write` 권한으로 충분하다. PAT은 별도 시크릿 관리 부담과
   유출 위험을 늘릴 뿐이라 채택하지 않았다.
+- **MVP 단계에는 CI 자동화를 통째로 미루고 계속 수동 빌드** — 검토했으나 채택하지
+  않았다. 최근 4주 `develop` 커밋이 130개, 기여자가 5명 안팎이라 작업 간 충돌 위험이
+  가장 큰 시기가 지금이다. 미루면 그 비용을 사람이 감당해야 한다. 또한 지금 도입을
+  주저하게 만드는 요인은 worker 이미지 빌드 하나뿐인데, 그것 때문에 비용이 사실상
+  0인 검증 자동화까지 버리는 것은 균형이 맞지 않는다. 대신 무거운 조각(worker 빌드)만
+  떼어내는 방식(결정 7)을 택했다.
+- **검사 job(`fastapi-checks`·`worker-checks`)을 직접 필수 체크로 등록** — 검토했으나
+  채택하지 않았다. 필수 체크는 job의 `name` 표시값으로 등록되므로 이름을 바꾸는 순간
+  조용히 풀린다. 검사 job을 늘릴 때마다 브랜치 보호 설정을 함께 고쳐야 하는 부담도
+  생긴다. 이름이 고정된 `ci-gate` 하나만 등록하는 방식(결정 4)이 더 견고하다.
+- **worker 이미지도 함께 자동 빌드** — 검토했으나 채택하지 않았다. 근거는 결정 7에 있다.
+  러너 디스크 확보 스텝을 넣고 캐시를 `mode=min`으로 낮추면 될 가능성은 있지만,
+  실제로 통과하는지 확인하지 않은 설정을 넣으면 매 병합마다 빨간불이 켜져 CI 신뢰도만
+  깎인다. 경량화가 끝난 뒤 실측하고 넣는다.
 
-**결과**: `develop`에 실제로 반영된 변경만 이미지로 남는다. 문서 전용 PR은 빌드·테스트
-대기 없이 병합할 수 있다. 다만 GHCR 패키지 쓰기 권한(저장소 Settings → Actions →
-Workflow permissions)과 브랜치 보호 규칙의 필수 상태 체크 지정은 저장소 설정 영역이라
-이 결정만으로 자동 적용되지 않는다 — 사람이 한 번 켜야 한다.
+**결과**: `develop`에 실제로 반영된 fastapi 변경만 이미지로 남는다. 문서 전용 PR은
+빌드·테스트 대기 없이 병합할 수 있다. 검증은 자동화되지만 worker 이미지 배포는 여전히
+사람이 기억해야 하는 수동 작업으로 남는다 — 이 결정이 감수하는 부분이다.
 
-**남은 일**: 저장소 Settings에서 Actions 쓰기 권한 켜기, `develop` 브랜치 보호 규칙에
-`fastapi-checks`·`worker-checks`를 필수 체크로 등록하기. `worker/recorder`를 배포
-대상에 넣기로 결정되면 전용 Dockerfile과 빌드 job을 추가한다. `main` 브랜치 배포
-시점의 별도 릴리스 태깅 전략은 아직 다루지 않았다.
+`latest` 태그를 더 이상 갱신하지 않으므로 `.docker/compose.main.yml`의 기본값
+`:latest`는 **2026-08-12에 수동으로 push한 이미지에 고정된 채로 남는다.** 자동 빌드
+결과를 서버에 반영하려면 `FASTAPI_IMAGE` 환경변수로 `:develop`이나 `:sha-<해시>`를
+지정해야 한다. compose 기본값 자체를 바꾸는 것은 배포 정책이라 팀 합의가 먼저다.
+
+GHCR 패키지 쓰기 권한(저장소 Settings → Actions → Workflow permissions)과 브랜치 보호
+규칙의 필수 상태 체크 지정은 저장소 설정 영역이라 이 결정만으로 자동 적용되지 않는다 —
+사람이 한 번 켜야 한다.
+
+**남은 일**:
+
+- 저장소 Settings에서 Actions 쓰기 권한 켜기.
+- 워크플로우를 1~2주 돌려 오탐이 없는지 확인한 뒤, `develop` 브랜치 보호 규칙에
+  **`ci-gate`** 를 필수 체크로 등록한다. 처음부터 필수로 걸지 않는 이유는 MVP 속도를
+  CI 오탐에 묶지 않기 위해서다. 같은 화면에서 "Require branches to be up to date before
+  merging"도 함께 켠다 — PR 체크는 통과했지만 그 뒤 `develop`이 바뀌어 생기는
+  의미적 충돌은 이 설정으로만 막힌다.
+- 첫 push로 생성되는 GHCR 패키지는 기본 private이고 저장소와 자동 연결되지 않는다.
+  배포 서버에서 pull하려면 패키지 visibility 또는 pull 자격 증명을 한 번 설정해야 한다.
+- `worker`에 lint·타입 검사 설정이 없어 검증이 `pytest`뿐이다. `webapps/fastapi`의 ruff
+  설정을 옮겨 `worker/pyproject.toml`을 만들고 검사를 추가하는 것을 검토한다.
+- CI는 Python 3.12로 도는데 팀의 로컬 환경에는 3.14가 섞여 있다. 지원 버전 확정은
+  `webapps/fastapi/pyproject.toml` 주석이 남긴 **결정 필요** 항목이며, 확정되면 CI의
+  `python-version`과 함께 갱신한다.
+- `worker` 이미지 경량화가 끝나면 자동 빌드 job 도입을 새 항목으로 기록한다.
+  `worker/recorder`를 배포 대상에 넣기로 결정되면 전용 Dockerfile과 빌드 job을 추가한다.
+- `main` 브랜치 배포 시점의 릴리스 태깅 전략(`latest`를 언제 붙일지)은 아직 다루지 않았다.
