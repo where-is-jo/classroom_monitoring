@@ -19,6 +19,7 @@ from .models import (
     EnrollmentStatus,
     FaceEnrollment,
     FaceProfile,
+    FaceSampleMetadata,
     FrameDecision,
     PoseBin,
     PoseProgress,
@@ -53,10 +54,33 @@ GUIDANCE_MESSAGES = {
     "EXPLORE_OTHER_ANGLE": "이 각도는 충분합니다. 고개를 천천히 다른 각도로 움직여 주세요.",
 }
 
+POSE_GUIDANCE = {
+    PoseBin.FRONT: ("LOOK_FRONT", "정면", "정면을 바라보고 잠시 멈춰 주세요."),
+    PoseBin.LEFT: ("TURN_LEFT", "왼쪽", "고개를 천천히 왼쪽으로 돌려 주세요."),
+    PoseBin.RIGHT: ("TURN_RIGHT", "오른쪽", "고개를 천천히 오른쪽으로 돌려 주세요."),
+    PoseBin.UP: ("LOOK_UP", "위", "턱을 조금 들고 위쪽을 바라봐 주세요."),
+    PoseBin.DOWN: ("LOOK_DOWN", "아래", "턱을 조금 내리고 아래쪽을 바라봐 주세요."),
+}
+
 
 def _safe_filename_component(value: str) -> str:
     normalized = re.sub(r"[^0-9A-Za-z가-힣._-]+", "-", value.strip())
     return normalized.strip(".-_")[:80] or "student"
+
+
+def _next_pose_guidance(progress: tuple[PoseProgress, ...]) -> tuple[str, str]:
+    incomplete = [item for item in progress if item.accepted_count < item.required_count]
+    if not incomplete:
+        return "FINAL_VALIDATION", GUIDANCE_MESSAGES["FINAL_VALIDATION"]
+    target = min(
+        incomplete,
+        key=lambda item: (
+            item.accepted_count / item.required_count,
+            tuple(PoseBin).index(item.pose),
+        ),
+    )
+    code, _label, message = POSE_GUIDANCE[target.pose]
+    return code, message
 
 
 class FaceEnrollmentService:
@@ -67,6 +91,7 @@ class FaceEnrollmentService:
         analyzer: FaceAnalyzer,
         *,
         required_sample_count: int,
+        augmented_sample_count: int,
         pose_quotas: dict[PoseBin, int],
         thresholds: EnrollmentThresholds,
         clock: Callable[[], datetime],
@@ -75,6 +100,7 @@ class FaceEnrollmentService:
         self._object_storage = object_storage
         self._analyzer = analyzer
         self._required_sample_count = required_sample_count
+        self._augmented_sample_count = augmented_sample_count
         self._pose_quotas = pose_quotas
         self._thresholds = thresholds
         self._clock = clock
@@ -147,11 +173,12 @@ class FaceEnrollmentService:
         if pose_quota_complete(enrollment.pose_progress, pose) and not quotas_complete(
             enrollment.pose_progress
         ):
+            guidance_code, guidance_message = _next_pose_guidance(enrollment.pose_progress)
             updated = replace(
                 enrollment,
                 status=EnrollmentStatus.GUIDING,
-                guidance_code="EXPLORE_OTHER_ANGLE",
-                guidance_message=GUIDANCE_MESSAGES["EXPLORE_OTHER_ANGLE"],
+                guidance_code=guidance_code,
+                guidance_message=f"이 방향은 충분합니다. {guidance_message}",
                 last_rejection_code="POSE_QUOTA_FILLED",
                 updated_at=now,
             )
@@ -166,7 +193,16 @@ class FaceEnrollmentService:
             f"{_safe_filename_component(enrollment.student_id)}_"
             f"{pose.value.lower()}_{sample_count:06d}"
         )
-        self._object_storage.put_sample(enrollment.id, sample_id, frame)
+        self._object_storage.put_sample(
+            enrollment.id,
+            FaceSampleMetadata(
+                sample_id=sample_id,
+                pose=pose,
+                captured_at=now,
+                analysis=analysis,
+            ),
+            frame,
+        )
         ready = sample_count >= enrollment.required_sample_count and quotas_complete(progress)
         if ready:
             validating = replace(
@@ -178,6 +214,11 @@ class FaceEnrollmentService:
                 guidance_message=GUIDANCE_MESSAGES["FINAL_VALIDATION"],
                 last_rejection_code=None,
                 updated_at=now,
+            )
+            self._object_storage.finalize_dataset(
+                enrollment.id,
+                enrollment.student_id,
+                self._augmented_sample_count,
             )
             self._repository.replace(validating)
             model_version = self._analyzer.finalize(enrollment.id)
@@ -199,13 +240,14 @@ class FaceEnrollmentService:
                 )
             )
             return FrameDecision(completed, True, None)
+        guidance_code, guidance_message = _next_pose_guidance(progress)
         updated = replace(
             enrollment,
             status=EnrollmentStatus.CAPTURING,
             valid_sample_count=sample_count,
             pose_progress=progress,
-            guidance_code="MOVE_SLOWLY",
-            guidance_message=GUIDANCE_MESSAGES["MOVE_SLOWLY"],
+            guidance_code=guidance_code,
+            guidance_message=guidance_message,
             last_rejection_code=None,
             updated_at=now,
         )

@@ -21,12 +21,13 @@ class Settings(BaseSettings):
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
-    face_enrollment_required_samples: int = Field(default=300, ge=1, le=2000)
-    face_pose_front_quota: int = Field(default=60, ge=1)
-    face_pose_left_quota: int = Field(default=60, ge=1)
-    face_pose_right_quota: int = Field(default=60, ge=1)
-    face_pose_up_quota: int = Field(default=60, ge=1)
-    face_pose_down_quota: int = Field(default=60, ge=1)
+    face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
+    face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
+    face_pose_front_quota: int = Field(default=32, ge=1)
+    face_pose_left_quota: int = Field(default=24, ge=1)
+    face_pose_right_quota: int = Field(default=24, ge=1)
+    face_pose_up_quota: int = Field(default=20, ge=1)
+    face_pose_down_quota: int = Field(default=20, ge=1)
     face_detection_confidence_min: float = Field(default=0.65, ge=0, le=1)
     face_size_ratio_min: float = Field(default=0.08, ge=0, le=1)
     face_roll_degrees_max: float = Field(default=20, gt=0, le=90)
@@ -84,7 +85,9 @@ class Settings(BaseSettings):
                 if not present
             ]
             if missing:
-                raise ValueError("Missing required environment variables for MongoDB mode: " + ", ".join(missing))
+                raise ValueError(
+                    "Missing required environment variables for MongoDB mode: " + ", ".join(missing)
+                )
         if self.app_env == "prod" and self.demo_mode_enabled:
             raise ValueError("APP_ENV=prod에서는 DEMO_MODE_ENABLED를 활성화할 수 없습니다.")
         if self.app_env != "local" and self.face_local_sample_storage_enabled:

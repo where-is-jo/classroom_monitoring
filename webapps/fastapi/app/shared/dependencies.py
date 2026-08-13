@@ -14,6 +14,19 @@ from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
 from ..demo_seed import seed_demo_data, seed_video_streams
+from ..face_enrollment.adapters.http_analyzer import HttpFaceAnalyzer
+from ..face_enrollment.adapters.local_storage import LocalFaceObjectStorage
+from ..face_enrollment.adapters.memory import (
+    InMemoryFaceEnrollmentRepository,
+    InMemoryFaceObjectStorage,
+    SyntheticFaceAnalyzer,
+)
+from ..face_enrollment.models import PoseBin
+from ..face_enrollment.rules import EnrollmentThresholds
+from ..face_enrollment.service import FaceEnrollmentService
+from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
+from ..snapshots.ports import SnapshotStorage
+from ..snapshots.service import SnapshotService
 from ..student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
     MemoryVideoSegmentRepository,
@@ -29,21 +42,6 @@ from ..video_monitoring.adapters.mongo_repository import MongoVideoStreamReposit
 from ..video_monitoring.ports import VideoStreamRepository
 from ..video_monitoring.service import VideoDemoService, VideoStreamService
 from .broadcaster import InMemoryBroadcaster
-from ..demo_seed import seed_demo_data
-from ..face_enrollment.adapters.http_analyzer import HttpFaceAnalyzer
-from ..face_enrollment.adapters.local_storage import LocalFaceObjectStorage
-from ..face_enrollment.adapters.memory import (
-    InMemoryFaceEnrollmentRepository,
-    InMemoryFaceObjectStorage,
-    SyntheticFaceAnalyzer,
-)
-from ..face_enrollment.models import PoseBin
-from ..face_enrollment.rules import EnrollmentThresholds
-from ..face_enrollment.service import FaceEnrollmentService
-from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
-from ..snapshots.ports import SnapshotStorage
-from ..snapshots.service import SnapshotService
-from ..video_monitoring.service import VideoDemoService
 from .config import Settings
 from .database import (
     DatabaseOperationError,
@@ -274,6 +272,7 @@ def get_face_enrollment_service(
             else _face_analyzer(tuple(pose_quotas.items()))
         ),
         required_sample_count=settings.face_enrollment_required_samples,
+        augmented_sample_count=settings.face_enrollment_augmented_samples,
         pose_quotas=pose_quotas,
         thresholds=EnrollmentThresholds(
             detection_confidence_min=settings.face_detection_confidence_min,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from .models import FaceAnalysis, FaceEnrollment, FaceProfile
+from .models import FaceAnalysis, FaceEnrollment, FaceProfile, FaceSampleMetadata
 
 
 class FaceEnrollmentRepository(Protocol):
@@ -23,7 +23,12 @@ class FaceObjectStorage(Protocol):
     def prepare_enrollment(
         self, enrollment_id: str, student_id: str, created_at: datetime
     ) -> None: ...
-    def put_sample(self, enrollment_id: str, sample_id: str, content: bytes) -> None: ...
+    def put_sample(
+        self, enrollment_id: str, metadata: FaceSampleMetadata, content: bytes
+    ) -> None: ...
+    def finalize_dataset(
+        self, enrollment_id: str, student_id: str, augmented_sample_count: int
+    ) -> None: ...
     def delete_enrollment(self, enrollment_id: str) -> None: ...
 
 

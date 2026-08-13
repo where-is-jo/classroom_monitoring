@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from threading import RLock
 
-from ..models import EnrollmentStatus, FaceAnalysis, FaceEnrollment, FaceProfile, PoseBin
+from ..models import (
+    EnrollmentStatus,
+    FaceAnalysis,
+    FaceEnrollment,
+    FaceProfile,
+    FaceSampleMetadata,
+    PoseBin,
+)
 
 
 class InMemoryFaceEnrollmentRepository:
@@ -66,9 +73,14 @@ class InMemoryFaceObjectStorage:
         with self._lock:
             self._samples.setdefault(enrollment_id, {})
 
-    def put_sample(self, enrollment_id: str, sample_id: str, content: bytes) -> None:
+    def put_sample(self, enrollment_id: str, metadata: FaceSampleMetadata, content: bytes) -> None:
         with self._lock:
-            self._samples.setdefault(enrollment_id, {})[sample_id] = content
+            self._samples.setdefault(enrollment_id, {})[metadata.sample_id] = content
+
+    def finalize_dataset(
+        self, enrollment_id: str, student_id: str, augmented_sample_count: int
+    ) -> None:
+        return None
 
     def delete_enrollment(self, enrollment_id: str) -> None:
         with self._lock:

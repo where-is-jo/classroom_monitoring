@@ -9,7 +9,7 @@
   <h2 id="setup-title">등록 준비</h2>
   <div class="simulation-notice" role="note">
     <strong>현재는 SCRFD 얼굴 검출과 MediaPipe 자세 분석 단계입니다.</strong>
-    타원 바깥 영역은 분석 프레임에서 제거하고, 타원 안의 얼굴만 SCRFD로 검출합니다. MediaPipe 자세에 맞는 방향별 진행률을 자동으로 올리며 심한 흔들림·흐림·과다/저조도·특징점 불안정·동일 연속 프레임은 실시간으로 제외합니다.
+    타원 바깥 영역은 분석 프레임에서 제거하고, 타원 안의 얼굴만 SCRFD로 검출합니다. MediaPipe 자세에 맞는 실제 유효본 120장을 수집하고, local 저장을 켠 경우 교실 카메라 환경을 모사한 증강본 180장을 생성합니다. 심한 흔들림·흐림·과다/저조도·특징점 불안정·동일 연속 프레임은 실시간으로 제외합니다.
   </div>
   <p>학생 ID: <strong id="student-id">{{ student_id }}</strong>{% if student_id == "demo-student" %} <span class="simulation-badge">테스트용 ID</span>{% endif %}</p>
   <div class="enrollment-consent">
@@ -30,21 +30,24 @@
       <video id="camera-preview" autoplay muted playsinline aria-label="얼굴 등록 카메라 미리보기"></video>
       <div class="face-guide" aria-hidden="true"></div>
       <div id="face-progress-ring" class="face-progress-ring" role="progressbar" aria-label="얼굴 등록 수집 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <span class="ring-direction ring-direction-up" aria-hidden="true">위</span>
-        <span class="ring-direction ring-direction-right" aria-hidden="true">오른쪽</span>
-        <span class="ring-direction ring-direction-down" aria-hidden="true">아래</span>
-        <span class="ring-direction ring-direction-left" aria-hidden="true">왼쪽</span>
+        <span class="ring-direction ring-direction-up" data-pose="UP" aria-hidden="true">위</span>
+        <span class="ring-direction ring-direction-right" data-pose="RIGHT" aria-hidden="true">오른쪽</span>
+        <span class="ring-direction ring-direction-down" data-pose="DOWN" aria-hidden="true">아래</span>
+        <span class="ring-direction ring-direction-left" data-pose="LEFT" aria-hidden="true">왼쪽</span>
         <div id="front-progress" class="front-progress" aria-hidden="true"><span>정면</span><strong>0%</strong></div>
         <div class="face-progress-complete" aria-hidden="true"><span>✓</span><strong>수집 완료</strong></div>
       </div>
       <canvas id="capture-canvas" hidden></canvas>
     </div>
+    <div class="overall-capture-progress" aria-labelledby="overall-progress-label">
+      <div class="overall-progress-heading"><strong id="overall-progress-label">전체 진행률</strong><strong id="overall-progress-percent">0%</strong></div>
+      <progress id="overall-progress" max="100" value="0">0%</progress>
+    </div>
     <button id="cancel-enrollment" class="secondary" type="button">등록 취소</button>
   </div>
   <aside class="progress-panel panel" aria-labelledby="progress-title">
     <h2 id="progress-title">등록 완료율</h2>
-    <p class="sample-count"><strong id="valid-count">0</strong> / <span id="required-count">300</span>장</p>
-    <progress id="overall-progress" max="100" value="0">0%</progress>
+    <p class="progress-description">방향별 수집 상태를 확인하면서 안내에 따라 천천히 움직여 주세요.</p>
     <ul id="pose-progress" class="pose-progress" aria-label="얼굴 방향별 진행률"></ul>
     <p id="connection-status" class="connection-status">연결 준비 중</p>
     <p id="capture-error" class="form-error" role="alert" hidden></p>

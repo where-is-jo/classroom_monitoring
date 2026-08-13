@@ -184,8 +184,9 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
 | `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
-| `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 유효본 수 | 기본 300 |
-| `FACE_POSE_*_QUOTA` | 방향별 필수 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 방향별 60장, 합계 300장 |
+| `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
+| `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
+| `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
 | `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
 | `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
 | `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
@@ -218,8 +219,11 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 수집된 JPEG를 local에서 직접 확인하려면 `.env`에
 `FACE_LOCAL_SAMPLE_STORAGE_ENABLED=true`를 설정한다. 완료된 세션은
 `local_face_data/<YYYYMMDD-HHMMSS-student_id>/`에 카메라와 같은 해상도의 JPEG가
-`<student_id>_<pose>_<sequence>.jpg` 형식으로 남는다. 타원 바깥은 분석 전에 어두운
-단색으로 제거되며 취소·연결 중단 세션 폴더는 즉시 삭제된다. 메뉴의 `demo-student`는
+`originals/<student_id>_<pose>_<sequence>.jpg` 형식으로 남는다. 실제 촬영본 120장이
+완료되면 `augmented/`에 교실 카메라의 저해상도·조명·흐림·압축·미세 회전을 모사한
+파생본 180장을 만들고, `manifest.json`에 원본·파생 관계와 적용 파라미터를 기록한다.
+증강본은 실제 촬영 진행률이나 프로필의 `sample_count`에 포함하지 않는다. 타원 바깥은
+분석 전에 어두운 단색으로 제거되며 취소·연결 중단 세션 폴더는 즉시 삭제된다. 메뉴의 `demo-student`는
 학생 원장·선택 화면이 구현되기 전의 local 테스트용 ID이며, 실제 학생 ID는
 `/students/{student_id}/face-enrollment` 경로로 전달된다.
 

@@ -40,6 +40,8 @@ def test_face_enrollment_page_has_camera_controls() -> None:
         assert 'id="face-progress-ring"' in response.text
         assert 'role="progressbar"' in response.text
         assert 'id="front-progress"' in response.text
+        assert 'id="overall-progress-percent"' in response.text
+        assert 'id="face-progress-ring"' in response.text
         assert "오른쪽" in response.text
         assert "왼쪽" in response.text
         assert "수집 완료" in response.text
