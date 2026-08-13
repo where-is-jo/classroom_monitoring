@@ -72,6 +72,7 @@
 | [0011](#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다) | 실시간 관제 전달을 HTTP·WebRTC·SSE로 구성한다 | 확정 |
 | [0011](#0012--영상-원본을-저장하지-않고-스냅샷만-남긴다) | 영상 원본을 저장하지 않고 스냅샷만 남긴다 | 확정 |
 | [0012](#0013--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다) | deeplearning에 모델 학습용 Jupyter 노트북 도구를 둔다 | 확정 |
+| [0014](#0014--github-actions로-develop-병합-시-ci-검증과-ghcr-이미지-자동-빌드) | GitHub Actions로 develop 병합 시 CI 검증과 GHCR 이미지 자동 빌드 | 확정 |
 
 ---
 
@@ -689,3 +690,57 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
 
 **남은 일**: 운영 관리자 인증과 얼굴 데이터 접근 통제, 재학 종료 자동 삭제 작업,
 실제 SCRFD·MediaPipe·AdaFace 모델 비교 및 중앙 추론 HTTP 어댑터의 운영 배포 검증.
+
+## 0014 · GitHub Actions로 develop 병합 시 CI 검증과 GHCR 이미지 자동 빌드
+
+**상태**: 확정
+
+**배경**: `webapps/fastapi`와 `worker`의 컨테이너 이미지는 그동안 팀원이 로컬에서
+수동으로 빌드해 GHCR에 push해 왔다(가장 최근은 2026-08-12). `develop`에 병합이
+계속 들어오는 상황에서 수동 push는 누락되기 쉽고, 실제로 배포된 이미지가 `develop`
+상태와 어긋날 위험이 있다. 동시에 문서만 바뀐 PR까지 매번 빌드·테스트를 기다리게
+하면 병합이 느려진다.
+
+**결정**:
+
+1. `.github/workflows/ci.yml` 하나로 PR 검증과 병합 후 이미지 빌드를 함께 처리한다.
+   `pull_request`(대상 `develop`)와 `push`(`develop`) 두 이벤트로 트리거한다.
+2. `dorny/paths-filter`로 변경 경로를 판정해 `webapps/fastapi/**` 변경 시에만 fastapi
+   검증 job을, `worker/**` 변경 시에만 worker 검증 job을 돌린다. 두 경로에 속하지 않는
+   변경(문서 등)은 모든 job이 스킵되며, 깃허브는 스킵된 job을 성공으로 취급하므로
+   필수 상태 체크로 지정해도 병합을 막지 않는다. `paths-ignore`로 워크플로우 자체를
+   안 돌게 하는 방식은 쓰지 않는다 — 트리거되지 않은 필수 체크는 영원히 "대기 중"으로
+   남아 오히려 병합을 막기 때문이다.
+3. fastapi 검증은 `ruff check` → `ruff format --check` → `mypy` → `pytest -q` 순으로
+   돌린다(CLAUDE.md가 병합 전 필수로 정한 순서와 같다). worker 검증은 `pytest -q`만
+   돌린다 — worker에는 아직 lint·타입 검사 설정이 없다.
+4. 이미지 빌드·GHCR push는 `push` 이벤트(즉 `develop` 병합 이후)에서만, 그리고 해당
+   서비스 검증이 통과한 뒤에만 실행한다. PR 단계에서는 절대 push하지 않는다.
+5. 인증은 `GITHUB_TOKEN`만 쓴다(별도 PAT을 만들지 않는다). 이미지 이름은
+   `ghcr.io/${{ github.repository_owner }}` 뒤에 `classroom-monitoring-fastapi`·
+   `classroom-monitoring-worker`를 붙인 것으로 하며, 조직명을 하드코딩하지 않고
+   저장소 소유자를 그대로 쓴다. 태그는 `latest`와 `sha-<짧은 커밋 해시>` 두 가지를 붙인다.
+6. `worker/recorder`는 이번 빌드 대상에서 뺀다. 전용 Dockerfile이 없고, 결정
+   0011(영상 원본 미저장)에 따라 공용 서버에 배포하지 않기 때문이다.
+
+**대안**:
+
+- **`paths-ignore`로 문서 변경 시 워크플로우 자체를 트리거하지 않기** — 검토했으나,
+  브랜치 보호 규칙에서 같은 체크를 필수로 지정하면 트리거되지 않은 체크가 "대기 중"
+  상태로 남아 병합을 막는 깃허브의 알려진 함정이 있어 채택하지 않았다.
+- **레포지토리 전체를 이미지 하나로 빌드** — fastapi와 worker는 런타임 의존성과 배포
+  대상 서버가 다르다(worker는 GPU 서버, fastapi는 별도). 서비스별로 독립된 이미지를
+  유지하는 기존 구조(Dockerfile 두 개)를 그대로 따랐다.
+- **GHCR 인증에 개인 액세스 토큰(PAT) 사용** — 같은 저장소 안에서 push하는 것뿐이라
+  `GITHUB_TOKEN`의 `packages: write` 권한으로 충분하다. PAT은 별도 시크릿 관리 부담과
+  유출 위험을 늘릴 뿐이라 채택하지 않았다.
+
+**결과**: `develop`에 실제로 반영된 변경만 이미지로 남는다. 문서 전용 PR은 빌드·테스트
+대기 없이 병합할 수 있다. 다만 GHCR 패키지 쓰기 권한(저장소 Settings → Actions →
+Workflow permissions)과 브랜치 보호 규칙의 필수 상태 체크 지정은 저장소 설정 영역이라
+이 결정만으로 자동 적용되지 않는다 — 사람이 한 번 켜야 한다.
+
+**남은 일**: 저장소 Settings에서 Actions 쓰기 권한 켜기, `develop` 브랜치 보호 규칙에
+`fastapi-checks`·`worker-checks`를 필수 체크로 등록하기. `worker/recorder`를 배포
+대상에 넣기로 결정되면 전용 Dockerfile과 빌드 job을 추가한다. `main` 브랜치 배포
+시점의 별도 릴리스 태깅 전략은 아직 다루지 않았다.
