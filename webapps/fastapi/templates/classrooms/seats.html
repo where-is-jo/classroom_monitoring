@@ -13,24 +13,59 @@
     </div>
   </header>
 
-  {% set geometry_seats = seats | selectattr('geometry') | list %}
-  {% set list_seats = seats | rejectattr('geometry') | list %}
+  {% set grid_seats = seats | selectattr('row') | selectattr('column') | list %}
+  {% set tray_seats = seats | rejectattr('row') | list %}
 
-  {% if geometry_seats %}
-    <section class="panel" aria-labelledby="seat-map-title">
+  <section class="panel" aria-labelledby="seat-map-title">
+    <div class="grid-heading">
       <h2 id="seat-map-title">좌석 배치</h2>
-      <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
-        <div class="seat-map" aria-label="좌석 배치">
-          {% for seat in geometry_seats %}
-            <div class="seat-card seat-card--admin" style="position:absolute;left:{{ seat.geometry.x*100 }}%;top:{{ seat.geometry.y*100 }}%;width:{{ seat.geometry.width*100 }}%;height:{{ seat.geometry.height*100 }}%;">
-              <strong>{{ seat.label }}</strong>
-              <small>{{ seat.code }}</small>
-            </div>
-          {% endfor %}
-        </div>
+      <div class="grid-toolbar" aria-label="격자 크기 조절">
+        <button type="button" id="add-row" class="secondary">행 추가</button>
+        <button type="button" id="add-column" class="secondary">열 추가</button>
       </div>
-    </section>
-  {% endif %}
+    </div>
+    <p id="seat-grid-status" class="grid-status" aria-live="polite"></p>
+    <p id="seat-grid-alert" class="grid-alert" role="alert" hidden></p>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
+      <div id="seat-grid" class="seat-map seat-map--grid" data-classroom-id="{{ classroom.id }}" data-max-row="{{ max_row }}" data-max-column="{{ max_column }}" style="grid-template-columns: repeat({{ max_column }}, minmax(100px, 1fr)); grid-template-rows: repeat({{ max_row }}, minmax(76px, 1fr));" aria-label="좌석 배치">
+        {% for r in range(1, max_row + 1) %}
+          {% for c in range(1, max_column + 1) %}
+            {% set seat = seat_map.get((r, c)) %}
+            {% if seat %}
+              <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" draggable="true" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
+                <strong>{{ seat.label }}</strong>
+                <small>{{ seat.code }}</small>
+              </button>
+            {% else %}
+              <button type="button" id="seat-cell-{{ r }}-{{ c }}" class="seat-map__empty" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · 빈 칸"></button>
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+    {% if grid_seats %}
+      <div class="seat-unplace" aria-label="좌석 배치 해제">
+        {% for seat in grid_seats %}
+          <button type="button" id="unplace-{{ seat.id }}" class="secondary" data-seat-id="{{ seat.id }}">배치 해제 · {{ seat.label }}</button>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="panel" aria-labelledby="seat-tray-title">
+    <h2 id="seat-tray-title">배치 대기 좌석</h2>
+    {% if tray_seats %}
+      <ul id="seat-tray" class="seat-tray">
+        {% for seat in tray_seats %}
+          <li>
+            <button type="button" id="tray-seat-{{ seat.id }}" class="seat-tray__seat" data-seat-id="{{ seat.id }}" aria-pressed="false">{{ seat.label }} · {{ seat.code }}</button>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="summary">배치 대기 좌석이 없습니다.</p>
+    {% endif %}
+  </section>
 
   {% if seats %}
     <section class="panel" aria-labelledby="seat-list-title">
@@ -40,7 +75,7 @@
           <li class="seat-list-card">
             <strong>{{ seat.label }}</strong>
             <span>{{ seat.code }}</span>
-            <small>{% if seat.geometry %}배치도 위치 ({{ seat.geometry.x|round(2) }}, {{ seat.geometry.y|round(2) }}) · {{ seat.geometry.width|round(2) }}×{{ seat.geometry.height|round(2) }}{% else %}배치도 미설정{% endif %}</small>
+            <small>{% if seat.row is not none and seat.column is not none %}{{ seat.row }}행 {{ seat.column }}열{% else %}배치도 미설정{% endif %}</small>
             <small>{% if seat.is_active %}활성{% else %}비활성{% endif %}</small>
             <div class="seat-actions">
               <a href="/classrooms/{{ classroom.id }}/seats/{{ seat.id }}/edit">수정</a>

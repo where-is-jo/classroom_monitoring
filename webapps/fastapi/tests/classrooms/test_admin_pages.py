@@ -8,6 +8,7 @@ message를 포함하는지 확인한다. 실제 검증 로직은 `test_crud_api.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -78,10 +79,16 @@ def _create_seat(
     code: str = "S01",
     label: str = "좌석 1",
     geometry: dict[str, float] | None = None,
+    row: int | None = None,
+    column: int | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {"code": code, "label": label}
     if geometry is not None:
         payload["geometry"] = geometry
+    if row is not None:
+        payload["row"] = row
+    if column is not None:
+        payload["column"] = column
     response = client.post(
         f"/api/v1/classrooms/{classroom_id}/seats",
         json=payload,
@@ -148,7 +155,7 @@ def test_edit_page_redirects_when_classroom_missing(client: TestClient) -> None:
 
 
 def test_seats_page_renders_list_and_map(client: TestClient) -> None:
-    """좌석 목록 화면은 배치도·목록·수정/삭제 배선을 렌더링한다."""
+    """좌석 목록 화면은 행·열 기준 배치도·목록·수정/삭제 배선을 렌더링한다."""
     classroom = _create_classroom(client)
     classroom_id = str(classroom["id"])
     seat = _create_seat(
@@ -156,7 +163,8 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
         classroom_id,
         code="S01",
         label="좌석 1",
-        geometry={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+        row=1,
+        column=1,
     )
     _create_seat(client, classroom_id, code="S02", label="좌석 2")
     seat_id = str(seat["id"])
@@ -169,6 +177,10 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
     assert "좌석 목록" in response.text
     assert "좌석 1" in response.text
     assert "좌석 2" in response.text
+    # 행·열이 있는 좌석은 배치도에, 없는 좌석은 목록에만 표시된다
+    assert "seat-map--grid" in response.text
+    assert "1행 1열" in response.text
+    assert "배치도 미설정" in response.text
     assert f'href="/classrooms/{classroom_id}/seats/{seat_id}/edit"' in response.text
     assert f'data-api-url="/api/v1/classrooms/{classroom_id}/seats/{seat_id}"' in response.text
     assert 'data-api-method="DELETE"' in response.text
@@ -176,7 +188,7 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
 
 
 def test_seats_page_renders_empty_state(client: TestClient) -> None:
-    """좌석이 없으면 배치도 없이 빈 상태 안내를 렌더링한다."""
+    """빈 강의실도 조작 가능한 1x1 grid와 tray를 표시한다 (AC-001)."""
     classroom = _create_classroom(client)
     classroom_id = str(classroom["id"])
 
@@ -184,7 +196,63 @@ def test_seats_page_renders_empty_state(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert "등록된 좌석이 없습니다." in response.text
-    assert "좌석 배치" not in response.text
+    # AC-001: 빈 강의실도 usable 1x1 grid가 렌더링된다
+    assert "좌석 배치" in response.text
+    assert "grid-template-columns: repeat(1," in response.text
+    assert "grid-template-rows: repeat(1," in response.text
+    assert 'id="seat-cell-1-1"' in response.text
+
+
+def test_seats_page_renders_grid_with_empty_cells(client: TestClient) -> None:
+    """배치도는 max_row x max_column CSS Grid로 렌더링되고 빈 셀이 구분된다."""
+    classroom = _create_classroom(client)
+    classroom_id = str(classroom["id"])
+    seat = _create_seat(client, classroom_id, code="S01", label="좌석 1", row=1, column=1)
+    seat_2 = _create_seat(client, classroom_id, code="S02", label="좌석 2", row=2, column=3)
+    _create_seat(client, classroom_id, code="S03", label="좌석 3")
+    seat_id = str(seat["id"])
+    seat_2_id = str(seat_2["id"])
+
+    response = client.get(f"/classrooms/{classroom_id}/seats")
+
+    assert response.status_code == 200
+    # max_row(2)·max_column(3)이 CSS Grid 크기로 전달된다
+    assert "grid-template-columns: repeat(3," in response.text
+    assert "grid-template-rows: repeat(2," in response.text
+    # 행·열이 있는 좌석은 배치도에 배치된다
+    assert "seat-map--grid" in response.text
+    assert "grid-row: 2; grid-column: 3;" in response.text
+    # 행·열이 없는 좌석은 배치도에 없고 목록에만 표시된다
+    assert "좌석 3" in response.text
+    # 빈 셀이 시각적으로 구분된다
+    assert "seat-map__empty" in response.text
+    # 배치된 셀·빈 셀·tray 좌석·unplace는 stable ID의 native button이다
+    assert f'id="seat-cell-{seat_id}"' in response.text
+    assert f'id="seat-cell-{seat_2_id}"' in response.text
+    assert 'id="seat-cell-1-2"' in response.text
+    assert "seat-tray" in response.text
+    assert f'id="unplace-{seat_id}"' in response.text
+    assert f'id="unplace-{seat_2_id}"' in response.text
+    # 각 셀은 정확히 하나의 button을 가지며 nested button이 없다
+    # (occupied 셀은 seat ID `seat-cell-{id}`, 빈 셀은 좌표 ID `seat-cell-{r}-{c}`)
+    cell_buttons = re.findall(
+        r'<button[^>]*id="seat-cell-[^"]*"[^>]*>(.*?)</button>', response.text, re.DOTALL
+    )
+    assert len(cell_buttons) == 2 * 3
+    assert all("<button" not in inner for inner in cell_buttons)
+    # idle 상태: positioned cell은 native enabled button이고 aria-disabled는 생략/false다
+    # (다른 occupied target의 aria-disabled=true·handler block은 JS 선택 시 동작이다)
+    assert f'<button type="button" id="seat-cell-{seat_id}"' in response.text
+    assert 'aria-disabled="true"' not in response.text
+    assert 'class="seat-map__cell' in response.text
+    # tray 좌석은 native button이며 idle에서 aria-pressed=false로 시작한다
+    assert '<button type="button" id="tray-seat-' in response.text
+    assert 'aria-pressed="false"' in response.text
+    # live region(polite)과 alert region(role="alert")이 존재한다
+    assert 'id="seat-grid-status"' in response.text
+    assert 'aria-live="polite"' in response.text
+    assert 'id="seat-grid-alert"' in response.text
+    assert 'role="alert"' in response.text
 
 
 def test_seats_page_redirects_when_classroom_missing(client: TestClient) -> None:
@@ -243,7 +311,7 @@ def test_classroom_list_page_shows_assigned_student_on_seat_map(
 
 
 def test_seat_create_page_renders_form(client: TestClient) -> None:
-    """좌석 추가 화면은 POST API와 geometry 입력 필드를 렌더링한다."""
+    """좌석 추가 화면은 POST API를 렌더링하고 row/column typing 입력이 없다 (AC-008)."""
     classroom = _create_classroom(client)
     classroom_id = str(classroom["id"])
 
@@ -255,21 +323,22 @@ def test_seat_create_page_renders_form(client: TestClient) -> None:
     assert 'data-api-method="POST"' in response.text
     assert 'name="code"' in response.text
     assert 'name="label"' in response.text
-    assert 'name="geometry_x"' in response.text
-    assert 'name="geometry_y"' in response.text
-    assert 'name="geometry_width"' in response.text
-    assert 'name="geometry_height"' in response.text
+    # AC-008: create form에는 row/column typing input이 없다
+    assert 'name="row"' not in response.text
+    assert 'name="column"' not in response.text
+    assert 'name="geometry_x"' not in response.text
     assert 'name="is_active"' not in response.text
 
 
 def test_seat_edit_page_renders_prefilled_values(client: TestClient) -> None:
-    """좌석 수정 화면은 기존 값과 PUT API 배선을 렌더링한다."""
+    """좌석 수정 화면은 기존 값과 PUT API 배선을 렌더링하고 row/column typing 입력이 없다 (AC-008)."""
     classroom = _create_classroom(client)
     classroom_id = str(classroom["id"])
     seat = _create_seat(
         client,
         classroom_id,
-        geometry={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+        row=2,
+        column=3,
     )
     seat_id = str(seat["id"])
 
@@ -281,8 +350,10 @@ def test_seat_edit_page_renders_prefilled_values(client: TestClient) -> None:
     assert 'data-api-method="PUT"' in response.text
     assert 'value="S01"' in response.text
     assert 'value="좌석 1"' in response.text
-    assert 'value="0.1"' in response.text
-    assert 'value="0.4"' in response.text
+    # AC-008: edit form에도 row/column typing input이 없다
+    assert 'name="row"' not in response.text
+    assert 'name="column"' not in response.text
+    assert 'name="geometry_x"' not in response.text
     assert 'name="is_active"' in response.text
 
 
