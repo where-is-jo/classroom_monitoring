@@ -8,6 +8,8 @@
   const connection = document.querySelector("#connection-status");
   const stage = document.querySelector(".camera-stage");
   const progressRing = document.querySelector("#face-progress-ring");
+  const poseProgress = document.querySelector("#pose-progress");
+  const embeddedDialog = setup.closest("#student-face-enrollment-dialog");
   const directionLabels = Object.fromEntries(
     [...document.querySelectorAll(".ring-direction[data-pose]")].map((element) => [element.dataset.pose, element]),
   );
@@ -131,7 +133,7 @@
     overall.textContent = `${enrollment.completion_percent}%`;
     document.querySelector("#overall-progress-percent").textContent = `${enrollment.completion_percent}%`;
     updateProgressRing(enrollment);
-    document.querySelector("#pose-progress").replaceChildren(...enrollment.pose_progress.map((item) => {
+    poseProgress?.replaceChildren(...enrollment.pose_progress.map((item) => {
       const li = document.createElement("li");
       li.className = "pose-row";
       li.innerHTML = `<span>${poseLabels[item.pose] || item.pose}</span><progress max="100" value="${item.completion_percent}">${item.completion_percent}%</progress><span>${item.accepted_count}/${item.required_count}</span>`;
@@ -142,6 +144,7 @@
       completed = true;
       connection.textContent = "등록 완료";
       stopCapture();
+      if (embeddedDialog) document.dispatchEvent(new CustomEvent("face-enrollment:complete", {detail: {enrollment}}));
     }
   };
 
@@ -222,6 +225,10 @@
     const error = document.querySelector("#setup-error");
     error.hidden = true;
     try {
+      if (!document.querySelector("#consent-confirmed").checked) {
+        throw new Error("학생의 얼굴 데이터 수집 동의를 먼저 확인해 주세요.");
+      }
+      completed = false;
       await openCamera();
       const response = await fetch(`/api/v1/students/${encodeURIComponent(document.querySelector("#student-id").textContent)}/face-enrollments`, {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({consent_confirmed: document.querySelector("#consent-confirmed").checked, consent_confirmed_by: document.querySelector("#confirmed-by").value})
@@ -245,8 +252,10 @@
   });
 
   document.querySelector("#cancel-enrollment").addEventListener("click", async () => {
-    stopCapture(); if (socket) socket.close();
+    stopCapture(); completed = true; if (socket) socket.close();
     if (enrollmentId) await fetch(`/api/v1/face-enrollments/${enrollmentId}`, {method: "DELETE"});
-    location.reload();
+    enrollmentId = null;
+    if (embeddedDialog) document.dispatchEvent(new CustomEvent("face-enrollment:aborted"));
+    else location.reload();
   });
 })();

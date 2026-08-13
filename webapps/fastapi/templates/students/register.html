@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}학생 등록 · 학습 모니터링{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', path='/student-registration.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/face-enrollment.css') }}">
+{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Student registration</p>
+    <h1>학생 등록</h1>
+    <p class="summary">학원에 새로 등록한 학생의 기본 인적사항과 얼굴 정보를 등록해 주세요.</p>
+  </div>
+</header>
+
+<div id="student-save-notice" class="student-save-notice" role="status" aria-live="polite" tabindex="-1" hidden>
+  <span class="student-save-icon" aria-hidden="true">✓</span>
+  <div><strong>학생 정보가 저장되었습니다.</strong><p>현재 테스트 단계로 브라우저 콘솔에서 입력 내용을 확인할 수 있습니다.</p></div>
+</div>
+
+<section class="panel student-form-panel" aria-labelledby="student-form-title">
+  <div class="student-form-heading">
+    <div><h2 id="student-form-title">기본 정보</h2><p>필수 항목을 입력한 후 저장해 주세요.</p></div>
+    <span><strong aria-hidden="true">*</strong> 필수 항목</span>
+  </div>
+  <form id="student-registration-form" class="student-registration-form">
+    <div class="student-form-grid">
+      <label>학생 이름 <span class="required-mark" aria-hidden="true">*</span>
+        <input name="name" type="text" maxlength="50" autocomplete="name" placeholder="예: 김민지" required>
+      </label>
+      <label>학생 번호 <span class="required-mark" aria-hidden="true">*</span>
+        <input name="student_number" type="text" maxlength="30" autocomplete="off" placeholder="예: ST-2026-001" required>
+      </label>
+      <label>생년월일 <span class="required-mark" aria-hidden="true">*</span>
+        <input name="birth_date" type="date" autocomplete="bday" required>
+      </label>
+      <label>소속 반 <span class="required-mark" aria-hidden="true">*</span>
+        <input name="classroom_name" type="text" maxlength="50" placeholder="예: 중등 수학 A반" required>
+      </label>
+      <label>학생 연락처 <span class="optional-label">선택</span>
+        <input name="phone" type="tel" maxlength="20" autocomplete="tel" inputmode="tel" placeholder="예: 010-1234-5678">
+      </label>
+      <label>보호자 연락처 <span class="required-mark" aria-hidden="true">*</span>
+        <input name="guardian_phone" type="tel" maxlength="20" autocomplete="tel" inputmode="tel" placeholder="예: 010-9876-5432" required>
+      </label>
+    </div>
+    <section class="face-registration-row" aria-labelledby="face-registration-title">
+      <div><strong id="face-registration-title">학생 얼굴 정보</strong><p>교실에서 학생을 식별하기 위한 얼굴 이미지를 등록합니다.</p></div>
+      <button id="open-face-enrollment" class="secondary" type="button">얼굴 등록</button>
+    </section>
+    <p class="student-form-help">입력한 인적사항은 현재 서버나 데이터베이스로 전송되지 않습니다.</p>
+    <div class="student-form-actions">
+      <button type="reset" class="secondary">초기화</button>
+      <button type="submit">학생 정보 저장</button>
+    </div>
+  </form>
+</section>
+
+<dialog id="student-face-enrollment-dialog" class="student-face-dialog" aria-labelledby="face-dialog-title">
+  <div class="student-face-dialog-shell">
+    <section id="enrollment-setup" class="face-dialog-step face-consent-step" aria-labelledby="face-dialog-title">
+      <div class="face-dialog-heading">
+        <p class="eyebrow">Face enrollment</p>
+        <h2 id="face-dialog-title">얼굴 등록 및 수집 동의</h2>
+        <p><strong id="face-student-name"></strong> 학생의 얼굴 이미지를 여러 방향에서 촬영합니다. 수집한 이미지는 학생 식별 모델 학습 목적으로 사용되므로, 시작 전에 학생과 보호자에게 목적과 이용 범위를 설명하고 동의를 확인해 주세요.</p>
+        <p class="face-dialog-student">학생 번호: <strong id="student-id"></strong></p>
+      </div>
+      <label class="face-consent-check"><input id="consent-confirmed" type="checkbox"> 학생의 얼굴 데이터 수집 및 학습 목적 이용 동의를 확인했습니다.</label>
+      <input id="confirmed-by" type="hidden" value="admin">
+      <p id="setup-error" class="form-error" role="alert" hidden></p>
+      <div class="face-dialog-actions">
+        <button id="close-face-enrollment" class="secondary" type="button">닫기</button>
+        <button id="start-enrollment" type="button">등록 시작</button>
+      </div>
+    </section>
+
+    <section id="capture-panel" class="face-dialog-step embedded-enrollment-capture" aria-label="얼굴 촬영" hidden>
+      <div class="camera-panel">
+        <div id="live-guidance" class="live-guidance" role="status" aria-live="polite">
+          <strong id="guidance-message">카메라를 준비하고 있습니다.</strong>
+          <button id="cancel-enrollment" class="secondary" type="button">등록 중단</button>
+        </div>
+        <div class="camera-stage" data-state="searching">
+          <video id="camera-preview" autoplay muted playsinline aria-label="얼굴 등록 카메라 미리보기"></video>
+          <div class="face-guide" aria-hidden="true"></div>
+          <div id="face-progress-ring" class="face-progress-ring" role="progressbar" aria-label="얼굴 등록 수집 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span class="ring-direction ring-direction-up" data-pose="UP" aria-hidden="true">위</span>
+            <span class="ring-direction ring-direction-right" data-pose="RIGHT" aria-hidden="true">오른쪽</span>
+            <span class="ring-direction ring-direction-down" data-pose="DOWN" aria-hidden="true">아래</span>
+            <span class="ring-direction ring-direction-left" data-pose="LEFT" aria-hidden="true">왼쪽</span>
+            <div id="front-progress" class="front-progress" aria-hidden="true"><span>정면</span><strong>0%</strong></div>
+            <div class="face-progress-complete" aria-hidden="true"><span>✓</span><strong>수집 완료</strong></div>
+          </div>
+          <canvas id="capture-canvas" hidden></canvas>
+        </div>
+        <div class="overall-capture-progress" aria-labelledby="overall-progress-label">
+          <div class="overall-progress-heading"><strong id="overall-progress-label">전체 진행률</strong><strong id="overall-progress-percent">0%</strong></div>
+          <progress id="overall-progress" max="100" value="0">0%</progress>
+        </div>
+        <p id="connection-status" class="connection-status">연결 준비 중</p>
+        <p id="capture-error" class="form-error" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <section id="face-enrollment-complete" class="face-dialog-step face-complete-step" role="status" aria-live="polite" hidden>
+      <span aria-hidden="true">✓</span><h2>얼굴 등록이 완료되었습니다.</h2><p>촬영 창이 잠시 후 자동으로 닫힙니다.</p>
+    </section>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='/face-enrollment.js') }}" defer></script>
+<script src="{{ url_for('static', path='/student-registration.js') }}" defer></script>
+{% endblock %}
