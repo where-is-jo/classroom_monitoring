@@ -26,10 +26,12 @@ from .shared.dependencies import (
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.schemas import HealthResponse, ReadinessResponse
 from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
-from .student_monitoring.router import api_router as student_api_router
-from .student_monitoring.router import internal_router as student_internal_router
 from .snapshots.router import api_router as snapshot_api_router
 from .snapshots.router import page_router as snapshot_page_router
+from .student_monitoring.router import api_router as student_api_router
+from .student_monitoring.router import internal_router as student_internal_router
+from .students.router import api_router as students_api_router
+from .students.router import page_router as students_page_router
 from .video_monitoring.router import api_router as monitoring_api_router
 from .video_monitoring.router import page_router as monitoring_page_router
 
@@ -58,6 +60,7 @@ app.include_router(classroom_page_router, include_in_schema=False)
 app.include_router(monitoring_page_router, include_in_schema=False)
 app.include_router(face_enrollment_page_router, include_in_schema=False)
 app.include_router(snapshot_page_router, include_in_schema=False)
+app.include_router(students_page_router, include_in_schema=False)
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
@@ -72,6 +75,7 @@ app.include_router(monitoring_api_router, responses=_ERROR_RESPONSES)
 app.include_router(face_enrollment_api_router, responses=_ERROR_RESPONSES)
 app.include_router(student_internal_router, responses=_ERROR_RESPONSES)
 app.include_router(student_api_router, responses=_ERROR_RESPONSES)
+app.include_router(students_api_router, responses=_ERROR_RESPONSES)
 app.include_router(snapshot_api_router, responses=_ERROR_RESPONSES)
 
 

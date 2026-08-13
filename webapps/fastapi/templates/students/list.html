@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}학생 관리 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">학생</p>
+      <h1>학생 관리</h1>
+      <p class="summary">등록된 학생 목록을 관리합니다.</p>
+    </div>
+    <div class="page-actions">
+      <a class="button-link" href="/students/create">학생 등록</a>
+    </div>
+  </header>
+
+  {% if students %}
+    <section class="panel" aria-labelledby="student-list-title">
+      <h2 id="student-list-title">학생 목록</h2>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="학생 목록 스크롤 영역">
+        <table>
+          <thead>
+            <tr>
+              <th>학번</th>
+              <th>이름</th>
+              <th>소속</th>
+              <th>상태</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for student in students %}
+              <tr>
+                <td>{{ student.student_no }}</td>
+                <td>{{ student.name }}</td>
+                <td>{{ student.department }}</td>
+                <td>
+                  {% if student.is_active %}
+                    <span class="state-active">활성</span>
+                  {% else %}
+                    <span class="state-inactive">비활성</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <a href="/students/{{ student.id }}/edit">수정</a>
+                  {% if student.is_active %}
+                    <form data-api-url="/api/v1/students/{{ student.id }}" data-api-method="DELETE" data-confirm="{{ student.name }} 학생을 비활성화할까요?" data-success-url="/students" style="display:inline">
+                      <button type="submit" class="link-button">비활성화</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <div class="empty" role="status">
+      <strong>등록된 학생이 없습니다.</strong>
+      <p><a href="/students/create">학생 등록</a>에서 학생을 등록하세요.</p>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='/students.js') }}" defer></script>
+{% endblock %}
