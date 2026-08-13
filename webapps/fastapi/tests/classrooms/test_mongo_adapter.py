@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.classrooms.adapters.mongo_repository import MongoClassroomRepository
+from app.classrooms.errors import SeatNotFoundError
 from app.classrooms.models import (
     Classroom,
     ObservationBatchStatus,
@@ -200,6 +201,63 @@ def test_updates_preserve_unrelated_legacy_fields() -> None:
         set_fields = update["$set"]
         assert isinstance(set_fields, dict)
         assert "_id" not in set_fields
+
+
+def test_classroom_update_and_delete_use_set_without_id() -> None:
+    classroom, _, _, _ = _values()
+    database = RecordingDatabase()
+    repository = MongoClassroomRepository(database)  # type: ignore[arg-type]
+    classrooms = database.collections[MongoClassroomRepository.classroom_collection_name]
+    classrooms.returned_document = MongoClassroomRepository._classroom_to_document(classroom)
+
+    assert repository.update_classroom(classroom) == classroom
+    repository.delete_classroom(classroom.id)
+
+    update_query, update = classrooms.updates[0]
+    assert update_query == {"_id": classroom.id}
+    assert set(update) == {"$set"}
+    set_fields = update["$set"]
+    assert isinstance(set_fields, dict)
+    assert "_id" not in set_fields
+    assert set_fields["code"] == classroom.code
+
+    delete_query, delete = classrooms.updates[1]
+    assert delete_query == {"_id": classroom.id}
+    assert delete == {"$set": {"is_active": False}}
+
+
+def test_seat_update_and_delete_use_set_without_id() -> None:
+    _, seat, _, _ = _values()
+    database = RecordingDatabase()
+    repository = MongoClassroomRepository(database)  # type: ignore[arg-type]
+    seats = database.collections[MongoClassroomRepository.seat_collection_name]
+    seats.returned_document = MongoClassroomRepository._seat_to_document(seat)
+
+    assert repository.update_seat(seat) == seat
+    repository.delete_seat(seat.id)
+
+    update_query, update = seats.updates[0]
+    assert update_query == {"_id": seat.id}
+    assert set(update) == {"$set"}
+    set_fields = update["$set"]
+    assert isinstance(set_fields, dict)
+    assert "_id" not in set_fields
+    assert set_fields["code"] == seat.code
+
+    delete_query, delete = seats.updates[1]
+    assert delete_query == {"_id": seat.id}
+    assert delete == {"$set": {"is_active": False}}
+
+
+def test_seat_update_and_delete_missing_raise_not_found() -> None:
+    _, seat, _, _ = _values()
+    database = RecordingDatabase()
+    repository = MongoClassroomRepository(database)  # type: ignore[arg-type]
+
+    with pytest.raises(SeatNotFoundError):
+        repository.update_seat(seat)
+    with pytest.raises(SeatNotFoundError):
+        repository.delete_seat(seat.id)
 
 
 def test_naive_datetime_raises_repository_error() -> None:

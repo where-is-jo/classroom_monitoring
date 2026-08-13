@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from threading import RLock
 
-from ..errors import ClassroomDuplicateError, SeatBatchConflictError, SeatDuplicateError
+from ..errors import (
+    ClassroomDuplicateError,
+    ClassroomNotFoundError,
+    SeatBatchConflictError,
+    SeatDuplicateError,
+    SeatNotFoundError,
+)
 from ..models import (
     Classroom,
     ClassroomPage,
@@ -46,6 +53,24 @@ class InMemoryClassroomRepository:
                 None,
             )
 
+    def update_classroom(self, classroom: Classroom) -> Classroom:
+        with self._lock:
+            existing = self._classrooms.get(classroom.id)
+            if existing is None:
+                raise ClassroomNotFoundError()
+            duplicate = self.get_classroom_by_code(classroom.code)
+            if duplicate is not None and duplicate.id != classroom.id:
+                raise ClassroomDuplicateError()
+            self._classrooms[classroom.id] = classroom
+            return classroom
+
+    def delete_classroom(self, classroom_id: str) -> None:
+        with self._lock:
+            existing = self._classrooms.get(classroom_id)
+            if existing is None:
+                raise ClassroomNotFoundError()
+            self._classrooms[classroom_id] = replace(existing, is_active=False)
+
     def list_classrooms(self, *, limit: int, offset: int) -> ClassroomPage:
         with self._lock:
             items = [item for item in self._classrooms.values() if item.is_active]
@@ -85,6 +110,24 @@ class InMemoryClassroomRepository:
                 return None
             self._seats[seat.id] = seat
             return seat
+
+    def update_seat(self, seat: Seat) -> Seat:
+        with self._lock:
+            existing = self._seats.get(seat.id)
+            if existing is None:
+                raise SeatNotFoundError()
+            duplicate = self._seat_by_code(seat.classroom_id, seat.code)
+            if duplicate is not None and duplicate.id != seat.id:
+                raise SeatDuplicateError()
+            self._seats[seat.id] = seat
+            return seat
+
+    def delete_seat(self, seat_id: str) -> None:
+        with self._lock:
+            existing = self._seats.get(seat_id)
+            if existing is None:
+                raise SeatNotFoundError()
+            self._seats[seat_id] = replace(existing, is_active=False)
 
     def claim_observation_batch(
         self, record: SeatObservationBatchRecord

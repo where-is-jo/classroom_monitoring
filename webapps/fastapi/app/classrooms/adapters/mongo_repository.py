@@ -10,7 +10,13 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from ...shared.database import MongoDatabase, MongoDocument
 from ...shared.errors import RepositoryDataError, RepositoryUnavailableError
-from ..errors import ClassroomDuplicateError, SeatBatchConflictError, SeatDuplicateError
+from ..errors import (
+    ClassroomDuplicateError,
+    ClassroomNotFoundError,
+    SeatBatchConflictError,
+    SeatDuplicateError,
+    SeatNotFoundError,
+)
 from ..models import (
     Classroom,
     ClassroomPage,
@@ -93,6 +99,35 @@ class MongoClassroomRepository:
     def get_classroom_by_code(self, code: str) -> Classroom | None:
         return self._find_classroom({"code": code})
 
+    def update_classroom(self, classroom: Classroom) -> Classroom:
+        update_fields = self._classroom_to_document(classroom)
+        update_fields.pop("_id")
+        try:
+            document = self._classrooms.find_one_and_update(
+                {"_id": classroom.id},
+                {"$set": update_fields},
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            raise ClassroomDuplicateError() from None
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise ClassroomNotFoundError()
+        return self._classroom_to_domain(document)
+
+    def delete_classroom(self, classroom_id: str) -> None:
+        try:
+            document = self._classrooms.find_one_and_update(
+                {"_id": classroom_id},
+                {"$set": {"is_active": False}},
+                return_document=ReturnDocument.AFTER,
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise ClassroomNotFoundError()
+
     def _find_classroom(self, query: MongoDocument) -> Classroom | None:
         try:
             document = self._classrooms.find_one(query)
@@ -162,6 +197,35 @@ class MongoClassroomRepository:
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._seat_to_domain(document)
+
+    def update_seat(self, seat: Seat) -> Seat:
+        update_fields = self._seat_to_document(seat)
+        update_fields.pop("_id")
+        try:
+            document = self._seats.find_one_and_update(
+                {"_id": seat.id},
+                {"$set": update_fields},
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            raise SeatDuplicateError() from None
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise SeatNotFoundError()
+        return self._seat_to_domain(document)
+
+    def delete_seat(self, seat_id: str) -> None:
+        try:
+            document = self._seats.find_one_and_update(
+                {"_id": seat_id},
+                {"$set": {"is_active": False}},
+                return_document=ReturnDocument.AFTER,
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise SeatNotFoundError()
 
     def claim_observation_batch(
         self, record: SeatObservationBatchRecord

@@ -6,7 +6,31 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from .models import Classroom, ClassroomOccupancySummary, ClassroomPage, Seat, SeatGeometry
+from .models import (
+    Classroom,
+    ClassroomOccupancySummary,
+    ClassroomPage,
+    Seat,
+    SeatGeometry,
+    SeatPage,
+)
+
+
+class ClassroomCreateRequest(BaseModel):
+    """강의실 생성 요청."""
+
+    code: str
+    name: str
+    location: str
+
+
+class ClassroomUpdateRequest(BaseModel):
+    """강의실 수정 요청. 전달한 필드만 갱신한다."""
+
+    code: str | None = None
+    name: str | None = None
+    location: str | None = None
+    is_active: bool | None = None
 
 
 class ClassroomResponse(BaseModel):
@@ -14,10 +38,19 @@ class ClassroomResponse(BaseModel):
     code: str
     name: str
     location: str
+    is_active: bool
+    created_at: datetime
 
     @classmethod
     def from_domain(cls, item: Classroom) -> ClassroomResponse:
-        return cls(id=item.id, code=item.code, name=item.name, location=item.location)
+        return cls(
+            id=item.id,
+            code=item.code,
+            name=item.name,
+            location=item.location,
+            is_active=item.is_active,
+            created_at=item.created_at,
+        )
 
 
 class ClassroomListResponse(BaseModel):
@@ -47,6 +80,35 @@ class GeometryResponse(BaseModel):
         return cls(x=item.x, y=item.y, width=item.width, height=item.height)
 
 
+class GeometryRequest(BaseModel):
+    """좌석 geometry 입력. 0~1 정규화 좌표다."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def to_domain(self) -> SeatGeometry:
+        return SeatGeometry(x=self.x, y=self.y, width=self.width, height=self.height)
+
+
+class SeatCreateRequest(BaseModel):
+    """좌석 생성 요청."""
+
+    code: str
+    label: str
+    geometry: GeometryRequest | None = None
+
+
+class SeatUpdateRequest(BaseModel):
+    """좌석 수정 요청. 전달한 필드만 갱신한다."""
+
+    code: str | None = None
+    label: str | None = None
+    geometry: GeometryRequest | None = None
+    is_active: bool | None = None
+
+
 class CurrentOccupancyResponse(BaseModel):
     state: str
     source: str
@@ -57,20 +119,26 @@ class CurrentOccupancyResponse(BaseModel):
 
 class SeatResponse(BaseModel):
     id: str
+    classroom_id: str
     code: str
     label: str
     geometry: GeometryResponse | None
+    is_active: bool
     current_occupancy: CurrentOccupancyResponse
+    created_at: datetime
+    updated_at: datetime
 
     @classmethod
     def from_domain(cls, item: Seat) -> SeatResponse:
         return cls(
             id=item.id,
+            classroom_id=item.classroom_id,
             code=item.code,
             label=item.label,
             geometry=(
                 None if item.geometry is None else GeometryResponse.from_domain(item.geometry)
             ),
+            is_active=item.is_active,
             current_occupancy=CurrentOccupancyResponse(
                 state=item.current_occupancy.state.value,
                 source=item.current_occupancy.source.value,
@@ -78,6 +146,24 @@ class SeatResponse(BaseModel):
                 observed_at=item.current_occupancy.observed_at,
                 event_id=item.current_occupancy.event_id,
             ),
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+
+class SeatListResponse(BaseModel):
+    items: list[SeatResponse]
+    total: int
+    limit: int
+    offset: int
+
+    @classmethod
+    def from_page(cls, page: SeatPage, limit: int, offset: int) -> SeatListResponse:
+        return cls(
+            items=[SeatResponse.from_domain(item) for item in page.items],
+            total=page.total,
+            limit=limit,
+            offset=offset,
         )
 
 

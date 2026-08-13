@@ -53,7 +53,7 @@ class ClassroomConcurrentUpdateError(DomainError):
 
 class ClassroomInputError(DomainError):
     code = "CLASSROOM_INPUT_INVALID"
-    status_code = 400
+    status_code = 422
 
     def __init__(self, message: str) -> None:
         super().__init__(message)

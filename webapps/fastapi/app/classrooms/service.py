@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from math import isfinite
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from .errors import (
     ClassroomConcurrentUpdateError,
@@ -51,6 +51,39 @@ class ClassroomService:
         self._threshold = occupancy_confidence_threshold
         self._clock = clock
 
+    def create_seat(
+        self,
+        classroom_id: str,
+        code: str,
+        label: str,
+        geometry: SeatGeometry | None = None,
+    ) -> Seat:
+        classroom = self._required_active_classroom(classroom_id)
+        normalized_code = self._code(code)
+        normalized_label = self._text(label, "좌석 이름")
+        normalized_geometry = self._geometry(geometry)
+        now = self._aware_datetime(self._clock())
+        return self._repository.create_seat(
+            Seat(
+                id=str(uuid4()),
+                classroom_id=classroom.id,
+                code=normalized_code,
+                label=normalized_label,
+                geometry=normalized_geometry,
+                is_active=True,
+                current_occupancy=SeatCurrentOccupancy(
+                    state=SeatOccupancy.UNKNOWN,
+                    source=OccupancySource.SYSTEM,
+                    confidence=None,
+                    observed_at=None,
+                    event_id=None,
+                ),
+                created_at=now,
+                updated_at=now,
+                version=0,
+            )
+        )
+
     def seed_classroom(self, command: CreateClassroomCommand) -> Classroom:
         classroom_id = self._identifier(command.id, "강의실 ID")
         code = self._code(command.code)
@@ -67,6 +100,23 @@ class ClassroomService:
                 code=code,
                 name=name,
                 location=location,
+                is_active=True,
+                created_at=self._aware_datetime(self._clock()),
+            )
+        )
+
+    def create_classroom(self, code: str, name: str, location: str) -> Classroom:
+        normalized_code = self._code(code)
+        normalized_name = self._text(name, "강의실 이름")
+        normalized_location = self._text(location, "강의실 위치")
+        if self._repository.get_classroom_by_code(normalized_code) is not None:
+            raise ClassroomDuplicateError()
+        return self._repository.create_classroom(
+            Classroom(
+                id=str(uuid4()),
+                code=normalized_code,
+                name=normalized_name,
+                location=normalized_location,
                 is_active=True,
                 created_at=self._aware_datetime(self._clock()),
             )
@@ -116,9 +166,82 @@ class ClassroomService:
     def get_classroom(self, classroom_id: str) -> Classroom:
         return self._required_active_classroom(classroom_id)
 
+    def update_classroom(
+        self,
+        classroom_id: str,
+        code: str | None = None,
+        name: str | None = None,
+        location: str | None = None,
+        is_active: bool | None = None,
+    ) -> Classroom:
+        classroom = self._required_active_classroom(classroom_id)
+        updated_code = self._code(classroom.code if code is None else code)
+        updated_name = self._text(classroom.name if name is None else name, "강의실 이름")
+        updated_location = self._text(
+            classroom.location if location is None else location, "강의실 위치"
+        )
+        existing = self._repository.get_classroom_by_code(updated_code)
+        if existing is not None and existing.id != classroom.id:
+            raise ClassroomDuplicateError()
+        return self._repository.update_classroom(
+            replace(
+                classroom,
+                code=updated_code,
+                name=updated_name,
+                location=updated_location,
+                is_active=classroom.is_active if is_active is None else is_active,
+            )
+        )
+
+    def delete_classroom(self, classroom_id: str) -> None:
+        classroom = self._required_active_classroom(classroom_id)
+        self._repository.delete_classroom(classroom.id)
+
     def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage:
         classroom = self._required_active_classroom(classroom_id)
         return self._repository.list_seats(classroom.id, limit=limit, offset=offset)
+
+    def list_all_seats(self, classroom_id: str) -> list[Seat]:
+        """강의실의 활성 좌석 전체를 한 번에 돌려준다. 매핑처럼 전체가 필요한 곳에서 쓴다."""
+        classroom = self._required_active_classroom(classroom_id)
+        return self._all_seats(classroom.id)
+
+    def get_seat(self, seat_id: str) -> Seat:
+        seat = self._required_seat(seat_id)
+        if not seat.is_active:
+            raise SeatNotFoundError()
+        return seat
+
+    def update_seat(
+        self,
+        seat_id: str,
+        code: str | None = None,
+        label: str | None = None,
+        geometry: SeatGeometry | None = None,
+        is_active: bool | None = None,
+    ) -> Seat:
+        seat = self._required_seat(seat_id)
+        if not seat.is_active:
+            raise SeatNotFoundError()
+        updated_code = self._code(seat.code if code is None else code)
+        updated_label = self._text(seat.label if label is None else label, "좌석 이름")
+        updated_geometry = seat.geometry if geometry is None else self._geometry(geometry)
+        return self._repository.update_seat(
+            replace(
+                seat,
+                code=updated_code,
+                label=updated_label,
+                geometry=updated_geometry,
+                is_active=seat.is_active if is_active is None else is_active,
+                updated_at=self._aware_datetime(self._clock()),
+            )
+        )
+
+    def delete_seat(self, seat_id: str) -> None:
+        seat = self._required_seat(seat_id)
+        if not seat.is_active:
+            raise SeatNotFoundError()
+        self._repository.delete_seat(seat.id)
 
     def occupancy_summary(self, classroom_id: str) -> ClassroomOccupancySummary:
         classroom = self._required_active_classroom(classroom_id)
@@ -146,6 +269,25 @@ class ClassroomService:
             seats.extend(page.items)
             if not page.items or len(seats) >= page.total:
                 return seats
+
+    def record_seat_observation_batch(
+        self,
+        *,
+        event_id: str,
+        classroom_id: str,
+        observations: tuple[SeatObservation, ...],
+        observed_at: datetime,
+    ) -> SeatObservationBatchResult:
+        """탐지 이벤트를 근거로 좌석 점유 batch를 기록한다. source는 항상 SYSTEM이다."""
+        return self.record_observation_batch(
+            RecordSeatObservationBatchCommand(
+                event_id=event_id,
+                classroom_id=classroom_id,
+                source=OccupancySource.SYSTEM,
+                observed_at=observed_at,
+                observations=observations,
+            )
+        )
 
     def record_observation_batch(
         self, command: RecordSeatObservationBatchCommand
