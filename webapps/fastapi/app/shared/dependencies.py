@@ -288,7 +288,10 @@ def get_face_enrollment_service(
             yaw_side_degrees=settings.face_yaw_side_degrees,
             pitch_side_degrees=settings.face_pitch_side_degrees,
         ),
-      
+        clock=utc_now,
+    )
+
+
 def get_video_stream_service(
     repository: VideoStreamRepository = Depends(get_video_stream_repository),
     settings: Settings = Depends(get_settings),
