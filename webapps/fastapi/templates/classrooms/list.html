@@ -48,6 +48,11 @@
               <div class="seat-card seat-card--{{ seat.current_occupancy.state.value|lower }}" data-seat-id="{{ seat.id }}" style="position:absolute;left:{{ seat.geometry.x*100 }}%;top:{{ seat.geometry.y*100 }}%;width:{{ seat.geometry.width*100 }}%;height:{{ seat.geometry.height*100 }}%;">
                 <strong>{{ seat.label }}</strong>
                 <span class="state" aria-label="좌석 상태 {{ seat.current_occupancy.state.value|display_label }}"><span class="state-icon" aria-hidden="true">{% if seat.current_occupancy.state.value == 'OCCUPIED' %}●{% elif seat.current_occupancy.state.value == 'VACANT' %}○{% else %}?{% endif %}</span><span class="state-label">{{ seat.current_occupancy.state.value|display_label }}</span></span>
+                {% if seat.id in assignments %}
+                  <small class="assigned-student">{{ assignments[seat.id].student_name }}</small>
+                {% else %}
+                  <small class="no-assignment">미지정</small>
+                {% endif %}
                 <small class="confidence">{% if seat.current_occupancy.confidence is not none %}{{ (seat.current_occupancy.confidence * 100)|round|int }}%{% endif %}</small>
                 <small class="observed-at">{{ seat.current_occupancy.observed_at|kst_datetime }}</small>
               </div>

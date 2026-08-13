@@ -292,6 +292,12 @@ def classrooms_page(
     if selected is None and page.items:
         selected = page.items[0].id
     summary = None if selected is None else service.occupancy_summary(selected)
+    # 좌석 배치도에 지정 학생 이름을 표시하기 위한 지정 현황 (seat_id → 지정 정보).
+    assignments = (
+        {}
+        if selected is None
+        else {info.seat_id: info for info in service.list_assignments(selected)}
+    )
     return templates.TemplateResponse(
         request=request,
         name="classrooms/list.html",
@@ -299,6 +305,7 @@ def classrooms_page(
             "classrooms": page.items,
             "selected_classroom_id": selected or "",
             "summary": summary,
+            "assignments": assignments,
         },
     )
 
@@ -346,6 +353,79 @@ def seats_page(
             "classroom": summary.classroom,
             "seats": summary.seats,
             "total": summary.total,
+        },
+    )
+
+
+@page_router.get("/{classroom_id}/seat-assignments")
+def seat_assignments_page(
+    classroom_id: str,
+    request: Request,
+    service: ClassroomService = Depends(get_classroom_service),
+    student_service: StudentService = Depends(get_student_service),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """좌석-학생 지정 관리 페이지.
+
+    좌석 목록과 지정 현황, 활성 학생 목록을 조합해 렌더링한다.
+    지정/해제는 기존 JSON API를 classroom-admin.js가 fetch로 호출한다.
+    """
+    try:
+        classroom = service.get_classroom(classroom_id)
+    except ClassroomNotFoundError:
+        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
+
+    seats = service.list_all_seats(classroom_id)
+    assignments_list = service.list_assignments(classroom_id)
+    # seat_id를 키로 변환해 템플릿에서 좌석별 지정을 바로 조회한다.
+    assignments = {info.seat_id: info for info in assignments_list}
+    # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
+    students_page = student_service.list_students(
+        limit=settings.page_size_max, offset=0, is_active=True
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="classrooms/seat_assignments.html",
+        context={
+            "classroom": classroom,
+            "seats": seats,
+            "assignments": assignments,
+            "students": students_page.items,
+        },
+    )
+
+
+@page_router.get("/{classroom_id}/student-states")
+def student_states_page(
+    classroom_id: str,
+    request: Request,
+    service: ClassroomService = Depends(get_classroom_service),
+    monitoring_service: StudentMonitoringService = Depends(get_student_monitoring_service),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """학생 상태 조회 페이지.
+
+    강의실 목록(선택 드롭다운용)과 학생별 상태를 조합해 렌더링한다.
+    상태 판정은 서비스 계층이 담당하고, 라우터는 조회·렌더링만 한다.
+    """
+    try:
+        classroom = service.get_classroom(classroom_id)
+    except ClassroomNotFoundError:
+        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
+
+    # 강의실 선택 드롭다운용 목록
+    classrooms_page = service.list_classrooms(limit=settings.page_size_max, offset=0)
+    # 학생 상태 조회 (TASK-A05 유보로 현재는 빈 목록)
+    states = monitoring_service.list_student_states(classroom_id)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="classrooms/student_states.html",
+        context={
+            "classroom": classroom,
+            "classrooms": classrooms_page.items,
+            "states": states,
         },
     )
 

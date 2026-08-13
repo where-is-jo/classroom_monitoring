@@ -9,26 +9,47 @@ message를 포함하는지 확인한다. 실제 검증 로직은 `test_crud_api.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.adapters.memory_repository import (
+    InMemoryClassroomRepository,
+    InMemorySeatAssignmentRepository,
+)
 from app.classrooms.service import ClassroomService
 from app.main import app
-from app.shared.dependencies import get_classroom_service
+from app.shared.dependencies import get_classroom_service, get_student_service
+from app.students.adapters.memory_repository import InMemoryStudentRepository
+from app.students.service import StudentService
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
+    # 학생/지정 저장소는 강의실 서비스와 학생 서비스가 같은 인스턴스를 공유해야
+    # 좌석-학생 지정 화면에서 학생 이름·학번을 보강해 표시할 수 있다.
+    student_repository = InMemoryStudentRepository()
+    # 학생 ID는 clock().timestamp()로 생성되어 같은 시각에 두 명을 만들면 충돌한다.
+    # 호출마다 1초씩 늘려 서로 다른 ID가 생기게 한다.
+    student_clock_tick = 0
+
+    def student_clock() -> datetime:
+        nonlocal student_clock_tick
+        student_clock_tick += 1
+        return datetime(2026, 8, 13, 9, 0, tzinfo=UTC) + timedelta(seconds=student_clock_tick)
+
     service = ClassroomService(
         InMemoryClassroomRepository(),
+        student_repository=student_repository,
+        assignment_repository=InMemorySeatAssignmentRepository(),
         occupancy_confidence_threshold=0.5,
         clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
     )
+    student_service = StudentService(student_repository, clock=student_clock)
     app.dependency_overrides[get_classroom_service] = lambda: service
+    app.dependency_overrides[get_student_service] = lambda: student_service
     try:
         yield TestClient(app)
     finally:
@@ -64,6 +85,21 @@ def _create_seat(
     response = client.post(
         f"/api/v1/classrooms/{classroom_id}/seats",
         json=payload,
+    )
+    assert response.status_code == 201
+    return cast(dict[str, object], response.json())
+
+
+def _create_student(
+    client: TestClient,
+    *,
+    student_no: str = "20240001",
+    name: str = "김철수",
+    department: str = "컴퓨터공학과",
+) -> dict[str, object]:
+    response = client.post(
+        "/api/v1/students",
+        json={"student_no": student_no, "name": name, "department": department},
     )
     assert response.status_code == 201
     return cast(dict[str, object], response.json())
@@ -158,6 +194,51 @@ def test_seats_page_redirects_when_classroom_missing(client: TestClient) -> None
     assert response.headers["location"] == "/classrooms"
 
 
+# --- 강의실 현황 화면 -----------------------------------------------------------
+
+
+def test_classroom_list_page_shows_assigned_student_on_seat_map(
+    client: TestClient,
+) -> None:
+    """강의실 현황 화면의 좌석 배치도는 지정 학생 이름을 표시한다 (UI-REQ-006)."""
+    classroom = _create_classroom(client, code="R-L01", name="현황테스트 강의실")
+    classroom_id = str(classroom["id"])
+    assigned_seat = _create_seat(
+        client,
+        classroom_id,
+        code="SL01",
+        label="지정 좌석",
+        geometry={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+    )
+    _create_seat(
+        client,
+        classroom_id,
+        code="SL02",
+        label="빈 좌석",
+        geometry={"x": 0.5, "y": 0.2, "width": 0.3, "height": 0.4},
+    )
+    student = _create_student(client, student_no="20240001", name="김철수")
+    student_id = str(student["id"])
+
+    assign = client.put(
+        f"/api/v1/classrooms/{classroom_id}/seats/{assigned_seat['id']}/assignment",
+        json={"student_id": student_id},
+    )
+    assert assign.status_code == 200
+
+    response = client.get(f"/classrooms?classroom_id={classroom_id}")
+
+    assert response.status_code == 200
+    # 지정된 좌석 카드에는 학생 이름이 표시된다
+    assert "지정 좌석" in response.text
+    assert "김철수" in response.text
+    assert 'class="assigned-student"' in response.text
+    # 미지정 좌석 카드에는 "미지정"으로 표시된다
+    assert "빈 좌석" in response.text
+    assert 'class="no-assignment"' in response.text
+    assert response.text.count("미지정") == 1
+
+
 # --- 좌석 생성/수정 화면 -------------------------------------------------------
 
 
@@ -229,6 +310,153 @@ def test_seat_edit_page_redirects_when_classroom_missing(client: TestClient) -> 
 def test_seat_create_page_redirects_when_classroom_missing(client: TestClient) -> None:
     """없는 강의실의 좌석 추가 화면은 목록으로 리다이렉트한다."""
     response = client.get("/classrooms/missing/seats/create", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/classrooms"
+
+
+# --- 좌석-학생 지정 화면 -------------------------------------------------------
+
+
+def test_seat_assignments_page_renders(client: TestClient) -> None:
+    """좌석-학생 지정 페이지는 좌석 목록과 지정 폼 배선을 렌더링한다."""
+    classroom = _create_classroom(client, code="R-A01", name="지정테스트 강의실")
+    classroom_id = str(classroom["id"])
+    seat = _create_seat(client, classroom_id, code="SA01", label="좌석 1")
+    seat_id = str(seat["id"])
+
+    response = client.get(f"/classrooms/{classroom_id}/seat-assignments")
+
+    assert response.status_code == 200
+    assert "좌석-학생 지정" in response.text
+    assert "SA01" in response.text
+    assert "좌석 1" in response.text
+    # 미지정 좌석은 "미지정"으로 표시된다
+    assert "미지정" in response.text
+    # 지정 폼 배선: PUT + required select
+    assignment_url = f"/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment"
+    assert f'data-api-url="{assignment_url}"' in response.text
+    assert 'data-api-method="PUT"' in response.text
+    assert 'name="student_id"' in response.text
+    assert "required" in response.text
+    # 에러 박스는 각 form 내부에 배치된다 (form 수와 일치, 실제 요소 기준)
+    assert response.text.count(
+        '<p class="form-error" role="alert" data-form-error'
+    ) == response.text.count("data-api-url=")
+
+
+def test_seat_assignments_page_shows_assigned_student(client: TestClient) -> None:
+    """지정된 좌석에는 학생 이름·학번이 표시되고 해제 폼이 렌더링된다."""
+    classroom = _create_classroom(client, code="R-B01", name="지정 현황 강의실")
+    classroom_id = str(classroom["id"])
+    seat = _create_seat(client, classroom_id, code="SB01", label="좌석 1")
+    seat_id = str(seat["id"])
+    student = _create_student(client, student_no="20240001", name="김철수")
+    student_id = str(student["id"])
+
+    assign = client.put(
+        f"/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
+        json={"student_id": student_id},
+    )
+    assert assign.status_code == 200
+
+    response = client.get(f"/classrooms/{classroom_id}/seat-assignments")
+
+    assert response.status_code == 200
+    assert "김철수" in response.text
+    assert "20240001" in response.text
+    # 이미 지정된 학생이 select에 선택된 상태로 표시된다
+    assert f'value="{student_id}"' in response.text
+    assert "selected" in response.text
+    # 해제 폼 배선: DELETE
+    assert 'data-api-method="DELETE"' in response.text
+    # 지정된 좌석은 지정/해제 2개 폼이며 각각 에러 박스가 있다 (실제 요소 기준)
+    assert response.text.count(
+        '<p class="form-error" role="alert" data-form-error'
+    ) == response.text.count("data-api-url=")
+
+
+def test_seat_assignments_page_lists_only_active_students(client: TestClient) -> None:
+    """학생 선택 select에는 활성 학생만 표시된다."""
+    classroom = _create_classroom(client, code="R-C01", name="활성 학생 강의실")
+    classroom_id = str(classroom["id"])
+    _create_seat(client, classroom_id, code="SC01", label="좌석 1")
+    _create_student(client, student_no="20240001", name="김철수")
+    inactive = _create_student(client, student_no="20240002", name="이영희")
+    inactive_id = str(inactive["id"])
+
+    deactivate = client.delete(f"/api/v1/students/{inactive_id}")
+    assert deactivate.status_code == 204
+
+    response = client.get(f"/classrooms/{classroom_id}/seat-assignments")
+
+    assert response.status_code == 200
+    assert "김철수" in response.text
+    assert "이영희" not in response.text
+
+
+def test_seat_assignments_page_renders_empty_state(client: TestClient) -> None:
+    """좌석이 없으면 빈 상태 안내를 렌더링한다."""
+    classroom = _create_classroom(client, code="R-D01", name="좌석 없음 강의실")
+    classroom_id = str(classroom["id"])
+
+    response = client.get(f"/classrooms/{classroom_id}/seat-assignments")
+
+    assert response.status_code == 200
+    assert "등록된 좌석이 없습니다." in response.text
+    assert "좌석-학생 지정 목록" not in response.text
+
+
+def test_seat_assignments_page_redirects_when_classroom_missing(client: TestClient) -> None:
+    """없는 강의실의 좌석-학생 지정 화면은 목록으로 리다이렉트한다."""
+    response = client.get(
+        "/classrooms/nonexistent/seat-assignments",
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["location"] == "/classrooms"
+
+
+# --- 학생 상태 조회 화면 -------------------------------------------------------
+
+
+def test_student_states_page_renders(client: TestClient) -> None:
+    """학생 상태 화면은 강의실 선택 드롭다운과 네비게이션 링크를 렌더링한다."""
+    classroom = _create_classroom(client, code="R-S01", name="상태테스트 강의실")
+    classroom_id = str(classroom["id"])
+
+    response = client.get(f"/classrooms/{classroom_id}/student-states")
+
+    assert response.status_code == 200
+    assert "학생 상태" in response.text
+    assert "상태테스트 강의실" in response.text
+    # 강의실 선택 드롭다운에 현재 강의실이 선택된 상태로 표시된다
+    assert 'name="classroom_id"' in response.text
+    assert f'value="{classroom_id}"' in response.text
+    assert "selected" in response.text
+    # 네비게이션 "학생 현황" nav-group에 학생 상태·좌석-학생 지정 링크가 있다 (UI-REQ-011)
+    assert "학생 현황" in response.text
+    assert 'href="/classrooms/demo-classroom/student-states"' in response.text
+    assert 'href="/classrooms/demo-classroom/seat-assignments"' in response.text
+
+
+def test_student_states_page_renders_empty_state(client: TestClient) -> None:
+    """탐지 결과가 없으면 "데이터 없음" 안내 문구를 렌더링한다 (UI-REQ-010)."""
+    classroom = _create_classroom(client, code="R-S02", name="빈상태 강의실")
+    classroom_id = str(classroom["id"])
+
+    response = client.get(f"/classrooms/{classroom_id}/student-states")
+
+    assert response.status_code == 200
+    assert "학생 상태 데이터가 없습니다." in response.text
+    assert "학생 상태 목록" not in response.text
+
+
+def test_student_states_page_redirects_when_classroom_missing(client: TestClient) -> None:
+    """없는 강의실의 학생 상태 화면은 목록으로 리다이렉트한다."""
+    response = client.get(
+        "/classrooms/nonexistent/student-states",
+        follow_redirects=False,
+    )
     assert response.status_code == 302
     assert response.headers["location"] == "/classrooms"
 

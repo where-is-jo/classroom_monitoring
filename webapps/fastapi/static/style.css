@@ -133,6 +133,7 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 .legend-swatch--occupied { color: var(--occupied); background: #c8ede2; }
 .legend-swatch--vacant { color: var(--vacant); background: #edf1f5; }
 .legend-swatch--unknown { color: var(--unknown); background: #ffedbd; }
+.legend-swatch--wrong-seat { color: #9a6a00; background: #fff3cd; }
 .table-scroll { overflow: auto; }
 .seat-map { position: relative; min-width: 680px; min-height: 440px; background: linear-gradient(#e3ebe9 1px, transparent 1px), linear-gradient(90deg, #e3ebe9 1px, transparent 1px), #f8fbfa; background-size: 40px 40px; border: 1px solid var(--border); border-radius: 12px; }
 .seat-card { display: grid; min-width: 100px; min-height: 76px; place-content: center; gap: 3px; padding: 8px; overflow: hidden; border: 2px solid; border-radius: 10px; text-align: center; }
@@ -141,12 +142,22 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 .seat-card--vacant { color: #384753; background: #edf1f5; border-color: var(--vacant); }
 .seat-card--unknown { color: #674300; background: #ffedbd; border-color: var(--unknown); }
 .seat-card--admin { color: var(--primary-dark); background: #eef7f4; border-color: var(--primary); }
+.seat-card .assigned-student { font-size: 0.75rem; color: #16a34a; display: block; }
+.seat-card .no-assignment { font-size: 0.75rem; color: #9ca3af; display: block; }
 .seat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 button.link-button { min-height: 0; padding: 0; color: var(--danger); background: none; border: 0; font-weight: 700; text-decoration: underline; }
 button.link-button:hover { color: #7f0d0d; background: none; }
 .card-list { margin: 0; padding: 0; list-style: none; }
 .seat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .seat-list-card { display: grid; gap: 5px; padding: 16px; background: var(--surface-low); border: 1px solid var(--border); border-radius: 12px; }
+
+/* 학생 상태 화면: 상태를 색·아이콘·문구로 함께 구분한다 (UI-REQ-005) */
+.student-state-legend { display: flex; flex-wrap: wrap; gap: 18px; margin: 0 0 16px; padding: 0; list-style: none; }
+.student-state-legend li { display: flex; align-items: center; gap: 7px; }
+.state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 700; }
+.state--present { color: #16a34a; }
+.state--wrong_seat { color: #ca8a04; }
+.state--unknown { color: #6b7280; }
 
 .demo-clock { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }
 .demo-clock span, .demo-clock strong { display: block; }
@@ -165,6 +176,9 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .status-label--stale { color: #674300; background: #fff3cd; }
 .status-label--unknown { color: #674300; background: #ffedbd; }
 .status-label--no-video { color: #ba1a1a; background: #ffdad6; }
+.state-active, .state-inactive { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; white-space: nowrap; font-size: .78rem; font-weight: 800; }
+.state-active { color: #004f3d; background: #c8ede2; }
+.state-inactive { color: #384753; background: #edf1f5; }
 .card-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 6px 18px 18px; font-size: .8rem; }
 .match-reason { margin: 10px 18px; padding: 10px 12px; color: #264e49; background: var(--primary-soft); border-radius: 9px; font-size: .85rem; }
 .example-list { display: grid; gap: 10px; margin-bottom: 0; }
