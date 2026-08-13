@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}{% if seat %}좌석 수정 · {% else %}좌석 추가 · {% endif %}{{ classroom.code }} · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">{{ classroom.code }}</p><h1>{% if seat %}{{ seat.label }} 수정{% else %}좌석 추가{% endif %}</h1><p class="summary">{{ classroom.name }} · 배치도 위치는 배치도 폭·높이에 대한 비율(0~1)로 입력합니다.</p></div>
+    <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seats">좌석 목록</a>
+  </header>
+
+  <section class="panel" aria-labelledby="seat-form-title">
+    <h2 id="seat-form-title">좌석 정보</h2>
+    {% if seat %}
+      <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}" data-api-method="PUT" data-success-url="/classrooms/{{ classroom.id }}/seats">
+    {% else %}
+      <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats" data-api-method="POST" data-success-url="/classrooms/{{ classroom.id }}/seats">
+    {% endif %}
+      <p class="form-error" role="alert" data-form-error hidden></p>
+      <div class="form-grid">
+        <label>코드<input name="code" type="text" value="{% if seat %}{{ seat.code }}{% endif %}" maxlength="64" required autocomplete="off" placeholder="S01"></label>
+        <label>이름<input name="label" type="text" value="{% if seat %}{{ seat.label }}{% endif %}" maxlength="200" required placeholder="좌석 1"></label>
+        {% if seat %}<label>활성화<input name="is_active" type="checkbox"{% if seat.is_active %} checked{% endif %}></label>{% endif %}
+      </div>
+      <div class="form-section">
+        <h3>배치도 위치</h3>
+        <p class="summary">좌표와 크기는 배치도 폭·높이의 비율입니다. 4개 값을 모두 입력하면 배치도에 표시되고, 모두 비우면 배치도에 표시하지 않습니다.</p>
+        <div class="form-grid">
+          <label>x<input name="geometry_x" type="number" min="0" max="1" step="0.01" value="{% if seat and seat.geometry %}{{ seat.geometry.x }}{% endif %}"></label>
+          <label>y<input name="geometry_y" type="number" min="0" max="1" step="0.01" value="{% if seat and seat.geometry %}{{ seat.geometry.y }}{% endif %}"></label>
+          <label>너비<input name="geometry_width" type="number" min="0" max="1" step="0.01" value="{% if seat and seat.geometry %}{{ seat.geometry.width }}{% endif %}"></label>
+          <label>높이<input name="geometry_height" type="number" min="0" max="1" step="0.01" value="{% if seat and seat.geometry %}{{ seat.geometry.height }}{% endif %}"></label>
+        </div>
+      </div>
+      <div>
+        <button type="submit">{% if seat %}저장{% else %}등록{% endif %}</button>
+        <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seats">취소</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

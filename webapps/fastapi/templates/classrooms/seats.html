@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ classroom.code }} 좌석 관리 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">{{ classroom.code }}</p><h1>{{ classroom.name }} 좌석 관리</h1><p class="summary">{{ classroom.location }} · 전체 {{ total }}좌석</p></div>
+    <div class="page-actions">
+      <a class="button-link secondary" href="/classrooms">목록</a>
+      <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/edit">강의실 수정</a>
+      <a class="button-link" href="/classrooms/{{ classroom.id }}/seats/create">좌석 추가</a>
+    </div>
+  </header>
+
+  {% set geometry_seats = seats | selectattr('geometry') | list %}
+  {% set list_seats = seats | rejectattr('geometry') | list %}
+
+  {% if geometry_seats %}
+    <section class="panel" aria-labelledby="seat-map-title">
+      <h2 id="seat-map-title">좌석 배치</h2>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
+        <div class="seat-map" aria-label="좌석 배치">
+          {% for seat in geometry_seats %}
+            <div class="seat-card seat-card--admin" style="position:absolute;left:{{ seat.geometry.x*100 }}%;top:{{ seat.geometry.y*100 }}%;width:{{ seat.geometry.width*100 }}%;height:{{ seat.geometry.height*100 }}%;">
+              <strong>{{ seat.label }}</strong>
+              <small>{{ seat.code }}</small>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
+  {% if seats %}
+    <section class="panel" aria-labelledby="seat-list-title">
+      <h2 id="seat-list-title">좌석 목록</h2>
+      <ul class="card-list seat-grid">
+        {% for seat in seats %}
+          <li class="seat-list-card">
+            <strong>{{ seat.label }}</strong>
+            <span>{{ seat.code }}</span>
+            <small>{% if seat.geometry %}배치도 위치 ({{ seat.geometry.x|round(2) }}, {{ seat.geometry.y|round(2) }}) · {{ seat.geometry.width|round(2) }}×{{ seat.geometry.height|round(2) }}{% else %}배치도 미설정{% endif %}</small>
+            <small>{% if seat.is_active %}활성{% else %}비활성{% endif %}</small>
+            <div class="seat-actions">
+              <a href="/classrooms/{{ classroom.id }}/seats/{{ seat.id }}/edit">수정</a>
+              <form data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}" data-api-method="DELETE" data-confirm="{{ seat.label }} 좌석을 삭제할까요?" data-success-url="/classrooms/{{ classroom.id }}/seats">
+                <button type="submit" class="link-button">삭제</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% else %}
+    <div class="empty" role="status"><strong>등록된 좌석이 없습니다.</strong><p><a href="/classrooms/{{ classroom.id }}/seats/create">좌석 추가</a>에서 좌석을 등록하세요.</p></div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

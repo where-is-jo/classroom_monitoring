@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}강의실 등록 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">Classroom</p><h1>강의실 등록</h1><p class="summary">새 강의실의 코드·이름·위치를 입력합니다. 코드는 강의실마다 달라야 합니다.</p></div>
+    <a class="button-link secondary" href="/classrooms">목록으로</a>
+  </header>
+
+  <section class="panel" aria-labelledby="classroom-create-title">
+    <h2 id="classroom-create-title">강의실 정보</h2>
+    <form class="stack" data-api-url="/api/v1/classrooms" data-api-method="POST" data-success-url="/classrooms">
+      <p class="form-error" role="alert" data-form-error hidden></p>
+      <div class="form-grid">
+        <label>코드<input name="code" type="text" maxlength="64" required autocomplete="off" placeholder="A101"></label>
+        <label>이름<input name="name" type="text" maxlength="200" required placeholder="일반 강의실"></label>
+        <label>위치<input name="location" type="text" maxlength="200" required placeholder="A동 1층"></label>
+      </div>
+      <div>
+        <button type="submit">등록</button>
+        <a class="button-link secondary" href="/classrooms">취소</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}
