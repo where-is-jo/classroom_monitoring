@@ -89,6 +89,12 @@ class InMemoryClassroomRepository:
                 return existing
             if self._seat_by_code(seat.classroom_id, seat.code) is not None:
                 raise SeatDuplicateError()
+            if (
+                seat.row is not None
+                and seat.column is not None
+                and self._seat_by_coordinate(seat.classroom_id, seat.row, seat.column) is not None
+            ):
+                raise SeatDuplicateError()
             self._seats[seat.id] = seat
             return seat
 
@@ -114,7 +120,8 @@ class InMemoryClassroomRepository:
             self._seats[seat.id] = seat
             return seat
 
-    def update_seat(self, seat: Seat) -> Seat:
+    def update_seat(self, seat: Seat, *, unset_fields: list[str] | None = None) -> Seat:
+        # 메모리 저장소는 도메인 객체를 통째로 저장하므로 unset_fields는 무시한다.
         with self._lock:
             existing = self._seats.get(seat.id)
             if existing is None:
@@ -122,6 +129,12 @@ class InMemoryClassroomRepository:
             duplicate = self._seat_by_code(seat.classroom_id, seat.code)
             if duplicate is not None and duplicate.id != seat.id:
                 raise SeatDuplicateError()
+            if seat.row is not None and seat.column is not None:
+                coordinate_holder = self._seat_by_coordinate(
+                    seat.classroom_id, seat.row, seat.column
+                )
+                if coordinate_holder is not None and coordinate_holder.id != seat.id:
+                    raise SeatDuplicateError()
             self._seats[seat.id] = seat
             return seat
 
@@ -240,6 +253,16 @@ class InMemoryClassroomRepository:
                 item
                 for item in self._seats.values()
                 if item.classroom_id == classroom_id and item.code == code
+            ),
+            None,
+        )
+
+    def _seat_by_coordinate(self, classroom_id: str, row: int, column: int) -> Seat | None:
+        return next(
+            (
+                item
+                for item in self._seats.values()
+                if item.classroom_id == classroom_id and item.row == row and item.column == column
             ),
             None,
         )

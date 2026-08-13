@@ -98,6 +98,8 @@ class SeatCreateRequest(BaseModel):
 
     code: str
     label: str
+    row: int | None = None
+    column: int | None = None
     geometry: GeometryRequest | None = None
 
 
@@ -106,6 +108,8 @@ class SeatUpdateRequest(BaseModel):
 
     code: str | None = None
     label: str | None = None
+    row: int | None = None
+    column: int | None = None
     geometry: GeometryRequest | None = None
     is_active: bool | None = None
 
@@ -123,7 +127,9 @@ class SeatResponse(BaseModel):
     classroom_id: str
     code: str
     label: str
-    geometry: GeometryResponse | None
+    row: int | None = None
+    column: int | None = None
+    geometry: GeometryResponse | None = None
     is_active: bool
     current_occupancy: CurrentOccupancyResponse
     created_at: datetime
@@ -136,6 +142,8 @@ class SeatResponse(BaseModel):
             classroom_id=item.classroom_id,
             code=item.code,
             label=item.label,
+            row=item.row,
+            column=item.column,
             geometry=(
                 None if item.geometry is None else GeometryResponse.from_domain(item.geometry)
             ),

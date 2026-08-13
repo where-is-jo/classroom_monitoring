@@ -66,11 +66,14 @@ class ClassroomService:
         classroom_id: str,
         code: str,
         label: str,
+        row: int | None = None,
+        column: int | None = None,
         geometry: SeatGeometry | None = None,
     ) -> Seat:
         classroom = self._required_active_classroom(classroom_id)
         normalized_code = self._code(code)
         normalized_label = self._text(label, "좌석 이름")
+        self._validate_row_column(row, column)
         normalized_geometry = self._geometry(geometry)
         now = self._aware_datetime(self._clock())
         return self._repository.create_seat(
@@ -79,6 +82,8 @@ class ClassroomService:
                 classroom_id=classroom.id,
                 code=normalized_code,
                 label=normalized_label,
+                row=row,
+                column=column,
                 geometry=normalized_geometry,
                 is_active=True,
                 current_occupancy=SeatCurrentOccupancy(
@@ -137,6 +142,9 @@ class ClassroomService:
         seat_id = self._identifier(command.id, "좌석 ID")
         code = self._code(command.code)
         label = self._text(command.label, "좌석 이름")
+        row = command.row
+        column = command.column
+        self._validate_row_column(row, column)
         geometry = self._geometry(command.geometry)
         existing = self._repository.get_seat(seat_id)
         if existing is not None:
@@ -144,8 +152,10 @@ class ClassroomService:
                 existing.classroom_id,
                 existing.code,
                 existing.label,
+                existing.row,
+                existing.column,
                 existing.geometry,
-            ) != (classroom.id, code, label, geometry):
+            ) != (classroom.id, code, label, row, column, geometry):
                 raise SeatDuplicateError()
             return existing
         now = self._aware_datetime(self._clock())
@@ -155,6 +165,8 @@ class ClassroomService:
                 classroom_id=classroom.id,
                 code=code,
                 label=label,
+                row=row,
+                column=column,
                 geometry=geometry,
                 is_active=True,
                 current_occupancy=SeatCurrentOccupancy(
@@ -227,24 +239,62 @@ class ClassroomService:
         seat_id: str,
         code: str | None = None,
         label: str | None = None,
+        row: int | None = None,
+        column: int | None = None,
         geometry: SeatGeometry | None = None,
         is_active: bool | None = None,
+        *,
+        unset_row: bool = False,
+        unset_column: bool = False,
     ) -> Seat:
         seat = self._required_seat(seat_id)
         if not seat.is_active:
             raise SeatNotFoundError()
+
+        # row, column 검증
+        self._validate_row_column(row, column)
+
+        # row, column 처리 (unset_row/unset_column이 우선한다)
+        if unset_row:
+            updated_row = None
+        elif row is not None:
+            updated_row = row
+        else:
+            updated_row = seat.row
+
+        if unset_column:
+            updated_column = None
+        elif column is not None:
+            updated_column = column
+        else:
+            updated_column = seat.column
+
+        # 최종 상태 검증 (부분 해제 방지)
+        self._validate_row_column(updated_row, updated_column)
+
         updated_code = self._code(seat.code if code is None else code)
         updated_label = self._text(seat.label if label is None else label, "좌석 이름")
         updated_geometry = seat.geometry if geometry is None else self._geometry(geometry)
+
+        # row/column 해제 시 $unset 대상 필드 전달
+        unset_fields: list[str] = []
+        if unset_row:
+            unset_fields.append("row")
+        if unset_column:
+            unset_fields.append("column")
+
         return self._repository.update_seat(
             replace(
                 seat,
                 code=updated_code,
                 label=updated_label,
+                row=updated_row,
+                column=updated_column,
                 geometry=updated_geometry,
                 is_active=seat.is_active if is_active is None else is_active,
                 updated_at=self._aware_datetime(self._clock()),
-            )
+            ),
+            unset_fields=unset_fields if unset_fields else None,
         )
 
     def delete_seat(self, seat_id: str) -> None:
@@ -614,6 +664,20 @@ class ClassroomService:
         if not normalized or len(normalized) > 64:
             raise ClassroomInputError("코드는 1~64자여야 합니다.")
         return normalized
+
+    @staticmethod
+    def _validate_row_column(row: int | None, column: int | None) -> None:
+        """행·열 검증 로직.
+
+        - row와 column은 1 이상의 정수여야 한다.
+        - 둘 다 입력하거나 둘 다 비워야 한다 (부분 입력 불가).
+        """
+        if row is not None and row < 1:
+            raise ClassroomInputError("행은 1 이상이어야 합니다.")
+        if column is not None and column < 1:
+            raise ClassroomInputError("열은 1 이상이어야 합니다.")
+        if (row is None) != (column is None):
+            raise ClassroomInputError("행과 열은 모두 입력하거나 모두 비워야 합니다.")
 
     @staticmethod
     def _geometry(value: SeatGeometry | None) -> SeatGeometry | None:

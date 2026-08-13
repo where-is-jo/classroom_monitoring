@@ -124,6 +124,8 @@ def create_seat(
         classroom_id,
         code=payload.code,
         label=payload.label,
+        row=payload.row,
+        column=payload.column,
         geometry=None if payload.geometry is None else payload.geometry.to_domain(),
     )
     response.headers["Location"] = f"/api/v1/classrooms/{classroom_id}/seats/{seat.id}"
@@ -162,12 +164,20 @@ def update_seat(
     payload: SeatUpdateRequest,
     service: ClassroomService = Depends(get_classroom_service),
 ) -> SeatResponse:
+    # 명시적으로 null이 전달된 경우에만 해제한다 (전달 안 된 필드는 갱신하지 않는다).
+    unset_row = "row" in payload.model_fields_set and payload.row is None
+    unset_column = "column" in payload.model_fields_set and payload.column is None
+
     seat = service.update_seat(
         seat_id,
         code=payload.code,
         label=payload.label,
+        row=payload.row,
+        column=payload.column,
         geometry=None if payload.geometry is None else payload.geometry.to_domain(),
         is_active=payload.is_active,
+        unset_row=unset_row,
+        unset_column=unset_column,
     )
     return SeatResponse.from_domain(seat)
 
@@ -346,6 +356,13 @@ def seats_page(
         summary = service.occupancy_summary(classroom_id)
     except ClassroomNotFoundError:
         return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
+    # 행·열이 있는 좌석만 배치도에 표시한다 (REQ-006).
+    grid_seats = [seat for seat in summary.seats if seat.row is not None and seat.column is not None]
+    # CSS Grid 크기 계산과 빈 셀 렌더링용 좌표 맵을 만든다.
+    # 빈 강의실도 조작 가능한 최소 1x1 격자를 제공한다 (SPEC: max(1, current max)).
+    max_row = max((seat.row for seat in grid_seats if seat.row is not None), default=1)
+    max_column = max((seat.column for seat in grid_seats if seat.column is not None), default=1)
+    seat_map = {(seat.row, seat.column): seat for seat in grid_seats}
     return templates.TemplateResponse(
         request=request,
         name="classrooms/seats.html",
@@ -353,6 +370,10 @@ def seats_page(
             "classroom": summary.classroom,
             "seats": summary.seats,
             "total": summary.total,
+            "grid_seats": grid_seats,
+            "max_row": max_row,
+            "max_column": max_column,
+            "seat_map": seat_map,
         },
     )
 
