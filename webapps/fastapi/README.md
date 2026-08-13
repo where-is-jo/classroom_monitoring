@@ -97,6 +97,9 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 삭제 (비활성화) |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy-events` | SSE 좌석 점유 실시간 구독 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |

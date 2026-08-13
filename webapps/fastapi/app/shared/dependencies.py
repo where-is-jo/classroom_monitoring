@@ -9,27 +9,14 @@ from pathlib import Path
 from fastapi import Depends
 from pymongo import MongoClient
 
-from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from ..classrooms.adapters.memory_repository import (
+    InMemoryClassroomRepository,
+    InMemorySeatAssignmentRepository,
+)
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
 from ..demo_seed import seed_demo_data, seed_video_streams
-from ..student_monitoring.adapters.memory_repository import (
-    MemoryDetectionEventRepository,
-    MemoryVideoSegmentRepository,
-)
-from ..student_monitoring.adapters.mongo_repository import (
-    MongoDetectionEventRepository,
-    MongoVideoSegmentRepository,
-)
-from ..student_monitoring.ports import DetectionEventRepository, VideoSegmentRepository
-from ..student_monitoring.service import StudentMonitoringService
-from ..video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
-from ..video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
-from ..video_monitoring.ports import VideoStreamRepository
-from ..video_monitoring.service import VideoDemoService, VideoStreamService
-from .broadcaster import InMemoryBroadcaster
-from ..demo_seed import seed_demo_data
 from ..face_enrollment.adapters.http_analyzer import HttpFaceAnalyzer
 from ..face_enrollment.adapters.local_storage import LocalFaceObjectStorage
 from ..face_enrollment.adapters.memory import (
@@ -43,7 +30,24 @@ from ..face_enrollment.service import FaceEnrollmentService
 from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
 from ..snapshots.ports import SnapshotStorage
 from ..snapshots.service import SnapshotService
-from ..video_monitoring.service import VideoDemoService
+from ..student_monitoring.adapters.memory_repository import (
+    MemoryDetectionEventRepository,
+    MemoryVideoSegmentRepository,
+)
+from ..student_monitoring.adapters.mongo_repository import (
+    MongoDetectionEventRepository,
+    MongoVideoSegmentRepository,
+)
+from ..student_monitoring.ports import DetectionEventRepository, VideoSegmentRepository
+from ..student_monitoring.service import StudentMonitoringService
+from ..students.adapters.memory_repository import InMemoryStudentRepository
+from ..students.ports import StudentRepository
+from ..students.service import StudentService
+from ..video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
+from ..video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
+from ..video_monitoring.ports import VideoStreamRepository
+from ..video_monitoring.service import VideoDemoService, VideoStreamService
+from .broadcaster import InMemoryBroadcaster
 from .config import Settings
 from .database import (
     DatabaseOperationError,
@@ -84,6 +88,16 @@ def _video_segment_repository() -> MemoryVideoSegmentRepository:
 @lru_cache
 def _video_stream_repository() -> MemoryVideoStreamRepository:
     return MemoryVideoStreamRepository()
+
+
+@lru_cache
+def _student_repository() -> InMemoryStudentRepository:
+    return InMemoryStudentRepository()
+
+
+@lru_cache
+def _seat_assignment_repository() -> InMemorySeatAssignmentRepository:
+    return InMemorySeatAssignmentRepository()
 
 
 @lru_cache
@@ -162,6 +176,16 @@ def get_video_stream_repository(
     return _mongo_video_stream_repository()
 
 
+def get_student_repository(
+    settings: Settings = Depends(get_settings),
+) -> StudentRepository:
+    if settings.database_mode == "memory":
+        return _student_repository()
+    # MongoDB 어댑터는 TASK-A01에서 구현하지 않아도 됨
+    # 임시로 메모리 사용
+    return _student_repository()
+
+
 def get_broadcaster() -> InMemoryBroadcaster:
     return _broadcaster()
 
@@ -172,9 +196,18 @@ def get_classroom_service(
 ) -> ClassroomService:
     return ClassroomService(
         repository,
+        student_repository=get_student_repository(settings),
+        assignment_repository=_seat_assignment_repository(),
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         clock=utc_now,
     )
+
+
+def get_student_service(
+    repository: StudentRepository = Depends(get_student_repository),
+    settings: Settings = Depends(get_settings),
+) -> StudentService:
+    return StudentService(repository, clock=utc_now)
 
 
 @lru_cache
@@ -289,6 +322,7 @@ def get_face_enrollment_service(
             pitch_side_degrees=settings.face_pitch_side_degrees,
         ),
     )
+
 
 def get_video_stream_service(
     repository: VideoStreamRepository = Depends(get_video_stream_repository),
