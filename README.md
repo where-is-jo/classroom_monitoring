@@ -82,7 +82,7 @@ README.md      이 문서
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
-| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | 추론 코드 없음. 학습 노트북 있음 |
+| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD 검출·MediaPipe 자세 구현. 나머지 예정 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | Grafana 설정만 있음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 
@@ -166,7 +166,8 @@ README.md      이 문서
 전체 목록과 각 항목의 영향 범위는
 [아키텍처의 미결정 항목](./docs/architecture/README.md#미결정-항목)이 정본이다.
 
-- **얼굴 데이터 정책** — 동의 절차, 원본 보관 여부, 보존 기간, 접근 권한, 삭제 절차
+- **얼굴 데이터 운영 정책의 남은 부분** — 접근 권한과 재학 종료 자동 삭제 실행 주체
+  (동의 확인·원본 보관·중단 삭제는 결정 0011로 확정)
 - **영상 저장 범위·보존 기간·접근 권한** — 개인정보가 걸린 합의 사항
 - **스냅샷 접근 권한** — 개인정보가 걸린 합의 사항. 지금은 root 키로 붙는다
 - **운영 접근 통제 방식** — 정해지기 전까지 `APP_ENV=prod` 배포를 하지 않는다
@@ -174,6 +175,8 @@ README.md      이 문서
 - 결석 유예 시간 값과 좌석 판정 방식 — 실제 촬영이 선행되어야 한다
 - 카메라 배치(대수·높이·화각·거리)
 - 수업 시간표의 원본 관리 주체
+- 일반 모니터링 화면 갱신 방식과 브라우저 영상 재생 방식
+  (얼굴 등록 실시간 채널은 결정 0011에 따라 WebSocket 확정)
 - Tracking 도입과 `IN_CLASSROOM` 지원
 - 자연어 검색 방식, 캐시·큐 도입 여부, 알림 채널
 - 통합 실행 수단(docker compose) 공식화, 배포 환경과 방식

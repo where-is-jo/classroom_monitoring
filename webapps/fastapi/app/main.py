@@ -15,6 +15,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .classrooms.router import api_router as classroom_api_router
 from .classrooms.router import page_router as classroom_page_router
+from .face_enrollment.router import api_router as face_enrollment_api_router
+from .face_enrollment.router import page_router as face_enrollment_page_router
 from .shared.dependencies import (
     close_data_store,
     get_settings,
@@ -54,6 +56,7 @@ if get_settings().demo_mode_enabled:
     app.mount("/demo-assets", StaticFiles(directory=str(DEMO_ASSET_DIR)), name="demo-assets")
 app.include_router(classroom_page_router, include_in_schema=False)
 app.include_router(monitoring_page_router, include_in_schema=False)
+app.include_router(face_enrollment_page_router, include_in_schema=False)
 app.include_router(snapshot_page_router, include_in_schema=False)
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -66,6 +69,7 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 app.include_router(classroom_api_router, responses=_ERROR_RESPONSES)
 app.include_router(monitoring_api_router, responses=_ERROR_RESPONSES)
+app.include_router(face_enrollment_api_router, responses=_ERROR_RESPONSES)
 app.include_router(student_internal_router, responses=_ERROR_RESPONSES)
 app.include_router(student_api_router, responses=_ERROR_RESPONSES)
 app.include_router(snapshot_api_router, responses=_ERROR_RESPONSES)
@@ -150,6 +154,11 @@ def handle_unexpected_error(request: Request, exc: Exception) -> Response:
 @app.get("/", include_in_schema=False)
 def index() -> RedirectResponse:
     return RedirectResponse(url="/classrooms")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> RedirectResponse:
+    return RedirectResponse(url="/static/favicon.svg")
 
 
 @app.get("/health", tags=["system"], response_model=HealthResponse)

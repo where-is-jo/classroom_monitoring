@@ -3,7 +3,8 @@
 컴퓨터 비전 모델을 실행해 영상 프레임에서 **사람을 찾고, 얼굴을 찾고, 학생을 식별**하는
 추론 디렉터리다.
 
-> 현재 상태: **추론 코드는 아직 없다.** 모델 종류와 실행 환경은 아직 확정되지 않았다.
+> 현재 상태: SCRFD 얼굴 검출과 MediaPipe 자세 분석 내부 HTTP 서비스가 구현됐다.
+> 기본 속도·특징점 안정성·흐림·밝기·중복 품질 수치는 구현되었다. 전용 가림 모델과 AdaFace 인식은 아직 구현되지 않았다.
 > 모델 학습용 Jupyter 노트북은 [`training/`](./training/README.md)에 있다
 > ([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 성능 수치나 정확도를 측정 없이 이 문서에 기록하지 않는다.
@@ -187,6 +188,25 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 - 갤러리 대조는 고정 벡터로 검증한다. 실제 얼굴을 쓰지 않는다.
 - 모델 자체를 요구하는 테스트는 별도로 표시해 기본 테스트에서 분리한다.
 - 성능 측정은 테스트가 아닌 별도 벤치마크로 다루고, 측정하지 않은 수치를 문서화하지 않는다.
+
+## SCRFD local 실행
+
+사전학습 모델은 비상업적 연구 용도로만 사용한다. 모델 파일은 Git에 포함하지 않고
+`FACE_DETECTION_MODEL_PATH`로 주입한다.
+
+```powershell
+conda activate smart_monitoring
+cd deeplearning
+$env:FACE_DETECTION_MODEL_PATH=(Resolve-Path '.models\scrfd\scrfd_10g_bnkps.onnx')
+$env:FACE_LANDMARKER_MODEL_PATH=(Resolve-Path '.models\mediapipe\face_landmarker.task')
+python -m uvicorn app:app --port 8100
+```
+
+`POST /internal/face-analysis`는 JPEG 바이트와 `X-Face-Enrollment-ID`를 받아 얼굴 수,
+bbox 기반 크기 비율, 검출 신뢰도, 안내 타원 포함 여부, MediaPipe yaw·pitch·roll과
+얼굴 crop의 흐림·밝기, 프레임 간 각속도·중복 점수를 반환한다. 중복은 같은 세션의 최근
+120개 특징 중 유사 자세와 비교하고, 비교 상태는 완료·취소 시 삭제한다. 얼굴 이미지와
+비교 지문은 응답·로그에 포함하지 않으며 저장 여부와 파일명은 FastAPI가 결정한다.
 
 ## 관련 문서
 

@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+insightface==1.0.1
+onnxruntime==1.28.0
+opencv-python-headless
+numpy
+mediapipe==1.0.0
