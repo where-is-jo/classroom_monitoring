@@ -52,11 +52,28 @@ class StudentMonitoringService:
             self._stream_repository.update_last_detection(event.camera_id, event.captured_at)
 
             # Publish to SSE only for new events
+            # frame·detections를 함께 보내야 브라우저가 bbox overlay를 그릴 수 있다.
             self._broadcaster.publish({
                 "type": "detection",
                 "event_id": saved_event.event_id,
                 "camera_id": saved_event.camera_id,
                 "captured_at": saved_event.captured_at.isoformat(),
+                "sequence": saved_event.sequence,
+                "frame": {
+                    "width_pixels": saved_event.frame.width_pixels,
+                    "height_pixels": saved_event.frame.height_pixels,
+                },
+                "detections": [
+                    {
+                        "detection_id": d.detection_id,
+                        "class_id": d.class_id,
+                        "class_name": d.class_name,
+                        "confidence": d.confidence,
+                        "bbox": list(d.bbox),
+                        "student_id": d.student_id,
+                    }
+                    for d in saved_event.detections
+                ],
                 "detections_count": len(saved_event.detections),
             })
 
