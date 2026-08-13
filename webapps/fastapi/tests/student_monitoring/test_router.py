@@ -1,12 +1,14 @@
 """Router tests."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
+from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.service import ClassroomService
 from app.main import app
-from app.shared.dependencies import get_student_monitoring_service
 from app.shared.broadcaster import InMemoryBroadcaster
+from app.shared.dependencies import get_student_monitoring_service
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
     MemoryVideoSegmentRepository,
@@ -28,8 +30,8 @@ def _make_stream() -> VideoStream:
         last_frame_at=None,
         last_detection_at=None,
         is_demo=False,
-        created_at=datetime(2026, 8, 12, 0, 0, 0, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 8, 12, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
     )
 
 
@@ -38,11 +40,18 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
     segment_repo = MemoryVideoSegmentRepository()
     stream_repo = MemoryVideoStreamRepository()
     broadcaster = InMemoryBroadcaster()
+    classroom_service = ClassroomService(
+        InMemoryClassroomRepository(),
+        occupancy_confidence_threshold=0.5,
+        clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+    )
     service = StudentMonitoringService(
         detection_repository=detection_repo,
         segment_repository=segment_repo,
         stream_repository=stream_repo,
         broadcaster=broadcaster,
+        classroom_service=classroom_service,
+        occupancy_confidence_threshold=0.5,
     )
     return service, detection_repo
 

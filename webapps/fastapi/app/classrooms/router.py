@@ -11,8 +11,16 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from ..shared.broadcaster import InMemoryBroadcaster
 from ..shared.config import Settings
-from ..shared.dependencies import get_broadcaster, get_classroom_service, get_settings
+from ..shared.dependencies import (
+    get_broadcaster,
+    get_classroom_service,
+    get_settings,
+    get_student_monitoring_service,
+    get_student_service,
+)
 from ..shared.templating import templates
+from ..student_monitoring.service import StudentMonitoringService
+from ..students.service import StudentService
 from .errors import ClassroomNotFoundError, SeatNotFoundError
 from .schemas import (
     ClassroomCreateRequest,

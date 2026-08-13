@@ -33,6 +33,8 @@ from .schemas import (
     DetectionEventResponse,
     InferenceEventRequest,
     InferenceEventResponse,
+    StudentSeatStateResponse,
+    StudentStateListResponse,
     VideoSegmentDetailResponse,
     VideoSegmentListResponse,
     VideoSegmentRequest,
@@ -133,9 +135,12 @@ def list_detections(
     detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
 ) -> DetectionEventListResponse:
     """List detection events for a video stream."""
-    stream = stream_repository.find_by_id(stream_id) or stream_repository.find_by_camera_id(stream_id)
+    stream = stream_repository.find_by_id(stream_id) or stream_repository.find_by_camera_id(
+        stream_id
+    )
     if stream is None:
         from ..video_monitoring.errors import DemoStreamNotFoundError
+
         raise DemoStreamNotFoundError()
 
     if from_at is not None and to_at is not None:
@@ -192,9 +197,12 @@ async def stream_detection_events(
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
 ) -> StreamingResponse:
     """SSE endpoint for real-time detection events."""
-    stream = stream_repository.find_by_id(stream_id) or stream_repository.find_by_camera_id(stream_id)
+    stream = stream_repository.find_by_id(stream_id) or stream_repository.find_by_camera_id(
+        stream_id
+    )
     if stream is None:
         from ..video_monitoring.errors import DemoStreamNotFoundError
+
         raise DemoStreamNotFoundError()
 
     async def event_generator() -> AsyncIterator[str]:
@@ -221,4 +229,32 @@ async def stream_detection_events(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
         },
+    )
+
+
+@api_router.get(
+    "/classrooms/{classroom_id}/student-states",
+    response_model=StudentStateListResponse,
+)
+def list_student_states(
+    classroom_id: str,
+    service: StudentMonitoringService = Depends(get_student_monitoring_service),
+) -> StudentStateListResponse:
+    """강의실의 학생별 현재 상태를 반환한다."""
+    states = service.list_student_states(classroom_id)
+    return StudentStateListResponse(
+        classroom_id=classroom_id,
+        states=[
+            StudentSeatStateResponse(
+                student_id=s.student_id,
+                student_name=s.student_name,
+                student_no=s.student_no,
+                assigned_seat_id=s.assigned_seat_id,
+                assigned_seat_label=s.assigned_seat_label,
+                current_state=s.current_state.value,
+                confidence=s.confidence,
+                last_observed_at=s.last_observed_at,
+            )
+            for s in states
+        ],
     )

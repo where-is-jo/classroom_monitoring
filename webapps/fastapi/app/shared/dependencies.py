@@ -306,12 +306,17 @@ def get_student_monitoring_service(
     segment_repository: VideoSegmentRepository = Depends(get_video_segment_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
+    classroom_service: ClassroomService = Depends(get_classroom_service),
+    settings: Settings = Depends(get_settings),
 ) -> StudentMonitoringService:
     return StudentMonitoringService(
         detection_repository=detection_repository,
         segment_repository=segment_repository,
         stream_repository=stream_repository,
         broadcaster=broadcaster,
+        classroom_service=classroom_service,
+        occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
+        identity_confidence_threshold=0.5,  # 기본값, 설정에서 읽도록 확장 가능
     )
 
 
