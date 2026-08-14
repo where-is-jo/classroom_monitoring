@@ -443,3 +443,35 @@ def test_pose_quota_total_must_equal_required_sample_count() -> None:
             database_mode="memory",
             face_enrollment_required_samples=301,
         )
+
+
+def test_webrtc_signaling_base_url_strips_trailing_slash() -> None:
+    # 화면이 이 값 뒤에 /<카메라>/whep을 붙이므로 //가 생기면 안 된다.
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        app_env="local",
+        database_mode="memory",
+        webrtc_signaling_base_url="http://localhost:18889/",
+    )
+
+    assert settings.webrtc_signaling_base_url == "http://localhost:18889"
+
+
+def test_webrtc_signaling_base_url_rejects_blank() -> None:
+    # 빈 값이면 요청이 같은 origin의 루트로 가서 fastapi가 조용히 404를 낸다.
+    with pytest.raises(ValidationError, match="WEBRTC_SIGNALING_BASE_URL"):
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            webrtc_signaling_base_url="   ",
+        )
+
+
+def test_monitoring_page_carries_webrtc_signaling_base(minimal_client: TestClient) -> None:
+    # 정적 JS가 시그널링 주소를 가질 수 없으므로 서버가 실어 보낸다.
+    # 이 속성이 빠지면 실시간 영상만 조용히 동작하지 않는다.
+    monitoring = minimal_client.get("/monitoring")
+
+    assert monitoring.status_code == 200
+    assert 'data-webrtc-base="' in monitoring.text

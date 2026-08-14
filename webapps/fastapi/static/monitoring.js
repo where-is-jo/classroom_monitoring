@@ -9,6 +9,17 @@
   };
 
   /* ── WebRTC player ── */
+
+  /* WHEP 시그널링 주소는 배포 환경마다 다르다. 서버가 base.html의 data 속성으로
+     내려 준다(설정 WEBRTC_SIGNALING_BASE_URL).
+     - 앞단 reverse proxy가 있으면 같은 origin의 상대 경로 "/webrtc"
+     - 그 proxy가 없는 개발자 PC에서는 MediaMTX 주소 "http://localhost:18889"
+     정적 JS가 포트를 직접 갖고 있으면 그 포트를 외부에 열어야 하고 배포마다 값이 갈린다. */
+  function whepSignalingUrl(cameraId) {
+    const base = (document.body.dataset.webrtcBase || "/webrtc").replace(/\/+$/, "");
+    return base + "/" + encodeURIComponent(cameraId) + "/whep";
+  }
+
   function initWebRTCPlayer(videoEl, cameraId) {
     /* WHEP signaling: MediaMTX에 SDP offer를 보내고 answer를 받는다 */
     const pc = new RTCPeerConnection();
@@ -29,7 +40,7 @@
         return pc.setLocalDescription(offer);
       })
       .then(() => {
-        const whepUrl = "http://" + window.location.hostname + ":8889/" + cameraId + "/whep";
+        const whepUrl = whepSignalingUrl(cameraId);
         console.log("WHEP signaling 요청:", whepUrl);
         return fetch(whepUrl, {
           method: "POST",

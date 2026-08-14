@@ -84,6 +84,18 @@ class Settings(BaseSettings):
     face_analyzer_url: str = "http://127.0.0.1:8100"
     face_analyzer_timeout_seconds: float = Field(default=5, gt=0, le=30)
 
+    # --- 실시간 영상 시그널링(WHEP) ---
+    # 브라우저가 WHEP 요청을 보낼 주소의 접두사다. 화면이 이 값 뒤에 `/<카메라>/whep`을
+    # 붙여 부른다.
+    #
+    # 기본값은 같은 origin의 상대 경로다. 앞단 reverse proxy가 이 경로를 MediaMTX
+    # 시그널링(8889)으로 넘기는 것을 전제한다 — 그러면 MediaMTX 포트를 외부에 열지
+    # 않아도 되고 배포마다 주소가 갈리지 않는다.
+    #
+    # **그 proxy가 없는 환경(개발자 PC)에서는 MediaMTX 주소를 직접 넣는다**
+    # (예: http://localhost:18889). 환경마다 실제로 다른 값이라 .env.{APP_ENV}에 둔다.
+    webrtc_signaling_base_url: str = "/webrtc"
+
     # SSE settings
     sse_heartbeat_interval_seconds: int = Field(default=30, ge=1)
     sse_reconnection_timeout_seconds: int = Field(default=60, ge=1)
@@ -142,6 +154,16 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("webrtc_signaling_base_url")
+    @classmethod
+    def _normalize_webrtc_signaling_base_url(cls, value: str) -> str:
+        # 화면이 이 값 뒤에 `/<카메라>/whep`을 붙이므로 끝의 /를 미리 떼어 //를 막는다.
+        # 빈 값은 같은 origin의 루트를 가리키게 되어 조용히 fastapi로 요청이 가므로 막는다.
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            raise ValueError("WEBRTC_SIGNALING_BASE_URL은 비워 둘 수 없습니다.")
+        return normalized
 
     @model_validator(mode="after")
     def _validate_environment_contract(self) -> Self:
