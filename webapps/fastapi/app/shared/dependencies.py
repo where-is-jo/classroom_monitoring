@@ -27,7 +27,9 @@ from ..face_enrollment.adapters.memory import (
 from ..face_enrollment.models import PoseBin
 from ..face_enrollment.rules import EnrollmentThresholds
 from ..face_enrollment.service import FaceEnrollmentService
+from ..llm_search.adapters.llama_planner import LlamaQueryPlanner
 from ..llm_search.adapters.stub_planner import StubQueryPlanner
+from ..llm_search.ports import QueryPlanner
 from ..llm_search.service import LlmSearchService
 from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
 from ..snapshots.ports import SnapshotStorage
@@ -246,6 +248,21 @@ def _stub_query_planner() -> StubQueryPlanner:
     return StubQueryPlanner()
 
 
+@lru_cache
+def _llama_query_planner(base_url: str, timeout_seconds: float, model: str) -> LlamaQueryPlanner:
+    return LlamaQueryPlanner(base_url, timeout_seconds, model)
+
+
+def _query_planner(settings: Settings) -> QueryPlanner:
+    if settings.llm_search_mode == "llama":
+        return _llama_query_planner(
+            settings.llm_search_url,
+            settings.llm_search_timeout_seconds,
+            settings.llm_search_model,
+        )
+    return _stub_query_planner()
+
+
 def get_llm_search_service(
     detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
@@ -258,7 +275,7 @@ def get_llm_search_service(
     그 안에 있어서, 포트를 직접 넘기면 키 규칙이 세 번째로 복사된다.
     """
     return LlmSearchService(
-        _stub_query_planner(),
+        _query_planner(settings),
         detection_repository,
         stream_repository,
         snapshot_service,
@@ -417,6 +434,7 @@ def close_data_store() -> None:
     _face_analyzer.cache_clear()
     _http_face_analyzer.cache_clear()
     _stub_query_planner.cache_clear()
+    _llama_query_planner.cache_clear()
 
 
 def verify_readiness(settings: Settings = Depends(get_settings)) -> None:

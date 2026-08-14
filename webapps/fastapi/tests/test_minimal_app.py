@@ -407,6 +407,15 @@ def test_occupancy_summary_does_not_truncate_after_one_repository_page() -> None
             "DEMO_MODE_ENABLED",
         ),
         ({"app_env": "local", "database_mode": "mongodb"}, "DATABASE_URL"),
+        (
+            {
+                "app_env": "local",
+                "database_mode": "memory",
+                "llm_search_mode": "llama",
+                "llm_search_url": "   ",
+            },
+            "LLM_SEARCH_URL",
+        ),
     ],
 )
 def test_settings_reject_unsafe_or_incomplete_modes(
