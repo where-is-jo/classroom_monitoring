@@ -22,16 +22,19 @@ try:
     from minio import Minio
     from minio.error import MinioException, S3Error
 except ImportError:  # pragma: no cover - 패키지가 없는 환경에서의 경로
-    Minio = None
-    MinioException = None
-    S3Error = None
+    # 이름에 None을 대입하는 것은 mypy가 보기엔 타입 자리에 값을 넣는 것이라 오류다.
+    # 여기서는 "패키지가 없으면 이름이 비어 있다"가 의도된 동작이므로 억제한다.
+    # worker/inference/model.py가 ultralytics에 쓰는 것과 같은 패턴이다.
+    Minio = None  # type: ignore[assignment, misc]
+    MinioException = None  # type: ignore[assignment, misc]
+    S3Error = None  # type: ignore[assignment, misc]
 
 try:
     import urllib3
     from urllib3.exceptions import HTTPError as Urllib3HTTPError
 except ImportError:  # pragma: no cover
-    urllib3 = None
-    Urllib3HTTPError = None
+    urllib3 = None  # type: ignore[assignment]
+    Urllib3HTTPError = None  # type: ignore[assignment, misc]
 
 # Urllib3HTTPError를 빠뜨리면 MinIO가 꺼져 있을 때 예외가 그대로 새어 나가
 # 500이 된다. OSError가 아니라서 잡히지 않는다.

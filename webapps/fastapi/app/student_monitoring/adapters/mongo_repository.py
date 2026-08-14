@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
@@ -17,6 +18,19 @@ from ..models import (
     FrameInfo,
     VideoSegment,
 )
+
+
+def _to_bbox(value: Any) -> tuple[int, int, int, int]:
+    """저장된 bbox 값을 길이 4 튜플로 좁힌다.
+
+    `tuple(int(x) for x in ...)`는 `tuple[int, ...]`라 길이를 보장하지 못한다.
+    도메인 모델은 좌표 4개를 요구하므로 여기서 실제로 4개인지 확인한다.
+    길이가 다르면 언패킹이 ValueError를 내고, `_to_domain`의 예외 처리가
+    이를 RepositoryDataError로 바꾼다 — 저장된 데이터가 깨진 것이므로
+    잘못된 도메인 객체를 만들어 넘기는 것보다 낫다.
+    """
+    x1, y1, x2, y2 = (int(coordinate) for coordinate in value)
+    return (x1, y1, x2, y2)
 
 
 class MongoDetectionEventRepository:
@@ -157,10 +171,10 @@ class MongoDetectionEventRepository:
                     class_id=int(d["class_id"]),
                     class_name=str(d["class_name"]),
                     confidence=float(d["confidence"]),
-                    bbox=tuple(int(x) for x in d["bbox"]),
+                    bbox=_to_bbox(d["bbox"]),
                     student_id=d.get("student_id"),
                     identity_confidence=d.get("identity_confidence"),
-                    face_bbox=tuple(int(x) for x in d["face_bbox"]) if d.get("face_bbox") else None,
+                    face_bbox=_to_bbox(d["face_bbox"]) if d.get("face_bbox") else None,
                 )
                 for d in detections_doc
             )
