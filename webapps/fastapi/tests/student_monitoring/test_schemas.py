@@ -1,6 +1,6 @@
 """Schema validation tests."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -20,7 +20,7 @@ class TestInferenceEventRequest:
         request = InferenceEventRequest(
             event_id="test-event-1",
             camera_id="camera-a",
-            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=timezone.utc),
+            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
             sequence=18420,
             frame=FrameSchema(width_pixels=1920, height_pixels=1080),
             detections=[
@@ -41,7 +41,7 @@ class TestInferenceEventRequest:
         request = InferenceEventRequest(
             event_id="test-event-empty",
             camera_id="camera-a",
-            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=timezone.utc),
+            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
             sequence=18421,
             frame=FrameSchema(width_pixels=1920, height_pixels=1080),
             detections=[],
@@ -91,8 +91,8 @@ class TestVideoSegmentRequest:
         request = VideoSegmentRequest(
             segment_id="camera-a-20260812T010000Z",
             camera_id="camera-a",
-            recorded_from=datetime(2026, 8, 12, 1, 0, 0, tzinfo=timezone.utc),
-            recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=timezone.utc),
+            recorded_from=datetime(2026, 8, 12, 1, 0, 0, tzinfo=UTC),
+            recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=UTC),
             storage="minio",
             bucket_alias="recordings",
             object_key="camera-a/2026-08-12/20260812T010000Z.mp4",
@@ -107,7 +107,7 @@ class TestVideoSegmentRequest:
                 segment_id="camera-a-20260812T010000Z",
                 camera_id="camera-a",
                 recorded_from=datetime(2026, 8, 12, 1, 0, 0),  # No timezone
-                recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=timezone.utc),
+                recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=UTC),
                 storage="minio",
                 bucket_alias="recordings",
                 object_key="camera-a/2026-08-12/20260812T010000Z.mp4",

@@ -1,6 +1,6 @@
 """Memory repository tests."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -28,11 +28,11 @@ def _make_event(
         camera_id=camera_id,
         stream_id="stream-camera-a",
         classroom_id="classroom-a101",
-        captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=timezone.utc),
+        captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
         sequence=sequence,
         frame=FrameInfo(width_pixels=1920, height_pixels=1080),
         detections=detections,
-        received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=timezone.utc),
+        received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=UTC),
         schema_version=1,
     )
 
@@ -46,13 +46,13 @@ def _make_segment(
         camera_id=camera_id,
         stream_id="stream-camera-a",
         classroom_id="classroom-a101",
-        recorded_from=datetime(2026, 8, 12, 1, 0, 0, tzinfo=timezone.utc),
-        recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=timezone.utc),
+        recorded_from=datetime(2026, 8, 12, 1, 0, 0, tzinfo=UTC),
+        recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=UTC),
         storage="minio",
         bucket_alias="recordings",
         object_key=f"{camera_id}/2026-08-12/{segment_id}.mp4",
         size_bytes=48392012,
-        received_at=datetime(2026, 8, 12, 1, 5, 1, tzinfo=timezone.utc),
+        received_at=datetime(2026, 8, 12, 1, 5, 1, tzinfo=UTC),
         schema_version=1,
     )
 
@@ -119,8 +119,8 @@ class TestMemoryVideoSegmentRepository:
         repo.save(segment)
         segments = repo.find_by_camera_and_period(
             "camera-a",
-            datetime(2026, 8, 12, 0, 0, 0, tzinfo=timezone.utc),
-            datetime(2026, 8, 12, 2, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+            datetime(2026, 8, 12, 2, 0, 0, tzinfo=UTC),
             limit=10,
         )
         assert len(segments) == 1
