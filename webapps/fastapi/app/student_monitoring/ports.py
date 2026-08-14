@@ -23,9 +23,7 @@ class DetectionEventRepository(Protocol):
         """Find by event ID."""
         ...
 
-    def find_recent_by_camera(
-        self, camera_id: str, limit: int
-    ) -> list[DetectionEvent]:
+    def find_recent_by_camera(self, camera_id: str, limit: int) -> list[DetectionEvent]:
         """Find recent detections by camera."""
         ...
 

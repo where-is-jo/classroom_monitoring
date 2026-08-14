@@ -91,8 +91,10 @@ def test_product_navigation_includes_face_enrollment(minimal_client: TestClient)
         response = minimal_client.get(path)
         assert response.status_code == 200
         assert heading in response.text
-        assert response.text.count('class="nav-group-title"') == 2
-        for label in ("강의실 좌석 현황", "실시간 모니터링", "자연어 검색"):
+        # 모니터링 / 등록 관리 / 학생 현황 세 묶음이다.
+        assert response.text.count('class="nav-group-title"') == 3
+        # 얼굴 등록은 이 테스트 이름이 약속한 항목이다. 단언이 빠져 있어 함께 넣는다.
+        for label in ("강의실 좌석 현황", "실시간 모니터링", "자연어 검색", "얼굴 등록"):
             assert label in response.text
         for removed in ("로그인", "사용자 관리", "직원 관리", "면담", "알림"):
             assert removed not in response.text
@@ -156,17 +158,34 @@ def test_removed_students_write_crud_is_404(
 def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -> None:
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
     assert paths == {
+        # 강의실·좌석
         "/api/v1/classrooms",
+        "/api/v1/classrooms/{classroom_id}",
         "/api/v1/classrooms/{classroom_id}/occupancy",
+        "/api/v1/classrooms/{classroom_id}/occupancy-events",
+        "/api/v1/classrooms/{classroom_id}/seats",
+        "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
+        "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
+        "/api/v1/classrooms/{classroom_id}/seat-assignments",
+        # 학생 상태
+        "/api/v1/classrooms/{classroom_id}/student-states",
+        # 영상 모니터링
         "/api/v1/video-streams",
         "/api/v1/video-streams/{stream_id}",
+        "/api/v1/video-streams/{stream_id}/detections",
+        "/api/v1/video-streams/{stream_id}/detection-events",
         "/api/v1/video-searches",
+        "/api/v1/video-segments",
+        # 얼굴 등록
         "/api/v1/students/{student_id}/face-enrollments",
         "/api/v1/face-enrollments/{enrollment_id}",
         "/api/v1/students/{student_id}/face-profile",
         # 탐지 스냅샷 조회(결정 0011). 영상 원본을 저장하지 않는 대신 남기는 정지 이미지다.
         "/api/v1/snapshots",
         "/api/v1/snapshots/image/{key}",
+        # worker가 결과를 밀어 넣는 내부 수집 경로다. 브라우저가 부르는 API가 아니다.
+        "/internal/inference/events",
+        "/internal/video-segments",
         "/health",
         "/health/ready",
     }

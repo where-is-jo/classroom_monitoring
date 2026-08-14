@@ -54,9 +54,7 @@ class StudentLookupPort(Protocol):
         ...
 
 
-def validate_list_active_args(
-    *, limit: int, offset: int, page_size_max: int
-) -> None:
+def validate_list_active_args(*, limit: int, offset: int, page_size_max: int) -> None:
     """호출자 입력 검증. 위반 시 422 CLASSROOM_INPUT_INVALID를 던진다.
 
     계약: `0 <= offset`, `1 <= limit <= Settings.page_size_max`.

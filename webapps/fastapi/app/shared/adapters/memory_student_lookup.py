@@ -17,9 +17,7 @@ class InMemoryStudentLookup:
     """
 
     def __init__(self, identities: tuple[StudentIdentity, ...] = ()) -> None:
-        self._by_id: dict[str, StudentIdentity] = {
-            identity.id: identity for identity in identities
-        }
+        self._by_id: dict[str, StudentIdentity] = {identity.id: identity for identity in identities}
 
     def find_by_id(self, student_id: str) -> StudentIdentity | None:
         return self._by_id.get(student_id)
