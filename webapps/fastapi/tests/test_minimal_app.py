@@ -161,8 +161,14 @@ def test_removed_students_write_crud_is_404(
 
 
 def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> None:
+    """아래 경로가 모두 등록되어 있는지만 본다(부분집합).
+
+    이전에는 `paths == {...} <= paths`라는 연쇄 비교여서 "정확히 같다"까지 요구했다.
+    그래서 새 기능이 엔드포인트를 더할 때마다 이 테스트가 함께 깨졌다. 이름이 말하는
+    계약은 "필수 API가 빠지지 않았다"이므로 부분집합 검사만 남긴다.
+    """
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
-    assert paths == {
+    assert {
         # 강의실·좌석
         "/api/v1/classrooms",
         "/api/v1/classrooms/{classroom_id}",
