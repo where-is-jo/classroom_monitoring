@@ -57,34 +57,34 @@ max_retry: 3
 그래서 `<서비스>/.env.dev`와 `.env.prod`는 실제로 만들지 않는다. 로더는 계속 지원하므로
 디버깅 목적으로 소스에서 dev 설정을 띄우고 싶으면 만들어 써도 된다.
 
-### 세 계층을 섞지 않는다
+### 두 계층을 섞지 않는다
 
-컨테이너로 띄울 때 환경변수는 성격이 다른 세 계층으로 나뉜다. 어느 계층인지 먼저 정하고
+컨테이너로 띄울 때 환경변수는 성격이 다른 두 계층으로 나뉜다. 어느 계층인지 먼저 정하고
 파일을 고른다.
 
-| 계층 | 예 | 컨테이너에 들어가나 | 파일 |
-| --- | --- | --- | --- |
-| compose `${...}` 치환 | 이미지 태그, 호스트 경로, 공인 IP, 대외 포트 | 아니오 | `.docker/.env.<환경>` |
-| 컨테이너 앱 설정 | `DATABASE_URL`, `STREAM_SOURCES`, `SNAPSHOT_STORAGE_*` | 예 (`env_file`) | `.docker/env/<서비스>.<환경>.env` |
-| 서드파티 자격증명 | MinIO root, Grafana admin, n8n | 예 (`env_file`) | `.docker/env/<서드파티>.<환경>.env` |
+| 계층 | 예 | 컨테이너에 들어가나 | 파일 | 커밋 |
+| --- | --- | --- | --- | --- |
+| 컨테이너 앱 설정 | `DATABASE_URL`, `STREAM_SOURCES`, `SNAPSHOT_STORAGE_*` | 예 (`env_file`) | `.docker/env/<서비스>.<환경>.env` | 안 함 |
+| 서드파티 자격증명 | MinIO root, Grafana admin, n8n | 예 (`env_file`) | `.docker/env/<서드파티>.<환경>.env` | 안 함 |
 
-첫 계층은 compose가 파일을 해석할 때만 쓰고 컨테이너 안으로 들어가지 않는다. Python
-`Settings`가 읽지 않으므로 **`.env.example`에 넣지 않는다.**
+**compose 자체가 쓰는 값(이미지 태그, 호스트 경로, 대외 포트)은 파일로 빼지 않는다.**
+[결정 0018](../architecture/decisions.md#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다)로
+compose 파일을 커밋하면서 그 안에 직접 적기로 했다. `${...}` 치환에 쓰던
+`.docker/.env.<환경>`은 `.env.*` 패턴에 걸려 커밋되지 않으므로, 치환에 의존하면
+**저장소에서 받은 compose만으로는 실행할 수 없기 때문이다.**
 
-`.docker/.env`(환경 접미사 없는 이름)는 일부러 두지 않는다. 두면 `--env-file`을 빠뜨렸을 때
-compose가 조용히 그 파일을 집어 들어 로컬 값으로 서버를 띄운다. 없으면 즉시 실패한다.
+그래서 `--env-file`도 쓰지 않는다. **환경을 고르는 것은 파일 이름이다.**
 
 ```bash
-docker compose --env-file .docker/.env.dev   -f .docker/compose.main.yml up -d
-docker compose --env-file .docker/.env.local -f .docker/compose.main.yml up -d
+docker compose -f .docker/compose.main.dev.yml   up -d
+docker compose -f .docker/compose.main.local.yml up -d
 ```
 
 ### 어떤 파일을 읽는지는 실제 OS 환경변수 `APP_ENV`가 정한다
 
 소스에서 실행할 때는 셸에서 export한다(`export APP_ENV=dev`). 컨테이너로 띄울 때는
-`--env-file`로 고른 `.docker/.env.<환경>`의 `APP_ENV`가 `env_file` 경로의 `${APP_ENV}`를
-채우고, compose가 `environment:`로 컨테이너에도 같은 값을 주입한다 — 그래서 **선택한
-파일과 컨테이너 안의 `APP_ENV`가 어긋날 수 없다.**
+각 compose 파일이 `environment:`에 `APP_ENV`를 고정값으로 적고 `env_file` 경로도 그
+환경으로 고정해 둔다 — 그래서 **고른 파일과 컨테이너 안의 `APP_ENV`가 어긋날 수 없다.**
 
 **export하지 않으면 `local`로 본다** — 손이 덜 가는 local을 기본값으로 두는 원칙과 같다.
 

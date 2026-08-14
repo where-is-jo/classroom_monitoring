@@ -1,0 +1,10 @@
+# 로컬 검증용 최소 설정. fastapi는 아직 /metrics를 노출하지 않으므로(monitoring/internal/README.md
+# "구현 전") 지금은 Prometheus 자기 자신만 스크랩한다. 서비스가 지표를 노출하면 여기에 job을 추가한다.
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -946,7 +946,9 @@ llama-server는 추론 워커와 같은 GPU를 쓴다. 인증이 없는 상태(�
 
 ## 0017 · 컨테이너 실행의 환경변수를 세 계층으로 나누고 .docker/ 아래에 둔다
 
-**상태**: 확정
+**상태**: 확정. 단 **1계층(compose `${...}` 치환용 `.docker/.env.<환경>`)은
+[결정 0018](#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다)이 없앴다.**
+2·3계층(`env_file`로 주입하는 값)과 `local`/`dev` 축은 그대로다.
 
 **배경**: [결정 0015](#0015--서비스-설정을-localdevprod-env와-공용-configsettingsyml로-분리한다)가
 `<서비스>/.env.{local,dev,prod}` 체계를 정했지만, 값 이관을 시작하자 그 경로를
@@ -1025,84 +1027,60 @@ llama-server는 추론 워커와 같은 GPU를 쓴다. 인증이 없는 상태(�
 fastapi가 공용으로 쓰는 상태(2026-08-12 결정)와 Grafana admin 비밀번호는 **운영 전환 전
 재발급이 필요하다.** `deeplearning`은 이번 범위 밖이라 여전히 순수 `os.environ`을 쓰고,
 `FACE_DETECTION_MODEL_PATH`·`FACE_LANDMARKER_MODEL_PATH`는 어떤 `.env.example`에도 없다.
-## 0018 · 카메라 영상 재생을 FastAPI WHEP 프록시와 재생 세션으로 통제한다
+
+## 0018 · docker compose 구성을 저장소에 커밋하고 local/dev 파일을 나눈다
 
 **상태**: 확정
 
-**배경**: 실시간 관제를 HTTP·WebRTC·SSE로 구성하기로 했지만(결정 0011), "fastapi가
-허용한 WebRTC 세션"의 **허용이 구체적으로 어떻게 구현되는지**는 남아 있었다. 운영
-접근 통제는 MVP 동안 도입하지 않기로 했고(결정 0010), local/dev에서 "URL을 알면
-영상에 접근할 수 있음을 감수한다"고 한 것은 영상 연결을 검증하기 위한 잠정 상태였다.
-`/monitoring` 화면을 연결된 실제 카메라 중심으로 전환하면 그대로 둘 수 없다. 학생이
-보이는 실제 영상의 재생 경로에 아무 검증도 없으면, 브라우저가 MediaMTX
-주소(`:8889`)를 알게 되어 URL만으로 영상에 접근할 수 있고, signaling을 아무나 보낼
-수 있다.
+**배경**: [결정 0017](#0017--컨테이너-실행의-환경변수를-세-계층으로-나누고-docker-아래에-둔다)이
+`.docker/`를 배포 전송 단위로 만들었지만, 그 디렉터리는 `.gitignore` 대상이었다.
+[최상위 구조 제약](../agents/AGENTS.md)이 "최상위에 인프라 파일을 새로 만들지 않는다"고
+정했기 때문이다. 그 결과 실제로 다음이 일어났다.
 
-동시에 브라우저가 MediaMTX에 직접 닿지 않도록 프록시를 두면 **SSRF**와 **재생 세션의
-수명**이라는 새 결정이 필요하다. 무엇을 proxy target으로 쓰는지, 세션을 언제
-활성화하고 언제 폐기하는지, 오류를 어떻게 구분하는지를 정하지 않으면 구현이
-시작될 수 없어, SPEC 7번이 이 ADR을 UI 구현의 선행조건으로 명시했다.
+- **팀이 실행 수단을 공유할 수 없었다.** compose 파일이 개인 PC에만 있어, 서버에 무엇이
+  어떤 포트로 떠 있는지 저장소를 봐서는 알 수 없었다.
+- **변경 이력이 남지 않았다.** 포트를 80 → 82 → 8076으로, reverse proxy를 Caddy에서
+  nginx로 옮기는 동안 무엇이 왜 바뀌었는지 추적할 방법이 파일 안 주석뿐이었다.
+- 한 `compose.main.yml`이 `--env-file`로 환경을 갈아 끼우는 구조라, **로컬에서 확인하려면
+  서버 값 파일을 함께 들고 있어야 했다.** 이미지 태그(로컬 빌드 `:local` vs GHCR
+  `:latest`), GPU 예약 유무, 포트 노출 범위처럼 **환경마다 다른 것이 값이 아니라 구조인데도**
+  한 파일이 둘을 겸했다.
 
-**결정**: 카메라 영상 재생을 **FastAPI 재생 세션 + WHEP signaling 프록시**로 통제한다.
+**결정**:
 
-1. **재생 세션은 `POST /api/v1/video-streams/{stream_id}/playback-sessions`로만
-   만든다.** 실제·enabled·WebRTC source만 허용하며, 응답은 opaque `session_id`,
-   FastAPI signaling URL, `expires_at`만 포함한다. 생성 응답에 MediaMTX 주소·포트·
-   RTSP URL·자격 증명을 넣지 않는다.
-2. **소유권은 HttpOnly owner cookie로 검증한다.** 서버가 별도의 unguessable
-   `HttpOnly`·`Secure`·`SameSite=Strict` cookie를 설정하고, signaling 요청은
-   **URL의 `session_id`와 owner cookie가 모두 일치할 때만** 허용한다. MVP에 사용자
-   인증을 새로 도입하지 않되, cross-origin credentialed request는 허용하지 않는다.
-3. **proxy target은 server-side binding으로만 결정한다.** FastAPI가 session의 source
-   mapping·TTL·owner를 검증한 뒤 MediaMTX WHEP를 대행하며, 대상 origin/path는
-   source의 server-side `camera_id`와 deployment config로만 조립한다. client
-   request의 URL·host·path·SDP 이외의 값을 proxy target으로 쓰지 않아 **SSRF를
-   차단**한다. MediaMTX WHEP·관리 포트와 RTSP URL·자격 증명은 browser에 노출하지
-   않는다.
-4. **session 상태는 `CREATED -> ACTIVE -> CLOSED` 또는 `CREATED/ACTIVE ->
-   EXPIRED`다.** FastAPI가 remote WHEP `POST`에 성공하고 remote resource location을
-   server-side로 보관하면 `ACTIVE`가 된다. `PATCH`는 ACTIVE에서만 허용하고,
-   `DELETE`는 ACTIVE/CLOSED에서 idempotent로 동작하며 remote delete를 한 번 시도한 뒤
-   local state를 CLOSED로 한다.
-5. **TTL 만료와 페이지 이탈은 같은 cleanup을 수행한다.** TTL은 짧게 두고
-   `expires_at`을 생성 시 반환한다. 만료·이탈 시 remote cleanup을 시도하며,
-   remote cleanup 실패는 server log/metric 대상이지만 **local session을 다시
-   활성화하지 않는다.**
-6. **생성/POST 실패는 session을 ACTIVE로 전이시키지 않는다.** 실패는 해당 카드에
-   한정해 표시하고 재시도 안내를 주며, 다른 카드의 재생·SSE를 중단하지 않는다.
-7. **오류 경계를 HTTP 상태로 구분한다.** owner cookie 불일치는 `403`, 존재하지 않는
-   session은 `404`, 만료 session은 `410`, 재생 불가 source는 `409`, MediaMTX 장애는
-   `503`(연결 실패) 또는 `504`(proxy timeout)로 응답한다. 재생 오류를 학생 부재나
-   카메라 해제로 해석하지 않는다.
+1. **`.docker/`를 커밋한다.** 최상위 구조 제약의 예외로 `docs/agents/AGENTS.md`에 명시한다.
+   docker compose를 팀 공식 실행 수단으로 확정한다.
+2. **디렉터리 전체가 아니라 선별해서 커밋한다.** 아래 셋은 계속 `.gitignore`로 막는다.
+   - `.docker/env/` — 컨테이너에 주입하는 실제 값(0017의 2·3계층). 파일명이 `<서비스>.<환경>.env`라
+     기존 `.env`/`.env.*` 패턴에 걸리지 않으므로 디렉터리째 막는다.
+   - `.docker/models/` — 모델 가중치. `gemma.gguf` 하나가 5.4GB다. `*.gguf`도 확장자로 막는다.
+   - `.docker/**/data/` — 실행 산출물.
+3. **compose 파일을 환경별로 나눈다.** `compose.<스택>.<환경>.yml` 여섯 개다
+   (`main`·`llm`·`monitoring` × `local`·`dev`). 스택을 셋으로 나눈 것은 0017 시점 그대로다.
+4. **커밋되는 compose는 `${...}` 치환과 `--env-file`을 쓰지 않는다.** 실행에 필요한 값을
+   파일 안에 직접 적는다. 0017의 1계층(`.docker/.env.<환경>`)은 없앤다 — 그 파일은
+   `.env.*` 패턴에 걸려 커밋되지 않으므로, 치환에 의존하면 **저장소에서 받은 compose만으로는
+   실행할 수 없다.** 2·3계층(비밀값)은 `env_file`로 남긴다.
+5. `APP_ENV`는 각 파일이 `environment:`에 고정값으로 적는다. 파일을 고르는 것이 곧 환경을
+   고르는 것이 된다.
+6. project name과 network 이름에 환경을 넣는다(`classroom-monitoring-{local,dev}`).
+   같은 daemon에서 두 환경이 섞이지 않는다.
 
 **대안**:
 
-- *브라우저가 MediaMTX에 직접 연결* — 프록시가 없어 가장 단순하지만, MediaMTX
-  주소·포트·RTSP URL이 브라우저와 화면 코드에 남는다. URL만 아는 사람이 signaling
-  없이 영상에 접근할 수 있고, 이후 인증을 도입해도 MediaMTX 경계를 다시 막아야
-  한다. browser 비노출 요구를 만족하지 못한다.
-- *서명된 짧은 URL(stateless) 방식* — session 저장소가 없어 구현이 가볍다. 그러나
-  URL을 가진 사람이면 누구나 소유자이므로 **철회·폐기가 불가능**하고, `PATCH` 재협상
-  같은 상태ful 동작을 표현하기 어렵다. unload 시 폐기를 보장할 수 없다.
-- *owner cookie 없이 session_id만으로 인증* — HttpOnly가 없으면 XSS로 session_id와
-  cookie를 함께 탈취할 때 재생을 막지 못하고, URL 공유 시 소유권 검증이 없어진다.
-  owner cookie를 추가하는 비용은 낮다.
-- *MediaMTX 자체 인증(토큰) 사용* — MediaMTX가 토큰을 검증하게 하면 fastapi가
-  발급·관리해야 하는 경로가 늘고, MVP의 운영 접근 통제 미도입 범위와 맞지 않는다.
-  운영 접근 통제를 정할 때 함께 다룬다.
+- **`.docker/`를 통째로 커밋** — 비밀값 10개와 5.4GB 가중치가 함께 올라간다. 한 번
+  커밋되면 이력에서 지우기 어렵다.
+- **한 compose + override 파일 합성**(`-f base.yml -f local.yml`) — 중복은 줄지만 실행
+  명령이 길어지고, 최종 구성을 보려면 `config`로 합쳐 봐야 한다. 환경 차이가 값이 아니라
+  구조(build 유무, GPU 예약, 포트 범위)라 override가 지우고 덮는 양이 많다.
+- **`.docker/` 대신 각 서비스 디렉터리로 분산** — 스택을 조립하는 파일이라 특정 서비스에
+  속하지 않는다. `worker`와 `fastapi`를 함께 띄우는 파일을 둘 중 어디에 둘지 답이 없다.
 
-**결과**: 브라우저가 아는 것은 FastAPI signaling URL 하나뿐이 되어 MediaMTX 경계가
-화면·JS 코드에서 완전히 사라진다. SSRF 면에서 proxy target이 server-side 조립으로
-고정되고, 재생 세션의 생성·활성·폐기가 서버에서 추적된다. 오류가 카드 단위로
-격리되어 한 카메라의 장애가 화면 전체를 중단시키지 않는다.
+**결과**: 저장소를 받으면 `docker compose -f .docker/compose.main.local.yml up -d` 하나로
+로컬 스택이 뜬다. 서버 값 파일을 들고 있을 필요가 없고, 포트·이미지·라우팅 변경이
+diff로 남는다. 값 파일(`.docker/env/`)은 여전히 각자 채워야 하며 그 목록의 기준은
+커밋된 `<서비스>/.env.example`이다.
 
-대신 **재생 세션 저장소와 TTL cleanup, owner cookie 관리가 새로 생긴다.** 세션
-상태를 메모리·Mongo 중 어디에 둘지 구현 단계에서 정해야 하고, 다중 fastapi
-프로세스가 되면 세션 저장소 공유를 다시 정해야 한다. 사용자 인증은 여전히 도입하지
-않으므로, 운영 접근 통제가 정해지기 전까지 prod 배포 금지(결정 0010)는 유지된다.
-
-**남은 일**: 재생 세션 생성·검증·TTL·cleanup을 담당하는 저장소 포트와 어댑터,
-signaling proxy 라우터와 오류 응답 계약 구현(TASK-002). owner cookie가 local/http
-테스트 환경에서도 적용되는지(HTTPS 요구의 예외 범위) 검증. 세션 저장 위치를
-메모리·Mongo 중 확정하고, 다중 프로세스 시 공유 방식을 새 항목으로 정한다. 운영
-접근 통제가 정해지면 owner cookie를 사용자 인증으로 대체하는 지점을 다시 본다.
+**남은 일**: 이 구조로 실제 기동해 검증하지 않았다 — `docker compose config`까지만 확인했다.
+`.docker/env/*.env` 10개는 커밋되지 않으므로 **팀원이 새로 받으면 그 파일들이 없어 기동에
+실패한다.** 각 파일의 `.env.example` 대응물을 만들지, 저장소 밖에서 전달할지 정하지 않았다.
