@@ -23,9 +23,13 @@ from app.classrooms.service import ClassroomService
 from app.demo_seed import seed_demo_data
 from app.main import app
 from app.shared.config import Settings
-from app.shared.dependencies import get_classroom_service, get_video_demo_service
+from app.shared.dependencies import (
+    get_classroom_service,
+    get_video_demo_service,
+    get_video_stream_service,
+)
 from app.shared.errors import RepositoryUnavailableError
-from app.video_monitoring.service import VideoDemoService
+from app.video_monitoring.service import VideoDemoService, VideoStreamService
 
 NOW = datetime(2026, 8, 10, 3, 0, tzinfo=UTC)
 
@@ -160,6 +164,8 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
         "/api/v1/classrooms/{classroom_id}/occupancy",
         "/api/v1/video-streams",
         "/api/v1/video-streams/{stream_id}",
+        "/api/v1/video-streams/{stream_id}/playback-sessions",
+        "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
         "/api/v1/video-searches",
         "/api/v1/students/{student_id}/face-enrollments",
         "/api/v1/face-enrollments/{enrollment_id}",
@@ -241,8 +247,8 @@ def test_empty_provider_keeps_monitoring_and_search_pages_available(
     results = minimal_client.post("/api/v1/video-searches", json={"query": "사람"})
 
     assert monitoring.status_code == 200
-    assert "연결된 영상 source가 없습니다." in monitoring.text
-    assert "실제 CCTV나 실시간 스트림" not in monitoring.text
+    assert "연결된 카메라가 없습니다." in monitoring.text
+    assert "학생 부재로 해석하지 않습니다" in monitoring.text
     assert search.status_code == 200
     assert "검색할 운영 metadata가 없습니다." in search.text
     assert streams.json() == {"items": [], "total": 0}
@@ -288,7 +294,7 @@ def test_repository_failures_are_not_replaced_with_demo_data(
     def unavailable_classroom_service() -> ClassroomService:
         raise RepositoryUnavailableError()
 
-    def unavailable_video_service() -> VideoDemoService:
+    def unavailable_stream_service() -> VideoStreamService:
         raise RepositoryUnavailableError()
 
     app.dependency_overrides[get_classroom_service] = unavailable_classroom_service
@@ -296,7 +302,7 @@ def test_repository_failures_are_not_replaced_with_demo_data(
     assert classroom.status_code == 503
     assert classroom.json()["error"]["code"] == "REPOSITORY_UNAVAILABLE"
 
-    app.dependency_overrides[get_video_demo_service] = unavailable_video_service
+    app.dependency_overrides[get_video_stream_service] = unavailable_stream_service
     monitoring = minimal_client.get("/monitoring")
     assert monitoring.status_code == 503
     assert "요청을 처리할 수 없습니다" in monitoring.text

@@ -102,6 +102,10 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
+| `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |
+| `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP offer signaling (MediaMTX proxy) |
+| `PATCH` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | ACTIVE 세션 재협상 signaling |
+| `DELETE` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP resource 종료·세션 CLOSED (idempotent) |
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detection-events` | SSE 실시간 탐지 이벤트 구독 |
 | `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
@@ -211,6 +215,11 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `SSE_RECONNECTION_TIMEOUT_SECONDS` | SSE 재연결 타임아웃 | 기본 60 |
 | `DETECTION_EVENT_MAX_DETECTIONS_PER_EVENT` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `DETECTION_EVENT_STALE_SECONDS` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `WHEP_BASE_URL` | WHEP proxy target의 base URL (결정 0014). source의 camera_id로만 조립된다 | 기본 `http://127.0.0.1:8889` |
+| `WHEP_TIMEOUT_SECONDS` | MediaMTX signaling 호출 타임아웃 | 기본 5 |
+| `PLAYBACK_SESSION_TTL_SECONDS` | 재생 세션 TTL | 기본 300. 30~3600 |
+| `PLAYBACK_SESSION_COOKIE_SECURE` | owner cookie Secure 플래그 | 기본 true. local/http에서는 false로 내려야 전송된다 |
+| `PLAYBACK_SESSION_SDP_MAX_BYTES` | SDP 본문 최대 크기 | 기본 65536 |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
 학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,

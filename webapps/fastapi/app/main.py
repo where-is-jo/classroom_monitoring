@@ -90,11 +90,14 @@ app.include_router(snapshot_page_router, include_in_schema=False)
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"model": ErrorResponse},
+    403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
+    410: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
     500: {"model": ErrorResponse},
     503: {"model": ErrorResponse},
+    504: {"model": ErrorResponse},
 }
 app.include_router(classroom_api_router, responses=_ERROR_RESPONSES)
 app.include_router(monitoring_api_router, responses=_ERROR_RESPONSES)

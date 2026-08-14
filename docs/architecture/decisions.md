@@ -72,6 +72,7 @@
 | [0011](#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다) | 실시간 관제 전달을 HTTP·WebRTC·SSE로 구성한다 | 확정 |
 | [0011](#0012--영상-원본을-저장하지-않고-스냅샷만-남긴다) | 영상 원본을 저장하지 않고 스냅샷만 남긴다 | 확정 |
 | [0012](#0013--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다) | deeplearning에 모델 학습용 Jupyter 노트북 도구를 둔다 | 확정 |
+| [0014](#0014--카메라-영상-재생을-fastapi-whep-프록시와-재생-세션으로-통제한다) | 카메라 영상 재생을 FastAPI WHEP 프록시와 재생 세션으로 통제한다 | 확정 |
 
 ---
 
@@ -689,3 +690,87 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
 
 **남은 일**: 운영 관리자 인증과 얼굴 데이터 접근 통제, 재학 종료 자동 삭제 작업,
 실제 SCRFD·MediaPipe·AdaFace 모델 비교 및 중앙 추론 HTTP 어댑터의 운영 배포 검증.
+
+---
+
+## 0014 · 카메라 영상 재생을 FastAPI WHEP 프록시와 재생 세션으로 통제한다
+
+**상태**: 확정
+
+**배경**: 실시간 관제를 HTTP·WebRTC·SSE로 구성하기로 했지만(결정 0011), "fastapi가
+허용한 WebRTC 세션"의 **허용이 구체적으로 어떻게 구현되는지**는 남아 있었다. 운영
+접근 통제는 MVP 동안 도입하지 않기로 했고(결정 0010), local/dev에서 "URL을 알면
+영상에 접근할 수 있음을 감수한다"고 한 것은 영상 연결을 검증하기 위한 잠정 상태였다.
+`/monitoring` 화면을 연결된 실제 카메라 중심으로 전환하면 그대로 둘 수 없다. 학생이
+보이는 실제 영상의 재생 경로에 아무 검증도 없으면, 브라우저가 MediaMTX
+주소(`:8889`)를 알게 되어 URL만으로 영상에 접근할 수 있고, signaling을 아무나 보낼
+수 있다.
+
+동시에 브라우저가 MediaMTX에 직접 닿지 않도록 프록시를 두면 **SSRF**와 **재생 세션의
+수명**이라는 새 결정이 필요하다. 무엇을 proxy target으로 쓰는지, 세션을 언제
+활성화하고 언제 폐기하는지, 오류를 어떻게 구분하는지를 정하지 않으면 구현이
+시작될 수 없어, SPEC 7번이 이 ADR을 UI 구현의 선행조건으로 명시했다.
+
+**결정**: 카메라 영상 재생을 **FastAPI 재생 세션 + WHEP signaling 프록시**로 통제한다.
+
+1. **재생 세션은 `POST /api/v1/video-streams/{stream_id}/playback-sessions`로만
+   만든다.** 실제·enabled·WebRTC source만 허용하며, 응답은 opaque `session_id`,
+   FastAPI signaling URL, `expires_at`만 포함한다. 생성 응답에 MediaMTX 주소·포트·
+   RTSP URL·자격 증명을 넣지 않는다.
+2. **소유권은 HttpOnly owner cookie로 검증한다.** 서버가 별도의 unguessable
+   `HttpOnly`·`Secure`·`SameSite=Strict` cookie를 설정하고, signaling 요청은
+   **URL의 `session_id`와 owner cookie가 모두 일치할 때만** 허용한다. MVP에 사용자
+   인증을 새로 도입하지 않되, cross-origin credentialed request는 허용하지 않는다.
+3. **proxy target은 server-side binding으로만 결정한다.** FastAPI가 session의 source
+   mapping·TTL·owner를 검증한 뒤 MediaMTX WHEP를 대행하며, 대상 origin/path는
+   source의 server-side `camera_id`와 deployment config로만 조립한다. client
+   request의 URL·host·path·SDP 이외의 값을 proxy target으로 쓰지 않아 **SSRF를
+   차단**한다. MediaMTX WHEP·관리 포트와 RTSP URL·자격 증명은 browser에 노출하지
+   않는다.
+4. **session 상태는 `CREATED -> ACTIVE -> CLOSED` 또는 `CREATED/ACTIVE ->
+   EXPIRED`다.** FastAPI가 remote WHEP `POST`에 성공하고 remote resource location을
+   server-side로 보관하면 `ACTIVE`가 된다. `PATCH`는 ACTIVE에서만 허용하고,
+   `DELETE`는 ACTIVE/CLOSED에서 idempotent로 동작하며 remote delete를 한 번 시도한 뒤
+   local state를 CLOSED로 한다.
+5. **TTL 만료와 페이지 이탈은 같은 cleanup을 수행한다.** TTL은 짧게 두고
+   `expires_at`을 생성 시 반환한다. 만료·이탈 시 remote cleanup을 시도하며,
+   remote cleanup 실패는 server log/metric 대상이지만 **local session을 다시
+   활성화하지 않는다.**
+6. **생성/POST 실패는 session을 ACTIVE로 전이시키지 않는다.** 실패는 해당 카드에
+   한정해 표시하고 재시도 안내를 주며, 다른 카드의 재생·SSE를 중단하지 않는다.
+7. **오류 경계를 HTTP 상태로 구분한다.** owner cookie 불일치는 `403`, 존재하지 않는
+   session은 `404`, 만료 session은 `410`, 재생 불가 source는 `409`, MediaMTX 장애는
+   `503`(연결 실패) 또는 `504`(proxy timeout)로 응답한다. 재생 오류를 학생 부재나
+   카메라 해제로 해석하지 않는다.
+
+**대안**:
+
+- *브라우저가 MediaMTX에 직접 연결* — 프록시가 없어 가장 단순하지만, MediaMTX
+  주소·포트·RTSP URL이 브라우저와 화면 코드에 남는다. URL만 아는 사람이 signaling
+  없이 영상에 접근할 수 있고, 이후 인증을 도입해도 MediaMTX 경계를 다시 막아야
+  한다. browser 비노출 요구를 만족하지 못한다.
+- *서명된 짧은 URL(stateless) 방식* — session 저장소가 없어 구현이 가볍다. 그러나
+  URL을 가진 사람이면 누구나 소유자이므로 **철회·폐기가 불가능**하고, `PATCH` 재협상
+  같은 상태ful 동작을 표현하기 어렵다. unload 시 폐기를 보장할 수 없다.
+- *owner cookie 없이 session_id만으로 인증* — HttpOnly가 없으면 XSS로 session_id와
+  cookie를 함께 탈취할 때 재생을 막지 못하고, URL 공유 시 소유권 검증이 없어진다.
+  owner cookie를 추가하는 비용은 낮다.
+- *MediaMTX 자체 인증(토큰) 사용* — MediaMTX가 토큰을 검증하게 하면 fastapi가
+  발급·관리해야 하는 경로가 늘고, MVP의 운영 접근 통제 미도입 범위와 맞지 않는다.
+  운영 접근 통제를 정할 때 함께 다룬다.
+
+**결과**: 브라우저가 아는 것은 FastAPI signaling URL 하나뿐이 되어 MediaMTX 경계가
+화면·JS 코드에서 완전히 사라진다. SSRF 면에서 proxy target이 server-side 조립으로
+고정되고, 재생 세션의 생성·활성·폐기가 서버에서 추적된다. 오류가 카드 단위로
+격리되어 한 카메라의 장애가 화면 전체를 중단시키지 않는다.
+
+대신 **재생 세션 저장소와 TTL cleanup, owner cookie 관리가 새로 생긴다.** 세션
+상태를 메모리·Mongo 중 어디에 둘지 구현 단계에서 정해야 하고, 다중 fastapi
+프로세스가 되면 세션 저장소 공유를 다시 정해야 한다. 사용자 인증은 여전히 도입하지
+않으므로, 운영 접근 통제가 정해지기 전까지 prod 배포 금지(결정 0010)는 유지된다.
+
+**남은 일**: 재생 세션 생성·검증·TTL·cleanup을 담당하는 저장소 포트와 어댑터,
+signaling proxy 라우터와 오류 응답 계약 구현(TASK-002). owner cookie가 local/http
+테스트 환경에서도 적용되는지(HTTPS 요구의 예외 범위) 검증. 세션 저장 위치를
+메모리·Mongo 중 확정하고, 다중 프로세스 시 공유 방식을 새 항목으로 정한다. 운영
+접근 통제가 정해지면 owner cookie를 사용자 인증으로 대체하는 지점을 다시 본다.

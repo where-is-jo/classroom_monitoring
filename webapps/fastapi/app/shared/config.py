@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +50,16 @@ class Settings(BaseSettings):
     sse_heartbeat_interval_seconds: int = Field(default=30, ge=1)
     sse_reconnection_timeout_seconds: int = Field(default=60, ge=1)
 
+    # --- WHEP 재생 proxy와 재생 세션 (결정 0014) ---
+    # proxy target은 이 base URL과 source의 camera_id로만 조립한다(SSRF 차단).
+    # 경로 접두사(예: /webrtc)가 필요하면 base URL에 함께 넣는다.
+    whep_base_url: str = "http://127.0.0.1:8889"
+    whep_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    playback_session_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    # local/http 개발 환경에서는 false로 내려야 cookie가 전송된다(ADR 남은 일).
+    playback_session_cookie_secure: bool = True
+    playback_session_sdp_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
+
     # Detection event settings
     detection_event_max_detections_per_event: int = Field(default=100, ge=1)
     detection_event_stale_seconds: int = Field(default=300, ge=1)
@@ -68,6 +79,16 @@ class Settings(BaseSettings):
     def _empty_database_name_is_missing(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("whep_base_url")
+    @classmethod
+    def _whep_base_url_must_be_http(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("WHEP_BASE_URL must be an http(s) URL.")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("WHEP_BASE_URL must not contain credentials.")
         return value
 
     @model_validator(mode="after")

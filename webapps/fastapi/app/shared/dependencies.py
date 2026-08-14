@@ -40,10 +40,21 @@ from ..student_monitoring.adapters.mongo_repository import (
 )
 from ..student_monitoring.ports import DetectionEventRepository, VideoSegmentRepository
 from ..student_monitoring.service import StudentMonitoringService
+from ..video_monitoring.adapters.memory_playback_session_repository import (
+    MemoryPlaybackSessionRepository,
+)
 from ..video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
+from ..video_monitoring.adapters.mongo_playback_session_repository import (
+    MongoPlaybackSessionRepository,
+)
 from ..video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
-from ..video_monitoring.ports import VideoStreamRepository
-from ..video_monitoring.service import VideoDemoService, VideoStreamService
+from ..video_monitoring.adapters.whep_client import HttpWhepClient
+from ..video_monitoring.ports import PlaybackSessionRepository, VideoStreamRepository, WhepClient
+from ..video_monitoring.service import (
+    PlaybackSessionService,
+    VideoDemoService,
+    VideoStreamService,
+)
 from .adapters.memory_student_lookup import InMemoryStudentLookup
 from .broadcaster import InMemoryBroadcaster
 from .config import Settings
@@ -87,6 +98,11 @@ def _video_segment_repository() -> MemoryVideoSegmentRepository:
 @lru_cache
 def _video_stream_repository() -> MemoryVideoStreamRepository:
     return MemoryVideoStreamRepository()
+
+
+@lru_cache
+def _playback_session_repository() -> MemoryPlaybackSessionRepository:
+    return MemoryPlaybackSessionRepository()
 
 
 @lru_cache
@@ -147,6 +163,11 @@ def _mongo_video_stream_repository() -> MongoVideoStreamRepository:
     return MongoVideoStreamRepository(_mongo_database())
 
 
+@lru_cache
+def _mongo_playback_session_repository() -> MongoPlaybackSessionRepository:
+    return MongoPlaybackSessionRepository(_mongo_database())
+
+
 def get_classroom_repository(
     settings: Settings = Depends(get_settings),
 ) -> ClassroomRepository:
@@ -177,6 +198,24 @@ def get_video_stream_repository(
     if settings.database_mode == "memory":
         return _video_stream_repository()
     return _mongo_video_stream_repository()
+
+
+def get_playback_session_repository(
+    settings: Settings = Depends(get_settings),
+) -> PlaybackSessionRepository:
+    if settings.database_mode == "memory":
+        return _playback_session_repository()
+    return _mongo_playback_session_repository()
+
+
+@lru_cache
+def _whep_client() -> HttpWhepClient:
+    settings = get_settings()
+    return HttpWhepClient(timeout_seconds=settings.whep_timeout_seconds)
+
+
+def get_whep_client() -> WhepClient:
+    return _whep_client()
 
 
 def get_broadcaster() -> InMemoryBroadcaster:
@@ -329,6 +368,22 @@ def get_video_stream_service(
     )
 
 
+def get_playback_session_service(
+    session_repository: PlaybackSessionRepository = Depends(get_playback_session_repository),
+    stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    whep_client: WhepClient = Depends(get_whep_client),
+    settings: Settings = Depends(get_settings),
+) -> PlaybackSessionService:
+    return PlaybackSessionService(
+        session_repository=session_repository,
+        stream_repository=stream_repository,
+        whep_client=whep_client,
+        whep_base_url=settings.whep_base_url,
+        ttl_seconds=settings.playback_session_ttl_seconds,
+        clock=utc_now,
+    )
+
+
 def get_student_monitoring_service(
     detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
     segment_repository: VideoSegmentRepository = Depends(get_video_segment_repository),
@@ -362,6 +417,7 @@ def initialize_data_store() -> None:
                 MongoDetectionEventRepository.ensure_indexes,
                 MongoVideoSegmentRepository.ensure_indexes,
                 MongoVideoStreamRepository.ensure_indexes,
+                MongoPlaybackSessionRepository.ensure_indexes,
             ],
         )
         return
@@ -382,6 +438,7 @@ def close_data_store() -> None:
     _mongo_detection_event_repository.cache_clear()
     _mongo_video_segment_repository.cache_clear()
     _mongo_video_stream_repository.cache_clear()
+    _mongo_playback_session_repository.cache_clear()
     _mongo_database.cache_clear()
     _mongo_client.cache_clear()
     _face_enrollment_repository.cache_clear()
