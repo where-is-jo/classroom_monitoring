@@ -73,6 +73,7 @@ class VideoSearchResultPage:
 @dataclass(frozen=True)
 class VideoStream:
     """Real camera source metadata."""
+
     id: str
     camera_id: str
     classroom_id: str

@@ -36,7 +36,9 @@ def list_video_streams(
     items: list[DemoStreamResponse | RealStreamResponse] = []
 
     # Add demo streams
-    demo_streams = demo_service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
+    demo_streams = demo_service.list_streams(
+        search=q, classroom_id=classroom_id, status=stream_status
+    )
     items.extend(DemoStreamResponse.from_domain(item) for item in demo_streams)
 
     # Add real streams
@@ -50,7 +52,9 @@ def list_video_streams(
     return StreamListResponse(items=items, total=len(items))
 
 
-@api_router.get("/video-streams/{stream_id}", response_model=DemoStreamResponse | RealStreamResponse)
+@api_router.get(
+    "/video-streams/{stream_id}", response_model=DemoStreamResponse | RealStreamResponse
+)
 def get_video_stream(
     stream_id: str,
     demo_service: VideoDemoService = Depends(get_video_demo_service),
@@ -93,7 +97,9 @@ def monitoring_page(
     demo_service: VideoDemoService = Depends(get_video_demo_service),
     stream_service: VideoStreamService = Depends(get_video_stream_service),
 ) -> Response:
-    demo_feeds = demo_service.list_streams(search=q, classroom_id=classroom_id, status=stream_status)
+    demo_feeds = demo_service.list_streams(
+        search=q, classroom_id=classroom_id, status=stream_status
+    )
     real_streams = stream_service.list_streams()
     options = demo_service.classroom_options()
     return templates.TemplateResponse(

@@ -367,9 +367,7 @@ def initialize_data_store() -> None:
         return
     if settings.demo_mode_enabled:
         seed_demo_data(
-            get_classroom_service(
-                get_classroom_repository(settings), settings=settings
-            ),
+            get_classroom_service(get_classroom_repository(settings), settings=settings),
             now=utc_now(),
         )
         seed_video_streams(_video_stream_repository(), now=utc_now())

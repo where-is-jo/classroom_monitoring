@@ -357,7 +357,9 @@ def seats_page(
     except ClassroomNotFoundError:
         return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
     # 행·열이 있는 좌석만 배치도에 표시한다 (REQ-006).
-    grid_seats = [seat for seat in summary.seats if seat.row is not None and seat.column is not None]
+    grid_seats = [
+        seat for seat in summary.seats if seat.row is not None and seat.column is not None
+    ]
     # CSS Grid 크기 계산과 빈 셀 렌더링용 좌표 맵을 만든다.
     # 빈 강의실도 조작 가능한 최소 1x1 격자를 제공한다 (SPEC: max(1, current max)).
     max_row = max((seat.row for seat in grid_seats if seat.row is not None), default=1)
@@ -419,9 +421,7 @@ def seat_assignments_page(
     validate_list_active_args(
         limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
     )
-    students_page = student_lookup.list_active(
-        limit=settings.page_size_max, offset=0
-    )
+    students_page = student_lookup.list_active(limit=settings.page_size_max, offset=0)
 
     return templates.TemplateResponse(
         request=request,

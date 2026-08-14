@@ -68,9 +68,7 @@ class MongoDetectionEventRepository:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._to_domain(document)
 
-    def find_recent_by_camera(
-        self, camera_id: str, limit: int
-    ) -> list[DetectionEvent]:
+    def find_recent_by_camera(self, camera_id: str, limit: int) -> list[DetectionEvent]:
         """Find recent detections by camera."""
         try:
             documents = list(
@@ -108,9 +106,7 @@ class MongoDetectionEventRepository:
                 {"camera_id": camera_id, "captured_at": {"$gte": from_dt, "$lt": to_dt}}
             )
             documents = list(
-                self._collection.find(query)
-                .sort("captured_at", DESCENDING)
-                .limit(limit)
+                self._collection.find(query).sort("captured_at", DESCENDING).limit(limit)
             )
         except PyMongoError:
             raise RepositoryUnavailableError() from None

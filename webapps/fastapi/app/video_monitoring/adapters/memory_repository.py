@@ -28,9 +28,7 @@ class MemoryVideoStreamRepository:
         """Find all enabled streams."""
         return [s for s in self._streams.values() if s.enabled]
 
-    def update_last_detection(
-        self, camera_id: str, captured_at: datetime
-    ) -> None:
+    def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
         """Update last detection timestamp."""
         stream = self._streams.get(camera_id)
         if stream:

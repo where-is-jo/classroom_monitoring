@@ -52,17 +52,12 @@ class MongoVideoStreamRepository:
     def find_all_enabled(self) -> list[VideoStream]:
         """Find all enabled streams."""
         try:
-            documents = list(
-                self._collection.find({"enabled": True})
-                .sort("camera_id", ASCENDING)
-            )
+            documents = list(self._collection.find({"enabled": True}).sort("camera_id", ASCENDING))
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return [self._to_domain(doc) for doc in documents]
 
-    def update_last_detection(
-        self, camera_id: str, captured_at: datetime
-    ) -> None:
+    def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
         """Update last detection timestamp."""
         try:
             self._collection.update_one(

@@ -58,9 +58,7 @@ def _ensure_default_classroom() -> None:
     settings = get_settings()
     if settings.database_mode != "memory":
         return
-    service = get_classroom_service(
-        get_classroom_repository(settings), settings=settings
-    )
+    service = get_classroom_service(get_classroom_repository(settings), settings=settings)
     page = service.list_classrooms(limit=1, offset=0)
     if not page.items:
         service.seed_classroom(

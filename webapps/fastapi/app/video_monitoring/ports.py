@@ -23,9 +23,7 @@ class VideoStreamRepository(Protocol):
         """Find all enabled streams."""
         ...
 
-    def update_last_detection(
-        self, camera_id: str, captured_at: datetime
-    ) -> None:
+    def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
         """Update last detection timestamp."""
         ...
 
