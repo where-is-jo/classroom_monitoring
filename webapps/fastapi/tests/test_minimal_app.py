@@ -162,44 +162,48 @@ def test_removed_students_write_crud_is_404(
 
 def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> None:
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
-    assert paths == {
-        # 강의실·좌석
-        "/api/v1/classrooms",
-        "/api/v1/classrooms/{classroom_id}",
-        "/api/v1/classrooms/{classroom_id}/occupancy",
-        "/api/v1/classrooms/{classroom_id}/occupancy-events",
-        "/api/v1/classrooms/{classroom_id}/seats",
-        "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
-        "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
-        "/api/v1/classrooms/{classroom_id}/seat-assignments",
-        # 학생 상태
-        "/api/v1/classrooms/{classroom_id}/student-states",
-        # 영상 모니터링
-        "/api/v1/video-streams",
-        "/api/v1/video-streams/{stream_id}",
-        "/api/v1/video-streams/{stream_id}/detections",
-        "/api/v1/video-streams/{stream_id}/detection-events",
-        "/api/v1/video-searches",
-        "/api/v1/video-segments",
-        # 얼굴 등록
-        "/api/v1/students/{student_id}/face-enrollments",
-        "/api/v1/face-enrollments/{enrollment_id}",
-        "/api/v1/students/{student_id}/face-profile",
-        "/api/v1/students",
-        "/api/v1/students/{student_id}/face-enrollment",
-        "/api/v1/classrooms/{classroom_id}/roi-connection",
-        "/api/v1/classrooms/{classroom_id}/roi-connections",
-        # 탐지 스냅샷 조회(결정 0011). 영상 원본을 저장하지 않는 대신 남기는 정지 이미지다.
-        "/api/v1/snapshots",
-        "/api/v1/snapshots/image/{key}",
-        # 자연어 탐지 검색. 질문이 본문에 들어가므로 조회지만 POST다.
-        "/api/v1/llm-searches",
-        # worker가 결과를 밀어 넣는 내부 수집 경로다. 브라우저가 부르는 API가 아니다.
-        "/internal/inference/events",
-        "/internal/video-segments",
-        "/health",
-        "/health/ready",
-    } <= paths
+    assert (
+        paths
+        == {
+            # 강의실·좌석
+            "/api/v1/classrooms",
+            "/api/v1/classrooms/{classroom_id}",
+            "/api/v1/classrooms/{classroom_id}/occupancy",
+            "/api/v1/classrooms/{classroom_id}/occupancy-events",
+            "/api/v1/classrooms/{classroom_id}/seats",
+            "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
+            "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
+            "/api/v1/classrooms/{classroom_id}/seat-assignments",
+            # 학생 상태
+            "/api/v1/classrooms/{classroom_id}/student-states",
+            # 영상 모니터링
+            "/api/v1/video-streams",
+            "/api/v1/video-streams/{stream_id}",
+            "/api/v1/video-streams/{stream_id}/detections",
+            "/api/v1/video-streams/{stream_id}/detection-events",
+            "/api/v1/video-searches",
+            "/api/v1/video-segments",
+            # 얼굴 등록
+            "/api/v1/students/{student_id}/face-enrollments",
+            "/api/v1/face-enrollments/{enrollment_id}",
+            "/api/v1/students/{student_id}/face-profile",
+            "/api/v1/students",
+            "/api/v1/students/{student_id}/face-enrollment",
+            "/api/v1/classrooms/{classroom_id}/roi-connection",
+            "/api/v1/classrooms/{classroom_id}/roi-connections",
+            # 탐지 스냅샷 조회(결정 0011). 영상 원본을 저장하지 않는 대신 남기는 정지 이미지다.
+            "/api/v1/snapshots",
+            "/api/v1/snapshots/image/{key}",
+            # 자연어 탐지 검색. 질문이 본문에 들어가므로 조회지만 POST다.
+            "/api/v1/llm-searches",
+            # worker가 결과를 밀어 넣는 내부 수집 경로다. 브라우저가 부르는 API가 아니다.
+            "/internal/inference/events",
+            "/internal/video-segments",
+            "/health",
+            "/health/ready",
+        }
+        <= paths
+    )
 
 
 def test_seat_summary_maps_present_absent_and_unknown(minimal_client: TestClient) -> None:

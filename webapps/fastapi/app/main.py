@@ -17,10 +17,10 @@ from .classrooms.router import api_router as classroom_api_router
 from .classrooms.router import page_router as classroom_page_router
 from .face_enrollment.router import api_router as face_enrollment_api_router
 from .face_enrollment.router import page_router as face_enrollment_page_router
-from .roi_connections.router import api_router as roi_connection_api_router
-from .roi_connections.router import page_router as roi_connection_page_router
 from .llm_search.router import api_router as llm_search_api_router
 from .llm_search.router import page_router as llm_search_page_router
+from .roi_connections.router import api_router as roi_connection_api_router
+from .roi_connections.router import page_router as roi_connection_page_router
 from .shared.dependencies import (
     close_data_store,
     get_settings,
