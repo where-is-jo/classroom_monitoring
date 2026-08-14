@@ -1,16 +1,49 @@
-"""Minimal monitoring app settings and startup validation."""
+"""Minimal monitoring app settings and startup validation.
+
+값은 두 곳에서 온다.
+
+- ``.env.{APP_ENV}`` — 환경마다 달라야 하는 값과 비밀값(``APP_ENV``, ``DATABASE_MODE``,
+  ``DATABASE_URL``, ``DATABASE_NAME``, ``FACE_ANALYZER_MODE``, ``FACE_ANALYZER_URL``,
+  ``SNAPSHOT_STORAGE_BACKEND``와 MinIO 접속 정보). 커밋하지 않는다.
+- ``config/settings.yml`` — 환경과 무관하게 같은 값(타임아웃, 판정 임계값, quota 등).
+  커밋한다.
+
+우선순위는 실제 OS 환경변수 > ``.env.{APP_ENV}`` 파일 > ``config/settings.yml``이다.
+규칙은 ``docs/conventions/environment-convention.md``를 따른다.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+# .env.*와 config/를 실행 위치(CWD)가 아니라 이 파일 기준으로 잡는다.
+# config.py는 app/shared/에 있으므로 두 단계 위가 webapps/fastapi다.
+_FASTAPI_DIR = Path(__file__).resolve().parent.parent.parent
+
+# 실제 OS 환경변수로 어떤 .env.{APP_ENV} 파일을 읽을지 정한다. 없으면 local로 본다 —
+# 손이 덜 가는 local을 기본값으로 두는 기존 원칙과 같다.
+_APP_ENV_FOR_FILE_SELECTION = os.environ.get("APP_ENV", "local")
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_FASTAPI_DIR / f".env.{_APP_ENV_FOR_FILE_SELECTION}",
+        yaml_file=_FASTAPI_DIR / "config" / "settings.yml",
+        # PyYAML의 기본 파일 인코딩은 OS 로캘을 따른다. 한국어 Windows에서는 cp949라
+        # yml의 한국어 주석을 읽다가 UnicodeDecodeError가 난다. 명시적으로 고정한다.
+        yaml_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: Literal["local", "dev", "prod"]
     database_mode: Literal["memory", "mongodb"]
@@ -41,6 +74,8 @@ class Settings(BaseSettings):
     face_pitch_side_degrees: float = Field(default=8, gt=0, le=90)
     face_local_sample_storage_enabled: bool = False
     face_local_sample_storage_dir: Path = Path("local_face_data")
+    # 분석 companion 프로세스의 실행 방식과 주소 — local(synthetic)과 dev/prod(http)에서
+    # 실제로 다른 값을 쓴다.
     face_analyzer_mode: Literal["synthetic", "http"] = "synthetic"
     face_analyzer_url: str = "http://127.0.0.1:8100"
     face_analyzer_timeout_seconds: float = Field(default=5, gt=0, le=30)
@@ -78,6 +113,25 @@ class Settings(BaseSettings):
     # 읽어 오는 이벤트 수의 상한이며, 걸리면 결과에 truncated로 표시한다.
     llm_search_scan_limit: int = Field(default=500, ge=1, le=5000)
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # 실제 OS 환경변수 > .env.{APP_ENV} 파일 > config/settings.yml 순으로 읽는다.
+        # yml에 있는 값도 필요하면 .env.*나 실제 export로 즉석 재정의할 수 있다.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            YamlConfigSettingsSource(settings_cls),
+            file_secret_settings,
+        )
+
     @field_validator("database_name", mode="before")
     @classmethod
     def _empty_database_name_is_missing(cls, value: object) -> object:
@@ -108,7 +162,6 @@ class Settings(BaseSettings):
         if self.app_env != "local" and self.face_local_sample_storage_enabled:
             raise ValueError("얼굴 샘플 로컬 저장은 APP_ENV=local에서만 사용할 수 있습니다.")
         if self.page_size_default > self.page_size_max:
-            raise ValueError("PAGE_SIZE_DEFAULT must be less than or equal to PAGE_SIZE_MAX.")
             raise ValueError("PAGE_SIZE_DEFAULT는 PAGE_SIZE_MAX 이하여야 합니다.")
         quota_total = sum(
             (

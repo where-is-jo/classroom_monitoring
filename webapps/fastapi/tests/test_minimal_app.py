@@ -421,13 +421,17 @@ def test_occupancy_summary_does_not_truncate_after_one_repository_page() -> None
 def test_settings_reject_unsafe_or_incomplete_modes(
     kwargs: dict[str, object], message: str
 ) -> None:
+    # _env_file=None으로 로컬 .env.*를 무시한다. 개발자가 DATABASE_URL이 채워진
+    # .env.local을 두면 그 값이 검증 대상 값을 덮어써서 테스트가 사람마다 다르게 통과한다.
     with pytest.raises(ValidationError, match=message):
-        Settings(**kwargs)  # type: ignore[arg-type]
+        # _env_file은 pydantic-settings가 런타임에 받는 인자라 Settings 시그니처에 없다.
+        Settings(_env_file=None, **kwargs)  # type: ignore[arg-type, call-arg]
 
 
 def test_pose_quota_total_must_equal_required_sample_count() -> None:
     with pytest.raises(ValidationError, match="Pose quota"):
-        Settings(
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
             app_env="local",
             database_mode="memory",
             face_enrollment_required_samples=301,

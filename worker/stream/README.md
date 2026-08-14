@@ -79,7 +79,8 @@ USB 카메라를 직접 쓰지 않고 이미 RTSP를 내보내는 소스에 붙�
 ```bash
 cd worker
 python -m pip install -r stream/requirements.txt
-cp stream/.env.example stream/.env    # STREAM_SOURCES를 채운다
+cp stream/.env.example stream/.env.local    # STREAM_SOURCES를 채운다
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
 python -m stream.main
 ```
 
@@ -97,32 +98,41 @@ python -m stream.main
 돌기 때문에 미리보기 창을 띄우지 않는다. 영상이 실제로 흐르는지는 VLC 같은
 클라이언트로 `STREAM_SOURCES`의 URL을 열어 확인한다.
 
-## 환경변수
+## 환경변수와 설정
 
-이름과 용도는 [`.env.example`](./.env.example)에 있다. **실제 값은 커밋하지 않는다.**
-카메라 접속 정보는 비밀값 등급이다([환경변수 규칙](../../docs/conventions/environment-convention.md)).
+환경마다 달라야 하는 값·비밀값은 `.env.{local,dev,prod}`([`.env.example`](./.env.example)이
+기준)에, 환경과 무관한 일반 설정은 커밋된 [`config/settings.yml`](./config/settings.yml)에
+있다. **실제 값이 든 `.env.*`는 커밋하지 않는다.** 카메라 접속 정보는 비밀값 등급이다
+([환경변수 규칙](../../docs/conventions/environment-convention.md)).
+
+### `.env.{local,dev,prod}`
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
 | `APP_ENV` | 실행 환경 | `local` / `dev` / `prod`. 필수 |
 | `STREAM_SOURCES` | 연결할 영상 소스 목록 | `<식별자>=<RTSP URL>`을 쉼표로 구분. 필수 |
-| `STREAM_RECONNECT_MAX_RETRY` | 재연결 최대 시도 횟수 | 기본 10 |
-| `STREAM_RECONNECT_DELAY_SECONDS` | 재연결 시도 간격 | 기본 1.0 |
-| `STREAM_STARTUP_WAIT_SECONDS` | RTSP 경로 생성 대기 | 기본 3.0 |
-| `STREAM_READ_FAILURE_TOLERANCE` | 재연결을 부르는 연속 실패 횟수 | 기본 30 |
-| `FRAME_SAMPLE_INTERVAL_FRAMES` | 샘플링 주기(프레임 수) | 기본 20 |
-| `RTSP_PUBLISH_ENABLED` | USB 카메라 RTSP 송출 여부 | 기본 false |
-| `RTSP_PUBLISH_INPUT_FORMAT` | FFmpeg 입력 형식 | `dshow` / `v4l2` / `avfoundation` |
 | `RTSP_PUBLISH_DEVICE_NAME` | 카메라 장치 이름 | 송출 시 필수 |
 | `RTSP_PUBLISH_TARGET_URL` | 송출 대상 RTSP URL | 송출 시 필수 |
-| `RTSP_PUBLISH_FRAMERATE` | 송출 프레임률 | 기본 20 |
-| `RECORDING_ENABLED` | 원본 영상 로컬 저장 | 기본 false. `prod`에서 금지 |
-| `RECORDING_OUTPUT_DIR` | 영상 저장 경로 | 기본 `stream/data/video` |
-| `RECORDING_FPS` | 저장 영상 FPS | 기본 20 |
-| `RECORDING_SEGMENT_SECONDS` | 영상 파일 하나의 길이 | 기본 3600 |
-| `FRAME_CAPTURE_ENABLED` | 학습용 프레임 저장 | 기본 false. `prod`에서 금지 |
-| `FRAME_CAPTURE_OUTPUT_DIR` | 프레임 저장 경로 | 기본 `stream/data/frames` |
-| `LOG_LEVEL` | 로그 수준 | 기본 `INFO` |
+
+### `config/settings.yml`
+
+| 이름 | 용도 | 비고 |
+| --- | --- | --- |
+| `stream_reconnect_max_retry` | 재연결 최대 시도 횟수 | 기본 10 |
+| `stream_reconnect_delay_seconds` | 재연결 시도 간격 | 기본 1.0 |
+| `stream_startup_wait_seconds` | RTSP 경로 생성 대기 | 기본 3.0 |
+| `stream_read_failure_tolerance` | 재연결을 부르는 연속 실패 횟수 | 기본 30 |
+| `frame_sample_interval_frames` | 샘플링 주기(프레임 수) | 기본 20 |
+| `rtsp_publish_enabled` | USB 카메라 RTSP 송출 여부 | 기본 false |
+| `rtsp_publish_input_format` | FFmpeg 입력 형식 | `dshow` / `v4l2` / `avfoundation` |
+| `rtsp_publish_framerate` | 송출 프레임률 | 기본 20 |
+| `recording_enabled` | 원본 영상 로컬 저장 | 기본 false. `prod`에서 금지 |
+| `recording_output_dir` | 영상 저장 경로 | 기본 `stream/data/video` |
+| `recording_fps` | 저장 영상 FPS | 기본 20 |
+| `recording_segment_seconds` | 영상 파일 하나의 길이 | 기본 3600 |
+| `frame_capture_enabled` | 학습용 프레임 저장 | 기본 false. `prod`에서 금지 |
+| `frame_capture_output_dir` | 프레임 저장 경로 | 기본 `stream/data/frames` |
+| `log_level` | 로그 수준 | 기본 `INFO` |
 
 ### 저장 기능이 기본으로 꺼져 있는 이유
 

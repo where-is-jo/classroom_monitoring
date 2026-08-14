@@ -105,7 +105,8 @@ InferenceResult(
 ```bash
 cd worker
 python -m pip install -r inference/requirements.txt
-cp inference/.env.example inference/.env
+cp inference/.env.example inference/.env.local
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
 
 # 이미지 한 장 검사
 python -m inference.main path/to/image.jpg
@@ -128,24 +129,36 @@ python -m pipeline.main
 > 호스트 메모리로 먼저 옮기도록 고쳤다(`_to_numpy`). CPU로만 확인해서는 드러나지
 > 않는 종류의 버그다.
 
-## 환경변수
+## 환경변수와 설정
 
-이름과 용도는 [`.env.example`](./.env.example)에 있다.
-조립 실행에서는 이 파일이 아니라 `pipeline/.env`를 읽는다.
+환경마다 달라야 하는 값·비밀값은 `.env.{local,dev,prod}`([`.env.example`](./.env.example)이
+기준)에, 환경과 무관한 일반 설정·판정 기준값은 커밋된
+[`config/settings.yml`](./config/settings.yml)에 있다.
+조립 실행에서는 `.env.*`는 이 디렉터리가 아니라 `pipeline/.env.{APP_ENV}`를 읽지만,
+`config/settings.yml`은 조립 실행에서도 이 디렉터리 것을 그대로 읽는다.
+
+### `.env.{local,dev,prod}`
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
-| `MODEL_PATH` | 모델 가중치 경로 | 기본 `yolov8n.pt` |
-| `INFERENCE_DEVICE` | 실행 장치 | `cpu` / `cuda` |
-| `INFERENCE_CONFIDENCE_THRESHOLD` | 탐지 신뢰도 임계값 | 기본 0.25 |
-| `SNAPSHOT_ENABLED` | 탐지 스냅샷 적재 | 기본 `false`. 저장은 명시적으로 켠다 |
-| `SNAPSHOT_MAX_LONG_SIDE_PX` | 긴 변 상한 | 기본 1280(720p). 확대하지 않는다 |
-| `SNAPSHOT_JPEG_QUALITY` | JPEG 품질 | 기본 80 |
-| `SNAPSHOT_MIN_INTERVAL_SECONDS` | 카메라당 최소 적재 간격 | 기본 60 |
-| `OBJECT_STORAGE_*` | 객체 저장소 접속 | `SNAPSHOT_ENABLED=true`일 때만 필요 |
+| `MODEL_PATH` | 모델 가중치 경로 | 기본 `yolov8n.pt`. GPU 서버는 다른 경로를 쓸 수 있다 |
+| `INFERENCE_DEVICE` | 실행 장치 | `cpu` / `cuda`. local은 보통 cpu, dev는 cuda |
+| `OBJECT_STORAGE_BACKEND` | 객체 저장소 종류 | `local` / `minio`. local은 보통 `local` |
+| `OBJECT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필요. 비밀값 |
+
+### `config/settings.yml`
+
+| 이름 | 용도 | 비고 |
+| --- | --- | --- |
+| `inference_confidence_threshold` | 탐지 신뢰도 임계값 | 기본 0.25 |
+| `snapshot_enabled` | 탐지 스냅샷 적재 | 기본 `false`. 저장은 명시적으로 켠다 |
+| `snapshot_max_long_side_px` | 긴 변 상한 | 기본 1280(720p). 확대하지 않는다 |
+| `snapshot_jpeg_quality` | JPEG 품질 | 기본 80 |
+| `snapshot_min_interval_seconds` | 카메라당 최소 적재 간격 | 기본 60 |
+| `object_storage_bucket`, `_secure`, `_timeout_seconds` | 버킷 이름·TLS·타임아웃 | `snapshot_enabled: true`일 때만 필요 |
 
 소비자 루프의 대기 시간과 연속 실패 허용치는 조립 쪽 설정이다.
-[pipeline README](../pipeline/README.md#환경변수)를 따른다.
+[pipeline README](../pipeline/README.md#환경변수와-설정)를 따른다.
 
 ## 탐지 스냅샷
 
