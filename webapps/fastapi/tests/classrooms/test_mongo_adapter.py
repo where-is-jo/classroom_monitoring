@@ -26,11 +26,19 @@ from app.classrooms.models import (
 from app.shared.errors import RepositoryDataError
 
 
+class RecordingDeleteResult:
+    def __init__(self, deleted_count: int) -> None:
+        self.deleted_count = deleted_count
+
+
 class RecordingCollection:
     def __init__(self) -> None:
         self.indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
         self.updates: list[tuple[dict[str, object], dict[str, object]]] = []
+        self.deletes: list[dict[str, object]] = []
         self.returned_document: dict[str, object] | None = None
+        # delete_one이 지웠다고 보고할 문서 수 (0이면 대상 없음).
+        self.deleted_count = 0
 
     def create_index(self, fields: list[tuple[str, int]], **options: object) -> None:
         self.indexes.append((fields, options))
@@ -45,6 +53,10 @@ class RecordingCollection:
         del return_document
         self.updates.append((query, update))
         return self.returned_document
+
+    def delete_one(self, query: dict[str, object]) -> RecordingDeleteResult:
+        self.deletes.append(query)
+        return RecordingDeleteResult(self.deleted_count)
 
 
 class RecordingDatabase:
@@ -204,6 +216,49 @@ class UniqueIndexDatabase:
         return self.collections[name]
 
 
+class AllocationSeatCollection:
+    """list_all_seats_for_allocation이 쓰는 find(...).sort(...) 결과 fake."""
+
+    def __init__(self, documents: list[dict[str, object]]) -> None:
+        self.documents = documents
+        self.queries: list[dict[str, object]] = []
+
+    def find(self, query: dict[str, object]) -> AllocationCursor:
+        self.queries.append(query)
+        return AllocationCursor(
+            [
+                document
+                for document in self.documents
+                if all(document.get(key) == value for key, value in query.items())
+            ]
+        )
+
+
+class AllocationCursor:
+    def __init__(self, documents: list[dict[str, object]]) -> None:
+        self._documents = documents
+
+    def sort(self, key: list[tuple[str, int]]) -> AllocationCursor:
+        del key
+        return self
+
+    def __iter__(self) -> Iterator[dict[str, object]]:
+        return iter(self._documents)
+
+
+class AllocationDatabase:
+    def __init__(self, seats: list[dict[str, object]]) -> None:
+        self.collections: dict[str, object] = {
+            MongoClassroomRepository.classroom_collection_name: object(),
+            MongoClassroomRepository.seat_collection_name: AllocationSeatCollection(seats),
+            MongoClassroomRepository.batch_collection_name: object(),
+            MongoClassroomRepository.history_collection_name: object(),
+        }
+
+    def __getitem__(self, name: str) -> object:
+        return self.collections[name]
+
+
 def _values() -> tuple[
     Classroom,
     Seat,
@@ -298,6 +353,24 @@ def test_row_column_unique_index_has_partial_filter() -> None:
         and options.get("unique")
         and options.get("partialFilterExpression")
         == {"row": {"$type": "number"}, "column": {"$type": "number"}}
+        for fields, options in indexes
+    )
+
+
+def test_seat_code_unique_index_is_retained() -> None:
+    """hard delete 도입 후에도 좌석 code unique index를 그대로 유지한다.
+
+    삭제된 좌석은 문서가 사라져 키를 해제하므로, 코드 예약은 현존 문서에만
+    걸리는 이 unique index가 계속 담당한다.
+    """
+    database = RecordingDatabase()
+    MongoClassroomRepository.ensure_indexes(database)  # type: ignore[arg-type]
+
+    indexes = database.collections["seats"].indexes
+    assert any(
+        fields == [("classroom_id", 1), ("code", 1)]
+        and options.get("name") == "seats_classroom_code_unique"
+        and options.get("unique")
         for fields, options in indexes
     )
 
@@ -445,6 +518,31 @@ def test_mongo_inactive_seat_reserves_coordinate() -> None:
         repository.create_seat(active)
 
 
+def test_list_all_seats_for_allocation_includes_inactive_seats() -> None:
+    """allocator 조회는 is_active와 무관하게 강의실의 모든 좌석을 반환한다."""
+    _, seat, _, _ = _values()
+    active = dataclasses.replace(seat, id="seat-active", code="S01", row=1, column=1)
+    inactive = dataclasses.replace(
+        seat, id="seat-inactive", code="S02", row=2, column=2, is_active=False
+    )
+    other_classroom = dataclasses.replace(seat, id="seat-other", classroom_id="other-room")
+    database = AllocationDatabase(
+        [
+            MongoClassroomRepository._seat_to_document(active),
+            MongoClassroomRepository._seat_to_document(inactive),
+            MongoClassroomRepository._seat_to_document(other_classroom),
+        ]
+    )
+    repository = MongoClassroomRepository(database)  # type: ignore[arg-type]
+
+    result = repository.list_all_seats_for_allocation(seat.classroom_id)
+
+    assert [item.id for item in result] == ["seat-active", "seat-inactive"]
+    collection = database.collections[MongoClassroomRepository.seat_collection_name]
+    assert isinstance(collection, AllocationSeatCollection)
+    assert collection.queries == [{"classroom_id": seat.classroom_id}]
+
+
 def test_retained_documents_roundtrip() -> None:
     classroom, seat, batch, history = _values()
     assert (
@@ -536,12 +634,14 @@ def test_classroom_update_and_delete_use_set_without_id() -> None:
     assert delete == {"$set": {"is_active": False}}
 
 
-def test_seat_update_and_delete_use_set_without_id() -> None:
+def test_seat_update_uses_set_without_id_and_delete_removes_document() -> None:
+    """update는 _id 없는 $set을, delete는 문서 자체를 지우는 delete_one을 쓴다."""
     _, seat, _, _ = _values()
     database = RecordingDatabase()
     repository = MongoClassroomRepository(database)  # type: ignore[arg-type]
     seats = database.collections[MongoClassroomRepository.seat_collection_name]
     seats.returned_document = MongoClassroomRepository._seat_to_document(seat)
+    seats.deleted_count = 1
 
     assert repository.update_seat(seat) == seat
     repository.delete_seat(seat.id)
@@ -554,20 +654,25 @@ def test_seat_update_and_delete_use_set_without_id() -> None:
     assert "_id" not in set_fields
     assert set_fields["code"] == seat.code
 
-    delete_query, delete = seats.updates[1]
-    assert delete_query == {"_id": seat.id}
-    assert delete == {"$set": {"is_active": False}}
+    # hard delete: is_active=false 기록이 아니라 문서 삭제 한 번만 수행한다.
+    assert len(seats.updates) == 1
+    assert seats.deletes == [{"_id": seat.id}]
 
 
 def test_seat_update_and_delete_missing_raise_not_found() -> None:
+    """대상 문서가 없으면 update도 delete도 404 SEAT_NOT_FOUND다 (반복 삭제 포함)."""
     _, seat, _, _ = _values()
     database = RecordingDatabase()
     repository = MongoClassroomRepository(database)  # type: ignore[arg-type]
+    seats = database.collections[MongoClassroomRepository.seat_collection_name]
+    seats.deleted_count = 0
 
     with pytest.raises(SeatNotFoundError):
         repository.update_seat(seat)
-    with pytest.raises(SeatNotFoundError):
+    with pytest.raises(SeatNotFoundError) as exc_info:
         repository.delete_seat(seat.id)
+    assert exc_info.value.code == "SEAT_NOT_FOUND"
+    assert exc_info.value.status_code == 404
 
 
 def test_naive_datetime_raises_repository_error() -> None:

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>classroom-admin.js seat admin contract test</title>
+  <style>
+    /* 실제 화면에서 필요한 최소 레이아웃만 재현한다. */
+    [hidden] { display: none; }
+    .seat-map__empty, .seat-map__cell { display: block; width: 120px; height: 76px; }
+  </style>
+</head>
+<body>
+  <p id="seat-grid-status" aria-live="polite"></p>
+  <p id="seat-grid-alert" role="alert" hidden></p>
+  <div id="seat-grid" class="seat-map seat-map--grid"
+       data-classroom-id="classroom-a101" data-max-row="2" data-max-column="2">
+    <!-- 빈 칸: 클릭 → POST /seats/auto -->
+    <button type="button" id="seat-cell-1-1" class="seat-map__empty" data-row="1" data-column="1"></button>
+    <!-- 좌석: 클릭 → 편집 패널 -->
+    <button type="button" id="seat-cell-seat-01" class="seat-map__cell seat-card--admin" data-seat-id="seat-01" data-row="1" data-column="2" data-assignment-student-id="stu-001" data-assignment-student-name="김철수" aria-label="1행 2열 · 좌석 1">
+      <strong>좌석 1</strong><small>S01</small>
+    </button>
+    <button type="button" id="seat-cell-2-1" class="seat-map__empty" data-row="2" data-column="1"></button>
+    <button type="button" id="seat-cell-2-2" class="seat-map__empty" data-row="2" data-column="2"></button>
+  </div>
+  <div class="grid-toolbar">
+    <button type="button" id="add-row">행 추가</button>
+    <button type="button" id="add-column">열 추가</button>
+  </div>
+  <aside id="seat-edit-panel" class="seat-edit-panel" data-seat-id="" hidden>
+    <h2>좌석 편집</h2>
+    <form id="seat-edit-form" class="stack">
+      <p class="form-error" role="alert" data-form-error hidden></p>
+      <label>이름<input name="label" type="text"></label>
+      <label>학생 지정
+        <select name="student_id">
+          <option value="">학생 선택</option>
+          <option value="stu-001">20240001 김철수</option>
+        </select>
+      </label>
+      <div class="assignment-actions">
+        <button type="button" id="btn-assign">지정</button>
+        <button type="button" id="btn-unassign" class="danger">해제</button>
+      </div>
+      <div class="edit-actions">
+        <button type="submit">저장</button>
+        <button type="button" id="btn-delete" class="danger">삭제</button>
+      </div>
+    </form>
+  </aside>
+
+  <pre id="test-results"></pre>
+
+  <script>
+    /* ===== 테스트 harness stubs (fetch·confirm·prompt를 대역으로 교체) =====
+       성공 응답은 페이지 reload를 유발하므로(브라우저 재시도 없음의 일부) 여기서는
+       실패 응답만 사용한다. 성공 시 reload 여부는 정적 검증이 확인한다. */
+    window.__results = { calls: [], checkpoints: [], promptCalls: 0, confirmCalls: [], log: [] };
+    window.__scenario = { autoStatus: 422, deleteStatus: 500, confirmResult: true };
+
+    function recordCall(entry) {
+      window.__results.calls.push(entry);
+    }
+
+    function errorResponse(status, message) {
+      return Promise.resolve({
+        ok: false,
+        status: status,
+        json: function () {
+          return Promise.resolve({ error: { code: "TEST_ERROR", message: message } });
+        }
+      });
+    }
+
+    /* fetch stub: 요청을 기록하고 시나리오에 따라 실패 응답을 돌려준다. */
+    window.fetch = function (url, options) {
+      options = options || {};
+      var method = (options.method || "GET").toUpperCase();
+      var entry = { url: String(url), method: method };
+      if (options.headers && options.headers["Content-Type"]) {
+        entry.contentType = options.headers["Content-Type"];
+      }
+      if (typeof options.body === "string") {
+        entry.body = options.body;
+      }
+      recordCall(entry);
+
+      var s = String(url);
+      if (method === "POST" && s.indexOf("/seats/auto") !== -1) {
+        if (window.__scenario.autoStatus >= 200 && window.__scenario.autoStatus < 300) {
+          return Promise.resolve({
+            ok: true,
+            status: window.__scenario.autoStatus,
+            json: function () { return Promise.resolve({ id: "seat-new-1" }); }
+          });
+        }
+        return errorResponse(window.__scenario.autoStatus, "테스트 자동 생성 오류");
+      }
+      if (method === "DELETE" && /\/assignment$/.test(s)) {
+        return errorResponse(window.__scenario.deleteStatus, "테스트 해제 오류");
+      }
+      if (method === "DELETE") {
+        return errorResponse(window.__scenario.deleteStatus, "테스트 삭제 오류");
+      }
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    };
+
+    window.prompt = function () {
+      window.__results.promptCalls += 1;
+      return "STUB_PROMPT";
+    };
+
+    window.confirm = function (message) {
+      window.__results.confirmCalls.push(String(message));
+      return window.__scenario.confirmResult;
+    };
+  </script>
+
+  <script src="{{ ADMIN_JS_URI }}" defer></script>
+
+  <script>
+    /* ===== 시나리오 러너: seat admin 계약 검증 ===== */
+    (async function run() {
+      var results = window.__results;
+      var checkpoints = results.checkpoints;
+
+      function checkpoint(name, ok, detail) {
+        checkpoints.push({ name: name, ok: !!ok, detail: detail == null ? null : String(detail) });
+      }
+
+      function tick() {
+        return new Promise(function (resolve) { setTimeout(resolve, 50); });
+      }
+
+      function callsSince(index) {
+        return results.calls.slice(index);
+      }
+
+      function alertVisible() {
+        var el = document.getElementById("seat-grid-alert");
+        return el && el.hidden === false && el.textContent.trim() !== "";
+      }
+
+      function formErrorVisible() {
+        var el = document.querySelector("#seat-edit-form [data-form-error]");
+        return el && el.hidden === false && el.textContent.trim() !== "";
+      }
+
+      try {
+        await new Promise(function (resolve) {
+          if (document.readyState === "interactive" || document.readyState === "complete") {
+            resolve();
+          } else {
+            document.addEventListener("DOMContentLoaded", resolve, { once: true });
+          }
+        });
+        await tick(); /* deferred script의 핸들러 등록 완료 대기 */
+
+        /* 1) 빈 칸 클릭 → POST /seats/auto (row/column만, prompt 없음, 재시도 없음) */
+        var base1 = results.calls.length;
+        window.__scenario.autoStatus = 422; /* 실패 응답 → reload 없음 */
+        document.getElementById("seat-cell-1-1").click();
+        await tick();
+        var calls1 = callsSince(base1);
+        var autoPost1 = calls1.filter(function (c) { return c.method === "POST" && c.url.indexOf("/seats/auto") !== -1; });
+        var body1 = null;
+        try { body1 = autoPost1[0] ? JSON.parse(autoPost1[0].body) : null; } catch (e) { body1 = null; }
+        checkpoint("empty-cell-create-calls-auto",
+          autoPost1.length === 1 &&
+          autoPost1[0].url.indexOf("/classroom-a101/seats/auto") !== -1 &&
+          autoPost1[0].contentType === "application/json" &&
+          body1 && body1.row === 1 && body1.column === 1 &&
+          body1.code === undefined && body1.label === undefined,
+          JSON.stringify(autoPost1));
+        checkpoint("empty-cell-create-no-prompt", results.promptCalls === 0, "promptCalls=" + results.promptCalls);
+        checkpoint("create-failure-no-retry", autoPost1.length === 1, JSON.stringify(autoPost1));
+        checkpoint("create-failure-shows-alert", alertVisible(), document.getElementById("seat-grid-alert").textContent);
+
+        /* 2) 생성 500 실패 → 정확히 1회 호출 (재시도 없음) */
+        var base2 = results.calls.length;
+        window.__scenario.autoStatus = 500;
+        document.getElementById("seat-cell-2-1").click();
+        await tick();
+        var calls2 = callsSince(base2);
+        var autoPosts2 = calls2.filter(function (c) { return c.method === "POST" && c.url.indexOf("/seats/auto") !== -1; });
+        checkpoint("create-500-no-retry", autoPosts2.length === 1, JSON.stringify(autoPosts2));
+
+        /* 3) 좌석 클릭 → 편집 패널 (label·학생만, code/is_active 입력 없음) */
+        document.getElementById("seat-cell-seat-01").click();
+        await tick();
+        var panel = document.getElementById("seat-edit-panel");
+        var labelInput = document.querySelector('#seat-edit-form [name="label"]');
+        var codeInput = document.querySelector('#seat-edit-form [name="code"]');
+        var activeInput = document.querySelector('#seat-edit-form [name="is_active"]');
+        checkpoint("occupied-cell-opens-panel",
+          panel.hidden === false && panel.dataset.seatId === "seat-01",
+          "hidden=" + panel.hidden + ", seatId=" + panel.dataset.seatId);
+        checkpoint("panel-shows-label", labelInput && labelInput.value === "좌석 1", labelInput && labelInput.value);
+        checkpoint("panel-has-no-code-input", !codeInput, "code=" + (codeInput ? "present" : "absent"));
+        checkpoint("panel-has-no-active-input", !activeInput, "active=" + (activeInput ? "present" : "absent"));
+        checkpoint("release-enabled-when-assigned",
+          document.getElementById("btn-unassign").disabled === false,
+          "disabled=" + document.getElementById("btn-unassign").disabled);
+
+        /* 4) 삭제: '영구 삭제' 확인 후 DELETE 1회 (실패 응답 → reload 없음) */
+        var base4 = results.calls.length;
+        var confirmBefore4 = results.confirmCalls.length;
+        window.__scenario.confirmResult = true;
+        window.__scenario.deleteStatus = 500;
+        document.getElementById("btn-delete").click();
+        await tick();
+        var calls4 = callsSince(base4);
+        var deleteCalls4 = calls4.filter(function (c) { return c.method === "DELETE" && c.url.indexOf("/seats/seat-01") !== -1; });
+        var deleteMsg4 = results.confirmCalls[confirmBefore4] || "";
+        checkpoint("delete-confirm-message-permanent", deleteMsg4.indexOf("영구 삭제") !== -1, deleteMsg4);
+        checkpoint("delete-issues-delete-after-confirm", deleteCalls4.length === 1, JSON.stringify(deleteCalls4));
+        checkpoint("delete-failure-no-retry", deleteCalls4.length === 1, JSON.stringify(deleteCalls4));
+
+        /* 5) 삭제 취소: confirm false → DELETE 호출 없음 */
+        window.__scenario.confirmResult = false;
+        var base5 = results.calls.length;
+        document.getElementById("btn-delete").click();
+        await tick();
+        var calls5 = callsSince(base5);
+        var deleteCalls5 = calls5.filter(function (c) { return c.method === "DELETE" && c.url.indexOf("/seats/seat-01") !== -1; });
+        checkpoint("delete-cancel-no-request", deleteCalls5.length === 0, JSON.stringify(calls5));
+
+        /* 6) 해제: '영구 해제' 확인 후 assignment DELETE 1회 */
+        window.__scenario.confirmResult = true;
+        var base6 = results.calls.length;
+        var confirmBefore6 = results.confirmCalls.length;
+        document.getElementById("btn-unassign").click();
+        await tick();
+        var calls6 = callsSince(base6);
+        var unassignCalls6 = calls6.filter(function (c) {
+          return c.method === "DELETE" && c.url.indexOf("/seats/seat-01/assignment") !== -1;
+        });
+        var unassignMsg6 = results.confirmCalls[confirmBefore6] || "";
+        checkpoint("release-confirm-message", unassignMsg6.indexOf("영구 해제") !== -1, unassignMsg6);
+        checkpoint("release-issues-delete-after-confirm", unassignCalls6.length === 1, JSON.stringify(unassignCalls6));
+
+        results.done = true;
+      } catch (err) {
+        results.error = String((err && err.stack) || err);
+        checkpoint("harness-error", false, String((err && err.message) || err));
+      }
+
+      document.getElementById("test-results").textContent = JSON.stringify(results);
+    })();
+  </script>
+</body>
+</html>

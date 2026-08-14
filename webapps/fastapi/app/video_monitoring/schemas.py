@@ -7,7 +7,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .models import DemoStream, SourceStatus, VideoSearchResult, VideoSearchResultPage, VideoStream
+from .models import (
+    DemoStream,
+    PlaybackSession,
+    SourceStatus,
+    VideoSearchResult,
+    VideoSearchResultPage,
+    VideoStream,
+)
 
 
 class DemoStreamResponse(BaseModel):
@@ -146,4 +153,26 @@ class VideoSearchResponse(BaseModel):
             items=[VideoSearchResultResponse.from_domain(item) for item in page.items],
             total=page.total,
             limit=page.limit,
+        )
+
+
+class PlaybackSessionCreateResponse(BaseModel):
+    """재생 세션 생성 응답 (결정 0014).
+
+    opaque session_id, FastAPI signaling URL, expires_at만 포함한다.
+    MediaMTX 주소·포트·RTSP URL·자격 증명은 넣지 않는다.
+    """
+
+    session_id: str
+    signaling_url: str
+    expires_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls, session: PlaybackSession, signaling_url: str
+    ) -> PlaybackSessionCreateResponse:
+        return cls(
+            session_id=session.session_id,
+            signaling_url=signaling_url,
+            expires_at=session.expires_at,
         )

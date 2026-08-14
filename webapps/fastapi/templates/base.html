@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -31,7 +31,6 @@
           <p class="nav-group-title">모니터링</p>
           <a href="/classrooms"{% if current_path == '/classrooms' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▦</span><span>강의실 좌석 현황</span></a>
           <a href="/monitoring"{% if current_path == '/monitoring' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span><span>실시간 모니터링</span></a>
-          <a href="/snapshots"{% if current_path == '/snapshots' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◫</span><span>탐지 스냅샷</span></a>
           <a href="/llm-search"{% if current_path == '/llm-search' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌕</span><span>자연어 탐지 검색</span></a>
           <a href="/video-search"{% if current_path == '/video-search' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▷</span><span>데모 영상 검색</span></a>
         </div>
@@ -43,14 +42,18 @@
         </div>
         <div class="nav-group nav-group-spaced">
           <p class="nav-group-title">학생 현황</p>
-          {% set _cls = nav_classrooms() %}
-          {% if _cls %}
-            {% set _cid = _cls[0].id %}
-            <a href="/classrooms/{{ _cid }}/student-states"{% if '/student-states' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◉</span><span>학생 상태</span></a>
-            <a href="/classrooms/{{ _cid }}/seat-assignments"{% if '/seat-assignments' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>좌석-학생 지정</span></a>
+          {% set _cid = nav_classroom_id|default('', true) %}
+          {% if not _cid and classroom is defined %}
+            {% set _cid = classroom.id %}
+          {% endif %}
+          {% if not _cid %}
+            {% set _cls = nav_classrooms() %}
+            {% if _cls %}{% set _cid = _cls[0].id %}{% endif %}
+          {% endif %}
+          {% if _cid %}
+            <a href="/classrooms/{{ _cid }}/seats"{% if '/seats' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>좌석 관리</span></a>
           {% else %}
-            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◉</span><span>학생 상태</span></a>
-            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◎</span><span>좌석-학생 지정</span></a>
+            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◎</span><span>좌석 관리</span></a>
           {% endif %}
         </div>
       </nav>

@@ -7,14 +7,8 @@
     <div><p class="eyebrow">{{ classroom.code }}</p><h1>{{ classroom.name }} 좌석 관리</h1><p class="summary">{{ classroom.location }} · 전체 {{ total }}좌석</p></div>
     <div class="page-actions">
       <a class="button-link secondary" href="/classrooms">목록</a>
-      <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/edit">강의실 수정</a>
-      <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seat-assignments">학생 지정</a>
-      <a class="button-link" href="/classrooms/{{ classroom.id }}/seats/create">좌석 추가</a>
     </div>
   </header>
-
-  {% set grid_seats = seats | selectattr('row') | selectattr('column') | list %}
-  {% set tray_seats = seats | rejectattr('row') | list %}
 
   <section class="panel" aria-labelledby="seat-map-title">
     <div class="grid-heading">
@@ -24,72 +18,59 @@
         <button type="button" id="add-column" class="secondary">열 추가</button>
       </div>
     </div>
+    <p class="summary seat-map-hint">빈 칸을 클릭하면 좌석이 자동 생성됩니다. 좌석을 클릭하면 편집할 수 있습니다.</p>
     <p id="seat-grid-status" class="grid-status" aria-live="polite"></p>
     <p id="seat-grid-alert" class="grid-alert" role="alert" hidden></p>
-    <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
-      <div id="seat-grid" class="seat-map seat-map--grid" data-classroom-id="{{ classroom.id }}" data-max-row="{{ max_row }}" data-max-column="{{ max_column }}" style="grid-template-columns: repeat({{ max_column }}, minmax(100px, 1fr)); grid-template-rows: repeat({{ max_row }}, minmax(76px, 1fr));" aria-label="좌석 배치">
-        {% for r in range(1, max_row + 1) %}
-          {% for c in range(1, max_column + 1) %}
-            {% set seat = seat_map.get((r, c)) %}
-            {% if seat %}
-              <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" draggable="true" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
-                <strong>{{ seat.label }}</strong>
-                <small>{{ seat.code }}</small>
-              </button>
-            {% else %}
-              <button type="button" id="seat-cell-{{ r }}-{{ c }}" class="seat-map__empty" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · 빈 칸"></button>
-            {% endif %}
-          {% endfor %}
-        {% endfor %}
+    <div class="seat-workbench" style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+      <div class="seat-workbench__map" style="flex: 1 1 480px; min-width: 0;">
+        <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
+          <div id="seat-grid" class="seat-map seat-map--grid" data-classroom-id="{{ classroom.id }}" data-max-row="{{ max_row }}" data-max-column="{{ max_column }}" style="grid-template-columns: repeat({{ max_column }}, minmax(100px, 1fr)); grid-template-rows: repeat({{ max_row }}, minmax(76px, 1fr));" aria-label="좌석 배치">
+            {% for r in range(1, max_row + 1) %}
+              {% for c in range(1, max_column + 1) %}
+                {% set seat = seat_map.get((r, c)) %}
+                {% if seat %}
+                  {% set assignment = assignments.get(seat.id) %}
+                  <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}"{% if assignment %} data-assignment-student-id="{{ assignment.student_id }}" data-assignment-student-name="{{ assignment.student_name }}"{% endif %} style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
+                    <strong>{{ seat.label }}</strong>
+                    <small>{{ seat.code }}</small>
+                    {% if assignment %}<small class="assigned-student">{{ assignment.student_name }}</small>{% endif %}
+                  </button>
+                {% else %}
+                  <button type="button" id="seat-cell-{{ r }}-{{ c }}" class="seat-map__empty" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · 빈 칸"></button>
+                {% endif %}
+              {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
       </div>
-    </div>
-    {% if grid_seats %}
-      <div class="seat-unplace" aria-label="좌석 배치 해제">
-        {% for seat in grid_seats %}
-          <button type="button" id="unplace-{{ seat.id }}" class="secondary" data-seat-id="{{ seat.id }}">배치 해제 · {{ seat.label }}</button>
-        {% endfor %}
-      </div>
-    {% endif %}
-  </section>
 
-  <section class="panel" aria-labelledby="seat-tray-title">
-    <h2 id="seat-tray-title">배치 대기 좌석</h2>
-    {% if tray_seats %}
-      <ul id="seat-tray" class="seat-tray">
-        {% for seat in tray_seats %}
-          <li>
-            <button type="button" id="tray-seat-{{ seat.id }}" class="seat-tray__seat" data-seat-id="{{ seat.id }}" aria-pressed="false">{{ seat.label }} · {{ seat.code }}</button>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="summary">배치 대기 좌석이 없습니다.</p>
-    {% endif %}
-  </section>
-
-  {% if seats %}
-    <section class="panel" aria-labelledby="seat-list-title">
-      <h2 id="seat-list-title">좌석 목록</h2>
-      <ul class="card-list seat-grid">
-        {% for seat in seats %}
-          <li class="seat-list-card">
-            <strong>{{ seat.label }}</strong>
-            <span>{{ seat.code }}</span>
-            <small>{% if seat.row is not none and seat.column is not none %}{{ seat.row }}행 {{ seat.column }}열{% else %}배치도 미설정{% endif %}</small>
-            <small>{% if seat.is_active %}활성{% else %}비활성{% endif %}</small>
-            <div class="seat-actions">
-              <a href="/classrooms/{{ classroom.id }}/seats/{{ seat.id }}/edit">수정</a>
-              <form data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}" data-api-method="DELETE" data-confirm="{{ seat.label }} 좌석을 삭제할까요?" data-success-url="/classrooms/{{ classroom.id }}/seats">
-                <button type="submit" class="link-button">삭제</button>
-              </form>
+      <aside id="seat-edit-panel" class="seat-edit-panel panel" data-seat-id="" hidden>
+        <h2>좌석 편집</h2>
+        <form id="seat-edit-form" class="stack">
+          <p class="form-error" role="alert" data-form-error hidden></p>
+          <label>이름<input name="label" type="text" maxlength="200" required autocomplete="off"></label>
+          <div class="assignment-section">
+            <label>학생 지정
+              <select name="student_id" aria-label="학생 선택">
+                <option value="">학생 선택</option>
+                {% for student in students %}
+                  <option value="{{ student.id }}">{{ student.student_no }} {{ student.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <div class="assignment-actions">
+              <button type="button" id="btn-assign" class="secondary">지정</button>
+              <button type="button" id="btn-unassign" class="danger">해제</button>
             </div>
-          </li>
-        {% endfor %}
-      </ul>
-    </section>
-  {% else %}
-    <div class="empty" role="status"><strong>등록된 좌석이 없습니다.</strong><p><a href="/classrooms/{{ classroom.id }}/seats/create">좌석 추가</a>에서 좌석을 등록하세요.</p></div>
-  {% endif %}
+          </div>
+          <div class="edit-actions">
+            <button type="submit">저장</button>
+            <button type="button" id="btn-delete" class="danger">삭제</button>
+          </div>
+        </form>
+      </aside>
+    </div>
+  </section>
 {% endblock %}
 
 {% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

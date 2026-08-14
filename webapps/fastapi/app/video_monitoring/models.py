@@ -86,3 +86,44 @@ class VideoStream:
     is_demo: bool
     created_at: datetime
     updated_at: datetime
+
+
+class PlaybackSessionStatus(StrEnum):
+    """Playback session lifecycle (결정 0014).
+
+    CREATED -> ACTIVE -> CLOSED 이거나 CREATED/ACTIVE -> EXPIRED다.
+    """
+
+    CREATED = "CREATED"
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
+    EXPIRED = "EXPIRED"
+
+
+@dataclass(frozen=True)
+class PlaybackSession:
+    """결정 0014의 짧은 수명 재생 세션.
+
+    owner_token_hash는 HttpOnly owner cookie 값의 SHA-256 해시를 보관한다.
+    원문 토큰은 생성 응답에서만 한 번 노출되고 저장소에 남지 않는다.
+    remote_resource_location은 MediaMTX가 돌려준 WHEP resource를 가리키며,
+    서비스가 같은 origin 검증을 마친 값만 보관한다.
+    """
+
+    session_id: str
+    stream_id: str
+    camera_id: str
+    status: PlaybackSessionStatus
+    owner_token_hash: str
+    expires_at: datetime
+    remote_resource_location: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class PlaybackSessionCreateResult:
+    """세션 생성 결과. owner_token은 cookie 설정을 위해 라우터가 한 번만 받는다."""
+
+    session: PlaybackSession
+    owner_token: str

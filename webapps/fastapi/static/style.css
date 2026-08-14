@@ -165,8 +165,7 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 .seat-map__cell:hover { background: #dff1ec; }
 .seat-map__cell small { font-size: .7rem; }
 /* idle positioned/occupied는 enabled이며 aria-disabled 생략 상태다. */
-.seat-map__cell[aria-pressed="true"],
-.seat-tray__seat[aria-pressed="true"] {
+.seat-map__cell[aria-pressed="true"] {
   color: #00352e;
   background: #b7e4dc;
   border-color: var(--primary-dark);
@@ -186,20 +185,35 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 }
 .seat-map__empty:hover { background: #e4efec; border-color: var(--primary); }
 
+/* 좌석 편집 패널: 지도 옆 고정 폭(280px)으로 표시하고 320px에서 축소한다. */
+.seat-edit-panel { flex: 0 1 340px; min-width: 280px; }
+.seat-map-hint { margin-bottom: 8px; }
+
 /* 저장(busy) 중에는 모든 action control을 native disabled로 만든다. */
 .seat-map--grid button:disabled,
-.seat-tray button:disabled,
-.seat-unplace button:disabled,
+.seat-edit-panel button:disabled,
 .grid-toolbar button:disabled {
   cursor: not-allowed;
   opacity: .55;
 }
 
-/* 배치 해제(격자 밖 sibling)와 tray */
-.seat-unplace { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.seat-unplace button { min-height: 38px; padding: 6px 12px; font-weight: 600; }
-.seat-tray { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
-.seat-tray__seat { justify-content: flex-start; gap: 8px; font-weight: 600; }
+/* 좌석 편집 패널: select·지정·해제는 480px 이상 flex 한 행,
+   480px 미만은 라벨 포함 wrap (TASK-004). */
+.assignment-section { display: flex; align-items: flex-end; gap: 8px; }
+.assignment-section > label { flex: 1 1 150px; }
+.assignment-actions, .edit-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.assignment-actions { justify-content: flex-end; }
+.edit-actions { margin-top: 14px; }
+
+/* danger 버튼: 해제·삭제 등 파괴적 동작은 링크가 아닌 solid 버튼이다. */
+button.danger, .button.danger {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+button.danger:hover, .button.danger:hover { background: #8f1010; border-color: #8f1010; }
+button.danger:focus-visible { outline-color: var(--danger); }
+button.danger:disabled { cursor: not-allowed; opacity: .55; }
 .seat-card { display: grid; min-width: 100px; min-height: 76px; place-content: center; gap: 3px; padding: 8px; overflow: hidden; border: 2px solid; border-radius: 10px; text-align: center; }
 .seat-card small { font-size: .7rem; }
 .seat-card--occupied { color: #004f3d; background: #c8ede2; border-color: var(--occupied); }
@@ -223,9 +237,14 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .state--wrong_seat { color: #ca8a04; }
 .state--unknown { color: #6b7280; }
 
-.demo-clock { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }
-.demo-clock span, .demo-clock strong { display: block; }
-.demo-clock span { font-size: .75rem; }
+.camera-monitoring-refresh-time { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }
+.camera-monitoring-refresh-time span, .camera-monitoring-refresh-time strong { display: block; }
+.camera-monitoring-refresh-time span { font-size: .75rem; }
+.page-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.fullscreen-toggle { color: var(--primary-dark); background: var(--surface); border-color: var(--border); }
+.fullscreen-toggle:hover { background: var(--primary-soft); }
+.fullscreen-toggle[hidden] { display: none; }
+.fullscreen-toggle-icon { margin-right: 7px; font-size: 16px; line-height: 1; }
 .demo-video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
 .demo-video-card { overflow: hidden; }
 .demo-video-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #142220; }
@@ -247,6 +266,26 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .match-reason { margin: 10px 18px; padding: 10px 12px; color: #264e49; background: var(--primary-soft); border-radius: 9px; font-size: .85rem; }
 .example-list { display: grid; gap: 10px; margin-bottom: 0; }
 
+/* 연결 카메라 중심 실시간 모니터링 (TASK-003)
+   demo/search 화면의 demo-video-* grid와 분리된 페이지 전용 클래스다. */
+.camera-monitoring-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.camera-monitoring-grid--single { grid-template-columns: minmax(0, 1fr); }
+.camera-monitoring-card { overflow: hidden; }
+.camera-monitoring-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #142220; }
+.camera-monitoring-frame video { width: 100%; height: 100%; object-fit: cover; }
+.camera-monitoring-error { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; color: #fff; background: rgb(20 34 32 / 88%); text-align: center; }
+.camera-monitoring-error[hidden] { display: none; }
+.camera-monitoring-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px 8px; }
+.camera-monitoring-meta p:last-child { margin-bottom: 0; }
+
+/* 전체화면 (TASK-006, MON-008): sidebar·footer 없이 영상 목록을 viewport에 채운다.
+   player lifecycle은 그대로 두고 main 영역만 확대한다. */
+main:fullscreen {
+  background: var(--surface-low);
+  overflow: auto;
+  padding: 24px clamp(16px, 3vw, 40px);
+}
+
 @media (max-width: 900px) {
   .app-shell { display: block; }
   .sidebar { position: sticky; z-index: 20; height: auto; padding: 12px 16px; }
@@ -258,6 +297,7 @@ button.link-button:hover { color: #7f0d0d; background: none; }
   .nav-enhanced.nav-open .side-nav { display: block; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-form, .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .camera-monitoring-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 560px) {
@@ -265,7 +305,19 @@ button.link-button:hover { color: #7f0d0d; background: none; }
   .page-header, .section-heading { display: grid; gap: 14px; }
   .metric-grid, .filter-form, .form-grid { grid-template-columns: 1fr; }
   .demo-video-grid { grid-template-columns: 1fr; }
-  .demo-clock { white-space: normal; }
+  .camera-monitoring-refresh-time { white-space: normal; }
+}
+
+@media (max-width: 480px) {
+  /* 편집 패널: 학생 선택·지정·해제를 라벨 포함 wrap한다 (겹침·순서 오류 방지). */
+  .assignment-section { flex-wrap: wrap; }
+  .assignment-section > label { flex: 1 1 100%; }
+  .assignment-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 320px) {
+  .seat-edit-panel { min-width: 0; }
+  .assignment-section > label { font-size: .85rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

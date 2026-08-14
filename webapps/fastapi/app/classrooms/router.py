@@ -14,6 +14,7 @@ from ..shared.config import Settings
 from ..shared.dependencies import (
     get_broadcaster,
     get_classroom_service,
+    get_seat_migration_service,
     get_settings,
     get_student_lookup,
     get_student_monitoring_service,
@@ -22,12 +23,24 @@ from ..shared.student_identity import StudentLookupPort, validate_list_active_ar
 from ..shared.templating import templates
 from ..student_monitoring.service import StudentMonitoringService
 from .errors import ClassroomNotFoundError, SeatNotFoundError
+from .migration import SeatMigrationService
 from .schemas import (
+    AutoSeatCreateRequest,
     ClassroomCreateRequest,
     ClassroomListResponse,
     ClassroomResponse,
     ClassroomUpdateRequest,
+    MigrationPreflightResponse,
+    MigrationRollbackRequest,
+    MigrationRollbackResponse,
+    MigrationRunRequest,
+    MigrationRunResponse,
+    MigrationStatusResponse,
     OccupancySummaryResponse,
+    RepairApprovalResponse,
+    RepairApproveRequest,
+    RepairExecuteRequest,
+    RepairRequestRequest,
     SeatAssignmentListResponse,
     SeatAssignmentRequest,
     SeatAssignmentResponse,
@@ -132,6 +145,23 @@ def create_seat(
     return SeatResponse.from_domain(seat)
 
 
+@api_router.post(
+    "/{classroom_id}/seats/auto",
+    response_model=SeatResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_seat_auto(
+    classroom_id: str,
+    payload: AutoSeatCreateRequest,
+    response: Response,
+    service: ClassroomService = Depends(get_classroom_service),
+) -> SeatResponse:
+    """좌석을 자동 코드로 생성한다. UI는 이 경로만 호출한다."""
+    seat = service.create_seat_auto(classroom_id, row=payload.row, column=payload.column)
+    response.headers["Location"] = f"/api/v1/classrooms/{classroom_id}/seats/{seat.id}"
+    return SeatResponse.from_domain(seat)
+
+
 @api_router.get("/{classroom_id}/seats", response_model=SeatListResponse)
 def list_seats(
     classroom_id: str,
@@ -154,7 +184,10 @@ def get_seat(
     seat_id: str,
     service: ClassroomService = Depends(get_classroom_service),
 ) -> SeatResponse:
-    return SeatResponse.from_domain(service.get_seat(seat_id))
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
+    return SeatResponse.from_domain(seat)
 
 
 @api_router.put("/{classroom_id}/seats/{seat_id}", response_model=SeatResponse)
@@ -167,6 +200,10 @@ def update_seat(
     # 명시적으로 null이 전달된 경우에만 해제한다 (전달 안 된 필드는 갱신하지 않는다).
     unset_row = "row" in payload.model_fields_set and payload.row is None
     unset_column = "column" in payload.model_fields_set and payload.column is None
+
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
 
     seat = service.update_seat(
         seat_id,
@@ -191,6 +228,9 @@ def delete_seat(
     seat_id: str,
     service: ClassroomService = Depends(get_classroom_service),
 ) -> Response:
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
     service.delete_seat(seat_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -203,6 +243,9 @@ def assign_student_to_seat(
     service: ClassroomService = Depends(get_classroom_service),
 ) -> SeatAssignmentResponse:
     """좌석에 학생을 지정한다."""
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
     info = service.assign_student(seat_id, payload.student_id)
     return SeatAssignmentResponse.from_domain(info)
 
@@ -217,6 +260,9 @@ def unassign_student_from_seat(
     service: ClassroomService = Depends(get_classroom_service),
 ) -> Response:
     """좌석-학생 지정을 해제한다."""
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
     service.unassign_student(seat_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -231,6 +277,130 @@ def list_seat_assignments(
     return SeatAssignmentListResponse(
         items=[SeatAssignmentResponse.from_domain(info) for info in infos]
     )
+
+
+# ============================================================
+# 오프라인 migration API
+# ============================================================
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/preflight",
+    response_model=MigrationPreflightResponse,
+)
+def migration_preflight(
+    classroom_id: str,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationPreflightResponse:
+    """migration 전 사전 검사. 부분 좌표 발견 시 ok=False(abort 대상)를 알린다."""
+    return MigrationPreflightResponse.from_domain(service.preflight_check(classroom_id))
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/run",
+    response_model=MigrationRunResponse,
+)
+def migration_run(
+    classroom_id: str,
+    payload: MigrationRunRequest | None = None,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationRunResponse:
+    """오프라인 migration을 실행한다.
+
+    preflight 실패(부분 좌표)는 zero-write abort, 승인되지 않은 cutover는
+    차단, post-gate 검증 실패는 snapshot으로 restore한다.
+    """
+    result = service.run_migration(
+        classroom_id,
+        snapshot_name=payload.name if payload is not None else None,
+    )
+    return MigrationRunResponse.from_domain(result)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/rollback",
+    response_model=MigrationRollbackResponse,
+)
+def migration_rollback(
+    classroom_id: str,
+    payload: MigrationRollbackRequest | None = None,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationRollbackResponse:
+    """migration을 snapshot으로 롤백한다 (기본: 강의실의 최근 snapshot)."""
+    snapshot = service.rollback(
+        classroom_id,
+        snapshot_id=payload.snapshot_id if payload is not None else None,
+    )
+    return MigrationRollbackResponse.from_domain(snapshot, classroom_id)
+
+
+@api_router.get(
+    "/{classroom_id}/seats/migration/status",
+    response_model=MigrationStatusResponse,
+)
+def migration_status(
+    classroom_id: str,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationStatusResponse:
+    """migration 상태(preflight·snapshot·감사·gate 검증)를 조회한다."""
+    return MigrationStatusResponse.from_domain(service.migration_status(classroom_id))
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/repair/request",
+    response_model=RepairApprovalResponse,
+)
+def repair_request(
+    classroom_id: str,
+    payload: RepairRequestRequest,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> RepairApprovalResponse:
+    """좌석 repair 승인 요청을 만든다 (PENDING 상태로 저장).
+
+    좌표는 양쪽 모두 양수 정수 또는 양쪽 모두 unset만 허용한다.
+    """
+    approval = service.request_repair(
+        classroom_id,
+        payload.seat_id,
+        row=payload.row,
+        column=payload.column,
+        requested_by=payload.requested_by,
+    )
+    return RepairApprovalResponse.from_domain(approval)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/repair/approve",
+    response_model=RepairApprovalResponse,
+)
+def repair_approve(
+    classroom_id: str,
+    payload: RepairApproveRequest,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> RepairApprovalResponse:
+    """대기 중인 repair 승인 요청을 승인한다 (APPROVED 상태로 전환)."""
+    approval = service.approve_repair(payload.approval_id, approved_by=payload.approved_by)
+    return RepairApprovalResponse.from_domain(approval)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/repair/execute",
+    response_model=SeatResponse,
+)
+def repair_execute(
+    classroom_id: str,
+    payload: RepairExecuteRequest,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> SeatResponse:
+    """승인된 수동 repair를 적용하고 REPAIR 감사 기록을 남긴다."""
+    seat = service.repair_seat(
+        classroom_id,
+        payload.seat_id,
+        row=payload.row,
+        column=payload.column,
+        approved_by=payload.approved_by,
+    )
+    return SeatResponse.from_domain(seat)
 
 
 @api_router.get("/{classroom_id}/occupancy", response_model=OccupancySummaryResponse)
@@ -314,6 +484,7 @@ def classrooms_page(
         context={
             "classrooms": page.items,
             "selected_classroom_id": selected or "",
+            "nav_classroom_id": selected or "",
             "summary": summary,
             "assignments": assignments,
         },
@@ -351,6 +522,8 @@ def seats_page(
     classroom_id: str,
     request: Request,
     service: ClassroomService = Depends(get_classroom_service),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     try:
         summary = service.occupancy_summary(classroom_id)
@@ -365,6 +538,14 @@ def seats_page(
     max_row = max((seat.row for seat in grid_seats if seat.row is not None), default=1)
     max_column = max((seat.column for seat in grid_seats if seat.column is not None), default=1)
     seat_map = {(seat.row, seat.column): seat for seat in grid_seats}
+    # 통합 관리 화면용 좌석-학생 지정 현황 (seat_id → 지정 정보) (TASK-002).
+    assignments = {info.seat_id: info for info in service.list_assignments(classroom_id)}
+    # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
+    # 중립 조회 계약: limit은 1~page_size_max, offset은 0 이상이어야 한다.
+    validate_list_active_args(
+        limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
+    )
+    students = student_lookup.list_active(limit=settings.page_size_max, offset=0).items
     return templates.TemplateResponse(
         request=request,
         name="classrooms/seats.html",
@@ -376,6 +557,8 @@ def seats_page(
             "max_row": max_row,
             "max_column": max_column,
             "seat_map": seat_map,
+            "assignments": assignments,
+            "students": students,
         },
     )
 
@@ -395,43 +578,14 @@ def seat_assignments_page_any(
 
 
 @page_router.get("/{classroom_id}/seat-assignments")
-def seat_assignments_page(
-    classroom_id: str,
-    request: Request,
-    service: ClassroomService = Depends(get_classroom_service),
-    student_lookup: StudentLookupPort = Depends(get_student_lookup),
-    settings: Settings = Depends(get_settings),
-) -> Response:
-    """좌석-학생 지정 관리 페이지.
+def seat_assignments_page(classroom_id: str) -> Response:
+    """레거시 좌석-학생 지정 화면 URL은 통합 좌석 관리 화면으로 302 리다이렉트한다.
 
-    좌석 목록과 지정 현황, 활성 학생 목록을 조합해 렌더링한다.
-    지정/해제는 기존 JSON API를 classroom-admin.js가 fetch로 호출한다.
+    지정/해제는 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
     """
-    try:
-        classroom = service.get_classroom(classroom_id)
-    except ClassroomNotFoundError:
-        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
-
-    seats = service.list_all_seats(classroom_id)
-    assignments_list = service.list_assignments(classroom_id)
-    # seat_id를 키로 변환해 템플릿에서 좌석별 지정을 바로 조회한다.
-    assignments = {info.seat_id: info for info in assignments_list}
-    # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
-    # 중립 조회 계약: limit은 1~page_size_max, offset은 0 이상이어야 한다.
-    validate_list_active_args(
-        limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
-    )
-    students_page = student_lookup.list_active(limit=settings.page_size_max, offset=0)
-
-    return templates.TemplateResponse(
-        request=request,
-        name="classrooms/seat_assignments.html",
-        context={
-            "classroom": classroom,
-            "seats": seats,
-            "assignments": assignments,
-            "students": students_page.items,
-        },
+    return RedirectResponse(
+        url=f"/classrooms/{classroom_id}/seats",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
@@ -484,39 +638,24 @@ def student_states_page(
 
 
 @page_router.get("/{classroom_id}/seats/create")
-def seat_create_page(
-    classroom_id: str,
-    request: Request,
-    service: ClassroomService = Depends(get_classroom_service),
-) -> Response:
-    try:
-        classroom = service.get_classroom(classroom_id)
-    except ClassroomNotFoundError:
-        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse(
-        request=request,
-        name="classrooms/seat_edit.html",
-        context={"classroom": classroom, "seat": None},
+def seat_create_page(classroom_id: str) -> Response:
+    """레거시 좌석 추가 화면 URL은 통합 좌석 관리 화면으로 302 리다이렉트한다.
+
+    생성은 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
+    """
+    return RedirectResponse(
+        url=f"/classrooms/{classroom_id}/seats",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
 @page_router.get("/{classroom_id}/seats/{seat_id}/edit")
-def seat_edit_page(
-    classroom_id: str,
-    seat_id: str,
-    request: Request,
-    service: ClassroomService = Depends(get_classroom_service),
-) -> Response:
-    seats_url = f"/classrooms/{classroom_id}/seats"
-    try:
-        classroom = service.get_classroom(classroom_id)
-        seat = service.get_seat(seat_id)
-    except (ClassroomNotFoundError, SeatNotFoundError):
-        return RedirectResponse(url=seats_url, status_code=status.HTTP_302_FOUND)
-    if seat.classroom_id != classroom.id:
-        return RedirectResponse(url=seats_url, status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse(
-        request=request,
-        name="classrooms/seat_edit.html",
-        context={"classroom": classroom, "seat": seat},
+def seat_edit_page(classroom_id: str, seat_id: str) -> Response:
+    """레거시 좌석 수정 화면 URL은 통합 좌석 관리 화면으로 302 리다이렉트한다.
+
+    수정은 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
+    """
+    return RedirectResponse(
+        url=f"/classrooms/{classroom_id}/seats",
+        status_code=status.HTTP_302_FOUND,
     )

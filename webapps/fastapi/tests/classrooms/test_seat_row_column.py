@@ -239,15 +239,28 @@ class TestCoordinateUniquenessParity:
         service.create_seat(classroom_id, code="S02", label="좌석 2")
 
     def test_inactive_seat_reserves_coordinate(self) -> None:
-        """비활성 좌석도 (row, column)을 예약한다."""
+        """legacy inactive(PUT is_active=false) 좌석도 (row, column)을 예약한다."""
         service = _make_service()
         classroom_id = _seed_classroom(service)
         service.create_seat(classroom_id, code="S01", label="좌석 1", row=1, column=1)
         inactive = service.create_seat(classroom_id, code="S02", label="좌석 2", row=2, column=2)
-        service.delete_seat(inactive.id)
+        service.update_seat(inactive.id, is_active=False)
 
         with pytest.raises(SeatDuplicateError):
             service.create_seat(classroom_id, code="S03", label="좌석 3", row=2, column=2)
+
+    def test_hard_deleted_seat_releases_coordinate(self) -> None:
+        """hard delete된 좌석의 (row, column)은 즉시 해제된다."""
+        service = _make_service()
+        classroom_id = _seed_classroom(service)
+        service.create_seat(classroom_id, code="S01", label="좌석 1", row=1, column=1)
+        deleted = service.create_seat(classroom_id, code="S02", label="좌석 2", row=2, column=2)
+        service.delete_seat(deleted.id)
+
+        created = service.create_seat(classroom_id, code="S03", label="좌석 3", row=2, column=2)
+
+        assert (created.row, created.column) == (2, 2)
+        assert created.id != deleted.id
 
     def test_same_coordinate_in_different_classrooms_is_allowed(self) -> None:
         service = _make_service()

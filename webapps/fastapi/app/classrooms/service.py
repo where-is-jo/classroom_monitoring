@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -16,6 +17,9 @@ from .errors import (
     ClassroomInputError,
     ClassroomNotFoundError,
     SeatBatchConflictError,
+    SeatCodeAllocationConflictError,
+    SeatCodeConflictError,
+    SeatCoordinateConflictError,
     SeatDuplicateError,
     SeatInactiveForAssignmentError,
     SeatNotFoundError,
@@ -42,7 +46,16 @@ from .models import (
     SeatOccupancyHistory,
     SeatPage,
 )
-from .ports import ClassroomRepository, SeatAssignmentRepository
+from .ports import ClassroomRepository, SeatAssignmentRepository, SeatMutationUnitOfWork
+
+# allocator가 인식하는 좌석 코드 패턴: S 뒤에 양의 정수 1개 이상.
+_SEAT_CODE_PATTERN = re.compile(r"^S(\d+)$")
+
+# batch 좌석 사전 검증과 처리 중 hard delete 경쟁에서 공통으로 쓰는 422 메시지.
+_OBSERVATION_SEAT_REQUIREMENT = "batch의 모든 좌석은 요청한 강의실 소속의 활성 좌석이어야 합니다."
+
+# 좌석 current 반영(CAS) 재시도 상한. 소진 시 ClassroomConcurrentUpdateError.
+_OCCUPANCY_RETRY_LIMIT = 3
 
 
 class ClassroomService:
@@ -52,12 +65,15 @@ class ClassroomService:
         *,
         student_lookup: StudentLookupPort | None = None,  # 학생 조회·활성 검증용 (중립 계약)
         assignment_repository: SeatAssignmentRepository | None = None,  # 좌석-학생 지정 관리용
+        uow: SeatMutationUnitOfWork
+        | None = None,  # 지정 mutation 단위 작업 (주입 시 직접 mutation 금지)
         occupancy_confidence_threshold: float,
         clock: Callable[[], datetime],
     ) -> None:
         self._repository = repository
         self._student_lookup = student_lookup
         self._assignment_repository = assignment_repository
+        self._uow = uow
         self._threshold = occupancy_confidence_threshold
         self._clock = clock
 
@@ -97,6 +113,80 @@ class ClassroomService:
                 updated_at=now,
                 version=0,
             )
+        )
+
+    def create_seat_auto(self, classroom_id: str, *, row: int, column: int) -> Seat:
+        """좌석을 자동 코드로 생성한다. label은 ``좌석 {code}``로 설정한다.
+
+        - allocator가 현재 seat 문서(legacy inactive 포함)를 읽어 최소 누락 코드를 만든다.
+        - code conflict(동시 할당 레이스)에서만 할당·삽입을 최대 3회 재시도하고,
+          재시도 소진 시 ``SeatCodeAllocationConflictError``를 던진다.
+        - 좌표 conflict는 재시도하지 않고 즉시 ``SeatCoordinateConflictError``를 던진다.
+        """
+        classroom = self._required_active_classroom(classroom_id)
+        self._validate_row_column(row, column)
+        last_code_conflict: SeatCodeConflictError | None = None
+        for _ in range(3):
+            try:
+                return self._create_auto_seat(classroom.id, row=row, column=column)
+            except SeatCodeConflictError as exc:
+                last_code_conflict = exc
+        raise SeatCodeAllocationConflictError() from last_code_conflict
+
+    def _create_auto_seat(self, classroom_id: str, *, row: int, column: int) -> Seat:
+        code = self._allocate_seat_code(classroom_id)
+        now = self._aware_datetime(self._clock())
+        seat = Seat(
+            id=str(uuid4()),
+            classroom_id=classroom_id,
+            code=code,
+            label=f"좌석 {code}",
+            row=row,
+            column=column,
+            geometry=None,
+            is_active=True,
+            current_occupancy=SeatCurrentOccupancy(
+                state=SeatOccupancy.UNKNOWN,
+                source=OccupancySource.SYSTEM,
+                confidence=None,
+                observed_at=None,
+                event_id=None,
+            ),
+            created_at=now,
+            updated_at=now,
+            version=0,
+        )
+        try:
+            return self._repository.create_seat(seat)
+        except SeatDuplicateError:
+            if self._is_coordinate_conflict(classroom_id, row=row, column=column):
+                raise SeatCoordinateConflictError() from None
+            raise SeatCodeConflictError() from None
+
+    def _allocate_seat_code(self, classroom_id: str) -> str:
+        """``^S(\\d+)$`` 코드 중 최소 누락값으로 새 코드를 만든다.
+
+        현재 seat 문서(비활성 포함)가 예약한 양의 정수를 파싱해,
+        S01~S99는 2자리 0-padding, S100 이후는 자연수 표기로 생성한다.
+        """
+        seats = self._repository.list_all_seats_for_allocation(classroom_id)
+        reserved: set[int] = set()
+        for seat in seats:
+            match = _SEAT_CODE_PATTERN.fullmatch(seat.code)
+            if match is not None:
+                reserved.add(int(match.group(1)))
+        candidate = 1
+        while candidate in reserved:
+            candidate += 1
+        if candidate < 100:
+            return f"S{candidate:02d}"
+        return f"S{candidate}"
+
+    def _is_coordinate_conflict(self, classroom_id: str, *, row: int, column: int) -> bool:
+        """현재 seat 문서(비활성 포함) 중 (row, column)을 예약한 좌석이 있는지 확인한다."""
+        return any(
+            seat.row == row and seat.column == column
+            for seat in self._repository.list_all_seats_for_allocation(classroom_id)
         )
 
     def seed_classroom(self, command: CreateClassroomCommand) -> Classroom:
@@ -301,7 +391,13 @@ class ClassroomService:
         seat = self._required_seat(seat_id)
         if not seat.is_active:
             raise SeatNotFoundError()
-        self._repository.delete_seat(seat.id)
+        if self._uow is not None:
+            self._uow.delete_seat_and_unassign(seat.id)
+        else:
+            # UoW 미주입(레거시 경로): 삭제 전 지정 해제 (베스트 에포트)
+            if self._assignment_repository is not None:
+                self._assignment_repository.unassign(seat.id)
+            self._repository.delete_seat(seat.id)
 
     # ============================================================
     # 좌석-학생 지정
@@ -318,7 +414,7 @@ class ClassroomService:
         - 이미 같은 강의실의 다른 좌석에 지정된 학생이면 기존 지정을 해제하고 새 좌석에 지정한다.
         - 비활성화된 학생/좌석이면 예외를 발생시킨다.
         """
-        if self._assignment_repository is None:
+        if self._assignment_repository is None and self._uow is None:
             raise ClassroomInputError("지정 저장소가 연결되지 않았습니다.")
 
         seat = self._required_seat(seat_id)
@@ -332,19 +428,24 @@ class ClassroomService:
             if not student.is_active:
                 raise StudentInactiveForAssignmentError()
 
-        # 같은 강의실 내에서 이미 지정된 학생이 있으면 기존 지정 해제 (이동)
-        existing = self._assignment_repository.get_by_student(student_id, seat.classroom_id)
-        if existing is not None and existing.seat_id != seat_id:
-            self._assignment_repository.unassign(existing.seat_id)
+        if self._uow is not None:
+            # UoW가 기존 지정 해제 + 새 지정을 원자적으로 수행한다.
+            saved = self._uow.assign_or_move_if_active(seat_id, student_id, seat.classroom_id)
+        else:
+            assert self._assignment_repository is not None
+            # 같은 강의실 내에서 이미 지정된 학생이 있으면 기존 지정 해제 (이동)
+            existing = self._assignment_repository.get_by_student(student_id, seat.classroom_id)
+            if existing is not None and existing.seat_id != seat_id:
+                self._assignment_repository.unassign(existing.seat_id)
 
-        now = self._aware_datetime(self._clock())
-        assignment = SeatAssignment(
-            seat_id=seat_id,
-            student_id=student_id,
-            classroom_id=seat.classroom_id,
-            assigned_at=now,
-        )
-        saved = self._assignment_repository.assign(assignment)
+            now = self._aware_datetime(self._clock())
+            assignment = SeatAssignment(
+                seat_id=seat_id,
+                student_id=student_id,
+                classroom_id=seat.classroom_id,
+                assigned_at=now,
+            )
+            saved = self._assignment_repository.assign(assignment)
 
         # SeatAssignmentInfo 조회 (학생 이름/학번 보강)
         student_name = ""
@@ -366,6 +467,9 @@ class ClassroomService:
 
     def unassign_student(self, seat_id: str) -> None:
         """좌석-학생 지정을 해제한다."""
+        if self._uow is not None:
+            self._uow.unassign_if_active(seat_id)
+            return
         if self._assignment_repository is None:
             raise ClassroomInputError("지정 저장소가 연결되지 않았습니다.")
         self._assignment_repository.unassign(seat_id)
@@ -483,9 +587,7 @@ class ClassroomService:
         for observation in observations:
             seat = self._repository.get_seat(observation.seat_id)
             if seat is None or not seat.is_active or seat.classroom_id != classroom.id:
-                raise ClassroomInputError(
-                    "batch의 모든 좌석은 요청한 강의실 소속의 활성 좌석이어야 합니다."
-                )
+                raise ClassroomInputError(_OBSERVATION_SEAT_REQUIREMENT)
             seats[seat.id] = seat
 
         claimed = existing
@@ -508,17 +610,25 @@ class ClassroomService:
         if claimed.status == ObservationBatchStatus.COMPLETED:
             return self._batch_result(claimed)
 
-        histories = [
-            self._apply_observation(
-                observation,
-                classroom_id=classroom.id,
-                event_id=event_id,
-                source=command.source,
-                observed_at=observed_at,
-                received_at=claimed.received_at,
-            )
-            for observation in observations
-        ]
+        try:
+            histories = [
+                self._apply_observation(
+                    observation,
+                    classroom_id=classroom.id,
+                    event_id=event_id,
+                    source=command.source,
+                    observed_at=observed_at,
+                    received_at=claimed.received_at,
+                )
+                for observation in observations
+            ]
+        except SeatNotFoundError as exc:
+            # 사전 검증을 통과한 직후 좌석이 hard delete되는 경쟁(claim 이후 delete-first).
+            # UoW가 좌석 부재를 확인하고 history·current를 하나도 쓰지 않으므로,
+            # 사전 검증과 같은 422로 수렴시켜 두 저장소에서 동일한 결과를 낸다.
+            # batch는 COMPLETED로 넘어가지 않고 PROCESSING으로 남아, 같은 event_id의
+            # 재요청도 사전 검증에서 다시 422가 된다 (재시도 결과가 멱등하다).
+            raise ClassroomInputError(_OBSERVATION_SEAT_REQUIREMENT) from exc
         completed = replace(
             claimed,
             status=ObservationBatchStatus.COMPLETED,
@@ -542,11 +652,62 @@ class ClassroomService:
         if existing is not None:
             self._repair_current_from_history(existing)
             return existing
-        seat = self._required_seat(observation.seat_id)
+        if self._uow is None:
+            # UoW 미주입(레거시 경로): history append와 current 반영이 분리된다.
+            seat = self._required_seat(observation.seat_id)
+            history = self._build_history(
+                seat,
+                observation,
+                classroom_id=classroom_id,
+                event_id=event_id,
+                source=source,
+                observed_at=observed_at,
+                received_at=received_at,
+            )
+            stored = self._repository.append_occupancy_history(history)
+            self._repair_current_from_history(stored)
+            return stored
+        # UoW 주입 경로: history 기록과 current 반영을 hard delete와 같은
+        # session/lock에서 원자적으로 수행한다. 좌석이 사라졌으면 아무것도 쓰지
+        # 않고 SeatNotFoundError가 올라오고, version이 어긋나면 최신 좌석으로
+        # history를 다시 만들어 재시도한다.
+        for _ in range(_OCCUPANCY_RETRY_LIMIT):
+            seat = self._required_seat(observation.seat_id)
+            history = self._build_history(
+                seat,
+                observation,
+                classroom_id=classroom_id,
+                event_id=event_id,
+                source=source,
+                observed_at=observed_at,
+                received_at=received_at,
+            )
+            applied = self._uow.append_history_and_apply_occupancy(
+                history,
+                expected_version=seat.version,
+                occupancy=self._occupancy_update(seat, history),
+                updated_at=self._aware_datetime(self._clock()),
+            )
+            if applied is not None:
+                return applied
+        raise ClassroomConcurrentUpdateError()
+
+    def _build_history(
+        self,
+        seat: Seat,
+        observation: SeatObservation,
+        *,
+        classroom_id: str,
+        event_id: str,
+        source: OccupancySource,
+        observed_at: datetime,
+        received_at: datetime,
+    ) -> SeatOccupancyHistory:
+        """좌석의 현재 상태를 기준으로 관측 history를 만든다."""
         current = seat.current_occupancy
         target = self._occupancy(observation)
         applied = current.observed_at is None or observed_at >= current.observed_at
-        history = SeatOccupancyHistory(
+        return SeatOccupancyHistory(
             id=str(uuid5(NAMESPACE_URL, f"seat-occupancy-history:{event_id}:{seat.id}")),
             seat_id=seat.id,
             classroom_id=classroom_id,
@@ -561,32 +722,51 @@ class ClassroomService:
             applied_to_current=applied,
             state_changed=applied and current.state != target,
         )
-        stored = self._repository.append_occupancy_history(history)
-        self._repair_current_from_history(stored)
-        return stored
+
+    @staticmethod
+    def _occupancy_update(seat: Seat, history: SeatOccupancyHistory) -> SeatCurrentOccupancy | None:
+        """history를 좌석 current에 반영해야 하면 새 current를, 아니면 None을 준다."""
+        if not history.applied_to_current:
+            return None
+        current = seat.current_occupancy
+        if current.event_id == history.event_id:
+            return None
+        if current.observed_at is not None and current.observed_at > history.observed_at:
+            return None
+        return SeatCurrentOccupancy(
+            state=history.to_state,
+            source=history.source,
+            confidence=history.confidence,
+            observed_at=history.observed_at,
+            event_id=history.event_id,
+        )
 
     def _repair_current_from_history(self, history: SeatOccupancyHistory) -> None:
         if not history.applied_to_current:
             return
-        for _ in range(3):
+        for _ in range(_OCCUPANCY_RETRY_LIMIT):
             current = self._required_seat(history.seat_id)
-            if current.current_occupancy.event_id == history.event_id:
+            occupancy = self._occupancy_update(current, history)
+            if occupancy is None:
                 return
-            if (
-                current.current_occupancy.observed_at is not None
-                and current.current_occupancy.observed_at > history.observed_at
-            ):
-                return
+            now = self._aware_datetime(self._clock())
+            if self._uow is not None:
+                # 이미 저장된 history를 그대로 넘겨 current만 원자적으로 반영한다.
+                if (
+                    self._uow.append_history_and_apply_occupancy(
+                        history,
+                        expected_version=current.version,
+                        occupancy=occupancy,
+                        updated_at=now,
+                    )
+                    is not None
+                ):
+                    return
+                continue
             updated = replace(
                 current,
-                current_occupancy=SeatCurrentOccupancy(
-                    state=history.to_state,
-                    source=history.source,
-                    confidence=history.confidence,
-                    observed_at=history.observed_at,
-                    event_id=history.event_id,
-                ),
-                updated_at=self._aware_datetime(self._clock()),
+                current_occupancy=occupancy,
+                updated_at=now,
                 version=current.version + 1,
             )
             if self._repository.replace_seat(updated, expected_version=current.version) is not None:

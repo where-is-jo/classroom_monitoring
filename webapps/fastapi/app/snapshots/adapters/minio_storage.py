@@ -16,18 +16,20 @@ from ..ports import ObjectContent, StoredObject
 
 logger = logging.getLogger(__name__)
 
-# 두 import를 따로 감싼다. 한 블록에 묶으면 minio가 없을 때 urllib3 이름까지 함께 비어,
-# 아래 예외 목록이 bare Exception이 되어 모든 오류를 삼킨다.
-try:
-    from minio import Minio
-    from minio.error import MinioException, S3Error
-except ImportError:  # pragma: no cover - 패키지가 없는 환경에서의 경로
-    # 이름에 None을 대입하는 것은 mypy가 보기엔 타입 자리에 값을 넣는 것이라 오류다.
-    # 여기서는 "패키지가 없으면 이름이 비어 있다"가 의도된 동작이므로 억제한다.
-    # worker/inference/model.py가 ultralytics에 쓰는 것과 같은 패턴이다.
-    Minio = None  # type: ignore[assignment, misc]
-    MinioException = None  # type: ignore[assignment, misc]
-    S3Error = None  # type: ignore[assignment, misc]
+
+def _load_minio_sdk() -> tuple[Any, type[BaseException] | None, type[BaseException] | None]:
+    """선택 의존성인 MinIO SDK의 클라이언트와 예외 타입을 읽는다."""
+    try:
+        from minio import Minio
+        from minio.error import MinioException, S3Error
+    except ImportError:  # pragma: no cover - 패키지가 없는 환경에서의 경로
+        return None, None, None
+    return Minio, MinioException, S3Error
+
+
+# MinIO와 urllib3 import를 따로 감싼다. 한 블록에 묶으면 minio가 없을 때 urllib3
+# 이름까지 함께 비어, 아래 예외 목록이 bare Exception이 되어 모든 오류를 삼킨다.
+Minio, MinioException, S3Error = _load_minio_sdk()
 
 try:
     import urllib3

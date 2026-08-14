@@ -23,9 +23,13 @@ from app.classrooms.service import ClassroomService
 from app.demo_seed import seed_demo_data
 from app.main import app
 from app.shared.config import Settings
-from app.shared.dependencies import get_classroom_service, get_video_demo_service
+from app.shared.dependencies import (
+    get_classroom_service,
+    get_video_demo_service,
+    get_video_stream_service,
+)
 from app.shared.errors import RepositoryUnavailableError
-from app.video_monitoring.service import VideoDemoService
+from app.video_monitoring.service import VideoDemoService, VideoStreamService
 
 NOW = datetime(2026, 8, 10, 3, 0, tzinfo=UTC)
 
@@ -174,10 +178,18 @@ def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> No
         "/api/v1/classrooms/{classroom_id}",
         "/api/v1/classrooms/{classroom_id}/occupancy",
         "/api/v1/classrooms/{classroom_id}/occupancy-events",
+        "/api/v1/classrooms/{classroom_id}/seat-assignments",
         "/api/v1/classrooms/{classroom_id}/seats",
+        "/api/v1/classrooms/{classroom_id}/seats/auto",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/preflight",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/rollback",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/run",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/status",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/approve",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/execute",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/request",
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
-        "/api/v1/classrooms/{classroom_id}/seat-assignments",
         # 학생 상태
         "/api/v1/classrooms/{classroom_id}/student-states",
         # 영상 모니터링
@@ -185,12 +197,14 @@ def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> No
         "/api/v1/video-streams/{stream_id}",
         "/api/v1/video-streams/{stream_id}/detections",
         "/api/v1/video-streams/{stream_id}/detection-events",
+        "/api/v1/video-streams/{stream_id}/playback-sessions",
+        "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
         "/api/v1/video-searches",
         "/api/v1/video-segments",
         # 얼굴 등록
         "/api/v1/students/{student_id}/face-enrollments",
-        "/api/v1/face-enrollments/{enrollment_id}",
         "/api/v1/students/{student_id}/face-profile",
+        "/api/v1/face-enrollments/{enrollment_id}",
         "/api/v1/students",
         "/api/v1/students/{student_id}/face-enrollment",
         "/api/v1/classrooms/{classroom_id}/roi-connection",
@@ -200,9 +214,6 @@ def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> No
         "/api/v1/snapshots/image/{key}",
         # 자연어 탐지 검색. 질문이 본문에 들어가므로 조회지만 POST다.
         "/api/v1/llm-searches",
-        # worker가 결과를 밀어 넣는 내부 수집 경로다. 브라우저가 부르는 API가 아니다.
-        "/internal/inference/events",
-        "/internal/video-segments",
         "/health",
         "/health/ready",
     } <= paths
@@ -277,8 +288,8 @@ def test_empty_provider_keeps_monitoring_and_search_pages_available(
     results = minimal_client.post("/api/v1/video-searches", json={"query": "사람"})
 
     assert monitoring.status_code == 200
-    assert "연결된 영상 source가 없습니다." in monitoring.text
-    assert "실제 CCTV나 실시간 스트림" not in monitoring.text
+    assert "연결된 카메라가 없습니다." in monitoring.text
+    assert "학생 부재로 해석하지 않습니다" in monitoring.text
     assert search.status_code == 200
     assert "검색할 운영 metadata가 없습니다." in search.text
     assert streams.json() == {"items": [], "total": 0}
@@ -324,7 +335,7 @@ def test_repository_failures_are_not_replaced_with_demo_data(
     def unavailable_classroom_service() -> ClassroomService:
         raise RepositoryUnavailableError()
 
-    def unavailable_video_service() -> VideoDemoService:
+    def unavailable_stream_service() -> VideoStreamService:
         raise RepositoryUnavailableError()
 
     app.dependency_overrides[get_classroom_service] = unavailable_classroom_service
@@ -332,7 +343,7 @@ def test_repository_failures_are_not_replaced_with_demo_data(
     assert classroom.status_code == 503
     assert classroom.json()["error"]["code"] == "REPOSITORY_UNAVAILABLE"
 
-    app.dependency_overrides[get_video_demo_service] = unavailable_video_service
+    app.dependency_overrides[get_video_stream_service] = unavailable_stream_service
     monitoring = minimal_client.get("/monitoring")
     assert monitoring.status_code == 503
     assert "요청을 처리할 수 없습니다" in monitoring.text
