@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}자연어 탐지 검색 · 학습 모니터링{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1>자연어 탐지 검색</h1>
+  <p class="page-lead">
+    질문을 검색 조건으로 바꾼 뒤 탐지 기록을 찾습니다. 탐지 인원이 바뀐 시점만 보여줍니다.
+  </p>
+</header>
+
+<form class="filter-bar" method="get" action="/llm-search">
+  <label for="question">질문</label>
+  <input
+    id="question"
+    name="q"
+    type="text"
+    maxlength="200"
+    value="{{ question }}"
+    placeholder="예) 오늘 6시부터 7시 사이에 A101에 누가 있었어?">
+  <button type="submit">검색</button>
+</form>
+
+{# 상태를 다섯으로 나눈다. 묶어서 보여주면 사용자가 질문을 고쳐야 하는지
+   관리자를 불러야 하는지 알 수 없다. #}
+{% if planner_error %}
+  <div class="state-panel state-error" role="alert">
+    <h2>검색 서버에 닿지 못했습니다</h2>
+    <p>
+      질문을 해석하는 서버에 연결하지 못했습니다.
+      <strong>질문을 고쳐도 해결되지 않습니다.</strong> 서버 상태를 확인한 뒤 다시 시도하세요.
+    </p>
+  </div>
+{% elif plan_error %}
+  <div class="state-panel state-error" role="alert">
+    <h2>질문을 검색 조건으로 바꾸지 못했습니다</h2>
+    <p>
+      기간과 대상을 더 분명하게 적어 주세요.
+      예) <em>어제 오후 2시부터 4시까지 A101</em>
+    </p>
+  </div>
+{% elif not asked %}
+  <div class="state-panel state-empty">
+    <h2>질문을 입력하세요</h2>
+    <p>
+      기간과 강의실을 말하면 그 시간대의 탐지 기록을 찾습니다.
+      찾을 수 있는 것은 <strong>몇 명이 언제 어느 카메라에 잡혔는지</strong>입니다.
+    </p>
+  </div>
+{% else %}
+  <section class="state-panel" aria-labelledby="plan-heading">
+    <h2 id="plan-heading">이렇게 이해했습니다</h2>
+    <dl class="plan-summary">
+      <dt>기간</dt>
+      <dd>
+        <time datetime="{{ outcome.query.from_at.isoformat() }}">
+          {{ outcome.query.from_at.strftime('%Y-%m-%d %H:%M') }}
+        </time>
+        ~
+        <time datetime="{{ outcome.query.to_at.isoformat() }}">
+          {{ outcome.query.to_at.strftime('%Y-%m-%d %H:%M') }}
+        </time>
+        UTC
+      </dd>
+      <dt>대상</dt>
+      <dd>
+        {% if outcome.query.camera_id %}
+          카메라 {{ outcome.query.camera_id }}
+        {% elif outcome.query.classroom_id %}
+          {{ outcome.query.classroom_id }} 강의실
+        {% else %}
+          사용 중인 카메라 전체
+        {% endif %}
+      </dd>
+    </dl>
+    {% if outcome.query.notes %}
+      <ul class="plan-notes">
+        {% for note in outcome.query.notes %}
+          <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  {% if outcome.snapshot_lookup_failed %}
+    {# "이미지 없음"과 "이미지 확인 실패"는 다르다. 아래 결과는 유효하다. #}
+    <div class="state-panel state-error" role="alert">
+      <h2>스냅샷 저장소를 조회하지 못했습니다</h2>
+      <p>
+        아래 기록은 정상 조회된 것입니다.
+        <strong>이미지가 없다는 뜻이 아니라 있는지 확인하지 못했다는 뜻입니다.</strong>
+      </p>
+    </div>
+  {% endif %}
+
+  {% if not outcome.hits %}
+    <div class="state-panel state-empty">
+      <h2>해당 기간에 탐지 기록이 없습니다</h2>
+      <p>
+        조회는 성공했고 결과가 없습니다.
+        탐지 이벤트가 저장되고 있는지 확인하거나 기간을 넓혀 보세요.
+      </p>
+    </div>
+  {% else %}
+    <p class="result-count">
+      {{ outcome.hits | length }}건
+      {% if outcome.truncated %}
+        · <strong>상한에 걸려 잘렸습니다. 이것이 전부가 아닙니다.</strong>
+      {% endif %}
+    </p>
+    <ul class="snapshot-grid">
+      {% for hit in outcome.hits %}
+        <li class="snapshot-card">
+          {% if hit.snapshot_key %}
+            <img
+              class="snapshot-image"
+              src="/api/v1/snapshots/image/{{ hit.snapshot_key }}"
+              alt="{{ hit.camera_id }} 카메라의 {{ hit.captured_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC 스냅샷"
+              loading="lazy">
+          {% else %}
+            <p class="state-empty">
+              {% if outcome.snapshot_lookup_failed %}
+                이미지 확인 실패
+              {% else %}
+                이 시각의 스냅샷 없음
+              {% endif %}
+            </p>
+          {% endif %}
+          <div class="snapshot-meta">
+            <p class="snapshot-camera">
+              {{ hit.camera_id }}
+              {% if hit.resolved_classroom_id %}· {{ hit.resolved_classroom_id }}{% endif %}
+            </p>
+            <p class="snapshot-time">
+              <time datetime="{{ hit.captured_at.isoformat() }}">
+                {{ hit.captured_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+              </time>
+            </p>
+            {# 식별된 학생을 먼저 보여준다. 얼굴 인식이 붙으면 같은 자리에 이름이 뜬다.
+               지금은 채우는 생산자가 없어 항상 미식별로 나온다. 그 사실을 숨기지 않는다. #}
+            <p class="snapshot-size">
+              탐지 {{ hit.detection_count }}명
+              {% if hit.identified %}
+                · 식별 {{ hit.identified | map(attribute='student_id') | join(', ') }}
+                {% if hit.unidentified_count %}· 미식별 {{ hit.unidentified_count }}명{% endif %}
+              {% else %}
+                · 식별 미연동
+              {% endif %}
+            </p>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -41,9 +41,7 @@ class TestStudentIdentityContract:
     """StudentIdentity 모델 계약."""
 
     def test_identity_is_frozen(self) -> None:
-        identity = StudentIdentity(
-            id="stu-1", student_no="20260101", name="홍길동", is_active=True
-        )
+        identity = StudentIdentity(id="stu-1", student_no="20260101", name="홍길동", is_active=True)
         with pytest.raises(FrozenInstanceError):
             identity.name = "이름변경"  # type: ignore[misc]
 

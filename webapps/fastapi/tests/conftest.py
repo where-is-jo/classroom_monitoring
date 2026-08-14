@@ -12,6 +12,9 @@ os.environ["DATABASE_URL"] = ""
 os.environ["DATABASE_NAME"] = ""
 os.environ["DEMO_MODE_ENABLED"] = "false"
 os.environ["FACE_ANALYZER_MODE"] = "synthetic"
+# 기본값이 stub이어도 명시한다. 개발자 .env에 llama가 적혀 있으면 테스트가 실제
+# GPU 서버를 때린다.
+os.environ["LLM_SEARCH_MODE"] = "stub"
 
 
 def pytest_configure(config: pytest.Config) -> None:

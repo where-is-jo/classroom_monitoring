@@ -23,7 +23,9 @@ from .ports import VideoStreamRepository
 
 _KST = ZoneInfo("Asia/Seoul")
 _TOKEN_PATTERN = re.compile(r"[0-9a-z\uac00-\ud7a3]+")
-_HOUR_PATTERN = re.compile(r"(?P<hour>\d{1,2})\s*\uc2dc\s*(?P<direction>\uc774\ud6c4|\uc804|\uc774\uc804)")
+_HOUR_PATTERN = re.compile(
+    r"(?P<hour>\d{1,2})\s*\uc2dc\s*(?P<direction>\uc774\ud6c4|\uc804|\uc774\uc804)"
+)
 _GENERIC_TERMS = frozenset(
     {
         "\uc601\uc0c1",
@@ -48,7 +50,11 @@ _SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "\uc785\uc2e4": ("\uc785\uc2e4", "\ub4e4\uc5b4", "\uc785\uc7a5"),
     "\uc774\ub3d9": ("\uc774\ub3d9", "\uc6b4\ub3d9\uc785", "\uc6b4\ub3d9\ud558\ub294"),
     "\uc7a5\ube44 \uad6c\uc5ed": ("\uc7a5\ube44", "\uc2e4\uc2b5"),
-    "\ube44\uc5b4 \uc788\uc74c": ("\ube44\uc5b4", "\ube48 \uacf5\uac04", "\uc544\ubb34\ub3c4 \uc5c6"),
+    "\ube44\uc5b4 \uc788\uc74c": (
+        "\ube44\uc5b4",
+        "\ube48 \uacf5\uac04",
+        "\uc544\ubb34\ub3c4 \uc5c6",
+    ),
     "\uc6b4\ub3d9\uc785 \uc5c6\uc74c": ("\uc6b4\ub3d9\uc785 \uc5c6", "\uc815\uc9c0"),
 }
 
@@ -151,7 +157,11 @@ class VideoDemoService:
             if any(term not in haystack for term in raw_terms):
                 continue
             matched = tuple(dict.fromkeys((*concepts, *raw_terms)))
-            reason = " \u00b7 ".join(matched) if matched else "\uc804\uccb4 \ub370\ubaa8 \uce90\ud0c8\ub85c\uadf8"
+            reason = (
+                " \u00b7 ".join(matched)
+                if matched
+                else "\uc804\uccb4 \ub370\ubaa8 \uce90\ud0c8\ub85c\uadf8"
+            )
             matches.append(
                 VideoSearchResult(
                     clip=clip,
@@ -217,7 +227,9 @@ class VideoDemoService:
                 or token.isdigit()
                 or bool(re.fullmatch(r"\d{1,2}\uc2dc", token))
                 or any(alias in token or token in alias for alias in covered_aliases)
-                or token.endswith(("\uc5d0\ub294", "\uc5d0\uc11c", "\uc73c\ub85c", "\uc774\ud6c4", "\uc774\uc804"))
+                or token.endswith(
+                    ("\uc5d0\ub294", "\uc5d0\uc11c", "\uc73c\ub85c", "\uc774\ud6c4", "\uc774\uc804")
+                )
             ):
                 continue
             terms.append(token)

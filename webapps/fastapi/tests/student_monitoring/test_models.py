@@ -1,17 +1,20 @@
 """Domain model tests."""
 
-from datetime import datetime, timezone
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 
+import pytest
+
+from app.student_monitoring.errors import (
+    InferenceEventConflictError,
+    RepositoryError,
+    VideoStreamNotFoundError,
+)
 from app.student_monitoring.models import (
     Detection,
     DetectionEvent,
     FrameInfo,
     VideoSegment,
-)
-from app.student_monitoring.errors import (
-    InferenceEventConflictError,
-    RepositoryError,
-    VideoStreamNotFoundError,
 )
 
 
@@ -25,7 +28,7 @@ class TestDetectionEvent:
             camera_id="camera-a",
             stream_id="stream-camera-a",
             classroom_id="classroom-a101",
-            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=timezone.utc),
+            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
             sequence=18420,
             frame=FrameInfo(width_pixels=1920, height_pixels=1080),
             detections=(
@@ -40,7 +43,7 @@ class TestDetectionEvent:
                     face_bbox=None,
                 ),
             ),
-            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=timezone.utc),
+            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=UTC),
             schema_version=1,
         )
         assert event.event_id == "test-event-1"
@@ -54,18 +57,15 @@ class TestDetectionEvent:
             camera_id="camera-a",
             stream_id="stream-camera-a",
             classroom_id="classroom-a101",
-            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=timezone.utc),
+            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
             sequence=18420,
             frame=FrameInfo(width_pixels=1920, height_pixels=1080),
             detections=(),
-            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=timezone.utc),
+            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=UTC),
             schema_version=1,
         )
-        try:
+        with pytest.raises(FrozenInstanceError):
             event.event_id = "changed"  # type: ignore[misc]
-            assert False, "Should raise FrozenInstanceError"
-        except AttributeError:
-            pass
 
     def test_empty_detections(self) -> None:
         """Zero detection event test."""
@@ -74,11 +74,11 @@ class TestDetectionEvent:
             camera_id="camera-a",
             stream_id="stream-camera-a",
             classroom_id="classroom-a101",
-            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=timezone.utc),
+            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
             sequence=18421,
             frame=FrameInfo(width_pixels=1920, height_pixels=1080),
             detections=(),
-            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=timezone.utc),
+            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=UTC),
             schema_version=1,
         )
         assert len(event.detections) == 0
@@ -94,13 +94,13 @@ class TestVideoSegment:
             camera_id="camera-a",
             stream_id="stream-camera-a",
             classroom_id="classroom-a101",
-            recorded_from=datetime(2026, 8, 12, 1, 0, 0, tzinfo=timezone.utc),
-            recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=timezone.utc),
+            recorded_from=datetime(2026, 8, 12, 1, 0, 0, tzinfo=UTC),
+            recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=UTC),
             storage="minio",
             bucket_alias="recordings",
             object_key="camera-a/2026-08-12/20260812T010000Z.mp4",
             size_bytes=48392012,
-            received_at=datetime(2026, 8, 12, 1, 5, 1, tzinfo=timezone.utc),
+            received_at=datetime(2026, 8, 12, 1, 5, 1, tzinfo=UTC),
             schema_version=1,
         )
         assert segment.segment_id == "camera-a-20260812T010000Z"

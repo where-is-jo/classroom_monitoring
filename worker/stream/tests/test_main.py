@@ -10,8 +10,10 @@ from shared.config_errors import format_validation_error
 
 
 def capture_validation_error(**values: object) -> ValidationError:
+    # _env_file=None으로 stream/.env.*를 무시한다. 개발자가 값이 채워진 .env.local을
+    # 두면 필수값이 채워져 "없는 변수를 알린다"는 검증이 사람마다 다르게 통과한다.
     with pytest.raises(ValidationError) as error:
-        StreamSettings(**values)  # type: ignore[arg-type]
+        StreamSettings(_env_file=None, **values)  # type: ignore[arg-type]
     return error.value
 
 

@@ -1,0 +1,30 @@
+# stream worker의 일반 설정·판정 기준값. 환경(local/dev/prod)과 무관하게 같은 값을 쓴다.
+# 환경마다 달라야 하는 값과 비밀값은 .env.{local,dev,prod}에 둔다.
+# 규칙: docs/conventions/environment-convention.md
+
+stream_reconnect_max_retry: 10
+stream_reconnect_delay_seconds: 1.0
+stream_startup_wait_seconds: 3.0
+# 연속으로 이만큼 프레임을 못 읽으면 끊긴 것으로 보고 재연결한다.
+stream_read_failure_tolerance: 30
+
+# 몇 프레임마다 한 장을 추론 대상으로 고를지. 20 FPS에서 20이면 약 1초에 한 장이다.
+frame_sample_interval_frames: 20
+
+# --- USB 카메라를 직접 RTSP로 송출할 때만 ---
+rtsp_publish_enabled: false
+# dshow(Windows) | v4l2(Linux) | avfoundation(macOS)
+rtsp_publish_input_format: dshow
+rtsp_publish_framerate: 20
+
+# --- 로컬 저장 (개발용) ---
+# 영상 저장 범위와 보존 기간이 합의되지 않아 기본값은 false다.
+# APP_ENV=prod에서는 활성화할 수 없다(코드가 검증한다).
+recording_enabled: false
+# recording_output_dir·frame_capture_output_dir는 여기 적지 않는다.
+# 비워두면 코드 기본값(stream/data/video, stream/data/frames)을 쓴다.
+recording_fps: 20
+recording_segment_seconds: 3600
+frame_capture_enabled: false
+
+log_level: INFO
