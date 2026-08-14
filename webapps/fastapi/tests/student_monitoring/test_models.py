@@ -1,6 +1,9 @@
 """Domain model tests."""
 
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
+
+import pytest
 
 from app.student_monitoring.errors import (
     InferenceEventConflictError,
@@ -61,11 +64,8 @@ class TestDetectionEvent:
             received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=UTC),
             schema_version=1,
         )
-        try:
+        with pytest.raises(FrozenInstanceError):
             event.event_id = "changed"  # type: ignore[misc]
-            assert False, "Should raise FrozenInstanceError"
-        except AttributeError:
-            pass
 
     def test_empty_detections(self) -> None:
         """Zero detection event test."""

@@ -76,7 +76,8 @@ class TestInferenceEventRequest:
             InferenceEventRequest(
                 event_id="test-event-1",
                 camera_id="camera-a",
-                captured_at=datetime(2026, 8, 12, 1, 3, 0),  # No timezone
+                # 시간대 없는 값을 일부러 넣는다. 검증이 이것을 거부하는지가 이 테스트의 대상이다.
+                captured_at=datetime(2026, 8, 12, 1, 3, 0),  # noqa: DTZ001
                 sequence=18420,
                 frame=FrameSchema(width_pixels=1920, height_pixels=1080),
                 detections=[],
@@ -106,7 +107,8 @@ class TestVideoSegmentRequest:
             VideoSegmentRequest(
                 segment_id="camera-a-20260812T010000Z",
                 camera_id="camera-a",
-                recorded_from=datetime(2026, 8, 12, 1, 0, 0),  # No timezone
+                # 시간대 없는 값을 일부러 넣는다. 검증이 이것을 거부하는지가 이 테스트의 대상이다.
+                recorded_from=datetime(2026, 8, 12, 1, 0, 0),  # noqa: DTZ001
                 recorded_to=datetime(2026, 8, 12, 1, 5, 0, tzinfo=UTC),
                 storage="minio",
                 bucket_alias="recordings",
