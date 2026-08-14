@@ -529,7 +529,7 @@ def test_seat_assignments_page_redirects_when_classroom_missing(client: TestClie
 
 
 def test_student_states_page_renders(client: TestClient) -> None:
-    """학생 상태 화면은 강의실 선택 드롭다운과 네비게이션 링크를 렌더링한다."""
+    """학생 상태 화면은 강의실 선택 드롭다운을 렌더링하되 메뉴에서는 숨긴다."""
     classroom = _create_classroom(client, code="R-S01", name="상태테스트 강의실")
     classroom_id = str(classroom["id"])
 
@@ -542,9 +542,10 @@ def test_student_states_page_renders(client: TestClient) -> None:
     assert 'name="classroom_id"' in response.text
     assert f'value="{classroom_id}"' in response.text
     assert "selected" in response.text
-    # 네비게이션 "학생 현황" nav-group에 학생 상태·좌석-학생 지정 링크가 있다 (UI-REQ-011)
+    # 학생 상태와 탐지 스냅샷은 직접 URL로 접근할 수 있지만 주 메뉴에는 노출하지 않는다.
     assert "학생 현황" in response.text
-    assert '/student-states"' in response.text
+    assert "<span>학생 상태</span>" not in response.text
+    assert "<span>탐지 스냅샷</span>" not in response.text
     assert '/seats"' in response.text
 
 
