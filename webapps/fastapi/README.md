@@ -215,10 +215,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `SNAPSHOT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필수. 비밀값 |
 | `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `stub`. `stub`은 LLM 없이 "오늘 하루"만 돌려주는 대역, `llama`는 llama-server 호출 |
 | `LLM_SEARCH_URL` | llama-server의 OpenAI 호환 API 주소 | `llama` mode에서 필수. 기본 `http://127.0.0.1:8008` |
-| `LLM_SEARCH_TIMEOUT_SECONDS` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
 | `LLM_SEARCH_MODEL` | 요청에 넣을 모델 이름 | llama-server의 `LLAMA_ARG_ALIAS`와 같아야 한다. 기본 `gemma` |
-| `LLM_SEARCH_MAX_SPAN_DAYS` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
-| `LLM_SEARCH_SCAN_LIMIT` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
 ### `config/settings.yml`
@@ -241,6 +238,9 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
 | `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
+| `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
+| `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
+| `llm_search_scan_limit` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 
 학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
 `ABSENCE_GRACE_PERIOD_SECONDS` 등)은 아직 없다. 목록은

@@ -57,3 +57,14 @@ snapshot_storage_bucket: classroom-snapshots
 # 달라지므로 .env.{local,dev,prod} 쪽이 소유한다(SNAPSHOT_STORAGE_SECURE).
 # 저장소가 죽었을 때 요청이 오래 묶이지 않도록 짧게 끊는다.
 snapshot_storage_timeout_seconds: 5
+
+# 자연어 탐지 검색 (결정 0016)
+# 실행 방식과 주소(LLM_SEARCH_MODE·_URL·_MODEL)는 환경마다 달라 .env.* 쪽이 갖는다.
+#
+# 생성은 조회보다 훨씬 느려서 다른 외부 호출(5초)과 같은 값을 쓸 수 없다.
+llm_search_timeout_seconds: 20
+# 조회 기간 상한. 넘는 질문은 거절하지 않고 이 길이로 줄인 뒤 사용자에게 알린다.
+llm_search_max_span_days: 7
+# 탐지 인원 변화를 판정하려면 원본 이벤트를 봐야 한다. 카메라 한 대에서 한 번에
+# 읽어 오는 이벤트 수의 상한이며, 걸리면 결과에 truncated로 표시한다.
+llm_search_scan_limit: 500
