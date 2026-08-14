@@ -65,7 +65,8 @@ class ClassroomService:
         *,
         student_lookup: StudentLookupPort | None = None,  # 학생 조회·활성 검증용 (중립 계약)
         assignment_repository: SeatAssignmentRepository | None = None,  # 좌석-학생 지정 관리용
-        uow: SeatMutationUnitOfWork | None = None,  # 지정 mutation 단위 작업 (주입 시 직접 mutation 금지)
+        uow: SeatMutationUnitOfWork
+        | None = None,  # 지정 mutation 단위 작업 (주입 시 직접 mutation 금지)
         occupancy_confidence_threshold: float,
         clock: Callable[[], datetime],
     ) -> None:
@@ -723,9 +724,7 @@ class ClassroomService:
         )
 
     @staticmethod
-    def _occupancy_update(
-        seat: Seat, history: SeatOccupancyHistory
-    ) -> SeatCurrentOccupancy | None:
+    def _occupancy_update(seat: Seat, history: SeatOccupancyHistory) -> SeatCurrentOccupancy | None:
         """history를 좌석 current에 반영해야 하면 새 current를, 아니면 None을 준다."""
         if not history.applied_to_current:
             return None

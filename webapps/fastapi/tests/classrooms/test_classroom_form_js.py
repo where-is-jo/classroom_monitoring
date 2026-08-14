@@ -124,8 +124,8 @@ class TestClassroomFormJsStatic:
         """`form[data-api-url]` 제출 핸들러가 소스에 존재한다 (create/edit.html이 의존)."""
         source = ADMIN_JS.read_text(encoding="utf-8")
         assert 'document.querySelectorAll("form[data-api-url]")' in source
-        assert 'form.dataset.apiUrl' in source
-        assert 'form.dataset.apiMethod' in source
+        assert "form.dataset.apiUrl" in source
+        assert "form.dataset.apiMethod" in source
 
     def test_bundle_has_collect_payload_helper(self) -> None:
         """`collectPayload` 헬퍼가 정의되어 있고 제출 핸들러가 사용한다."""
@@ -149,27 +149,23 @@ class TestClassroomFormJsStatic:
         seat 컨트롤러는 `#seat-grid`가 없는 페이지(create/edit.html)에서
         조기 반환해 서로 간섭하지 않는다."""
         source = ADMIN_JS.read_text(encoding="utf-8")
-        generic_index = source.index('form[data-api-url]')
+        generic_index = source.index("form[data-api-url]")
         seat_index = source.index("seatAdminController")
         assert generic_index < seat_index
-        assert 'if (!grid || !panel || !form) return;' in source
+        assert "if (!grid || !panel || !form) return;" in source
 
 
 # ── 브라우저 검증 (headless, 없으면 skip) ────────────────────────────────────
 
 
 class TestClassroomFormJsBrowser:
-    def test_create_form_submits_expected_payload(
-        self, browser_results: dict[str, object]
-    ) -> None:
+    def test_create_form_submits_expected_payload(self, browser_results: dict[str, object]) -> None:
         """강의실 생성 폼 제출은 POST /api/v1/classrooms를 code/name/location payload로 호출한다."""
         _assert_all_checkpoints(browser_results)
         checkpoint = _checkpoint(browser_results, "create-form-posts-with-payload")
         assert checkpoint["ok"], f"생성 폼 payload 위반: {checkpoint['detail']}"
 
-    def test_create_form_shows_api_error_message(
-        self, browser_results: dict[str, object]
-    ) -> None:
+    def test_create_form_shows_api_error_message(self, browser_results: dict[str, object]) -> None:
         """API 오류 응답의 message가 생성 폼 오류 영역에 표시된다."""
         _assert_all_checkpoints(browser_results)
         checkpoint = _checkpoint(browser_results, "create-form-shows-api-error")

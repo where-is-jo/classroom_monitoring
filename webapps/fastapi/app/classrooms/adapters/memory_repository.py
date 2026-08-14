@@ -125,11 +125,7 @@ class InMemoryClassroomRepository:
     def list_all_seats_for_allocation(self, classroom_id: str) -> list[Seat]:
         """allocator용: 비활성(legacy inactive) 포함 모든 좌석을 돌려준다."""
         with self._lock:
-            return [
-                item
-                for item in self._seats.values()
-                if item.classroom_id == classroom_id
-            ]
+            return [item for item in self._seats.values() if item.classroom_id == classroom_id]
 
     def replace_seat(self, seat: Seat, *, expected_version: int) -> Seat | None:
         with self._lock:
@@ -565,9 +561,7 @@ class InMemorySeatMigrationRepository:
             ]
             return sorted(approvals, key=lambda approval: approval.requested_at)
 
-    def approved_approval_for_seat(
-        self, classroom_id: str, seat_id: str
-    ) -> RepairApproval | None:
+    def approved_approval_for_seat(self, classroom_id: str, seat_id: str) -> RepairApproval | None:
         with self._lock:
             return next(
                 (

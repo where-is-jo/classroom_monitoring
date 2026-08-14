@@ -169,13 +169,10 @@ class TestSeatManagementEndToEndFlow:
         )
         assert move_to_s03.status_code == 200
 
-        assignments_after_move = client.get(
-            f"/api/v1/classrooms/{classroom_id}/seat-assignments"
-        )
+        assignments_after_move = client.get(f"/api/v1/classrooms/{classroom_id}/seat-assignments")
         assert assignments_after_move.status_code == 200
         by_seat = {
-            item["seat_id"]: item["student_id"]
-            for item in assignments_after_move.json()["items"]
+            item["seat_id"]: item["student_id"] for item in assignments_after_move.json()["items"]
         }
         assert by_seat == {seat_s02_id: "stu-002", seat_s03_id: "stu-001"}
         assert seat_s01_id not in by_seat
@@ -183,9 +180,7 @@ class TestSeatManagementEndToEndFlow:
         # ------------------------------------------------------------
         # 5. migration preflight — S01만 활성 null 쌍이어야 한다.
         # ------------------------------------------------------------
-        preflight = client.post(
-            f"/api/v1/classrooms/{classroom_id}/seats/migration/preflight"
-        )
+        preflight = client.post(f"/api/v1/classrooms/{classroom_id}/seats/migration/preflight")
         assert preflight.status_code == 200
         preflight_body = preflight.json()
         assert preflight_body["ok"] is True
@@ -214,15 +209,11 @@ class TestSeatManagementEndToEndFlow:
         assert run_body["snapshot"]["seats_count"] == 3
         assert run_body["snapshot"]["assignments_count"] == 2
 
-        migrated_seat = client.get(
-            f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}"
-        )
+        migrated_seat = client.get(f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}")
         assert migrated_seat.status_code == 200
         assert (migrated_seat.json()["row"], migrated_seat.json()["column"]) == (2, 1)
 
-        status_after_run = client.get(
-            f"/api/v1/classrooms/{classroom_id}/seats/migration/status"
-        )
+        status_after_run = client.get(f"/api/v1/classrooms/{classroom_id}/seats/migration/status")
         assert status_after_run.status_code == 200
         status_body = status_after_run.json()
         assert status_body["preflight"]["ok"] is True
@@ -259,25 +250,18 @@ class TestSeatManagementEndToEndFlow:
         assert by_seat_before_delete == {seat_s01_id: "stu-001", seat_s02_id: "stu-002"}
         assert seat_s03_id not in by_seat_before_delete  # stu-001이 S03에서 S01로 이동했다.
 
-        delete_response = client.delete(
-            f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}"
-        )
+        delete_response = client.delete(f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}")
         assert delete_response.status_code == 204
         assert delete_response.content == b""
 
         # 좌석·지정이 물리적으로 부재해야 한다.
-        deleted_seat = client.get(
-            f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}"
-        )
+        deleted_seat = client.get(f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}")
         assert deleted_seat.status_code == 404
         assert deleted_seat.json()["error"]["code"] == "SEAT_NOT_FOUND"
 
-        assignments_after_delete = client.get(
-            f"/api/v1/classrooms/{classroom_id}/seat-assignments"
-        )
+        assignments_after_delete = client.get(f"/api/v1/classrooms/{classroom_id}/seat-assignments")
         by_seat_after_delete = {
-            item["seat_id"]: item["student_id"]
-            for item in assignments_after_delete.json()["items"]
+            item["seat_id"]: item["student_id"] for item in assignments_after_delete.json()["items"]
         }
         assert by_seat_after_delete == {seat_s02_id: "stu-002"}
 
@@ -287,18 +271,14 @@ class TestSeatManagementEndToEndFlow:
         )
         assert status_after_delete.status_code == 200
         status_after_delete_body = status_after_delete.json()
-        assert any(
-            item["seat_id"] == seat_s01_id for item in status_after_delete_body["records"]
-        )
+        assert any(item["seat_id"] == seat_s01_id for item in status_after_delete_body["records"])
         assert status_after_delete_body["preflight"]["total_seats"] == 2
         assert status_after_delete_body["validation"]["ok"] is True
 
         # ------------------------------------------------------------
         # 9. 반복·후속 mutation은 기존 404 envelope여야 한다.
         # ------------------------------------------------------------
-        repeated_delete = client.delete(
-            f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}"
-        )
+        repeated_delete = client.delete(f"/api/v1/classrooms/{classroom_id}/seats/{seat_s01_id}")
         assert repeated_delete.status_code == 404
         assert repeated_delete.json()["error"]["code"] == "SEAT_NOT_FOUND"
 

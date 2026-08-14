@@ -225,9 +225,7 @@ class TestSeatCodeAllocator:
         """
         service = _make_service()
         classroom_id = _seed_classroom(service)
-        reserved = service.create_seat(
-            classroom_id, code="S01", label="좌석 1", row=1, column=1
-        )
+        reserved = service.create_seat(classroom_id, code="S01", label="좌석 1", row=1, column=1)
         service.update_seat(reserved.id, is_active=False)
 
         seat = service.create_seat_auto(classroom_id, row=1, column=2)
@@ -238,9 +236,7 @@ class TestSeatCodeAllocator:
         """hard delete된 좌석의 코드는 즉시 해제되어 재사용된다."""
         service = _make_service()
         classroom_id = _seed_classroom(service)
-        reserved = service.create_seat(
-            classroom_id, code="S01", label="좌석 1", row=1, column=1
-        )
+        reserved = service.create_seat(classroom_id, code="S01", label="좌석 1", row=1, column=1)
         service.delete_seat(reserved.id)
 
         seat = service.create_seat_auto(classroom_id, row=1, column=2)
@@ -315,7 +311,9 @@ class TestConflictTypes:
         assert (created.row, created.column) == (1, 1)
         assert created.id != seat.id
 
-    def test_code_conflict_classified_as_seat_code_conflict(self, service: ClassroomService) -> None:
+    def test_code_conflict_classified_as_seat_code_conflict(
+        self, service: ClassroomService
+    ) -> None:
         """예약된 코드를 할당하면 code conflict로 분류된다 (재시도 대상)."""
         classroom_id = _seed_classroom(service)
         service.create_seat(classroom_id, code="S01", label="좌석 1", row=1, column=1)
@@ -328,7 +326,8 @@ class TestConflictTypes:
         assert exc_info.value.status_code == 409
 
     def test_coordinate_conflict_priority_over_code_conflict(
-        self, service: ClassroomService,
+        self,
+        service: ClassroomService,
     ) -> None:
         """코드·좌표가 동시에 겹쳐도 좌표 conflict가 우선 노출된다 (재시도 없음)."""
         classroom_id = _seed_classroom(service)
@@ -352,7 +351,8 @@ class TestConflictTypes:
         assert response.json()["error"]["code"] == "SEAT_DUPLICATE"
 
     def test_legacy_coordinate_duplicate_keeps_generic_seat_duplicate(
-        self, client: TestClient,
+        self,
+        client: TestClient,
     ) -> None:
         """legacy POST /seats의 좌표 중복도 generic SEAT_DUPLICATE로 유지한다."""
         classroom_id = _create_classroom(client)
@@ -413,7 +413,9 @@ class TestAutoRetryLogic:
         assert calls["count"] == 3
 
     def test_code_conflict_exhaustion_returns_409_allocation_conflict(
-        self, client: TestClient, service: ClassroomService,
+        self,
+        client: TestClient,
+        service: ClassroomService,
     ) -> None:
         """API 레벨: 재시도 소진 시 409 SEAT_CODE_ALLOCATION_CONFLICT다."""
         classroom_id = _create_classroom(client)

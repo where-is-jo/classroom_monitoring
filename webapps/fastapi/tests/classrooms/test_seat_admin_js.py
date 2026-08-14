@@ -163,8 +163,8 @@ class TestSeatAdminJsStatic:
         source = ADMIN_JS.read_text(encoding="utf-8")
         assert "window.location.reload" in source
         # 성공(ok) 분기에서만 reload한다 (실패 분기에는 reload가 없다).
-        assert 'if (response.ok)' in source
-        assert 'response.status === 409' in source
+        assert "if (response.ok)" in source
+        assert "response.status === 409" in source
         # 자동 재시도 루프(재귀 fetch 호출)가 없다.
         assert "retry" not in source.lower()
 
@@ -203,7 +203,8 @@ class TestSeatAdminJsBrowser:
         assert checkpoint["ok"], f"alert 미표시: {checkpoint['detail']}"
 
     def test_occupied_cell_opens_panel_without_code_active(
-        self, browser_results: dict[str, object],
+        self,
+        browser_results: dict[str, object],
     ) -> None:
         """좌석 클릭 → 편집 패널에 label·학생만 있고 code/is_active 입력이 없다."""
         _assert_all_checkpoints(browser_results)
@@ -218,7 +219,8 @@ class TestSeatAdminJsBrowser:
             assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"
 
     def test_delete_confirms_permanent_then_deletes(
-        self, browser_results: dict[str, object],
+        self,
+        browser_results: dict[str, object],
     ) -> None:
         """삭제는 '영구 삭제' 확인 대화상자 후 DELETE를 호출하고 재시도하지 않는다."""
         _assert_all_checkpoints(browser_results)

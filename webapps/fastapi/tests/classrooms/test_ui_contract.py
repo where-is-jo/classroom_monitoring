@@ -166,7 +166,7 @@ def test_seats_page_has_aria_live_regions(client: TestClient) -> None:
 def test_seats_page_has_form_error_alert(client: TestClient) -> None:
     """편집 패널의 오류 표시도 role=alert로 접근 가능하다."""
     html = _render_seats_page(client)
-    assert 'data-form-error' in html
+    assert "data-form-error" in html
     assert 'role="alert"' in html
 
 

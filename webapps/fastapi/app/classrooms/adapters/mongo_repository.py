@@ -1055,9 +1055,7 @@ class MongoSeatMigrationRepository:
             raise RepositoryUnavailableError() from None
         return [self._approval_to_domain(document) for document in documents]
 
-    def approved_approval_for_seat(
-        self, classroom_id: str, seat_id: str
-    ) -> RepairApproval | None:
+    def approved_approval_for_seat(self, classroom_id: str, seat_id: str) -> RepairApproval | None:
         try:
             document = self._approvals.find_one(
                 {

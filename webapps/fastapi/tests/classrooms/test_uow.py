@@ -560,9 +560,7 @@ class FakeCollection:
         # transaction 안에서 본 삭제 대상 수를 보고하고, 반영 여부는
         # persist_writes로 나눈다 (commit 실패 시 rollback 시뮬레이션).
         if match is not None and self.persist_writes:
-            self.documents = [
-                document for document in self.documents if document is not match
-            ]
+            self.documents = [document for document in self.documents if document is not match]
         return FakeWriteResult(1 if match is not None else 0)
 
     def delete_many(self, query: dict[str, object], session: object = None) -> FakeWriteResult:

@@ -35,6 +35,7 @@ class ClassroomRepository(Protocol):
     def list_all_seats_for_allocation(self, classroom_id: str) -> list[Seat]:
         """allocator용: 비활성 포함 강의실의 모든 좌석을 돌려준다."""
         ...
+
     def update_seat(self, seat: Seat, *, unset_fields: list[str] | None = None) -> Seat: ...
     def delete_seat(self, seat_id: str) -> None:
         """좌석 레코드를 물리적으로 삭제한다 (hard delete).
@@ -201,8 +202,6 @@ class SeatMigrationRepository(Protocol):
         """강의실(또는 좌석)의 승인 기록을 조회한다."""
         ...
 
-    def approved_approval_for_seat(
-        self, classroom_id: str, seat_id: str
-    ) -> RepairApproval | None:
+    def approved_approval_for_seat(self, classroom_id: str, seat_id: str) -> RepairApproval | None:
         """좌석의 승인된 repair 요청을 조회한다."""
         ...

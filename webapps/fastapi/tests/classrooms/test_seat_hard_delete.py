@@ -142,8 +142,7 @@ def _record(
         event_id=event_id,
         classroom_id="cls-001",
         observations=tuple(
-            SeatObservation(seat_id=seat_id, occupied=True, confidence=0.95)
-            for seat_id in seat_ids
+            SeatObservation(seat_id=seat_id, occupied=True, confidence=0.95) for seat_id in seat_ids
         ),
         observed_at=_NOW,
     )

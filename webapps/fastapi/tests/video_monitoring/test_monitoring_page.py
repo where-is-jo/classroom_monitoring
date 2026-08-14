@@ -202,12 +202,12 @@ def test_monitoring_page_has_fullscreen_toggle(monitoring_client: TestClient) ->
     response = monitoring_client.get("/monitoring")
 
     assert response.status_code == 200
-    assert 'data-fullscreen-toggle' in response.text
+    assert "data-fullscreen-toggle" in response.text
     assert 'aria-pressed="false"' in response.text
     assert "data-fullscreen-label" in response.text
     assert "전체화면" in response.text
     # 상태는 색상만이 아니라 text 라벨로도 제공된다.
-    assert 'data-fullscreen-toggle' in response.text
+    assert "data-fullscreen-toggle" in response.text
 
 
 def test_monitoring_fullscreen_css_uses_fullscreen_selector() -> None:
