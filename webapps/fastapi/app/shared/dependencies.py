@@ -27,6 +27,8 @@ from ..face_enrollment.adapters.memory import (
 from ..face_enrollment.models import PoseBin
 from ..face_enrollment.rules import EnrollmentThresholds
 from ..face_enrollment.service import FaceEnrollmentService
+from ..llm_search.adapters.stub_planner import StubQueryPlanner
+from ..llm_search.service import LlmSearchService
 from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
 from ..snapshots.ports import SnapshotStorage
 from ..snapshots.service import SnapshotService
@@ -239,6 +241,33 @@ def get_snapshot_service(
     return SnapshotService(_snapshot_storage(), page_size_max=settings.page_size_max)
 
 
+@lru_cache
+def _stub_query_planner() -> StubQueryPlanner:
+    return StubQueryPlanner()
+
+
+def get_llm_search_service(
+    detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
+    stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    snapshot_service: SnapshotService = Depends(get_snapshot_service),
+    settings: Settings = Depends(get_settings),
+) -> LlmSearchService:
+    """자연어 검색 조립.
+
+    스냅샷만 포트가 아니라 서비스를 받는다. 객체 키 규칙의 해석과 저장소 장애 처리가
+    그 안에 있어서, 포트를 직접 넘기면 키 규칙이 세 번째로 복사된다.
+    """
+    return LlmSearchService(
+        _stub_query_planner(),
+        detection_repository,
+        stream_repository,
+        snapshot_service,
+        max_span_days=settings.llm_search_max_span_days,
+        scan_limit=settings.llm_search_scan_limit,
+        clock=utc_now,
+    )
+
+
 def get_video_demo_service(
     settings: Settings = Depends(get_settings),
 ) -> VideoDemoService:
@@ -387,6 +416,7 @@ def close_data_store() -> None:
     _local_face_object_storage.cache_clear()
     _face_analyzer.cache_clear()
     _http_face_analyzer.cache_clear()
+    _stub_query_planner.cache_clear()
 
 
 def verify_readiness(settings: Settings = Depends(get_settings)) -> None:

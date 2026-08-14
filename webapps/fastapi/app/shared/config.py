@@ -63,6 +63,21 @@ class Settings(BaseSettings):
     snapshot_storage_secure: bool = True
     snapshot_storage_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
+    # --- 자연어 탐지 검색 ---
+    # stub은 LLM 없이 계약과 화면을 확인하기 위한 대역이며 "오늘 하루"만 돌려준다.
+    # 기본을 stub으로 두는 이유는 개발과 테스트가 GPU 서버에 매이지 않게 하기 위해서다.
+    llm_search_mode: Literal["stub", "llama"] = "stub"
+    llm_search_url: str = "http://127.0.0.1:8008"
+    # 생성은 조회보다 훨씬 느려서 다른 외부 호출(5초)과 같은 값을 쓸 수 없다.
+    llm_search_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    # llama-server의 LLAMA_ARG_ALIAS와 같은 값이어야 한다.
+    llm_search_model: str = "gemma"
+    # 기간 상한을 넘는 질문은 거절하지 않고 이 길이로 줄인 뒤 사용자에게 알린다.
+    llm_search_max_span_days: int = Field(default=7, ge=1, le=31)
+    # 탐지 인원 변화를 판정하려면 원본 이벤트를 봐야 한다. 카메라 한 대에서 한 번에
+    # 읽어 오는 이벤트 수의 상한이며, 걸리면 결과에 truncated로 표시한다.
+    llm_search_scan_limit: int = Field(default=500, ge=1, le=5000)
+
     @field_validator("database_name", mode="before")
     @classmethod
     def _empty_database_name_is_missing(cls, value: object) -> object:
@@ -121,4 +136,6 @@ class Settings(BaseSettings):
                     "SNAPSHOT_STORAGE_BACKEND=minio에 필요한 환경변수가 없습니다: "
                     + ", ".join(missing_storage)
                 )
+        if self.llm_search_mode == "llama" and not self.llm_search_url.strip():
+            raise ValueError("LLM_SEARCH_MODE=llama에는 LLM_SEARCH_URL이 필요합니다.")
         return self

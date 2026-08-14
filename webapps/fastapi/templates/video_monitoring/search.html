@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}자연어 검색 · 학습 모니터링{% endblock %}
+{% block title %}데모 영상 검색 · 학습 모니터링{% endblock %}
 {% block head_extra %}{% if demo_enabled %}<script src="/demo-assets/demo-video.js" defer></script>{% endif %}{% endblock %}
 
 {% block content %}
   <header class="page-header">
-    <div><p class="eyebrow">한국어 metadata 검색</p><h1>자연어 검색</h1>{% if demo_enabled %}<p class="summary">local/dev 고정 metadata를 규칙으로 매칭합니다. LLM·임베딩·외부 API를 사용하지 않습니다.</p>{% else %}<p class="summary">운영 검색 metadata 공급원이 아직 연결되지 않았습니다.</p>{% endif %}</div>
+    <div><p class="eyebrow">한국어 metadata 검색</p><h1>데모 영상 검색</h1>{% if demo_enabled %}<p class="summary">local/dev 고정 metadata를 규칙으로 매칭합니다. LLM·임베딩·외부 API를 사용하지 않습니다.</p>{% else %}<p class="summary">운영 검색 metadata 공급원이 아직 연결되지 않았습니다.</p>{% endif %}</div>
   </header>
 
   <section class="panel" aria-labelledby="video-search-form-title">
