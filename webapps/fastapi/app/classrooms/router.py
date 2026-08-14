@@ -484,6 +484,7 @@ def classrooms_page(
         context={
             "classrooms": page.items,
             "selected_classroom_id": selected or "",
+            "nav_classroom_id": selected or "",
             "summary": summary,
             "assignments": assignments,
         },

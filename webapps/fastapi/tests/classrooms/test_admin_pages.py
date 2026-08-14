@@ -324,6 +324,33 @@ def test_seats_page_redirects_when_classroom_missing(client: TestClient) -> None
 # --- 강의실 현황 화면 -----------------------------------------------------------
 
 
+def test_classroom_list_page_links_seat_management_to_selected_classroom(
+    client: TestClient,
+) -> None:
+    """좌석 관리 링크는 첫 강의실이 아니라 현재 선택한 강의실을 가리킨다."""
+    first = _create_classroom(client, code="R-N01", name="첫 강의실")
+    selected = _create_classroom(client, code="R-N02", name="선택 강의실")
+    selected_id = str(selected["id"])
+    _create_seat(
+        client,
+        selected_id,
+        code="SN01",
+        label="선택 강의실 좌석",
+        row=1,
+        column=1,
+    )
+
+    response = client.get(f"/classrooms?classroom_id={selected_id}")
+
+    assert response.status_code == 200
+    assert f'href="/classrooms/{selected_id}/seats"' in response.text
+    assert f'href="/classrooms/{first["id"]}/seats"' not in response.text
+
+    seats_response = client.get(f"/classrooms/{selected_id}/seats")
+    assert seats_response.status_code == 200
+    assert "선택 강의실 좌석" in seats_response.text
+
+
 def test_classroom_list_page_shows_assigned_student_on_seat_map(
     client: TestClient,
 ) -> None:
