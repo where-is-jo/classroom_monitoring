@@ -53,6 +53,7 @@ detection_event_stale_seconds: 300
 
 # 탐지 스냅샷 저장소 (결정 0011)
 snapshot_storage_bucket: classroom-snapshots
-snapshot_storage_secure: true
+# TLS 사용 여부는 여기 없다 — MinIO가 같은 network 안이냐 밖이냐에 따라 환경마다
+# 달라지므로 .env.{local,dev,prod} 쪽이 소유한다(SNAPSHOT_STORAGE_SECURE).
 # 저장소가 죽었을 때 요청이 오래 묶이지 않도록 짧게 끊는다.
 snapshot_storage_timeout_seconds: 5

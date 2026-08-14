@@ -19,6 +19,7 @@ snapshot_min_interval_seconds: 60
 # --- 객체 저장소 (SNAPSHOT_ENABLED=true일 때만 유효) ---
 object_storage_bucket: classroom-snapshots
 # 비우면 inference/data/snapshots를 쓴다. 여기서는 적지 않는다(코드 기본값 사용).
-object_storage_secure: true
+# TLS 사용 여부는 여기 없다 — MinIO가 같은 network 안이냐 밖이냐에 따라 환경마다
+# 달라지므로 .env.{local,dev,prod} 쪽이 소유한다(OBJECT_STORAGE_SECURE).
 # 적재는 추론 소비자 스레드를 막는다. 저장소가 죽었을 때 오래 붙잡지 않도록 짧게 끊는다.
 object_storage_timeout_seconds: 5

@@ -27,5 +27,5 @@ recording_retention_interval_seconds: 3600.0
 # 이번에는 값을 그대로 옮기기만 한다.
 object_storage_bucket: office-recordings
 # object_storage_local_dir는 여기 적지 않는다. 비우면 recorder/data/objects를 쓴다.
-# TLS 사용 여부. 로컬 MinIO는 보통 false다.
-object_storage_secure: true
+# TLS 사용 여부는 여기 없다 — MinIO가 같은 network 안이냐 밖이냐에 따라 환경마다
+# 달라지므로 .env.{local,dev,prod} 쪽이 소유한다(OBJECT_STORAGE_SECURE).
