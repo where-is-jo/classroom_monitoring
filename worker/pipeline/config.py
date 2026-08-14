@@ -30,3 +30,7 @@ class PipelineSettings(BaseSettings):
     # 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다. 계속 실패하는 상태로
     # 도는 것은 프레임을 버리면서 아무것도 만들지 않는 것과 같다.
     inference_max_consecutive_failures: int = Field(default=5, ge=1, le=100)
+
+    # 탐지 결과를 전송할 FastAPI URL. 조립 실행에서 worker는 HTTP POST로 여기에
+    # 적재한다. 웹앱이 다른 주소로 뜨면 이 값만 바꾸면 된다.
+    fastapi_url: str = Field(default="http://127.0.0.1:8001")

@@ -37,6 +37,18 @@
           <a href="/students/new"{% if current_path == '/students/new' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">＋</span><span>학생 등록</span></a>
           <a href="/students/demo-student/face-enrollment"{% if '/face-enrollment' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>얼굴 등록</span></a>
         </div>
+        <div class="nav-group nav-group-spaced">
+          <p class="nav-group-title">학생 현황</p>
+          {% set _cls = nav_classrooms() %}
+          {% if _cls %}
+            {% set _cid = _cls[0].id %}
+            <a href="/classrooms/{{ _cid }}/student-states"{% if '/student-states' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◉</span><span>학생 상태</span></a>
+            <a href="/classrooms/{{ _cid }}/seat-assignments"{% if '/seat-assignments' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>좌석-학생 지정</span></a>
+          {% else %}
+            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◉</span><span>학생 상태</span></a>
+            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◎</span><span>좌석-학생 지정</span></a>
+          {% endif %}
+        </div>
       </nav>
     </aside>
     <div class="workspace">

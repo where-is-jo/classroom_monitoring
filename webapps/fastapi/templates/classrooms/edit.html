@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ classroom.code }} 수정 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div><p class="eyebrow">Classroom</p><h1>강의실 수정</h1><p class="summary">{{ classroom.code }} {{ classroom.name }}의 정보를 수정합니다. 코드는 강의실마다 달라야 합니다.</p></div>
+    <a class="button-link secondary" href="/classrooms">목록으로</a>
+  </header>
+
+  <section class="panel" aria-labelledby="classroom-edit-title">
+    <h2 id="classroom-edit-title">강의실 정보</h2>
+    <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}" data-api-method="PUT" data-success-url="/classrooms?classroom_id={{ classroom.id|urlencode }}">
+      <p class="form-error" role="alert" data-form-error hidden></p>
+      <div class="form-grid">
+        <label>코드<input name="code" type="text" value="{{ classroom.code }}" maxlength="64" required autocomplete="off"></label>
+        <label>이름<input name="name" type="text" value="{{ classroom.name }}" maxlength="200" required></label>
+        <label>위치<input name="location" type="text" value="{{ classroom.location }}" maxlength="200" required></label>
+        <label>활성화<input name="is_active" type="checkbox"{% if classroom.is_active %} checked{% endif %}></label>
+      </div>
+      <div>
+        <button type="submit">저장</button>
+        <a class="button-link secondary" href="/classrooms">취소</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

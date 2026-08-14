@@ -10,7 +10,13 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from ...shared.database import MongoDatabase, MongoDocument
 from ...shared.errors import RepositoryDataError, RepositoryUnavailableError
-from ..errors import ClassroomDuplicateError, SeatBatchConflictError, SeatDuplicateError
+from ..errors import (
+    ClassroomDuplicateError,
+    ClassroomNotFoundError,
+    SeatBatchConflictError,
+    SeatDuplicateError,
+    SeatNotFoundError,
+)
 from ..models import (
     Classroom,
     ClassroomPage,
@@ -61,6 +67,15 @@ class MongoClassroomRepository:
             ],
             name="seats_classroom_active_occupancy",
         )
+        database[cls.seat_collection_name].create_index(
+            [("classroom_id", ASCENDING), ("row", ASCENDING), ("column", ASCENDING)],
+            name="seats_classroom_row_column_unique",
+            unique=True,
+            partialFilterExpression={
+                "row": {"$type": "number"},
+                "column": {"$type": "number"},
+            },
+        )
         database[cls.batch_collection_name].create_index(
             [("classroom_id", ASCENDING), ("observed_at", DESCENDING)],
             name="seat_observation_batches_classroom_time",
@@ -74,6 +89,51 @@ class MongoClassroomRepository:
             [("classroom_id", ASCENDING), ("observed_at", DESCENDING)],
             name="seat_occupancy_history_classroom_time",
         )
+
+    @classmethod
+    def migrate_seat_row_column(
+        cls,
+        database: MongoDatabase,
+        *,
+        columns_per_row: int = 4,
+    ) -> int:
+        """기존 좌석의 행·열을 코드 순서로 초기화합니다.
+
+        row/column이 없는(또는 None인) 기존 좌석만 대상으로, 코드 오름차순으로
+        행당 ``columns_per_row`` 개씩 행·열을 할당합니다. 이미 행·열이 있는 좌석은
+        건드리지 않으므로 재실행해도 멱등입니다.
+
+        Args:
+            database: MongoDB 데이터베이스
+            columns_per_row: 행당 열 수 (기본값 4)
+
+        Returns:
+            업데이트된 좌석 수
+        """
+        classrooms = database[cls.classroom_collection_name].find({"is_active": True})
+        updated_count = 0
+
+        for classroom in classrooms:
+            seats = list(
+                database[cls.seat_collection_name]
+                .find(
+                    {"classroom_id": classroom["_id"], "is_active": True},
+                )
+                .sort("code", ASCENDING)
+            )
+
+            for idx, seat in enumerate(seats):
+                if seat.get("row") is None or seat.get("column") is None:
+                    # 코드 순서로 행·열 할당
+                    row = (idx // columns_per_row) + 1
+                    column = (idx % columns_per_row) + 1
+                    database[cls.seat_collection_name].update_one(
+                        {"_id": seat["_id"]},
+                        {"$set": {"row": row, "column": column}},
+                    )
+                    updated_count += 1
+
+        return updated_count
 
     def create_classroom(self, classroom: Classroom) -> Classroom:
         try:
@@ -92,6 +152,35 @@ class MongoClassroomRepository:
 
     def get_classroom_by_code(self, code: str) -> Classroom | None:
         return self._find_classroom({"code": code})
+
+    def update_classroom(self, classroom: Classroom) -> Classroom:
+        update_fields = self._classroom_to_document(classroom)
+        update_fields.pop("_id")
+        try:
+            document = self._classrooms.find_one_and_update(
+                {"_id": classroom.id},
+                {"$set": update_fields},
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            raise ClassroomDuplicateError() from None
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise ClassroomNotFoundError()
+        return self._classroom_to_domain(document)
+
+    def delete_classroom(self, classroom_id: str) -> None:
+        try:
+            document = self._classrooms.find_one_and_update(
+                {"_id": classroom_id},
+                {"$set": {"is_active": False}},
+                return_document=ReturnDocument.AFTER,
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise ClassroomNotFoundError()
 
     def _find_classroom(self, query: MongoDocument) -> Classroom | None:
         try:
@@ -162,6 +251,40 @@ class MongoClassroomRepository:
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._seat_to_domain(document)
+
+    def update_seat(self, seat: Seat, *, unset_fields: list[str] | None = None) -> Seat:
+        # 도메인 객체 전체를 $set으로 반영하고, unset_fields가 있으면
+        # 해당 필드는 $unset으로 제거한다 (행·열 해제 시 사용).
+        update_fields = self._seat_to_document(seat)
+        update_fields.pop("_id")
+        update: MongoDocument = {"$set": update_fields}
+        if unset_fields:
+            update["$unset"] = dict.fromkeys(unset_fields, "")
+        try:
+            document = self._seats.find_one_and_update(
+                {"_id": seat.id},
+                update,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            raise SeatDuplicateError() from None
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise SeatNotFoundError()
+        return self._seat_to_domain(document)
+
+    def delete_seat(self, seat_id: str) -> None:
+        try:
+            document = self._seats.find_one_and_update(
+                {"_id": seat_id},
+                {"$set": {"is_active": False}},
+                return_document=ReturnDocument.AFTER,
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        if document is None:
+            raise SeatNotFoundError()
 
     def claim_observation_batch(
         self, record: SeatObservationBatchRecord
@@ -257,7 +380,7 @@ class MongoClassroomRepository:
     @staticmethod
     def _seat_to_document(item: Seat) -> MongoDocument:
         geometry = item.geometry
-        return {
+        document: MongoDocument = {
             "_id": item.id,
             "classroom_id": item.classroom_id,
             "code": item.code,
@@ -284,6 +407,14 @@ class MongoClassroomRepository:
             "updated_at": item.updated_at,
             "version": item.version,
         }
+        # row/column이 None이면 문서에서 생략한다. partial 인덱스가 number 타입만
+        # 대상으로 하므로 None을 명시적으로 저장하면 unique 인덱스에 걸리지 않지만,
+        # 문서에 남은 None 필드는 하위 호환 혼란을 줄 수 있어 저장 자체를 하지 않는다.
+        if item.row is not None:
+            document["row"] = item.row
+        if item.column is not None:
+            document["column"] = item.column
+        return document
 
     @staticmethod
     def _seat_to_domain(document: MongoDocument) -> Seat:
@@ -309,6 +440,8 @@ class MongoClassroomRepository:
                 classroom_id=_required_str(document, "classroom_id"),
                 code=_required_str(document, "code"),
                 label=_required_str(document, "label"),
+                row=_optional_int(document, "row"),
+                column=_optional_int(document, "column"),
                 geometry=geometry,
                 is_active=_required_bool(document, "is_active"),
                 current_occupancy=SeatCurrentOccupancy(
@@ -462,6 +595,15 @@ def _required_int(document: MongoDocument, key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError
     return value
+
+
+def _optional_int(document: MongoDocument, key: str) -> int | None:
+    value = document.get(key)
+    if value is not None:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError
+        return value
+    return None
 
 
 def _required_datetime(document: MongoDocument, key: str) -> datetime:

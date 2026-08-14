@@ -42,6 +42,8 @@ def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
                     classroom_id=classroom.id,
                     code=f"S{index:02d}",
                     label=f"좌석 {index}",
+                    row=((index - 1) // 3) + 1,
+                    column=((index - 1) % 3) + 1,
                     geometry=SeatGeometry(
                         x=0.08 + ((index - 1) % 3) * 0.3,
                         y=0.16 + ((index - 1) // 3) * 0.36,

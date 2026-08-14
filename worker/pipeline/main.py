@@ -16,6 +16,7 @@ from types import FrameType
 from inference.config import DEFAULT_DATA_DIR as INFERENCE_DATA_DIR
 from inference.config import InferenceSettings
 from inference.consumer import InferenceConsumer, ResultHandler, log_result
+from inference.handler import FastAPIResultHandler
 from inference.model import Yolo8nDetector
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
@@ -35,31 +36,45 @@ from .runner import PipelineRunner
 logger = logging.getLogger(__name__)
 
 
-def build_result_handler(settings: InferenceSettings) -> ResultHandler:
+def build_result_handler(
+    settings: InferenceSettings,
+    *,
+    fastapi_url: str | None = None,
+) -> ResultHandler:
     """탐지 결과를 무엇으로 받을지 정한다.
 
     스냅샷이 꺼져 있으면 저장소를 만들지 않는다. MinIO 접속 정보 없이도 파이프라인이
     돌아야 하고, 저장은 명시적으로 켜는 것이라는 규칙(결정 0011)에 맞춘다.
+
+    `fastapi_url`이 주어지면(FASTAPI_URL을 설정한 경우) HTTP 전송 핸들러로 감싼다.
+    감싼 핸들러는 기존 로그·스냅샷 동작을 먼저 수행하고 그다음 전송하므로, 전송이
+    실패해도 탐지 기록은 남는다.
     """
     if not settings.snapshot_enabled:
-        return log_result
+        handler: ResultHandler = log_result
+    else:
+        storage = build_object_storage(
+            settings, local_fallback_dir=INFERENCE_DATA_DIR / "snapshots"
+        )
+        logger.info(
+            "탐지 스냅샷 적재를 켠다. 긴 변 %dpx, 품질 %d, 카메라당 최소 간격 %.0f초. "
+            "영상 원본은 저장하지 않는다(결정 0011).",
+            settings.snapshot_max_long_side_px,
+            settings.snapshot_jpeg_quality,
+            settings.snapshot_min_interval_seconds,
+        )
+        handler = SnapshotResultHandler(
+            storage=storage,
+            min_interval_seconds=settings.snapshot_min_interval_seconds,
+            max_long_side_px=settings.snapshot_max_long_side_px,
+            jpeg_quality=settings.snapshot_jpeg_quality,
+        )
 
-    storage = build_object_storage(
-        settings, local_fallback_dir=INFERENCE_DATA_DIR / "snapshots"
-    )
-    logger.info(
-        "탐지 스냅샷 적재를 켠다. 긴 변 %dpx, 품질 %d, 카메라당 최소 간격 %.0f초. "
-        "영상 원본은 저장하지 않는다(결정 0011).",
-        settings.snapshot_max_long_side_px,
-        settings.snapshot_jpeg_quality,
-        settings.snapshot_min_interval_seconds,
-    )
-    return SnapshotResultHandler(
-        storage=storage,
-        min_interval_seconds=settings.snapshot_min_interval_seconds,
-        max_long_side_px=settings.snapshot_max_long_side_px,
-        jpeg_quality=settings.snapshot_jpeg_quality,
-    )
+    if fastapi_url is None:
+        return handler
+
+    logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
+    return FastAPIResultHandler(fastapi_url, inner=handler)
 
 
 def build_runner(
@@ -78,13 +93,24 @@ def build_runner(
         device=inference_settings.inference_device,
         confidence_threshold=inference_settings.inference_confidence_threshold,
     )
+    # FASTAPI_URL은 .env·환경변수로 명시해야만 전송을 켠다. 필드에 기본값이 있어
+    # 값이 채워져 있는 것만으로는 "설정했다"를 판단할 수 없다. 명시 여부는 pydantic이
+    # 기록한 model_fields_set으로 본다. 빈 문자열로 끈 것도 설정으로 치지 않는다.
+    fastapi_url: str | None = None
+    if "fastapi_url" in pipeline_settings.model_fields_set:
+        candidate = pipeline_settings.fastapi_url.strip()
+        if candidate:
+            fastapi_url = candidate
+
     consumer = InferenceConsumer(
         frame_buffer=frame_buffer,
         processor=InferenceProcessor(detector),
         shutdown_event=shutdown_event,
         poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
         max_consecutive_failures=pipeline_settings.inference_max_consecutive_failures,
-        result_handler=build_result_handler(inference_settings),
+        result_handler=build_result_handler(
+            inference_settings, fastapi_url=fastapi_url
+        ),
     )
     stream_worker = StreamWorker(
         stream_settings,

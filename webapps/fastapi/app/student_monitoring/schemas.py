@@ -11,12 +11,14 @@ from .models import DetectionEvent, VideoSegment
 
 class FrameSchema(BaseModel):
     """Frame size schema."""
+
     width_pixels: int = Field(..., gt=0)
     height_pixels: int = Field(..., gt=0)
 
 
 class DetectionSchema(BaseModel):
     """Detection result schema."""
+
     detection_id: str
     class_id: int
     class_name: str
@@ -41,6 +43,7 @@ class DetectionSchema(BaseModel):
 
 class InferenceEventRequest(BaseModel):
     """Inference event request schema."""
+
     event_id: str
     camera_id: str
     captured_at: datetime
@@ -61,12 +64,14 @@ class InferenceEventRequest(BaseModel):
 
 class InferenceEventResponse(BaseModel):
     """Inference event response schema."""
+
     event_id: str
     received_at: datetime
 
 
 class VideoSegmentRequest(BaseModel):
     """Video segment request schema."""
+
     segment_id: str
     camera_id: str
     recorded_from: datetime
@@ -86,12 +91,14 @@ class VideoSegmentRequest(BaseModel):
 
 class VideoSegmentResponse(BaseModel):
     """Video segment response schema."""
+
     segment_id: str
     received_at: datetime
 
 
 class DetectionResponse(BaseModel):
     """Detection response for public API."""
+
     detection_id: str
     class_id: int
     class_name: str
@@ -102,6 +109,7 @@ class DetectionResponse(BaseModel):
 
 class DetectionEventResponse(BaseModel):
     """Detection event response for public API."""
+
     event_id: str
     camera_id: str
     captured_at: datetime
@@ -138,6 +146,7 @@ class DetectionEventResponse(BaseModel):
 
 class DetectionEventListResponse(BaseModel):
     """Detection event list response."""
+
     items: list[DetectionEventResponse]
     total: int
     next_cursor: str | None = None
@@ -145,6 +154,7 @@ class DetectionEventListResponse(BaseModel):
 
 class VideoSegmentDetailResponse(BaseModel):
     """Video segment detail response."""
+
     segment_id: str
     camera_id: str
     recorded_from: datetime
@@ -172,5 +182,31 @@ class VideoSegmentDetailResponse(BaseModel):
 
 class VideoSegmentListResponse(BaseModel):
     """Video segment list response."""
+
     items: list[VideoSegmentDetailResponse]
     total: int
+
+
+# ============================================================
+# 학생 상태 스키마
+# ============================================================
+
+
+class StudentSeatStateResponse(BaseModel):
+    """학생 좌석 상태 응답."""
+
+    student_id: str
+    student_name: str
+    student_no: str  # 학번
+    assigned_seat_id: str | None
+    assigned_seat_label: str | None
+    current_state: str
+    confidence: float | None
+    last_observed_at: datetime | None
+
+
+class StudentStateListResponse(BaseModel):
+    """학생 상태 목록 응답."""
+
+    classroom_id: str
+    states: list[StudentSeatStateResponse]

@@ -8,5 +8,8 @@ ultralytics>=8.0
 # OBJECT_STORAGE_BACKEND=local만 쓴다면 없어도 된다.
 minio>=7.2
 
+# 탐지 결과를 FastAPI 내부 API로 전송한다(결정 0011).
+requests>=2.31
+
 # 테스트
 pytest>=8.0

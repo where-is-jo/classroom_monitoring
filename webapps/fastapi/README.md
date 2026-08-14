@@ -75,6 +75,11 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | --- | --- |
 | `/` | `/classrooms`로 이동 |
 | `/classrooms` | 강의실 선택, 좌석 지도, 재석·부재·확인 필요 집계와 마지막 관측 시각 |
+| `/classrooms/create` | 강의실 등록 |
+| `/classrooms/{id}/edit` | 강의실 수정 |
+| `/classrooms/{id}/seats` | 강의실별 좌석 목록·배치도 관리 |
+| `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
+| `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | 한국어 문장과 강의실·기간·결과 수 조건으로 검색. demo가 꺼져 있으면 빈 결과 |
 
@@ -86,7 +91,15 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | `GET` | `/api/v1/classrooms` | 활성 강의실 목록 |
+| `POST` | `/api/v1/classrooms` | 강의실 생성 |
+| `GET` | `/api/v1/classrooms/{classroom_id}` | 한 강의실의 상세 정보 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 수정 (전달한 필드만 갱신) |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 삭제 (비활성화) |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/occupancy-events` | SSE 좌석 점유 실시간 구독 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
@@ -100,7 +113,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 
 **내부 쓰기 API가 있다.** worker가 탐지 이벤트(`/internal/inference/events`)와
 영상 세그먼트(`/internal/video-segments`)를 보낼 수 있다. 로그인, 사용자 관리,
-강의실·좌석 CRUD, 알림, 관리자 대시보드는 현재 구현되어 있지 않다.
+알림, 관리자 대시보드는 현재 구현되어 있지 않다.
 
 ### 좌석 상태 표기
 

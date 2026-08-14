@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 
 
@@ -62,12 +62,22 @@ class Seat:
     classroom_id: str
     code: str
     label: str
-    geometry: SeatGeometry | None
-    is_active: bool
-    current_occupancy: SeatCurrentOccupancy
-    created_at: datetime
-    updated_at: datetime
-    version: int
+    row: int | None = None  # 새로 추가 (1부터 시작, None 허용)
+    column: int | None = None  # 새로 추가 (1부터 시작, None 허용)
+    geometry: SeatGeometry | None = None
+    is_active: bool = True
+    current_occupancy: SeatCurrentOccupancy = field(
+        default_factory=lambda: SeatCurrentOccupancy(
+            state=SeatOccupancy.UNKNOWN,
+            source=OccupancySource.SYSTEM,
+            confidence=None,
+            observed_at=None,
+            event_id=None,
+        )
+    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    version: int = 0
 
 
 @dataclass(frozen=True)
@@ -146,7 +156,9 @@ class CreateSeatCommand:
     classroom_id: str
     code: str
     label: str
-    geometry: SeatGeometry | None
+    row: int | None = None  # 새로 추가 (None 허용)
+    column: int | None = None  # 새로 추가 (None 허용)
+    geometry: SeatGeometry | None = None
 
 
 @dataclass(frozen=True)
@@ -156,3 +168,46 @@ class RecordSeatObservationBatchCommand:
     source: OccupancySource
     observed_at: datetime
     observations: tuple[SeatObservation, ...]
+
+
+# ============================================================
+# 좌석-학생 지정 모델
+# ============================================================
+
+
+@dataclass(frozen=True)
+class SeatAssignment:
+    """좌석-학생 지정."""
+
+    seat_id: str
+    student_id: str
+    classroom_id: str
+    assigned_at: datetime
+
+
+@dataclass(frozen=True)
+class SeatAssignmentInfo:
+    """좌석-학생 지정 상세 (조회용)."""
+
+    seat_id: str
+    seat_label: str
+    student_id: str
+    student_name: str
+    student_no: str
+    assigned_at: datetime
+
+
+@dataclass(frozen=True)
+class AssignStudentCommand:
+    """학생 지정 명령."""
+
+    seat_id: str
+    student_id: str
+    classroom_id: str
+
+
+@dataclass(frozen=True)
+class UnassignStudentCommand:
+    """학생 지정 해제 명령."""
+
+    seat_id: str

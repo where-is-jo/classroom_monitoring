@@ -123,6 +123,36 @@ def test_removed_pages_and_apis_are_404(minimal_client: TestClient, path: str) -
     assert minimal_client.get(path, follow_redirects=False).status_code == 404
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/students",
+        "/api/v1/students/student-removed",
+        "/students",
+        "/students/create",
+        "/students/student-removed/edit",
+    ],
+)
+def test_removed_students_crud_is_404(minimal_client: TestClient, path: str) -> None:
+    assert minimal_client.get(path, follow_redirects=False).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", "/api/v1/students"),
+        ("post", "/api/v1/students/student-removed"),
+        ("patch", "/api/v1/students/student-removed"),
+        ("delete", "/api/v1/students/student-removed"),
+    ],
+)
+def test_removed_students_write_crud_is_404(
+    minimal_client: TestClient, method: str, path: str
+) -> None:
+    response = getattr(minimal_client, method)(path, follow_redirects=False)
+    assert response.status_code == 404
+
+
 def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -> None:
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
     assert paths == {
@@ -302,6 +332,7 @@ def test_demo_seed_is_idempotent() -> None:
     seed_demo_data(service, now=NOW)
     seed_demo_data(service, now=NOW)
     classrooms = service.list_classrooms(limit=10, offset=0)
+    # A101·B203 두 강의실만 시드된다.
     assert classrooms.total == 2
     assert sum(service.occupancy_summary(item.id).total for item in classrooms.items) == 12
 

@@ -1,6 +1,27 @@
-"""강의실 좌석 도메인 오류."""
+"""강의실 좌석 도메인 오류.
 
-from ..shared.errors import DomainError
+학생 관련 neutral 오류(CLASSROOM_INPUT_INVALID·STUDENT_NOT_FOUND·
+STUDENT_INACTIVE_FOR_ASSIGNMENT)는 `app/shared/errors.py`로 rehome되어
+여기서는 re-export만 한다.
+"""
+
+from ..shared.errors import (
+    ClassroomInputError,
+    DomainError,
+    StudentInactiveForAssignmentError,
+)
+
+__all__ = [
+    "ClassroomConcurrentUpdateError",
+    "ClassroomDuplicateError",
+    "ClassroomInputError",
+    "ClassroomNotFoundError",
+    "SeatBatchConflictError",
+    "SeatDuplicateError",
+    "SeatInactiveForAssignmentError",
+    "SeatNotFoundError",
+    "StudentInactiveForAssignmentError",
+]
 
 
 class ClassroomNotFoundError(DomainError):
@@ -51,9 +72,16 @@ class ClassroomConcurrentUpdateError(DomainError):
         super().__init__("좌석 상태가 동시에 변경됐습니다.")
 
 
-class ClassroomInputError(DomainError):
-    code = "CLASSROOM_INPUT_INVALID"
-    status_code = 400
+# ============================================================
+# 좌석-학생 지정 오류
+# ============================================================
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
+
+class SeatInactiveForAssignmentError(DomainError):
+    """비활성화된 좌석에 학생 지정 시도."""
+
+    code = "SEAT_INACTIVE_FOR_ASSIGNMENT"
+    status_code = 422
+
+    def __init__(self) -> None:
+        super().__init__("비활성화된 좌석에는 학생을 지정할 수 없습니다.")

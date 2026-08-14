@@ -9,7 +9,10 @@ from pathlib import Path
 from fastapi import Depends
 from pymongo import MongoClient
 
-from ..classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from ..classrooms.adapters.memory_repository import (
+    InMemoryClassroomRepository,
+    InMemorySeatAssignmentRepository,
+)
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
@@ -41,6 +44,7 @@ from ..video_monitoring.adapters.memory_repository import MemoryVideoStreamRepos
 from ..video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
 from ..video_monitoring.ports import VideoStreamRepository
 from ..video_monitoring.service import VideoDemoService, VideoStreamService
+from .adapters.memory_student_lookup import InMemoryStudentLookup
 from .broadcaster import InMemoryBroadcaster
 from .config import Settings
 from .database import (
@@ -53,6 +57,7 @@ from .database import (
     select_database,
 )
 from .errors import DatabaseUnavailableError
+from .student_identity import StudentLookupPort
 
 
 def utc_now() -> datetime:
@@ -82,6 +87,20 @@ def _video_segment_repository() -> MemoryVideoSegmentRepository:
 @lru_cache
 def _video_stream_repository() -> MemoryVideoStreamRepository:
     return MemoryVideoStreamRepository()
+
+
+@lru_cache
+def _student_lookup() -> InMemoryStudentLookup:
+    """중립 학생 조회 어댑터. runtime 기본은 empty다.
+
+    identities는 명시적 DI·테스트 fixture에서 주입하며, 여기서는 주입하지 않는다.
+    """
+    return InMemoryStudentLookup()
+
+
+@lru_cache
+def _seat_assignment_repository() -> InMemorySeatAssignmentRepository:
+    return InMemorySeatAssignmentRepository()
 
 
 @lru_cache
@@ -164,12 +183,20 @@ def get_broadcaster() -> InMemoryBroadcaster:
     return _broadcaster()
 
 
+def get_student_lookup() -> StudentLookupPort:
+    """중립 학생 조회 포트. runtime 기본은 empty 어댑터다."""
+    return _student_lookup()
+
+
 def get_classroom_service(
     repository: ClassroomRepository = Depends(get_classroom_repository),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
     settings: Settings = Depends(get_settings),
 ) -> ClassroomService:
     return ClassroomService(
         repository,
+        student_lookup=student_lookup,
+        assignment_repository=_seat_assignment_repository(),
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         clock=utc_now,
     )
@@ -307,12 +334,19 @@ def get_student_monitoring_service(
     segment_repository: VideoSegmentRepository = Depends(get_video_segment_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
+    classroom_service: ClassroomService = Depends(get_classroom_service),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
+    settings: Settings = Depends(get_settings),
 ) -> StudentMonitoringService:
     return StudentMonitoringService(
         detection_repository=detection_repository,
         segment_repository=segment_repository,
         stream_repository=stream_repository,
         broadcaster=broadcaster,
+        classroom_service=classroom_service,
+        occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
+        identity_confidence_threshold=0.5,  # 기본값, 설정에서 읽도록 확장 가능
+        student_lookup=student_lookup,
     )
 
 
@@ -333,7 +367,10 @@ def initialize_data_store() -> None:
         return
     if settings.demo_mode_enabled:
         seed_demo_data(
-            get_classroom_service(get_classroom_repository(settings), settings), now=utc_now()
+            get_classroom_service(
+                get_classroom_repository(settings), settings=settings
+            ),
+            now=utc_now(),
         )
         seed_video_streams(_video_stream_repository(), now=utc_now())
 

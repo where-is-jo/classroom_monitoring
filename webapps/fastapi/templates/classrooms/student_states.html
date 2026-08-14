@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}{{ classroom.code }} 학생 상태 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">{{ classroom.code }}</p>
+      <h1>{{ classroom.name }} 학생 상태</h1>
+      <p class="summary">학생별 재석·잘못된 자리·확인 필요 상태를 확인합니다.</p>
+    </div>
+    <div class="page-actions">
+      <a class="button-link secondary" href="/classrooms">목록</a>
+      <a class="button-link" href="/classrooms/{{ classroom.id }}/student-states">새로고침</a>
+    </div>
+  </header>
+
+  {% if classrooms %}
+    <section class="panel" aria-labelledby="classroom-selector-title">
+      <h2 id="classroom-selector-title">강의실 선택</h2>
+      {# 강의실이 URL 경로 파라미터로 전달되므로 폼 제출 대신 onchange로 해당 강의실 페이지로 이동한다. #}
+      <label>강의실
+        <select name="classroom_id" aria-label="강의실 선택"
+          onchange="location.href='/classrooms/' + encodeURIComponent(this.value) + '/student-states'">
+          {% for c in classrooms %}
+            <option value="{{ c.id }}"{% if c.id == classroom.id %} selected{% endif %}>{{ c.code }} {{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </section>
+  {% endif %}
+
+  {% if states %}
+    <section class="panel" aria-labelledby="student-state-table-title">
+      <h2 id="student-state-table-title">학생 상태 목록</h2>
+      <ul class="student-state-legend" aria-label="학생 상태 범례">
+        <li><span class="legend-swatch legend-swatch--occupied" aria-hidden="true"></span>재석 (PRESENT)</li>
+        <li><span class="legend-swatch legend-swatch--wrong-seat" aria-hidden="true"></span>잘못된 자리 (WRONG_SEAT)</li>
+        <li><span class="legend-swatch legend-swatch--unknown" aria-hidden="true"></span>확인 필요 (UNKNOWN)</li>
+      </ul>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="학생 상태 스크롤 영역">
+        <table>
+          <thead>
+            <tr>
+              <th>학생 이름</th>
+              <th>학번</th>
+              <th>지정 좌석</th>
+              <th>현재 상태</th>
+              <th>신뢰도</th>
+              <th>마지막 관측</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for state in states %}
+              <tr>
+                <td>{{ state.student_name }}</td>
+                <td>{{ state.student_no }}</td>
+                <td>{{ state.assigned_seat_label or '-' }}</td>
+                <td>
+                  <span class="state state--{{ state.current_state|lower }}" aria-label="현재 상태 {{ state.current_state }}">
+                    <span class="state-icon" aria-hidden="true">
+                      {% if state.current_state == 'PRESENT' %}●
+                      {% elif state.current_state == 'WRONG_SEAT' %}▲
+                      {% else %}?{% endif %}
+                    </span>
+                    <span class="state-label">
+                      {% if state.current_state == 'PRESENT' %}재석
+                      {% elif state.current_state == 'WRONG_SEAT' %}잘못된 자리
+                      {% else %}확인 필요{% endif %}
+                    </span>
+                  </span>
+                </td>
+                <td>
+                  {% if state.confidence is not none %}
+                    {{ (state.confidence * 100)|round|int }}%
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if state.last_observed_at %}
+                    {{ state.last_observed_at|kst_datetime }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <div class="empty" role="status">
+      <strong>학생 상태 데이터가 없습니다.</strong>
+      <p>탐지 시스템이 연동되면 학생 상태가 여기에 표시됩니다.</p>
+      <p><small>학생이 좌석에 지정되어 있고, 카메라에서 탐지 결과가 수신되어야 상태가 표시됩니다.</small></p>
+    </div>
+  {% endif %}
+{% endblock %}
