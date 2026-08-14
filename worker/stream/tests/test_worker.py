@@ -231,7 +231,8 @@ def build_settings(**overrides: object) -> StreamSettings:
         "app_env": "local",
         "stream_sources": "camera-01=rtsp://host/1,camera-02=rtsp://host/2,camera-03=rtsp://host/3",
     }
-    return StreamSettings(**{**base, **overrides})  # type: ignore[arg-type]
+    # _env_file=None으로 stream/.env.*를 무시한다. 값은 base와 overrides로만 결정한다.
+    return StreamSettings(_env_file=None, **{**base, **overrides})  # type: ignore[arg-type]
 
 
 class TestStreamWorker:

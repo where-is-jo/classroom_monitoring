@@ -5,6 +5,7 @@ from ..shared.errors import DomainError
 
 class InferenceEventConflictError(DomainError):
     """Same event_id with different body."""
+
     code = "INFERENCE_EVENT_CONFLICT"
     status_code = 409
 
@@ -14,6 +15,7 @@ class InferenceEventConflictError(DomainError):
 
 class VideoStreamNotFoundError(DomainError):
     """Unknown camera_id."""
+
     code = "VIDEO_STREAM_NOT_FOUND"
     status_code = 404
 
@@ -23,6 +25,7 @@ class VideoStreamNotFoundError(DomainError):
 
 class RepositoryError(DomainError):
     """Storage access failure."""
+
     code = "REPOSITORY_ERROR"
     status_code = 503
 

@@ -90,14 +90,23 @@ def test_product_navigation_includes_face_enrollment(minimal_client: TestClient)
     for path, heading in (
         ("/classrooms", "강의실 좌석 현황"),
         ("/monitoring", "실시간 모니터링"),
-        ("/video-search", "자연어 검색"),
+        # 규칙 기반 데모 카탈로그 검색이다. LLM 검색과 이름이 겹치지 않게 정리했다.
+        ("/video-search", "데모 영상 검색"),
+        ("/llm-search", "자연어 탐지 검색"),
     ):
         response = minimal_client.get(path)
         assert response.status_code == 200
         assert heading in response.text
-        # 모니터링·등록 관리·학생 현황 세 그룹이 사이드바에 있다.
+        # 모니터링 / 등록 관리 / 학생 현황 세 묶음이다.
         assert response.text.count('class="nav-group-title"') == 3
-        for label in ("강의실 좌석 현황", "실시간 모니터링", "자연어 검색"):
+        # 얼굴 등록은 이 테스트 이름이 약속한 항목이다. 단언이 빠져 있어 함께 넣는다.
+        for label in (
+            "강의실 좌석 현황",
+            "실시간 모니터링",
+            "자연어 탐지 검색",
+            "데모 영상 검색",
+            "얼굴 등록",
+        ):
             assert label in response.text
         for removed in ("로그인", "사용자 관리", "직원 관리", "면담", "알림"):
             assert removed not in response.text
@@ -161,41 +170,34 @@ def test_removed_students_write_crud_is_404(
 def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -> None:
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
     assert paths == {
+        # 강의실·좌석
         "/api/v1/classrooms",
         "/api/v1/classrooms/{classroom_id}",
         "/api/v1/classrooms/{classroom_id}/occupancy",
         "/api/v1/classrooms/{classroom_id}/occupancy-events",
-        "/api/v1/classrooms/{classroom_id}/seat-assignments",
         "/api/v1/classrooms/{classroom_id}/seats",
-        "/api/v1/classrooms/{classroom_id}/seats/auto",
-        # 오프라인 migration 계약 (TASK-003).
-        "/api/v1/classrooms/{classroom_id}/seats/migration/preflight",
-        "/api/v1/classrooms/{classroom_id}/seats/migration/rollback",
-        "/api/v1/classrooms/{classroom_id}/seats/migration/run",
-        "/api/v1/classrooms/{classroom_id}/seats/migration/status",
-        # 수동 repair 계약 (TASK-003 MAJOR Finding 2).
-        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/approve",
-        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/execute",
-        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/request",
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
+        "/api/v1/classrooms/{classroom_id}/seat-assignments",
+        # 학생 상태
         "/api/v1/classrooms/{classroom_id}/student-states",
+        # 영상 모니터링
+        "/api/v1/video-streams",
+        "/api/v1/video-streams/{stream_id}",
+        "/api/v1/video-streams/{stream_id}/detections",
+        "/api/v1/video-streams/{stream_id}/detection-events",
+        "/api/v1/video-searches",
+        "/api/v1/video-segments",
+        # 얼굴 등록
+        "/api/v1/students/{student_id}/face-enrollments",
         "/api/v1/face-enrollments/{enrollment_id}",
         "/api/v1/snapshots",
         "/api/v1/snapshots/image/{key}",
-        "/api/v1/students/{student_id}/face-enrollments",
-        "/api/v1/students/{student_id}/face-profile",
-        "/api/v1/video-searches",
-        # worker가 올리는 영상 segment 메타데이터와 재생 조회 계약.
-        "/api/v1/video-segments",
-        "/api/v1/video-streams",
-        "/api/v1/video-streams/{stream_id}",
-        # worker가 적재하는 탐지 이벤트·결과(운영 계약은 유지).
-        "/api/v1/video-streams/{stream_id}/detection-events",
-        "/api/v1/video-streams/{stream_id}/detections",
-        # 재생 세션(결정 0014). browser는 이 계약의 signaling URL만 쓴다.
-        "/api/v1/video-streams/{stream_id}/playback-sessions",
-        "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
+        # 자연어 탐지 검색. 질문이 본문에 들어가므로 조회지만 POST다.
+        "/api/v1/llm-searches",
+        # worker가 결과를 밀어 넣는 내부 수집 경로다. 브라우저가 부르는 API가 아니다.
+        "/internal/inference/events",
+        "/internal/video-segments",
         "/health",
         "/health/ready",
         # worker 전용 internal 계약.
@@ -409,29 +411,32 @@ def test_occupancy_summary_does_not_truncate_after_one_repository_page() -> None
             },
             "DEMO_MODE_ENABLED",
         ),
-        # mongodb에 필요한 값이 없으면 거부해야 한다. 로컬 .env가 값을 채워 검증을
-        # 우회하지 않도록 database_url·database_name을 명시적으로 None으로 넘긴다.
+        ({"app_env": "local", "database_mode": "mongodb"}, "DATABASE_URL"),
         (
             {
                 "app_env": "local",
-                "database_mode": "mongodb",
-                "database_url": None,
-                "database_name": None,
+                "database_mode": "memory",
+                "llm_search_mode": "llama",
+                "llm_search_url": "   ",
             },
-            "DATABASE_URL",
+            "LLM_SEARCH_URL",
         ),
     ],
 )
 def test_settings_reject_unsafe_or_incomplete_modes(
     kwargs: dict[str, object], message: str
 ) -> None:
+    # _env_file=None으로 로컬 .env.*를 무시한다. 개발자가 DATABASE_URL이 채워진
+    # .env.local을 두면 그 값이 검증 대상 값을 덮어써서 테스트가 사람마다 다르게 통과한다.
     with pytest.raises(ValidationError, match=message):
-        Settings(**kwargs)  # type: ignore[arg-type]
+        # _env_file은 pydantic-settings가 런타임에 받는 인자라 Settings 시그니처에 없다.
+        Settings(_env_file=None, **kwargs)  # type: ignore[arg-type, call-arg]
 
 
 def test_pose_quota_total_must_equal_required_sample_count() -> None:
     with pytest.raises(ValidationError, match="Pose quota"):
-        Settings(
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
             app_env="local",
             database_mode="memory",
             face_enrollment_required_samples=301,

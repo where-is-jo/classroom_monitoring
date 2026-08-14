@@ -582,9 +582,31 @@ def seat_assignments_page(classroom_id: str) -> Response:
 
     지정/해제는 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
     """
-    return RedirectResponse(
-        url=f"/classrooms/{classroom_id}/seats",
-        status_code=status.HTTP_302_FOUND,
+    try:
+        classroom = service.get_classroom(classroom_id)
+    except ClassroomNotFoundError:
+        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
+
+    seats = service.list_all_seats(classroom_id)
+    assignments_list = service.list_assignments(classroom_id)
+    # seat_id를 키로 변환해 템플릿에서 좌석별 지정을 바로 조회한다.
+    assignments = {info.seat_id: info for info in assignments_list}
+    # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
+    # 중립 조회 계약: limit은 1~page_size_max, offset은 0 이상이어야 한다.
+    validate_list_active_args(
+        limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
+    )
+    students_page = student_lookup.list_active(limit=settings.page_size_max, offset=0)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="classrooms/seat_assignments.html",
+        context={
+            "classroom": classroom,
+            "seats": seats,
+            "assignments": assignments,
+            "students": students_page.items,
+        },
     )
 
 

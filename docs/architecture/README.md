@@ -321,7 +321,8 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 일반 모니터링 화면 갱신 방식(폴링 / SSE / WebSocket) | 결정 필요 | 얼굴 등록은 [0011](./decisions.md#0011--얼굴-등록-실시간-경계와-데이터-수명)에 따라 WebSocket 확정. 일반 모니터링은 미정 |
 | 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | 결정 필요 | fastapi, worker, monitoring |
 | `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 설정·문서만([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | monitoring, fastapi |
-| 자연어 검색 방식(LLM + 허용된 조회 Tool) | 후보: LangGraph | fastapi. MVP 이후 |
+| 자연어 검색 방식 | 확정([0016](./decisions.md#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다)). LLM은 검색 계획 JSON만 만들고 검증·조회는 fastapi가 한다. 조회 Tool을 모델에게 주지 않는다 | fastapi |
+| 업무 자동화 오케스트레이션(n8n / LangGraph) | 결정 필요. 고도화 단계 | fastapi, RPAs |
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
 | Jetson 적용 범위 | 결정 필요 | worker |
 | 알림 채널과 RPA 대상 시스템 | 결정 필요 | RPAs, fastapi |

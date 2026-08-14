@@ -1,0 +1,70 @@
+# fastapi의 일반 설정·판정 기준값. 환경(local/dev/prod)과 무관하게 같은 값을 쓴다.
+# 환경마다 달라야 하는 값과 비밀값은 .env.{local,dev,prod}에 둔다.
+# 규칙: docs/conventions/environment-convention.md
+
+database_connect_timeout_seconds: 5.0
+
+# 개인정보 없는 합성 모니터링 데모. local/dev에서만 켤 수 있다(prod는 코드가 거부한다).
+demo_mode_enabled: false
+
+# 신뢰도가 이 값 미만인 좌석 관측은 UNKNOWN으로 취급한다.
+seat_occupancy_confidence_threshold: 0.6
+
+# 페이지 크기
+page_size_default: 50
+page_size_max: 200
+
+# 능동형 얼굴 등록 완료 조건과 pose quota.
+# quota 합계는 required_samples와 같아야 한다(코드가 검증한다).
+face_enrollment_required_samples: 120
+# 수집한 표본에서 증강으로 늘리는 수
+face_enrollment_augmented_samples: 180
+face_pose_front_quota: 32
+face_pose_left_quota: 24
+face_pose_right_quota: 24
+face_pose_up_quota: 20
+face_pose_down_quota: 20
+
+# 얼굴 분석 임계값. 실제 등록 장비 벤치마크 후 조정한다.
+face_detection_confidence_min: 0.65
+face_size_ratio_min: 0.08
+face_roll_degrees_max: 20
+face_blur_score_min: 0.3
+face_brightness_score_min: 0.2
+face_landmark_confidence_min: 0.8
+face_occlusion_score_max: 0.3
+face_duplicate_score_max: 0.99
+face_motion_speed_dps_max: 220
+face_yaw_side_degrees: 10
+face_pitch_side_degrees: 8
+
+# local 테스트에서만 유효 JPEG를 파일로 확인한다. 실제 얼굴이므로 기본 비활성화한다.
+face_local_sample_storage_enabled: false
+face_local_sample_storage_dir: local_face_data
+face_analyzer_timeout_seconds: 5
+
+# SSE settings
+sse_heartbeat_interval_seconds: 30
+sse_reconnection_timeout_seconds: 60
+
+# Detection event settings
+detection_event_max_detections_per_event: 100
+detection_event_stale_seconds: 300
+
+# 탐지 스냅샷 저장소 (결정 0011)
+snapshot_storage_bucket: classroom-snapshots
+# TLS 사용 여부는 여기 없다 — MinIO가 같은 network 안이냐 밖이냐에 따라 환경마다
+# 달라지므로 .env.{local,dev,prod} 쪽이 소유한다(SNAPSHOT_STORAGE_SECURE).
+# 저장소가 죽었을 때 요청이 오래 묶이지 않도록 짧게 끊는다.
+snapshot_storage_timeout_seconds: 5
+
+# 자연어 탐지 검색 (결정 0016)
+# 실행 방식과 주소(LLM_SEARCH_MODE·_URL·_MODEL)는 환경마다 달라 .env.* 쪽이 갖는다.
+#
+# 생성은 조회보다 훨씬 느려서 다른 외부 호출(5초)과 같은 값을 쓸 수 없다.
+llm_search_timeout_seconds: 20
+# 조회 기간 상한. 넘는 질문은 거절하지 않고 이 길이로 줄인 뒤 사용자에게 알린다.
+llm_search_max_span_days: 7
+# 탐지 인원 변화를 판정하려면 원본 이벤트를 봐야 한다. 카메라 한 대에서 한 번에
+# 읽어 오는 이벤트 수의 상한이며, 걸리면 결과에 truncated로 표시한다.
+llm_search_scan_limit: 500

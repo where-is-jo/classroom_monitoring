@@ -104,13 +104,11 @@ def monitoring_page(
     request: Request,
     stream_service: VideoStreamService = Depends(get_video_stream_service),
 ) -> Response:
-    """연결된 실제 카메라만 보여주는 실시간 모니터링 화면 (MON-001~006).
-
-    real-only 정책과 조회는 VideoStreamService.list_monitoring_streams()가
-    소유한다. query parameter, demo source/filter state, synthetic asset
-    script, demo 시간은 이 화면의 template context에 제공하지 않는다.
-    """
-    real_streams = stream_service.list_monitoring_streams()
+    demo_feeds = demo_service.list_streams(
+        search=q, classroom_id=classroom_id, status=stream_status
+    )
+    real_streams = stream_service.list_streams()
+    options = demo_service.classroom_options()
     return templates.TemplateResponse(
         request=request,
         name="video_monitoring/monitoring.html",

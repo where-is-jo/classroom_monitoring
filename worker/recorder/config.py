@@ -1,17 +1,31 @@
-"""recorder worker 설정. 환경변수에서 읽고 프로세스 시작 시 검증한다."""
+"""recorder worker 설정. 환경변수·yml에서 읽고 프로세스 시작 시 검증한다.
+
+값은 두 곳에서 온다.
+
+- `.env.{APP_ENV}` — 환경마다 달라야 하는 값과 비밀값(`STREAM_SOURCES`,
+  `OBJECT_STORAGE_BACKEND`와 MinIO 접속 정보). 커밋하지 않는다.
+- `config/settings.yml` — 환경과 무관하게 같은 값. 커밋한다.
+
+우선순위는 실제 OS 환경변수 > `.env.{APP_ENV}` > `config/settings.yml`이다
+(`shared.settings_sources.customise_sources_with_yaml`).
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from shared.camera_sources import CameraSource, parse_stream_sources
 from shared.object_storage import ObjectStorageSettings
+from shared.settings_sources import customise_sources_with_yaml
 
 _RECORDER_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = _RECORDER_DIR / "data"
+
+_APP_ENV_FOR_FILE_SELECTION = os.environ.get("APP_ENV", "local")
 
 __all__ = ["DEFAULT_DATA_DIR", "CameraSource", "RecorderSettings"]
 
@@ -21,9 +35,18 @@ class RecorderSettings(ObjectStorageSettings):
 
     객체 저장소 값(`OBJECT_STORAGE_*`)은 `ObjectStorageSettings`에서 온다.
     inference도 같은 mixin을 쓰므로 두 워커가 같은 변수를 같게 해석한다.
+    `OBJECT_STORAGE_BACKEND`·`OBJECT_STORAGE_ENDPOINT`·`ACCESS_KEY`·`SECRET_KEY`는
+    환경마다 실제로 달라지는 값이라 `.env.*`에 두고, 나머지는 `config/settings.yml`에 둔다.
     """
 
-    model_config = SettingsConfigDict(env_file=_RECORDER_DIR / ".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_RECORDER_DIR / f".env.{_APP_ENV_FOR_FILE_SELECTION}",
+        yaml_file=_RECORDER_DIR / "config" / "settings.yml",
+        # PyYAML의 기본 파일 인코딩은 OS 로캘을 따른다. 한국어 Windows에서는 cp949라
+        # yml의 한국어 주석을 읽다가 UnicodeDecodeError가 난다. 명시적으로 고정한다.
+        yaml_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: Literal["local", "dev", "prod"]
 
@@ -53,6 +76,19 @@ class RecorderSettings(ObjectStorageSettings):
     @property
     def camera_sources(self) -> tuple[CameraSource, ...]:
         return parse_stream_sources(self.stream_sources.get_secret_value())
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return customise_sources_with_yaml(
+            settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+        )
 
     # .env.example은 경로 항목을 비워 둔다. 빈 문자열이 그대로 오면 Path(".")가 되어
     # 실행 위치에 영상이 쌓인다. 비어 있으면 기본 경로를 쓰게 한다.

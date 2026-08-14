@@ -21,7 +21,9 @@ VALID_ENV = {
 
 
 def build_settings(**overrides: object) -> StreamSettings:
-    return StreamSettings(**{**VALID_ENV, **overrides})  # type: ignore[arg-type]
+    # _env_file=None으로 stream/.env.*를 무시한다. 개발자가 로컬 .env.local을 두면
+    # 그 값이 기본값 검증을 덮어써서 테스트가 사람마다 다르게 통과한다.
+    return StreamSettings(_env_file=None, **{**VALID_ENV, **overrides})  # type: ignore[arg-type]
 
 
 class TestParseStreamSources:

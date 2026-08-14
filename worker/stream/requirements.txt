@@ -4,6 +4,8 @@ opencv-python>=4.10
 numpy>=1.26
 pydantic>=2.7
 pydantic-settings>=2.3
+# config/settings.yml(환경과 무관한 일반 설정·판정 기준값)을 읽는 데 필요하다.
+pyyaml
 
 # 테스트
 pytest>=8.0

@@ -145,9 +145,14 @@ HTTP로 `fastapi`에 넘기는 경로([결정 0011](../docs/architecture/decisio
 ```bash
 cd worker
 python -m pip install -r pipeline/requirements.txt
-cp pipeline/.env.example pipeline/.env    # STREAM_SOURCES를 채운다
+cp pipeline/.env.example pipeline/.env.local    # STREAM_SOURCES를 채운다
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
 python -m pipeline.main
 ```
+
+각 워커는 환경마다 달라야 하는 값·비밀값을 `.env.{local,dev,prod}`에, 재시도 횟수·
+타임아웃 같은 일반 설정을 커밋된 `config/settings.yml`에 나눠 둔다. 자세한 내용은
+[환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
 
 워커를 따로 돌릴 수도 있다. 절차와 환경변수는 각 워커 README에 있다.
 

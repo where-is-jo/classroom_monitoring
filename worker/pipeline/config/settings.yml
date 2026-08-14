@@ -1,0 +1,12 @@
+# pipeline 조립 실행의 일반 설정. 환경(local/dev/prod)과 무관하게 같은 값을 쓴다.
+# 규칙: docs/conventions/environment-convention.md
+
+# 버퍼에 담아둘 최대 프레임 수. 실시간이라 최신 한 장이면 충분하다.
+# 키울수록 오래된 프레임을 들고 있게 되어 지연이 커진다.
+frame_buffer_maxsize: 1
+
+# 버퍼가 비어 있을 때 소비자가 종료 신호를 확인하는 주기(초)
+inference_poll_timeout_seconds: 0.5
+
+# 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다
+inference_max_consecutive_failures: 5

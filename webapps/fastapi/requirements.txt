@@ -1,7 +1,9 @@
 fastapi
 uvicorn[standard]
 jinja2
-pydantic-settings
+pydantic-settings>=2.3
+# config/settings.yml(환경과 무관한 일반 설정·판정 기준값)을 읽는 데 필요하다.
+pyyaml
 Pillow>=11,<13
 pymongo>=4.17,<5
 
@@ -10,9 +12,13 @@ pymongo>=4.17,<5
 minio>=7.2
 tzdata
 
+# 외부 HTTP 호출(중앙 얼굴 분석 서비스, llama.cpp 계획 생성)에 쓴다.
+# 런타임 의존성이다 — 테스트에서만 쓰는 것으로 분류되어 있었으나 app/ 코드가 이미
+# import하고 있어 바로잡았다.
+httpx
+
 # 테스트
 pytest
-httpx
 
 # 린트·타입 검사
 ruff

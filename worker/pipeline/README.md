@@ -28,13 +28,16 @@
 ```bash
 cd worker
 python -m pip install -r pipeline/requirements.txt
-cp pipeline/.env.example pipeline/.env    # STREAM_SOURCES를 채운다
+cp pipeline/.env.example pipeline/.env.local    # STREAM_SOURCES를 채운다
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
 python -m pipeline.main
 ```
 
-조립 실행은 워커별 `.env`가 아니라 **`pipeline/.env` 하나만** 읽는다.
-같은 변수가 여러 파일에 흩어져 어느 값이 적용됐는지 모르게 되는 것을 막는다.
-워커를 따로 실행할 때는 각 워커의 `.env`를 쓴다.
+조립 실행은 워커별 `.env.*`가 아니라 **`pipeline/.env.{APP_ENV}` 하나만** 읽는다.
+같은 변수(환경 의존 설정·비밀값)가 여러 파일에 흩어져 어느 값이 적용됐는지 모르게
+되는 것을 막는다. 워커를 따로 실행할 때는 각 워커의 `.env.*`를 쓴다.
+환경과 무관한 일반 설정(`config/settings.yml`)은 조립 실행에서도 각 워커 자신의
+`config/settings.yml`을 그대로 읽는다 — 어차피 같은 값이라 합칠 필요가 없다.
 
 종료는 `Ctrl+C`다. `SIGINT`·`SIGTERM`을 받으면 버퍼를 닫아 추론 소비자를 깨우고,
 카메라 스레드를 정리한 뒤 프레임 처리량을 로그로 남긴다.
@@ -45,17 +48,21 @@ python -m pipeline.main
 > **확인하지 못한 것**: 실제 카메라와 실제 YOLO 가중치를 붙인 동작.
 > 장비와 모델이 있는 사람이 확인한 뒤 이 문단을 갱신한다.
 
-## 환경변수
+## 환경변수와 설정
 
-전체 목록은 [`.env.example`](./.env.example)에 있다. 조립 전용 값만 아래에 적는다.
-수신·추론 값은 [stream README](../stream/README.md#환경변수)와
-[inference README](../inference/README.md#환경변수)가 기준이다.
+`.env.{local,dev,prod}` 전체 목록은 [`.env.example`](./.env.example)에 있다 — stream·
+inference의 환경 의존 설정·비밀값이며, pipeline 자신의 필드는 없다. 수신·추론 값은
+[stream README](../stream/README.md#환경변수와-설정)와
+[inference README](../inference/README.md#환경변수와-설정)가 기준이다.
+
+pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./config/settings.yml)에
+있다.
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
-| `FRAME_BUFFER_MAXSIZE` | 버퍼에 담아둘 최대 프레임 수 | 기본 1 |
-| `INFERENCE_POLL_TIMEOUT_SECONDS` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
-| `INFERENCE_MAX_CONSECUTIVE_FAILURES` | 연속 추론 실패 허용 횟수 | 기본 5 |
+| `frame_buffer_maxsize` | 버퍼에 담아둘 최대 프레임 수 | 기본 1 |
+| `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
+| `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
 
 ### 버퍼 크기를 1로 두는 이유
 

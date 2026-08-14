@@ -55,10 +55,10 @@ Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 | `refactor` | 동작 변경 없는 구조 개선 |
 | `test` | 테스트 추가·수정 |
 | `chore` | 설정, 의존성, 저장소 관리 |
+| `ci` | CI 워크플로우(`.github/workflows/`) 추가·수정 |
 
-**목록에 없는 타입을 쓰지 않는다.** `perf`, `ci`, `style`, `build`, `revert`는
+**목록에 없는 타입을 쓰지 않는다.** `perf`, `style`, `build`, `revert`는
 쓰지 않는다. 성능 개선은 `fix` 또는 `refactor`로, 의존성 변경은 `chore`로 쓴다.
-포매터와 CI를 도입하면 그때 이 표에 추가한다.
 
 커밋 타입 `feat`와 브랜치 타입 `feature`가 다른 것은 의도된 차이다. 관례를 따랐다.
 

@@ -24,10 +24,6 @@ class VideoStreamRepository(Protocol):
         """Find all enabled streams."""
         ...
 
-    def find_monitoring_streams(self) -> list[VideoStream]:
-        """Find real monitoring streams (enabled=true AND is_demo=false)."""
-        ...
-
     def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
         """Update last detection timestamp."""
         ...

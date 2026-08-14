@@ -57,18 +57,6 @@ class MongoVideoStreamRepository:
             raise RepositoryUnavailableError() from None
         return [self._to_domain(doc) for doc in documents]
 
-    def find_monitoring_streams(self) -> list[VideoStream]:
-        """실제 모니터링 stream만 반환한다 (enabled=true AND is_demo=false)."""
-        try:
-            documents = list(
-                self._collection.find({"enabled": True, "is_demo": False}).sort(
-                    "camera_id", ASCENDING
-                )
-            )
-        except PyMongoError:
-            raise RepositoryUnavailableError() from None
-        return [self._to_domain(doc) for doc in documents]
-
     def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
         """Update last detection timestamp."""
         try:

@@ -25,13 +25,13 @@
 | 항목 | 상태 | 코드에서 |
 | --- | --- | --- |
 | 상시 녹화 여부 | `결정 필요` | 상시 세그먼트 녹화로 구현 |
-| 보존 기간과 자동 삭제 | `결정 필요` | `RECORDING_RETENTION_DAYS` 기본 30일 |
+| 보존 기간과 자동 삭제 | `결정 필요` | `recording_retention_days` 기본 30일(`config/settings.yml`) |
 | 접근 권한 | `결정 필요` | 미구현. 조회 경로가 아직 없다 |
 | 개인정보 처리 근거와 고지 | `결정 필요` | 미구현. 코드로 풀 문제가 아니다 |
 
 **기본값 30일은 팀이 합의한 값이 아니다.** 워커는 시작할 때 현재 보존 기간과
 저장소를 경고 로그로 남겨, 합의 없이 운영에 쓰이는 것이 눈에 띄게 한다.
-합의되면 이 표와 `.env.example`의 주석을 함께 갱신한다.
+합의되면 이 표와 `config/settings.yml`의 주석을 함께 갱신한다.
 
 **강의실 영상에는 학생의 얼굴이 담기고 미성년자가 포함될 수 있다.**
 기술 부채가 아니라 미해결 합의 사항이다.
@@ -122,7 +122,8 @@ FFmpeg은 pip 패키지가 아니다. 시스템에 따로 설치한다.
 ```bash
 cd worker
 python -m pip install -r recorder/requirements.txt
-cp recorder/.env.example recorder/.env    # STREAM_SOURCES를 채운다
+cp recorder/.env.example recorder/.env.local    # STREAM_SOURCES를 채운다
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
 python -m recorder.main
 ```
 
@@ -144,29 +145,38 @@ SIGTERM과 동작이 달라 개발 환경에서만 조용히 깨진다. 실제 F
 > FFmpeg이 만든 합성 영상(`testsrc`)을 MediaMTX에 올려 대신했다. 장시간 녹화의
 > 안정성과 카메라 3대 동시 녹화도 측정하지 않았다.
 
-## 환경변수
+## 환경변수와 설정
 
-이름과 용도는 [`.env.example`](./.env.example)에 있다. **실제 값은 커밋하지 않는다.**
-MinIO 접속 정보와 카메라 접속 정보는 비밀값이다.
+환경마다 달라야 하는 값·비밀값은 `.env.{local,dev,prod}`([`.env.example`](./.env.example)이
+기준)에, 환경과 무관한 일반 설정은 커밋된 [`config/settings.yml`](./config/settings.yml)에
+있다. **실제 값이 든 `.env.*`는 커밋하지 않는다.** MinIO 접속 정보와 카메라 접속
+정보는 비밀값이다.
+
+### `.env.{local,dev,prod}`
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
 | `APP_ENV` | 실행 환경 | `local` / `dev` / `prod`. 필수 |
 | `STREAM_SOURCES` | 녹화할 영상 소스 목록 | stream과 같은 형식·같은 변수. 필수 |
-| `RECORDING_SEGMENT_SECONDS` | 영상 파일 하나의 길이 | 기본 600 |
-| `RECORDING_SEGMENT_DIR` | 세그먼트 임시 경로 | 기본 `recorder/data/segments` |
-| `RECORDING_STALE_AFTER_SECONDS` | 녹화 중단 판정 시간 | 기본 900. 세그먼트 길이보다 커야 한다 |
-| `RECORDING_UPLOAD_INTERVAL_SECONDS` | 적재 시도 주기 | 기본 30 |
-| `RECORDING_RETENTION_DAYS` | 보존 기간 | 기본 30. **팀 합의값이 아니다** |
-| `RECORDING_RETENTION_INTERVAL_SECONDS` | 보존 기간 정리 주기 | 기본 3600 |
 | `OBJECT_STORAGE_BACKEND` | 저장소 종류 | `local` / `minio`. `prod`에서 `local` 금지 |
-| `OBJECT_STORAGE_BUCKET` | 영상 버킷 이름 | 기본 `office-recordings`. **이전 주제에서 온 이름이며 변경 검토 대상** |
-| `OBJECT_STORAGE_LOCAL_DIR` | local backend 경로 | 기본 `recorder/data/objects` |
 | `OBJECT_STORAGE_ENDPOINT` | MinIO 주소 | `minio`일 때 필수. `host:port` |
 | `OBJECT_STORAGE_ACCESS_KEY` | 접근 키 | 비밀값. `minio`일 때 필수 |
 | `OBJECT_STORAGE_SECRET_KEY` | 비밀 키 | 비밀값. `minio`일 때 필수 |
-| `OBJECT_STORAGE_SECURE` | TLS 사용 여부 | 기본 true |
-| `LOG_LEVEL` | 로그 수준 | 기본 `INFO` |
+
+### `config/settings.yml`
+
+| 이름 | 용도 | 비고 |
+| --- | --- | --- |
+| `recording_segment_seconds` | 영상 파일 하나의 길이 | 기본 600 |
+| `recording_segment_dir` | 세그먼트 임시 경로 | 기본 `recorder/data/segments` |
+| `recording_stale_after_seconds` | 녹화 중단 판정 시간 | 기본 900. 세그먼트 길이보다 커야 한다 |
+| `recording_upload_interval_seconds` | 적재 시도 주기 | 기본 30 |
+| `recording_retention_days` | 보존 기간 | 기본 30. **팀 합의값이 아니다** |
+| `recording_retention_interval_seconds` | 보존 기간 정리 주기 | 기본 3600 |
+| `object_storage_bucket` | 영상 버킷 이름 | 기본 `office-recordings`. **이전 주제에서 온 이름이며 변경 검토 대상** |
+| `object_storage_local_dir` | local backend 경로 | 기본 `recorder/data/objects` |
+| `object_storage_secure` | TLS 사용 여부 | 기본 true |
+| `log_level` | 로그 수준 | 기본 `INFO` |
 
 ### local 저장소는 개발용이다
 

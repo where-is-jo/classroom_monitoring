@@ -141,7 +141,8 @@ def main() -> int:
     use_utf8_console()
 
     try:
-        # 조립 실행에서는 워커별 .env가 아니라 pipeline/.env 하나만 읽는다.
+        # 조립 실행에서는 워커별 .env.*가 아니라 pipeline/.env.{APP_ENV} 하나만 읽는다.
+        # 일반 설정·판정 기준값(config/settings.yml)은 각자 자기 디렉터리 것을 그대로 읽는다.
         stream_settings = StreamSettings(_env_file=PIPELINE_ENV_FILE)  # type: ignore[call-arg]
         inference_settings = InferenceSettings(_env_file=PIPELINE_ENV_FILE)  # type: ignore[call-arg]
         pipeline_settings = PipelineSettings(_env_file=PIPELINE_ENV_FILE)  # type: ignore[call-arg]

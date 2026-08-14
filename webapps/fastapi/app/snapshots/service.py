@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from .errors import SnapshotNotFoundError, SnapshotStorageUnavailableError
 from .models import Snapshot, SnapshotPage, parse_snapshot_key
@@ -66,6 +67,25 @@ class SnapshotService:
             limit=limit,
             offset=offset,
         )
+
+    def existing_keys(self, camera_id: str, day: date) -> frozenset[str]:
+        """한 카메라의 하루치 스냅샷 키 집합.
+
+        탐지 이벤트에서 계산한 키(`build_snapshot_key`)가 실제 객체인지 확인하는 데
+        쓴다. **`list_snapshots`와 달리 하루치 접두사만 훑는다** — 전체를 모아 정렬하지
+        않으므로 조회 범위가 며칠로 늘어나도 비용이 날짜 수에 비례하는 데서 그친다.
+
+        키만 필요하므로 규칙에 맞지 않는 객체도 그대로 담는다. 어차피 계산한 키와
+        비교할 뿐이라 걸러낼 이유가 없다.
+        """
+        prefix = f"{camera_id}/{day.isoformat()}/"
+        try:
+            return frozenset(stored.key for stored in self._storage.list_objects(prefix))
+        except SnapshotStorageUnavailableError:
+            raise
+        except Exception as error:
+            logger.warning("스냅샷 키 목록을 읽지 못했다: %s", error)
+            raise SnapshotStorageUnavailableError() from error
 
     def get_image(self, key: str) -> ObjectContent:
         """스냅샷 이미지를 가져온다.

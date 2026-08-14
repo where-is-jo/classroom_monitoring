@@ -39,13 +39,9 @@ class MemoryDetectionEventRepository:
         """Find by event ID."""
         return self._events.get(event_id)
 
-    def find_recent_by_camera(
-        self, camera_id: str, limit: int
-    ) -> list[DetectionEvent]:
+    def find_recent_by_camera(self, camera_id: str, limit: int) -> list[DetectionEvent]:
         """Find recent detections by camera."""
-        events = [
-            e for e in self._events.values() if e.camera_id == camera_id
-        ]
+        events = [e for e in self._events.values() if e.camera_id == camera_id]
         events.sort(key=lambda e: e.captured_at, reverse=True)
         return events[:limit]
 

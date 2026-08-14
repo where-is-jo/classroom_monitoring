@@ -1,17 +1,50 @@
-"""Minimal monitoring app settings and startup validation."""
+"""Minimal monitoring app settings and startup validation.
+
+값은 두 곳에서 온다.
+
+- ``.env.{APP_ENV}`` — 환경마다 달라야 하는 값과 비밀값(``APP_ENV``, ``DATABASE_MODE``,
+  ``DATABASE_URL``, ``DATABASE_NAME``, ``FACE_ANALYZER_MODE``, ``FACE_ANALYZER_URL``,
+  ``SNAPSHOT_STORAGE_BACKEND``와 MinIO 접속 정보). 커밋하지 않는다.
+- ``config/settings.yml`` — 환경과 무관하게 같은 값(타임아웃, 판정 임계값, quota 등).
+  커밋한다.
+
+우선순위는 실제 OS 환경변수 > ``.env.{APP_ENV}`` 파일 > ``config/settings.yml``이다.
+규칙은 ``docs/conventions/environment-convention.md``를 따른다.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+# .env.*와 config/를 실행 위치(CWD)가 아니라 이 파일 기준으로 잡는다.
+# config.py는 app/shared/에 있으므로 두 단계 위가 webapps/fastapi다.
+_FASTAPI_DIR = Path(__file__).resolve().parent.parent.parent
+
+# 실제 OS 환경변수로 어떤 .env.{APP_ENV} 파일을 읽을지 정한다. 없으면 local로 본다 —
+# 손이 덜 가는 local을 기본값으로 두는 기존 원칙과 같다.
+_APP_ENV_FOR_FILE_SELECTION = os.environ.get("APP_ENV", "local")
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_FASTAPI_DIR / f".env.{_APP_ENV_FOR_FILE_SELECTION}",
+        yaml_file=_FASTAPI_DIR / "config" / "settings.yml",
+        # PyYAML의 기본 파일 인코딩은 OS 로캘을 따른다. 한국어 Windows에서는 cp949라
+        # yml의 한국어 주석을 읽다가 UnicodeDecodeError가 난다. 명시적으로 고정한다.
+        yaml_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: Literal["local", "dev", "prod"]
     database_mode: Literal["memory", "mongodb"]
@@ -45,6 +78,8 @@ class Settings(BaseSettings):
     face_pitch_side_degrees: float = Field(default=8, gt=0, le=90)
     face_local_sample_storage_enabled: bool = False
     face_local_sample_storage_dir: Path = Path("local_face_data")
+    # 분석 companion 프로세스의 실행 방식과 주소 — local(synthetic)과 dev/prod(http)에서
+    # 실제로 다른 값을 쓴다.
     face_analyzer_mode: Literal["synthetic", "http"] = "synthetic"
     face_analyzer_url: str = "http://127.0.0.1:8100"
     face_analyzer_timeout_seconds: float = Field(default=5, gt=0, le=30)
@@ -76,6 +111,40 @@ class Settings(BaseSettings):
     snapshot_storage_secret_key: SecretStr | None = None
     snapshot_storage_secure: bool = True
     snapshot_storage_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
+    # --- 자연어 탐지 검색 ---
+    # stub은 LLM 없이 계약과 화면을 확인하기 위한 대역이며 "오늘 하루"만 돌려준다.
+    # 기본을 stub으로 두는 이유는 개발과 테스트가 GPU 서버에 매이지 않게 하기 위해서다.
+    llm_search_mode: Literal["stub", "llama"] = "stub"
+    llm_search_url: str = "http://127.0.0.1:8008"
+    # 생성은 조회보다 훨씬 느려서 다른 외부 호출(5초)과 같은 값을 쓸 수 없다.
+    llm_search_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    # llama-server의 LLAMA_ARG_ALIAS와 같은 값이어야 한다.
+    llm_search_model: str = "gemma"
+    # 기간 상한을 넘는 질문은 거절하지 않고 이 길이로 줄인 뒤 사용자에게 알린다.
+    llm_search_max_span_days: int = Field(default=7, ge=1, le=31)
+    # 탐지 인원 변화를 판정하려면 원본 이벤트를 봐야 한다. 카메라 한 대에서 한 번에
+    # 읽어 오는 이벤트 수의 상한이며, 걸리면 결과에 truncated로 표시한다.
+    llm_search_scan_limit: int = Field(default=500, ge=1, le=5000)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # 실제 OS 환경변수 > .env.{APP_ENV} 파일 > config/settings.yml 순으로 읽는다.
+        # yml에 있는 값도 필요하면 .env.*나 실제 export로 즉석 재정의할 수 있다.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            YamlConfigSettingsSource(settings_cls),
+            file_secret_settings,
+        )
 
     @field_validator("database_name", mode="before")
     @classmethod
@@ -117,7 +186,6 @@ class Settings(BaseSettings):
         if self.app_env != "local" and self.face_local_sample_storage_enabled:
             raise ValueError("얼굴 샘플 로컬 저장은 APP_ENV=local에서만 사용할 수 있습니다.")
         if self.page_size_default > self.page_size_max:
-            raise ValueError("PAGE_SIZE_DEFAULT must be less than or equal to PAGE_SIZE_MAX.")
             raise ValueError("PAGE_SIZE_DEFAULT는 PAGE_SIZE_MAX 이하여야 합니다.")
         quota_total = sum(
             (
@@ -145,4 +213,6 @@ class Settings(BaseSettings):
                     "SNAPSHOT_STORAGE_BACKEND=minio에 필요한 환경변수가 없습니다: "
                     + ", ".join(missing_storage)
                 )
+        if self.llm_search_mode == "llama" and not self.llm_search_url.strip():
+            raise ValueError("LLM_SEARCH_MODE=llama에는 LLM_SEARCH_URL이 필요합니다.")
         return self
