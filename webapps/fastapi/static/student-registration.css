@@ -4,6 +4,22 @@
 .student-save-notice p { margin: 3px 0 0; color: #35645c; font-size: .9rem; }
 .student-save-icon { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; color: #fff; background: var(--primary); border-radius: 50%; font-weight: 900; }
 .student-form-panel { max-width: 900px; }
+.student-list-panel { overflow: hidden; }
+.student-list-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 18px; }
+.student-list-heading p { margin: 4px 0 0; color: var(--muted); }
+.student-table-wrap { overflow-x: auto; }
+.student-table { width: 100%; border-collapse: collapse; }
+.student-table th, .student-table td { padding: 15px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.student-table th { color: var(--muted); background: var(--surface-low); font-size: .82rem; }
+.student-table tbody tr:last-child td { border-bottom: 0; }
+.student-empty-state { padding: 54px 20px; color: var(--muted); text-align: center; background: var(--surface-low); border-radius: 14px; }
+.student-empty-state strong { color: var(--text); }
+.student-empty-state p { margin-bottom: 0; }
+.face-status { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 7px 12px; border-radius: 999px; font-size: .84rem; font-weight: 800; }
+.face-status-complete { color: #06725e; background: #dff7ef; border: 1px solid #80cbbd; }
+button.face-status-needed { color: #8a4b08; background: #fff4db; border: 1px solid #e8bd6c; }
+.student-registration-dialog { width: min(92vw, 900px); max-width: none; padding: 26px; color: var(--text); background: var(--surface); border: 0; border-radius: 20px; box-shadow: 0 28px 80px rgba(0, 0, 0, .42); }
+.student-registration-dialog::backdrop { background: rgba(0, 0, 0, .72); backdrop-filter: blur(2px); }
 .student-form-heading { display: flex; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .student-form-heading p { margin-bottom: 0; color: var(--muted); }
 .student-form-heading > span { color: var(--muted); white-space: nowrap; font-size: .82rem; }

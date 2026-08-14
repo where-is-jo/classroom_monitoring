@@ -16,6 +16,7 @@ import mediapipe as mp
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from insightface.model_zoo import get_model
+from insightface.utils import face_align
 from pydantic import BaseModel
 
 
@@ -33,6 +34,15 @@ class AnalysisResponse(BaseModel):
     occlusion_score: float = 0
     duplicate_score: float = 0
     motion_speed_dps: float = 0
+
+
+class EmbeddingResponse(BaseModel):
+    vector: list[float]
+    dimension: int
+    normalized: bool
+    model_name: str
+    model_version: str
+    preprocessing_version: str
 
 
 @dataclass(frozen=True)
@@ -75,11 +85,31 @@ def _landmarker_path() -> Path:
     return path
 
 
+def _recognition_model_path() -> Path:
+    configured = os.environ.get("FACE_RECOGNITION_MODEL_PATH")
+    path = (
+        Path(configured)
+        if configured
+        else Path(__file__).resolve().parent
+        / ".models"
+        / "buffalo_l"
+        / "w600k_r50.onnx"
+    )
+    if not path.is_file():
+        raise RuntimeError("얼굴 인식 ONNX 모델 파일을 찾을 수 없습니다.")
+    return path
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     detector = get_model(str(_model_path()), providers=["CPUExecutionProvider"])
     detector.prepare(ctx_id=-1, input_size=(640, 640), det_thresh=0.6)
     app.state.detector = detector
+    recognizer = get_model(
+        str(_recognition_model_path()), providers=["CPUExecutionProvider"]
+    )
+    recognizer.prepare(ctx_id=-1)
+    app.state.recognizer = recognizer
     app.state.landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
         mp.tasks.vision.FaceLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=str(_landmarker_path())),
@@ -268,6 +298,37 @@ def discard_session(enrollment_id: str) -> None:
     with _history_lock:
         _frame_history.pop(enrollment_id, None)
         _fingerprint_history.pop(enrollment_id, None)
+
+
+@app.post("/internal/face-embeddings", response_model=EmbeddingResponse)
+async def create_embedding(request: Request) -> EmbeddingResponse:
+    content = await request.body()
+    image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=400, detail="JPEG 이미지를 해석할 수 없습니다.")
+    detector: Any = request.app.state.detector
+    detections, keypoints = detector.detect(image, max_num=0)
+    if len(detections) != 1 or keypoints is None or len(keypoints) != 1:
+        raise HTTPException(status_code=422, detail="정확히 한 명의 얼굴이 필요합니다.")
+    if float(detections[0][4]) < 0.6:
+        raise HTTPException(status_code=422, detail="얼굴 검출 신뢰도가 부족합니다.")
+    aligned = face_align.norm_crop(image, landmark=keypoints[0], image_size=112)
+    recognizer: Any = request.app.state.recognizer
+    vector = np.asarray(recognizer.get_feat(aligned), dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(vector))
+    if vector.size != 512 or not np.isfinite(vector).all() or norm <= 1e-12:
+        raise HTTPException(
+            status_code=422, detail="유효한 얼굴 embedding을 생성하지 못했습니다."
+        )
+    normalized = vector / norm
+    return EmbeddingResponse(
+        vector=normalized.tolist(),
+        dimension=int(normalized.size),
+        normalized=True,
+        model_name="arcface",
+        model_version="insightface-buffalo_l-w600k_r50-v0.7",
+        preprocessing_version="insightface-norm-crop-112-v1",
+    )
 
 
 @app.get("/health")

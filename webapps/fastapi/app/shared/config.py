@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
+    roi_reference_image_max_bytes: int = Field(
+        default=5 * 1024 * 1024, ge=1024, le=20 * 1024 * 1024
+    )
     face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
     face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
     face_pose_front_quota: int = Field(default=32, ge=1)
@@ -39,6 +42,7 @@ class Settings(BaseSettings):
     face_motion_speed_dps_max: float = Field(default=220, gt=0, le=1000)
     face_yaw_side_degrees: float = Field(default=10, gt=0, le=90)
     face_pitch_side_degrees: float = Field(default=8, gt=0, le=90)
+    face_pitch_down_degrees: float = Field(default=5, gt=0, le=90)
     face_local_sample_storage_enabled: bool = False
     face_local_sample_storage_dir: Path = Path("local_face_data")
     face_analyzer_mode: Literal["synthetic", "http"] = "synthetic"

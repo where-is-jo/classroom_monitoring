@@ -15,7 +15,7 @@
 
 <div id="student-save-notice" class="student-save-notice" role="status" aria-live="polite" tabindex="-1" hidden>
   <span class="student-save-icon" aria-hidden="true">✓</span>
-  <div><strong>학생 정보가 저장되었습니다.</strong><p>현재 테스트 단계로 브라우저 콘솔에서 입력 내용을 확인할 수 있습니다.</p></div>
+  <div><strong>학생 정보가 저장되었습니다.</strong><p>학생 정보가 데이터베이스에 등록되었습니다.</p></div>
 </div>
 
 <section class="panel student-form-panel" aria-labelledby="student-form-title">
@@ -48,7 +48,8 @@
       <div><strong id="face-registration-title">학생 얼굴 정보</strong><p>교실에서 학생을 식별하기 위한 얼굴 이미지를 등록합니다.</p></div>
       <button id="open-face-enrollment" class="secondary" type="button">얼굴 등록</button>
     </section>
-    <p class="student-form-help">입력한 인적사항은 현재 서버나 데이터베이스로 전송되지 않습니다.</p>
+    <p class="student-form-help">얼굴 원본과 embedding은 학생 문서에 저장하지 않고, 완료된 얼굴 등록 ID만 연결합니다.</p>
+    <p id="student-save-error" class="form-error" role="alert" tabindex="-1" hidden></p>
     <div class="student-form-actions">
       <button type="reset" class="secondary">초기화</button>
       <button type="submit">학생 정보 저장</button>

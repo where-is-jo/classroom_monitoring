@@ -7,8 +7,8 @@
 `ABSENT`로 바꾸는 규칙은 여기 있고, `worker`나 `deeplearning`에 두지 않는다
 ([결정 0008](../../docs/architecture/decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)).
 
-> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색과 학생 등록 프로토타입이다.**
-> 학생 정보의 DB 저장, 지정 좌석, 학생 상태 판정은 **아직 구현되지 않았다.** 얼굴 데이터 수집은 구현되어 있다.
+> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색과 학생 등록이다.**
+> 학생 원장은 memory 또는 MongoDB의 `students` 컬렉션에 저장된다. 얼굴 데이터 수집은 별도 프로필로 구현되어 있다.
 > 현재 좌석 상태는 "자리가 찼는지"를 뜻하며 "누가 앉았는지"가 아니다.
 > 앞으로 만들 도메인과 계약은 [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md)에 있다.
 
@@ -80,6 +80,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats` | 강의실별 좌석 목록·배치도 관리 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
+| `/roi-connections` | 메모리 가상 강의실·좌석과 DB 학생을 다각형 ROI로 연결하고 MongoDB에 저장 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | 한국어 문장과 강의실·기간·결과 수 조건으로 검색. demo가 꺼져 있으면 빈 결과 |
 
@@ -100,6 +101,11 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
+| `POST` | `/api/v1/students` | 학생 인적사항과 완료된 얼굴 등록 참조 저장 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | 현재 ROI 기준 이미지 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections` | 좌석별 ROI와 연결 학생 조회 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | 좌석 ROI와 학생 연결을 `roi_connections` 컬렉션에 저장 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
@@ -200,11 +206,13 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
 | `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
+| `ROI_REFERENCE_IMAGE_MAX_BYTES` | ROI 임시 기준 이미지 업로드 제한 | 기본 5MB, 최대 20MB |
 | `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
 | `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
 | `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
 | `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
+| `FACE_PITCH_DOWN_DEGREES` | 아래 방향으로 분류하는 최소 pitch | 기본 5도. 위 방향 기준과 별도 적용 |
 | `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
 | `FACE_LOCAL_SAMPLE_STORAGE_DIR` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
 | `SSE_HEARTBEAT_INTERVAL_SECONDS` | SSE heartbeat 간격 | 기본 30 |
