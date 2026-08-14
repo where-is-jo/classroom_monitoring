@@ -46,8 +46,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: Literal["local", "dev", "prod"]
-    database_mode: Literal["memory", "mongodb"]
+    app_env: Literal["local", "dev", "prod"] = "local"
+    database_mode: Literal["memory", "mongodb"] = "memory"
     database_url: SecretStr | None = None
     database_name: str | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)

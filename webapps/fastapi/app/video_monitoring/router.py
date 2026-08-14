@@ -104,11 +104,8 @@ def monitoring_page(
     request: Request,
     stream_service: VideoStreamService = Depends(get_video_stream_service),
 ) -> Response:
-    demo_feeds = demo_service.list_streams(
-        search=q, classroom_id=classroom_id, status=stream_status
-    )
-    real_streams = stream_service.list_streams()
-    options = demo_service.classroom_options()
+    """연결된 실제 카메라만 보여주는 실시간 모니터링 화면 (MON-001~006)."""
+    real_streams = stream_service.list_monitoring_streams()
     return templates.TemplateResponse(
         request=request,
         name="video_monitoring/monitoring.html",

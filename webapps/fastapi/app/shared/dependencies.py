@@ -94,7 +94,7 @@ def utc_now() -> datetime:
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
 
 
 @lru_cache
@@ -597,7 +597,7 @@ def initialize_data_store() -> None:
     # memory 모드 전용 로컬 실행 경로다.
     if settings.demo_mode_enabled:
         seed_demo_data(
-            get_classroom_service(get_classroom_repository(settings), settings=settings),
+            _build_memory_classroom_service(settings),
             now=utc_now(),
         )
         seed_video_streams(_video_stream_repository(), now=utc_now())

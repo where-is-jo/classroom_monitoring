@@ -175,10 +175,18 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
         "/api/v1/classrooms/{classroom_id}",
         "/api/v1/classrooms/{classroom_id}/occupancy",
         "/api/v1/classrooms/{classroom_id}/occupancy-events",
+        "/api/v1/classrooms/{classroom_id}/seat-assignments",
         "/api/v1/classrooms/{classroom_id}/seats",
+        "/api/v1/classrooms/{classroom_id}/seats/auto",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/preflight",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/rollback",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/run",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/status",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/approve",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/execute",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/request",
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
-        "/api/v1/classrooms/{classroom_id}/seat-assignments",
         # 학생 상태
         "/api/v1/classrooms/{classroom_id}/student-states",
         # 영상 모니터링
@@ -186,18 +194,18 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
         "/api/v1/video-streams/{stream_id}",
         "/api/v1/video-streams/{stream_id}/detections",
         "/api/v1/video-streams/{stream_id}/detection-events",
+        "/api/v1/video-streams/{stream_id}/playback-sessions",
+        "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
         "/api/v1/video-searches",
         "/api/v1/video-segments",
         # 얼굴 등록
         "/api/v1/students/{student_id}/face-enrollments",
+        "/api/v1/students/{student_id}/face-profile",
         "/api/v1/face-enrollments/{enrollment_id}",
         "/api/v1/snapshots",
         "/api/v1/snapshots/image/{key}",
         # 자연어 탐지 검색. 질문이 본문에 들어가므로 조회지만 POST다.
         "/api/v1/llm-searches",
-        # worker가 결과를 밀어 넣는 내부 수집 경로다. 브라우저가 부르는 API가 아니다.
-        "/internal/inference/events",
-        "/internal/video-segments",
         "/health",
         "/health/ready",
         # worker 전용 internal 계약.
