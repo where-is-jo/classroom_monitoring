@@ -25,8 +25,10 @@ _KEY_PATTERN = re.compile(
     r"(?P<timestamp>\d{8}T\d{6}Z)\.(?P<extension>jpg|jpeg)$"
 )
 _KEY_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+_KEY_DATE_FORMAT = "%Y-%m-%d"
+_KEY_SUFFIX = ".jpg"
 
-__all__ = ["Snapshot", "SnapshotPage", "parse_snapshot_key"]
+__all__ = ["Snapshot", "SnapshotPage", "build_snapshot_key", "parse_snapshot_key"]
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,26 @@ class SnapshotPage:
     total: int
     limit: int
     offset: int
+
+
+def build_snapshot_key(camera_id: str, captured_at: datetime) -> str:
+    """카메라와 촬영 시각으로 객체 키를 만든다. `parse_snapshot_key`의 역이다.
+
+    worker가 스냅샷을 올릴 때 쓰는 시각(`captured.captured_at`)과 탐지 이벤트에
+    담기는 시각이 **같은 값**이라, 이벤트만 있으면 스냅샷 키를 계산할 수 있다.
+    근접 매칭이 필요 없는 이유다.
+
+    계산한 키가 실제로 저장소에 있는지는 별개다. worker는 탐지 개수가 바뀔 때만,
+    최소 간격을 두고 올린다. **존재 확인 없이 이미지를 걸면 깨진 이미지가 뜬다.**
+
+    키에는 초 단위까지만 담기므로 같은 초의 두 장은 구분되지 않는다.
+    """
+    moment = captured_at.astimezone(UTC)
+    return (
+        f"{camera_id}/"
+        f"{moment.strftime(_KEY_DATE_FORMAT)}/"
+        f"{moment.strftime(_KEY_TIMESTAMP_FORMAT)}{_KEY_SUFFIX}"
+    )
 
 
 def parse_snapshot_key(key: str) -> tuple[str, datetime] | None:
