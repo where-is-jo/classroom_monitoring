@@ -81,7 +81,8 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
-| `/video-search` | 한국어 문장과 강의실·기간·결과 수 조건으로 검색. demo가 꺼져 있으면 빈 결과 |
+| `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
+| `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다 |
 
 `/classrooms/{id}` 상세 페이지는 없다. `/classrooms?classroom_id={id}`에서 같은
 정보를 선택해 본다.
@@ -105,7 +106,8 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detection-events` | SSE 실시간 탐지 이벤트 구독 |
 | `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
-| `POST` | `/api/v1/video-searches` | 부작용 없는 검색 실행 |
+| `POST` | `/api/v1/video-searches` | 부작용 없는 데모 catalog 검색 실행 (규칙 기반) |
+| `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
 | `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
 | `POST` | `/internal/video-segments` | worker 영상 세그먼트 수신 (멱등) |
 | `GET` | `/health` | 프로세스 기동 상태 |
@@ -164,6 +166,7 @@ app/
 ├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
 ├─ face_enrollment/     능동형 얼굴 등록 세션·품질·pose 완료 판정
 ├─ student_monitoring/  탐지 이벤트 수신·SSE·영상 세그먼트 메타데이터
+├─ llm_search/          자연어 질문 → 검증된 검색 조건 → 탐지 기록 조회
 ├─ shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마
 └─ demo_seed.py         demo fixture 멱등 생성
 
@@ -211,6 +214,12 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 | `SSE_RECONNECTION_TIMEOUT_SECONDS` | SSE 재연결 타임아웃 | 기본 60 |
 | `DETECTION_EVENT_MAX_DETECTIONS_PER_EVENT` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `DETECTION_EVENT_STALE_SECONDS` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `stub`. `stub`은 LLM 없이 "오늘 하루"만 돌려주는 대역, `llama`는 llama-server 호출 |
+| `LLM_SEARCH_URL` | llama-server의 OpenAI 호환 API 주소 | `llama` mode에서 필수. 기본 `http://127.0.0.1:8008` |
+| `LLM_SEARCH_TIMEOUT_SECONDS` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
+| `LLM_SEARCH_MODEL` | 요청에 넣을 모델 이름 | llama-server의 `LLAMA_ARG_ALIAS`와 같아야 한다. 기본 `gemma` |
+| `LLM_SEARCH_MAX_SPAN_DAYS` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
+| `LLM_SEARCH_SCAN_LIMIT` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
 학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
@@ -242,6 +251,34 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 분석 전에 어두운 단색으로 제거되며 취소·연결 중단 세션 폴더는 즉시 삭제된다. 메뉴의 `demo-student`는
 학생 원장·선택 화면이 구현되기 전의 local 테스트용 ID이며, 실제 학생 ID는
 `/students/{student_id}/face-enrollment` 경로로 전달된다.
+
+## 자연어 탐지 검색
+
+- 화면: `/llm-search` (질문은 쿼리스트링 `q`)
+- API: `POST /api/v1/llm-searches` — 본문 `{"question": "...", "limit": 20}`
+
+책임 분리는
+[결정 0016](../../docs/architecture/decisions.md#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다)이
+정한다. **LLM은 질문을 검색 조건 JSON으로 바꾸는 데서 끝나고 DB에 접근하지 않는다.**
+서버가 그 JSON을 검증한 뒤 기존 탐지 이벤트 저장소를 조회한다. 검증을 통과한 계획은
+응답의 `plan`과 화면에 그대로 노출되므로 어떻게 해석되었는지 확인할 수 있다.
+
+기본 `LLM_SEARCH_MODE=stub`은 LLM 없이 "오늘 하루 전체, 대상 지정 없음" 계획을
+돌려준다. 계약과 화면 상태를 GPU 서버 없이 확인하기 위한 대역이며 자연어를 해석하지
+않는다. 실제 해석은 `llama`로 바꾸고 `.docker/compose.llm.yml`의 llama-server를
+띄운 뒤에 동작한다.
+
+결과는 **탐지 인원이 직전과 달라진 시점만** 남긴다. 탐지 이벤트는 카메라당 프레임마다
+한 건이라 전부 보여주면 거의 같은 줄이 수천 개가 된다.
+
+주의할 점 두 가지가 있다.
+
+- **탐지 이벤트를 수집하는 코드가 아직 연결되지 않았다.** `/internal/inference/events`를
+  호출하는 worker 코드가 없어 저장소가 비어 있고, 따라서 검색 결과도 비어 있다.
+  화면에 데이터를 넣어 보려면 그 엔드포인트로 이벤트를 직접 POST한다.
+- **"누가"에는 아직 답하지 못한다.** `student_id`를 채우는 얼굴 인식이 구현되지
+  않았다. 응답과 화면은 값을 그대로 통과시켜 식별된 학생이 있으면 보여주고, 없으면
+  "식별 미연동"으로 표시한다. 인식이 붙으면 코드 변경 없이 이름이 나타난다.
 
 ## 검증
 
