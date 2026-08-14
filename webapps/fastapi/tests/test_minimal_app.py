@@ -95,7 +95,8 @@ def test_product_navigation_includes_face_enrollment(minimal_client: TestClient)
         response = minimal_client.get(path)
         assert response.status_code == 200
         assert heading in response.text
-        assert response.text.count('class="nav-group-title"') == 2
+        # 모니터링·등록 관리·학생 현황 세 그룹이 사이드바에 있다.
+        assert response.text.count('class="nav-group-title"') == 3
         for label in ("강의실 좌석 현황", "실시간 모니터링", "자연어 검색"):
             assert label in response.text
         for removed in ("로그인", "사용자 관리", "직원 관리", "면담", "알림"):
@@ -161,20 +162,45 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
     assert paths == {
         "/api/v1/classrooms",
+        "/api/v1/classrooms/{classroom_id}",
         "/api/v1/classrooms/{classroom_id}/occupancy",
-        "/api/v1/video-streams",
-        "/api/v1/video-streams/{stream_id}",
-        "/api/v1/video-streams/{stream_id}/playback-sessions",
-        "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
-        "/api/v1/video-searches",
-        "/api/v1/students/{student_id}/face-enrollments",
+        "/api/v1/classrooms/{classroom_id}/occupancy-events",
+        "/api/v1/classrooms/{classroom_id}/seat-assignments",
+        "/api/v1/classrooms/{classroom_id}/seats",
+        "/api/v1/classrooms/{classroom_id}/seats/auto",
+        # 오프라인 migration 계약 (TASK-003).
+        "/api/v1/classrooms/{classroom_id}/seats/migration/preflight",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/rollback",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/run",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/status",
+        # 수동 repair 계약 (TASK-003 MAJOR Finding 2).
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/approve",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/execute",
+        "/api/v1/classrooms/{classroom_id}/seats/migration/repair/request",
+        "/api/v1/classrooms/{classroom_id}/seats/{seat_id}",
+        "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
+        "/api/v1/classrooms/{classroom_id}/student-states",
         "/api/v1/face-enrollments/{enrollment_id}",
-        "/api/v1/students/{student_id}/face-profile",
-        # 탐지 스냅샷 조회(결정 0011). 영상 원본을 저장하지 않는 대신 남기는 정지 이미지다.
         "/api/v1/snapshots",
         "/api/v1/snapshots/image/{key}",
+        "/api/v1/students/{student_id}/face-enrollments",
+        "/api/v1/students/{student_id}/face-profile",
+        "/api/v1/video-searches",
+        # worker가 올리는 영상 segment 메타데이터와 재생 조회 계약.
+        "/api/v1/video-segments",
+        "/api/v1/video-streams",
+        "/api/v1/video-streams/{stream_id}",
+        # worker가 적재하는 탐지 이벤트·결과(운영 계약은 유지).
+        "/api/v1/video-streams/{stream_id}/detection-events",
+        "/api/v1/video-streams/{stream_id}/detections",
+        # 재생 세션(결정 0014). browser는 이 계약의 signaling URL만 쓴다.
+        "/api/v1/video-streams/{stream_id}/playback-sessions",
+        "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
         "/health",
         "/health/ready",
+        # worker 전용 internal 계약.
+        "/internal/inference/events",
+        "/internal/video-segments",
     }
 
 
@@ -383,7 +409,17 @@ def test_occupancy_summary_does_not_truncate_after_one_repository_page() -> None
             },
             "DEMO_MODE_ENABLED",
         ),
-        ({"app_env": "local", "database_mode": "mongodb"}, "DATABASE_URL"),
+        # mongodb에 필요한 값이 없으면 거부해야 한다. 로컬 .env가 값을 채워 검증을
+        # 우회하지 않도록 database_url·database_name을 명시적으로 None으로 넘긴다.
+        (
+            {
+                "app_env": "local",
+                "database_mode": "mongodb",
+                "database_url": None,
+                "database_name": None,
+            },
+            "DATABASE_URL",
+        ),
     ],
 )
 def test_settings_reject_unsafe_or_incomplete_modes(

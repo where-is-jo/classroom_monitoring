@@ -14,6 +14,7 @@ from ..shared.config import Settings
 from ..shared.dependencies import (
     get_broadcaster,
     get_classroom_service,
+    get_seat_migration_service,
     get_settings,
     get_student_lookup,
     get_student_monitoring_service,
@@ -22,12 +23,24 @@ from ..shared.student_identity import StudentLookupPort, validate_list_active_ar
 from ..shared.templating import templates
 from ..student_monitoring.service import StudentMonitoringService
 from .errors import ClassroomNotFoundError, SeatNotFoundError
+from .migration import SeatMigrationService
 from .schemas import (
+    AutoSeatCreateRequest,
     ClassroomCreateRequest,
     ClassroomListResponse,
     ClassroomResponse,
     ClassroomUpdateRequest,
+    MigrationPreflightResponse,
+    MigrationRollbackRequest,
+    MigrationRollbackResponse,
+    MigrationRunRequest,
+    MigrationRunResponse,
+    MigrationStatusResponse,
     OccupancySummaryResponse,
+    RepairApprovalResponse,
+    RepairApproveRequest,
+    RepairExecuteRequest,
+    RepairRequestRequest,
     SeatAssignmentListResponse,
     SeatAssignmentRequest,
     SeatAssignmentResponse,
@@ -128,6 +141,23 @@ def create_seat(
         column=payload.column,
         geometry=None if payload.geometry is None else payload.geometry.to_domain(),
     )
+    response.headers["Location"] = f"/api/v1/classrooms/{classroom_id}/seats/{seat.id}"
+    return SeatResponse.from_domain(seat)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/auto",
+    response_model=SeatResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_seat_auto(
+    classroom_id: str,
+    payload: AutoSeatCreateRequest,
+    response: Response,
+    service: ClassroomService = Depends(get_classroom_service),
+) -> SeatResponse:
+    """좌석을 자동 코드로 생성한다. UI는 이 경로만 호출한다."""
+    seat = service.create_seat_auto(classroom_id, row=payload.row, column=payload.column)
     response.headers["Location"] = f"/api/v1/classrooms/{classroom_id}/seats/{seat.id}"
     return SeatResponse.from_domain(seat)
 
@@ -247,6 +277,130 @@ def list_seat_assignments(
     return SeatAssignmentListResponse(
         items=[SeatAssignmentResponse.from_domain(info) for info in infos]
     )
+
+
+# ============================================================
+# 오프라인 migration API
+# ============================================================
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/preflight",
+    response_model=MigrationPreflightResponse,
+)
+def migration_preflight(
+    classroom_id: str,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationPreflightResponse:
+    """migration 전 사전 검사. 부분 좌표 발견 시 ok=False(abort 대상)를 알린다."""
+    return MigrationPreflightResponse.from_domain(service.preflight_check(classroom_id))
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/run",
+    response_model=MigrationRunResponse,
+)
+def migration_run(
+    classroom_id: str,
+    payload: MigrationRunRequest | None = None,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationRunResponse:
+    """오프라인 migration을 실행한다.
+
+    preflight 실패(부분 좌표)는 zero-write abort, 승인되지 않은 cutover는
+    차단, post-gate 검증 실패는 snapshot으로 restore한다.
+    """
+    result = service.run_migration(
+        classroom_id,
+        snapshot_name=payload.name if payload is not None else None,
+    )
+    return MigrationRunResponse.from_domain(result)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/rollback",
+    response_model=MigrationRollbackResponse,
+)
+def migration_rollback(
+    classroom_id: str,
+    payload: MigrationRollbackRequest | None = None,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationRollbackResponse:
+    """migration을 snapshot으로 롤백한다 (기본: 강의실의 최근 snapshot)."""
+    snapshot = service.rollback(
+        classroom_id,
+        snapshot_id=payload.snapshot_id if payload is not None else None,
+    )
+    return MigrationRollbackResponse.from_domain(snapshot, classroom_id)
+
+
+@api_router.get(
+    "/{classroom_id}/seats/migration/status",
+    response_model=MigrationStatusResponse,
+)
+def migration_status(
+    classroom_id: str,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> MigrationStatusResponse:
+    """migration 상태(preflight·snapshot·감사·gate 검증)를 조회한다."""
+    return MigrationStatusResponse.from_domain(service.migration_status(classroom_id))
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/repair/request",
+    response_model=RepairApprovalResponse,
+)
+def repair_request(
+    classroom_id: str,
+    payload: RepairRequestRequest,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> RepairApprovalResponse:
+    """좌석 repair 승인 요청을 만든다 (PENDING 상태로 저장).
+
+    좌표는 양쪽 모두 양수 정수 또는 양쪽 모두 unset만 허용한다.
+    """
+    approval = service.request_repair(
+        classroom_id,
+        payload.seat_id,
+        row=payload.row,
+        column=payload.column,
+        requested_by=payload.requested_by,
+    )
+    return RepairApprovalResponse.from_domain(approval)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/repair/approve",
+    response_model=RepairApprovalResponse,
+)
+def repair_approve(
+    classroom_id: str,
+    payload: RepairApproveRequest,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> RepairApprovalResponse:
+    """대기 중인 repair 승인 요청을 승인한다 (APPROVED 상태로 전환)."""
+    approval = service.approve_repair(payload.approval_id, approved_by=payload.approved_by)
+    return RepairApprovalResponse.from_domain(approval)
+
+
+@api_router.post(
+    "/{classroom_id}/seats/migration/repair/execute",
+    response_model=SeatResponse,
+)
+def repair_execute(
+    classroom_id: str,
+    payload: RepairExecuteRequest,
+    service: SeatMigrationService = Depends(get_seat_migration_service),
+) -> SeatResponse:
+    """승인된 수동 repair를 적용하고 REPAIR 감사 기록을 남긴다."""
+    seat = service.repair_seat(
+        classroom_id,
+        payload.seat_id,
+        row=payload.row,
+        column=payload.column,
+        approved_by=payload.approved_by,
+    )
+    return SeatResponse.from_domain(seat)
 
 
 @api_router.get("/{classroom_id}/occupancy", response_model=OccupancySummaryResponse)

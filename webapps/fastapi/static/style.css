@@ -165,8 +165,7 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 .seat-map__cell:hover { background: #dff1ec; }
 .seat-map__cell small { font-size: .7rem; }
 /* idle positioned/occupied는 enabled이며 aria-disabled 생략 상태다. */
-.seat-map__cell[aria-pressed="true"],
-.seat-tray__seat[aria-pressed="true"] {
+.seat-map__cell[aria-pressed="true"] {
   color: #00352e;
   background: #b7e4dc;
   border-color: var(--primary-dark);
@@ -186,20 +185,35 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 }
 .seat-map__empty:hover { background: #e4efec; border-color: var(--primary); }
 
+/* 좌석 편집 패널: 지도 옆 고정 폭(280px)으로 표시하고 320px에서 축소한다. */
+.seat-edit-panel { flex: 0 1 340px; min-width: 280px; }
+.seat-map-hint { margin-bottom: 8px; }
+
 /* 저장(busy) 중에는 모든 action control을 native disabled로 만든다. */
 .seat-map--grid button:disabled,
-.seat-tray button:disabled,
-.seat-unplace button:disabled,
+.seat-edit-panel button:disabled,
 .grid-toolbar button:disabled {
   cursor: not-allowed;
   opacity: .55;
 }
 
-/* 배치 해제(격자 밖 sibling)와 tray */
-.seat-unplace { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.seat-unplace button { min-height: 38px; padding: 6px 12px; font-weight: 600; }
-.seat-tray { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
-.seat-tray__seat { justify-content: flex-start; gap: 8px; font-weight: 600; }
+/* 좌석 편집 패널: select·지정·해제는 480px 이상 flex 한 행,
+   480px 미만은 라벨 포함 wrap (TASK-004). */
+.assignment-section { display: flex; align-items: flex-end; gap: 8px; }
+.assignment-section > label { flex: 1 1 150px; }
+.assignment-actions, .edit-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.assignment-actions { justify-content: flex-end; }
+.edit-actions { margin-top: 14px; }
+
+/* danger 버튼: 해제·삭제 등 파괴적 동작은 링크가 아닌 solid 버튼이다. */
+button.danger, .button.danger {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+button.danger:hover, .button.danger:hover { background: #8f1010; border-color: #8f1010; }
+button.danger:focus-visible { outline-color: var(--danger); }
+button.danger:disabled { cursor: not-allowed; opacity: .55; }
 .seat-card { display: grid; min-width: 100px; min-height: 76px; place-content: center; gap: 3px; padding: 8px; overflow: hidden; border: 2px solid; border-radius: 10px; text-align: center; }
 .seat-card small { font-size: .7rem; }
 .seat-card--occupied { color: #004f3d; background: #c8ede2; border-color: var(--occupied); }
@@ -292,6 +306,18 @@ main:fullscreen {
   .metric-grid, .filter-form, .form-grid { grid-template-columns: 1fr; }
   .demo-video-grid { grid-template-columns: 1fr; }
   .camera-monitoring-refresh-time { white-space: normal; }
+}
+
+@media (max-width: 480px) {
+  /* 편집 패널: 학생 선택·지정·해제를 라벨 포함 wrap한다 (겹침·순서 오류 방지). */
+  .assignment-section { flex-wrap: wrap; }
+  .assignment-section > label { flex: 1 1 100%; }
+  .assignment-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 320px) {
+  .seat-edit-panel { min-width: 0; }
+  .assignment-section > label { font-size: .85rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

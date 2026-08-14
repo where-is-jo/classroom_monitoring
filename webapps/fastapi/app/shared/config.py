@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
+    # 오프라인 migration cutover 게이트. 승인된 암호화 target/KMS가 준비된
+    # 경우에만 true로 전환한다 — false면 migration run을 차단한다.
+    migration_encryption_target_approved: bool = False
     face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
     face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
     face_pose_front_quota: int = Field(default=32, ge=1)

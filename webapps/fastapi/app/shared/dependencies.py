@@ -12,9 +12,22 @@ from pymongo import MongoClient
 from ..classrooms.adapters.memory_repository import (
     InMemoryClassroomRepository,
     InMemorySeatAssignmentRepository,
+    InMemorySeatMigrationRepository,
+    InMemorySeatMutationUnitOfWork,
 )
-from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
-from ..classrooms.ports import ClassroomRepository
+from ..classrooms.adapters.mongo_repository import (
+    MongoClassroomRepository,
+    MongoSeatAssignmentRepository,
+    MongoSeatMigrationRepository,
+    MongoSeatMutationUnitOfWork,
+)
+from ..classrooms.migration import SeatMigrationService
+from ..classrooms.ports import (
+    ClassroomRepository,
+    SeatAssignmentRepository,
+    SeatMigrationRepository,
+    SeatMutationUnitOfWork,
+)
 from ..classrooms.service import ClassroomService
 from ..demo_seed import seed_demo_data, seed_video_streams
 from ..face_enrollment.adapters.http_analyzer import HttpFaceAnalyzer
@@ -116,7 +129,18 @@ def _student_lookup() -> InMemoryStudentLookup:
 
 @lru_cache
 def _seat_assignment_repository() -> InMemorySeatAssignmentRepository:
-    return InMemorySeatAssignmentRepository()
+    # UoW와 같은 store·lock을 공유해 mutation이 조회에 그대로 보이게 한다.
+    return InMemorySeatAssignmentRepository(store=_classroom_repository())
+
+
+@lru_cache
+def _memory_seat_mutation_uow() -> InMemorySeatMutationUnitOfWork:
+    return InMemorySeatMutationUnitOfWork(_classroom_repository(), clock=utc_now)
+
+
+@lru_cache
+def _memory_seat_migration_repository() -> InMemorySeatMigrationRepository:
+    return InMemorySeatMigrationRepository()
 
 
 @lru_cache
@@ -146,6 +170,24 @@ def _mongo_database() -> MongoDatabase:
 @lru_cache
 def _mongo_classroom_repository() -> MongoClassroomRepository:
     return MongoClassroomRepository(_mongo_database())
+
+
+@lru_cache
+def _mongo_seat_mutation_uow() -> MongoSeatMutationUnitOfWork:
+    # 생성 시 topology(replica set)를 검사한다. 미지원이면 startup fail한다.
+    return MongoSeatMutationUnitOfWork(_mongo_classroom_repository(), _mongo_database())
+
+
+@lru_cache
+def _mongo_seat_assignment_repository() -> MongoSeatAssignmentRepository:
+    # UoW와 같은 database(client)를 공유해 UoW가 쓴 seat_assignments
+    # 컬렉션을 읽기 경로에 그대로 노출한다.
+    return MongoSeatAssignmentRepository(_mongo_database())
+
+
+@lru_cache
+def _mongo_seat_migration_repository() -> MongoSeatMigrationRepository:
+    return MongoSeatMigrationRepository(_mongo_database())
 
 
 @lru_cache
@@ -227,15 +269,74 @@ def get_student_lookup() -> StudentLookupPort:
     return _student_lookup()
 
 
+def get_seat_mutation_uow(
+    settings: Settings = Depends(get_settings),
+) -> SeatMutationUnitOfWork:
+    """좌석-학생 지정 mutation UoW.
+
+    memory는 InMemoryClassroomRepository와 같은 store·lock을 공유하고,
+    mongodb는 같은 database·client를 공유하는 MongoSeatMutationUnitOfWork를
+    돌려준다.
+    """
+    if settings.database_mode == "memory":
+        return _memory_seat_mutation_uow()
+    return _mongo_seat_mutation_uow()
+
+
+def get_seat_assignment_repository(
+    settings: Settings = Depends(get_settings),
+) -> SeatAssignmentRepository:
+    """좌석-학생 지정 저장소 (읽기 경로).
+
+    memory는 UoW와 같은 store·lock을 공유하고, mongodb는 UoW가 쓰는
+    seat_assignments 컬렉션을 읽는 저장소를 돌려줘 쓰기·읽기 경로를 맞춘다.
+    """
+    if settings.database_mode == "memory":
+        return _seat_assignment_repository()
+    return _mongo_seat_assignment_repository()
+
+
+def get_seat_migration_repository(
+    settings: Settings = Depends(get_settings),
+) -> SeatMigrationRepository:
+    """오프라인 migration snapshot·record·approval 저장소."""
+    if settings.database_mode == "memory":
+        return _memory_seat_migration_repository()
+    return _mongo_seat_migration_repository()
+
+
+def get_seat_migration_service(
+    repository: ClassroomRepository = Depends(get_classroom_repository),
+    assignment_repository: SeatAssignmentRepository = Depends(get_seat_assignment_repository),
+    migration_repository: SeatMigrationRepository = Depends(get_seat_migration_repository),
+    settings: Settings = Depends(get_settings),
+) -> SeatMigrationService:
+    """오프라인 migration 서비스.
+
+    cutover 게이트는 설정 ``MIGRATION_ENCRYPTION_TARGET_APPROVED``를 따른다.
+    승인된 암호화 target/KMS가 없으면 migration run(cutover)을 차단한다.
+    """
+    return SeatMigrationService(
+        repository,
+        assignment_repository=assignment_repository,
+        migration_repository=migration_repository,
+        cutover_ready=lambda: settings.migration_encryption_target_approved,
+        clock=utc_now,
+    )
+
+
 def get_classroom_service(
     repository: ClassroomRepository = Depends(get_classroom_repository),
     student_lookup: StudentLookupPort = Depends(get_student_lookup),
+    uow: SeatMutationUnitOfWork = Depends(get_seat_mutation_uow),
+    assignment_repository: SeatAssignmentRepository = Depends(get_seat_assignment_repository),
     settings: Settings = Depends(get_settings),
 ) -> ClassroomService:
     return ClassroomService(
         repository,
         student_lookup=student_lookup,
-        assignment_repository=_seat_assignment_repository(),
+        assignment_repository=assignment_repository,
+        uow=uow,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         clock=utc_now,
     )
@@ -405,6 +506,25 @@ def get_student_monitoring_service(
     )
 
 
+def _build_memory_classroom_service(settings: Settings) -> ClassroomService:
+    """FastAPI 요청 경로 밖(startup demo seed 등)에서 memory 모드
+    ``ClassroomService``를 직접 조립한다.
+
+    ``get_classroom_service`` 등은 파라미터 기본값이 ``fastapi.Depends(...)``
+    마커이므로, 일반 Python 함수 호출로 부르면서 해당 인자를 생략하면 FastAPI DI가
+    해석해주지 않아 ``Depends`` 객체 자체가 그대로 주입된다. 이 helper는 memory
+    모드 하위 의존성(uow·assignment_repository·student_lookup)을 모두 명시적으로
+    구성해 넘겨 그 문제를 피한다.
+    """
+    return get_classroom_service(
+        get_classroom_repository(settings),
+        student_lookup=get_student_lookup(),
+        uow=get_seat_mutation_uow(settings),
+        assignment_repository=get_seat_assignment_repository(settings),
+        settings=settings,
+    )
+
+
 def initialize_data_store() -> None:
     settings = get_settings()
     if settings.database_mode == "mongodb":
@@ -414,18 +534,24 @@ def initialize_data_store() -> None:
             database,
             [
                 MongoClassroomRepository.ensure_indexes,
+                MongoSeatMutationUnitOfWork.ensure_indexes,
+                MongoSeatMigrationRepository.ensure_indexes,
                 MongoDetectionEventRepository.ensure_indexes,
                 MongoVideoSegmentRepository.ensure_indexes,
                 MongoVideoStreamRepository.ensure_indexes,
                 MongoPlaybackSessionRepository.ensure_indexes,
             ],
         )
+        # UoW 생성 시 transaction topology(replica set)를 검사한다.
+        # 미지원 환경이면 DatabaseOperationError로 startup fail한다.
+        _mongo_seat_mutation_uow()
         return
+    # settings.database_mode는 memory|mongodb 둘 뿐이고 위에서 mongodb는 이미
+    # return했으므로, 여기 도달했다면 항상 memory 모드다. demo mode는 문서상
+    # memory 모드 전용 로컬 실행 경로다.
     if settings.demo_mode_enabled:
         seed_demo_data(
-            get_classroom_service(
-                get_classroom_repository(settings), settings=settings
-            ),
+            _build_memory_classroom_service(settings),
             now=utc_now(),
         )
         seed_video_streams(_video_stream_repository(), now=utc_now())
@@ -435,6 +561,9 @@ def close_data_store() -> None:
     if _mongo_client.cache_info().currsize:
         _mongo_client().close()
     _mongo_classroom_repository.cache_clear()
+    _mongo_seat_assignment_repository.cache_clear()
+    _mongo_seat_migration_repository.cache_clear()
+    _mongo_seat_mutation_uow.cache_clear()
     _mongo_detection_event_repository.cache_clear()
     _mongo_video_segment_repository.cache_clear()
     _mongo_video_stream_repository.cache_clear()

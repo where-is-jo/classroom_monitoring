@@ -201,7 +201,10 @@ def test_edit_page_redirects_when_classroom_missing(client: TestClient) -> None:
 
 
 def test_seats_page_renders_list_and_map(client: TestClient) -> None:
-    """통합 좌석 관리 화면은 배치도·편집 패널·트레이를 하나로 렌더링한다 (TASK-004)."""
+    """통합 좌석 관리 화면은 배치도·편집 패널을 렌더링한다 (TASK-004).
+
+    tray/unplace/활성·코드 입력은 없고, 파괴적 동작은 danger 버튼이다.
+    """
     classroom = _create_classroom(client)
     classroom_id = str(classroom["id"])
     seat = _create_seat(
@@ -212,7 +215,7 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
         row=1,
         column=1,
     )
-    _create_seat(client, classroom_id, code="S02", label="좌석 2")
+    _create_seat(client, classroom_id, code="S02", label="좌석 2")  # 좌표 없는 좌석
     seat_id = str(seat["id"])
 
     response = client.get(f"/classrooms/{classroom_id}/seats")
@@ -221,24 +224,23 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
     assert "좌석 관리" in response.text
     assert "좌석 배치" in response.text
     assert "좌석 1" in response.text
-    assert "좌석 2" in response.text
-    # 행·열이 있는 좌석은 배치도에, 없는 좌석은 트레이에 표시된다
+    # 행·열이 있는 좌석만 배치도에 표시된다 (tray 제거)
     assert "seat-map--grid" in response.text
     assert "1행 1열" in response.text
-    assert "seat-tray" in response.text
+    assert "seat-tray" not in response.text
     # 배치된 좌석 셀은 data-seat-id·data-row·data-column을 가진다
     assert f'data-seat-id="{seat_id}"' in response.text
     assert 'data-row="1"' in response.text
     assert 'data-column="1"' in response.text
-    # 편집 패널이 렌더링된다 (코드·이름·활성·학생 지정·삭제)
+    # 편집 패널: label·학생 지정·danger 버튼만 노출된다 (코드·활성 입력 제거)
     assert 'id="seat-edit-panel"' in response.text
-    assert 'name="code"' in response.text
     assert 'name="label"' in response.text
-    assert 'name="is_active"' in response.text
     assert 'name="student_id"' in response.text
     assert 'id="btn-assign"' in response.text
     assert 'id="btn-unassign"' in response.text
     assert 'id="btn-delete"' in response.text
+    assert 'name="code"' not in response.text
+    assert 'name="is_active"' not in response.text
     # 통합 화면 헤더에는 분리 화면 링크가 없다 (목록 링크만 유지)
     assert f'href="/classrooms/{classroom_id}/seats/create"' not in response.text
     assert f'href="/classrooms/{classroom_id}/seats/{seat_id}/edit"' not in response.text
@@ -247,7 +249,7 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
 
 
 def test_seats_page_renders_empty_state(client: TestClient) -> None:
-    """빈 강의실도 조작 가능한 1x1 grid와 tray를 표시한다 (AC-001)."""
+    """빈 강의실도 조작 가능한 1x1 grid를 표시한다 (AC-001)."""
     classroom = _create_classroom(client)
     classroom_id = str(classroom["id"])
 
@@ -259,8 +261,6 @@ def test_seats_page_renders_empty_state(client: TestClient) -> None:
     assert "grid-template-columns: repeat(1," in response.text
     assert "grid-template-rows: repeat(1," in response.text
     assert 'id="seat-cell-1-1"' in response.text
-    # 미배치 좌석이 없으면 트레이 빈 상태 안내를 표시한다
-    assert "배치 대기 좌석이 없습니다." in response.text
 
 
 def test_seats_page_renders_grid_with_empty_cells(client: TestClient) -> None:
@@ -269,7 +269,7 @@ def test_seats_page_renders_grid_with_empty_cells(client: TestClient) -> None:
     classroom_id = str(classroom["id"])
     seat = _create_seat(client, classroom_id, code="S01", label="좌석 1", row=1, column=1)
     seat_2 = _create_seat(client, classroom_id, code="S02", label="좌석 2", row=2, column=3)
-    _create_seat(client, classroom_id, code="S03", label="좌석 3")
+    _create_seat(client, classroom_id, code="S03", label="좌석 3")  # 좌표 없음 → 화면에 없음
     seat_id = str(seat["id"])
     seat_2_id = str(seat_2["id"])
 
@@ -282,17 +282,17 @@ def test_seats_page_renders_grid_with_empty_cells(client: TestClient) -> None:
     # 행·열이 있는 좌석은 배치도에 배치된다
     assert "seat-map--grid" in response.text
     assert "grid-row: 2; grid-column: 3;" in response.text
-    # 행·열이 없는 좌석은 배치도에 없고 목록에만 표시된다
-    assert "좌석 3" in response.text
+    # 행·열이 없는 좌석은 화면에 표시되지 않는다 (tray 제거)
+    assert "좌석 3" not in response.text
     # 빈 셀이 시각적으로 구분된다
     assert "seat-map__empty" in response.text
-    # 배치된 셀·빈 셀·tray 좌석·unplace는 stable ID의 native button이다
+    # 배치된 셀·빈 셀은 stable ID의 native button이다 (tray·unplace 제거)
     assert f'id="seat-cell-{seat_id}"' in response.text
     assert f'id="seat-cell-{seat_2_id}"' in response.text
     assert 'id="seat-cell-1-2"' in response.text
-    assert "seat-tray" in response.text
-    assert f'id="unplace-{seat_id}"' in response.text
-    assert f'id="unplace-{seat_2_id}"' in response.text
+    assert "seat-tray" not in response.text
+    assert f'id="unplace-{seat_id}"' not in response.text
+    assert f'id="unplace-{seat_2_id}"' not in response.text
     # 각 셀은 정확히 하나의 button을 가지며 nested button이 없다
     # (occupied 셀은 seat ID `seat-cell-{id}`, 빈 셀은 좌표 ID `seat-cell-{r}-{c}`)
     cell_buttons = re.findall(
@@ -301,13 +301,12 @@ def test_seats_page_renders_grid_with_empty_cells(client: TestClient) -> None:
     assert len(cell_buttons) == 2 * 3
     assert all("<button" not in inner for inner in cell_buttons)
     # idle 상태: positioned cell은 native enabled button이고 aria-disabled는 생략/false다
-    # (다른 occupied target의 aria-disabled=true·handler block은 JS 선택 시 동작이다)
     assert f'<button type="button" id="seat-cell-{seat_id}"' in response.text
     assert 'aria-disabled="true"' not in response.text
     assert 'class="seat-map__cell' in response.text
-    # tray 좌석은 native button이며 idle에서 aria-pressed=false로 시작한다
-    assert '<button type="button" id="tray-seat-' in response.text
-    assert 'aria-pressed="false"' in response.text
+    # 파괴적 동작(해제·삭제)은 danger 버튼으로 렌더링된다
+    assert '<button type="button" id="btn-unassign" class="danger">' in response.text
+    assert '<button type="button" id="btn-delete" class="danger">' in response.text
     # live region(polite)과 alert region(role="alert")이 존재한다
     assert 'id="seat-grid-status"' in response.text
     assert 'aria-live="polite"' in response.text
