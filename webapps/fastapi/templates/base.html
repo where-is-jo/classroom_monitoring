@@ -34,6 +34,7 @@
         </div>
         <div class="nav-group nav-group-spaced">
           <p class="nav-group-title">등록 관리</p>
+          <a href="/students/new"{% if current_path == '/students/new' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">＋</span><span>학생 등록</span></a>
           <a href="/students/demo-student/face-enrollment"{% if '/face-enrollment' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>얼굴 등록</span></a>
         </div>
         <div class="nav-group nav-group-spaced">

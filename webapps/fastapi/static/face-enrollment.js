@@ -8,8 +8,13 @@
   const connection = document.querySelector("#connection-status");
   const stage = document.querySelector(".camera-stage");
   const progressRing = document.querySelector("#face-progress-ring");
-  const progressDots = [];
-  const progressDotCount = 60;
+  const poseProgress = document.querySelector("#pose-progress");
+  const embeddedDialog = setup.closest("#student-face-enrollment-dialog");
+  const directionLabels = Object.fromEntries(
+    [...document.querySelectorAll(".ring-direction[data-pose]")].map((element) => [element.dataset.pose, element]),
+  );
+  const progressMarkers = [];
+  const progressMarkerCount = 40;
   const poseLabels = {FRONT: "정면", LEFT: "왼쪽", RIGHT: "오른쪽", UP: "위", DOWN: "아래"};
   let stream = null;
   let socket = null;
@@ -28,36 +33,39 @@
     return horizontal < 0 ? "LEFT" : "RIGHT";
   };
 
-  const initializeProgressRing = () => {
-    for (let index = 0; index < progressDotCount; index += 1) {
-      const angle = -Math.PI / 2 + (index / progressDotCount) * Math.PI * 2;
-      const dot = document.createElement("span");
-      const pose = poseForAngle(angle);
-      dot.className = "face-progress-dot";
-      dot.dataset.pose = pose;
-      dot.style.left = `${50 + Math.cos(angle) * 28}%`;
-      dot.style.top = `${50 + Math.sin(angle) * 36}%`;
-      dot.setAttribute("aria-hidden", "true");
-      progressRing.append(dot);
-      progressDots.push(dot);
+  const initializeProgressMarkers = () => {
+    for (let index = 0; index < progressMarkerCount; index += 1) {
+      const angle = -Math.PI / 2 + (index / progressMarkerCount) * Math.PI * 2;
+      const marker = document.createElement("span");
+      marker.className = "face-progress-marker";
+      marker.dataset.pose = poseForAngle(angle);
+      marker.dataset.angle = String(angle);
+      marker.style.left = `${50 + Math.cos(angle) * 28}%`;
+      marker.style.top = `${50 + Math.sin(angle) * 36}%`;
+      marker.style.setProperty("--marker-angle", `${angle * 180 / Math.PI + 90}deg`);
+      marker.setAttribute("aria-hidden", "true");
+      progressRing.append(marker);
+      progressMarkers.push(marker);
     }
   };
 
   const updateProgressRing = (enrollment) => {
     const progressByPose = Object.fromEntries(enrollment.pose_progress.map((item) => [item.pose, item.completion_percent]));
     for (const pose of ["LEFT", "RIGHT", "UP", "DOWN"]) {
-      const poseDots = progressDots.filter((dot) => dot.dataset.pose === pose);
-      const filledCount = Math.round((progressByPose[pose] || 0) / 100 * poseDots.length);
-      poseDots.forEach((dot, index) => {
-        const shouldFill = index < filledCount;
-        const isNew = shouldFill && !dot.classList.contains("is-filled");
-        dot.classList.toggle("is-filled", shouldFill);
-        if (isNew) {
-          dot.classList.remove("is-pulsing");
-          window.requestAnimationFrame(() => dot.classList.add("is-pulsing"));
-          window.setTimeout(() => dot.classList.remove("is-pulsing"), 650);
-        }
+      const posePercent = progressByPose[pose] || 0;
+      const targetAngles = {UP: -Math.PI / 2, RIGHT: 0, DOWN: Math.PI / 2, LEFT: Math.PI};
+      const angularDistance = (angle, target) => Math.abs(Math.atan2(Math.sin(angle - target), Math.cos(angle - target)));
+      const poseMarkers = progressMarkers
+        .filter((marker) => marker.dataset.pose === pose)
+        .sort((first, second) => (
+          angularDistance(Number(first.dataset.angle), targetAngles[pose])
+          - angularDistance(Number(second.dataset.angle), targetAngles[pose])
+        ));
+      const filledCount = Math.round(posePercent / 100 * poseMarkers.length);
+      poseMarkers.forEach((marker, index) => {
+        marker.classList.toggle("is-filled", index < filledCount);
       });
+      directionLabels[pose].classList.toggle("is-complete", posePercent >= 100);
     }
     const frontPercent = progressByPose.FRONT || 0;
     const frontProgress = document.querySelector("#front-progress");
@@ -73,6 +81,18 @@
     const percent = ringCompletionPercent(enrollment);
     const status = enrollment.status;
     const isComplete = status === "COMPLETE";
+    const targetPoseByGuidance = {TURN_LEFT: "LEFT", TURN_RIGHT: "RIGHT", LOOK_UP: "UP", LOOK_DOWN: "DOWN"};
+    const targetPose = targetPoseByGuidance[enrollment.guidance_code];
+    progressMarkers.forEach((marker) => marker.classList.remove("is-target"));
+    for (const pose of ["LEFT", "RIGHT", "UP", "DOWN"]) {
+      const isTarget = pose === targetPose;
+      directionLabels[pose].classList.toggle("is-target", isTarget);
+      if (isTarget) {
+        progressMarkers
+          .filter((marker) => marker.dataset.pose === pose && !marker.classList.contains("is-filled"))
+          .forEach((marker) => marker.classList.add("is-target"));
+      }
+    }
     progressRing.classList.toggle("is-complete", isComplete);
     progressRing.setAttribute("aria-valuenow", String(percent));
     progressRing.setAttribute("aria-valuetext", isComplete ? "얼굴 데이터 수집 완료" : `얼굴 데이터 ${percent}% 수집`);
@@ -85,7 +105,7 @@
     return Math.min(enrollment.completion_percent, posePercent);
   };
 
-  initializeProgressRing();
+  initializeProgressMarkers();
 
   const cameraErrorMessage = (reason) => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -108,13 +128,12 @@
     frameInFlight = false;
     const enrollment = value.enrollment || value;
     guidance.textContent = enrollment.guidance_message;
-    document.querySelector("#valid-count").textContent = enrollment.valid_sample_count;
-    document.querySelector("#required-count").textContent = enrollment.required_sample_count;
     const overall = document.querySelector("#overall-progress");
     overall.value = enrollment.completion_percent;
     overall.textContent = `${enrollment.completion_percent}%`;
+    document.querySelector("#overall-progress-percent").textContent = `${enrollment.completion_percent}%`;
     updateProgressRing(enrollment);
-    document.querySelector("#pose-progress").replaceChildren(...enrollment.pose_progress.map((item) => {
+    poseProgress?.replaceChildren(...enrollment.pose_progress.map((item) => {
       const li = document.createElement("li");
       li.className = "pose-row";
       li.innerHTML = `<span>${poseLabels[item.pose] || item.pose}</span><progress max="100" value="${item.completion_percent}">${item.completion_percent}%</progress><span>${item.accepted_count}/${item.required_count}</span>`;
@@ -125,6 +144,7 @@
       completed = true;
       connection.textContent = "등록 완료";
       stopCapture();
+      if (embeddedDialog) document.dispatchEvent(new CustomEvent("face-enrollment:complete", {detail: {enrollment}}));
     }
   };
 
@@ -205,6 +225,10 @@
     const error = document.querySelector("#setup-error");
     error.hidden = true;
     try {
+      if (!document.querySelector("#consent-confirmed").checked) {
+        throw new Error("학생의 얼굴 데이터 수집 동의를 먼저 확인해 주세요.");
+      }
+      completed = false;
       await openCamera();
       const response = await fetch(`/api/v1/students/${encodeURIComponent(document.querySelector("#student-id").textContent)}/face-enrollments`, {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({consent_confirmed: document.querySelector("#consent-confirmed").checked, consent_confirmed_by: document.querySelector("#confirmed-by").value})
@@ -228,8 +252,10 @@
   });
 
   document.querySelector("#cancel-enrollment").addEventListener("click", async () => {
-    stopCapture(); if (socket) socket.close();
+    stopCapture(); completed = true; if (socket) socket.close();
     if (enrollmentId) await fetch(`/api/v1/face-enrollments/${enrollmentId}`, {method: "DELETE"});
-    location.reload();
+    enrollmentId = null;
+    if (embeddedDialog) document.dispatchEvent(new CustomEvent("face-enrollment:aborted"));
+    else location.reload();
   });
 })();

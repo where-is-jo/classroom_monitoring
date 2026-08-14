@@ -299,6 +299,7 @@ def get_face_enrollment_service(
             else _face_analyzer(tuple(pose_quotas.items()))
         ),
         required_sample_count=settings.face_enrollment_required_samples,
+        augmented_sample_count=settings.face_enrollment_augmented_samples,
         pose_quotas=pose_quotas,
         thresholds=EnrollmentThresholds(
             detection_confidence_min=settings.face_detection_confidence_min,
@@ -313,6 +314,7 @@ def get_face_enrollment_service(
             yaw_side_degrees=settings.face_yaw_side_degrees,
             pitch_side_degrees=settings.face_pitch_side_degrees,
         ),
+        clock=utc_now,
     )
 
 
