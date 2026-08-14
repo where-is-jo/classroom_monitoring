@@ -42,7 +42,7 @@ def _clear_memory_singletons() -> None:
     dependencies._classroom_repository.cache_clear()
     dependencies._seat_assignment_repository.cache_clear()
     dependencies._memory_seat_mutation_uow.cache_clear()
-    dependencies._student_lookup.cache_clear()
+    dependencies._memory_student_repository.cache_clear()
     dependencies._video_stream_repository.cache_clear()
 
 
