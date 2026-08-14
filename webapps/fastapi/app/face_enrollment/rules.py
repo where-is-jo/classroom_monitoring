@@ -20,11 +20,17 @@ class EnrollmentThresholds:
     motion_speed_dps_max: float
     yaw_side_degrees: float
     pitch_side_degrees: float
+    pitch_down_degrees: float
 
 
 def classify_pose(analysis: FaceAnalysis, thresholds: EnrollmentThresholds) -> PoseBin:
     yaw_ratio = abs(analysis.yaw_degrees) / thresholds.yaw_side_degrees
-    pitch_ratio = abs(analysis.pitch_degrees) / thresholds.pitch_side_degrees
+    pitch_threshold = (
+        thresholds.pitch_down_degrees
+        if analysis.pitch_degrees >= 0
+        else thresholds.pitch_side_degrees
+    )
+    pitch_ratio = abs(analysis.pitch_degrees) / pitch_threshold
     if max(yaw_ratio, pitch_ratio) < 1:
         return PoseBin.FRONT
     if yaw_ratio >= pitch_ratio:

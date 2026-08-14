@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -33,6 +34,7 @@ def make_thresholds() -> EnrollmentThresholds:
         motion_speed_dps_max=240,
         yaw_side_degrees=15,
         pitch_side_degrees=10,
+        pitch_down_degrees=5,
     )
 
 
@@ -207,6 +209,28 @@ def test_camera_yaw_is_mirrored_to_user_direction() -> None:
     )
 
     assert classify_pose(camera_right, make_thresholds()) == PoseBin.LEFT
+
+
+def test_down_pose_uses_more_permissive_threshold_than_up_pose() -> None:
+    base = FaceAnalysis(
+        face_count=1,
+        detection_confidence=1,
+        face_size_ratio=0.2,
+        centered=True,
+        yaw_degrees=0,
+        pitch_degrees=6,
+        roll_degrees=0,
+        blur_score=1,
+        brightness_score=1,
+        landmark_confidence=1,
+        occlusion_score=0,
+        duplicate_score=0,
+        motion_speed_dps=0,
+    )
+    upward = replace(base, pitch_degrees=-6)
+
+    assert classify_pose(base, make_thresholds()) == PoseBin.DOWN
+    assert classify_pose(upward, make_thresholds()) == PoseBin.FRONT
 
 
 def test_abort_removes_active_session() -> None:
