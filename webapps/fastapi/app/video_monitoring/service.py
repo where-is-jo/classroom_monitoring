@@ -2,24 +2,47 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import logging
 import re
+import secrets
 import unicodedata
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from .catalog import DEMO_STREAMS, DEMO_VIDEO_CLIPS
-from .errors import DemoStreamNotFoundError, VideoSearchInputError
+from .errors import (
+    DemoStreamNotFoundError,
+    PlaybackSessionExpiredError,
+    PlaybackSessionNotFoundError,
+    PlaybackSessionOwnerMismatchError,
+    PlaybackSessionStateInvalidError,
+    PlaybackSourceUnavailableError,
+    PlaybackStreamNotFoundError,
+    VideoSearchInputError,
+    WhepTimeoutError,
+    WhepUnavailableError,
+)
 from .models import (
     DemoStream,
     DemoStreamStatus,
     DemoVideoClip,
+    PlaybackKind,
+    PlaybackSession,
+    PlaybackSessionCreateResult,
+    PlaybackSessionStatus,
     SourceStatus,
     VideoSearchResult,
     VideoSearchResultPage,
     VideoStream,
 )
-from .ports import VideoStreamRepository
+from .ports import PlaybackSessionRepository, VideoStreamRepository, WhepClient
+
+logger = logging.getLogger(__name__)
 
 _KST = ZoneInfo("Asia/Seoul")
 _TOKEN_PATTERN = re.compile(r"[0-9a-z\uac00-\ud7a3]+")
@@ -288,6 +311,14 @@ class VideoStreamService:
         """List all enabled streams."""
         return self._repository.find_all_enabled()
 
+    def list_monitoring_streams(self) -> list[VideoStream]:
+        """모니터링 화면용 실제 영상 source를 반환한다.
+
+        real-only 정책(enabled=true AND is_demo=false)의 소유자는 이 service와
+        repository port/adapter다. template/router는 이 결과만 렌더링한다(MON-002).
+        """
+        return self._repository.find_monitoring_streams()
+
     def get_stream(self, camera_id: str) -> VideoStream:
         """Get stream by camera ID."""
         stream = self._repository.find_by_camera_id(camera_id)
@@ -309,3 +340,210 @@ class VideoStreamService:
             return SourceStatus.STALE
         else:
             return SourceStatus.NO_VIDEO
+
+
+class PlaybackSessionService:
+    """결정 0014의 재생 세션 수명주기와 WHEP proxy 대행.
+
+    상태 전이: CREATED -> ACTIVE -> CLOSED 또는 CREATED/ACTIVE -> EXPIRED.
+    - PATCH(재협상)는 ACTIVE에서만, DELETE는 ACTIVE/CLOSED에서 idempotent.
+    - 생성/활성화 실패는 세션을 ACTIVE로 만들지 않는다.
+    - proxy target은 source의 camera_id와 deployment config로만 조립한다(SSRF 차단).
+    """
+
+    def __init__(
+        self,
+        *,
+        session_repository: PlaybackSessionRepository,
+        stream_repository: VideoStreamRepository,
+        whep_client: WhepClient,
+        whep_base_url: str,
+        ttl_seconds: int,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._session_repository = session_repository
+        self._stream_repository = stream_repository
+        self._whep_client = whep_client
+        self._whep_base_url = whep_base_url.rstrip("/")
+        self._ttl_seconds = ttl_seconds
+        self._clock = clock
+
+    def create_session(self, stream_id: str) -> PlaybackSessionCreateResult:
+        """실제·enabled·WebRTC source만 재생 세션으로 만든다."""
+        stream = self._stream_repository.find_by_id(
+            stream_id
+        ) or self._stream_repository.find_by_camera_id(stream_id)
+        if stream is None:
+            raise PlaybackStreamNotFoundError()
+        if not self._is_playable(stream):
+            raise PlaybackSourceUnavailableError()
+
+        now = self._clock().astimezone(UTC)
+        session_id = secrets.token_hex(24)
+        owner_token = secrets.token_urlsafe(32)
+        session = PlaybackSession(
+            session_id=session_id,
+            stream_id=stream.id,
+            camera_id=stream.camera_id,
+            status=PlaybackSessionStatus.CREATED,
+            owner_token_hash=self._hash_owner_token(owner_token),
+            expires_at=now + timedelta(seconds=self._ttl_seconds),
+            remote_resource_location=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self._session_repository.save(session)
+        return PlaybackSessionCreateResult(session=session, owner_token=owner_token)
+
+    def activate(
+        self,
+        *,
+        session_id: str,
+        stream_id: str,
+        owner_token: str | None,
+        offer_sdp: str,
+    ) -> str:
+        """WHEP offer를 MediaMTX에 대행하고 answer를 받는다.
+
+        remote POST가 성공하고 resource location을 서버 쪽에서 보관해야 ACTIVE가
+        된다. 실패하면 세션은 CREATED에 남는다.
+        """
+        session = self._find_live_session(session_id, stream_id, owner_token)
+        if session.status != PlaybackSessionStatus.CREATED:
+            raise PlaybackSessionStateInvalidError()
+
+        stream = self._stream_repository.find_by_id(
+            session.stream_id
+        ) or self._stream_repository.find_by_camera_id(session.stream_id)
+        if stream is None or not self._is_playable(stream):
+            raise PlaybackSourceUnavailableError()
+
+        target_url = self._assemble_whep_target(stream.camera_id)
+        result = self._whep_client.post_offer(target_url, offer_sdp)
+        resource_location = self._resolve_resource_location(result.resource_location, target_url)
+        self._session_repository.save(
+            replace(
+                session,
+                status=PlaybackSessionStatus.ACTIVE,
+                remote_resource_location=resource_location,
+                updated_at=self._clock().astimezone(UTC),
+            )
+        )
+        return result.answer_sdp
+
+    def renegotiate(
+        self,
+        *,
+        session_id: str,
+        stream_id: str,
+        owner_token: str | None,
+        offer_sdp: str,
+    ) -> str:
+        """ACTIVE 세션의 재협상(WHEP PATCH)만 대행한다."""
+        session = self._find_live_session(session_id, stream_id, owner_token)
+        if session.status != PlaybackSessionStatus.ACTIVE:
+            raise PlaybackSessionStateInvalidError()
+        location = session.remote_resource_location
+        if location is None:
+            raise PlaybackSessionStateInvalidError()
+        return self._whep_client.patch_offer(location, offer_sdp)
+
+    def close(
+        self,
+        *,
+        session_id: str,
+        stream_id: str,
+        owner_token: str | None,
+    ) -> None:
+        """WHEP resource를 닫고 세션을 CLOSED로 만든다. CLOSED에서는 idempotent."""
+        session = self._find_live_session(session_id, stream_id, owner_token)
+        if session.status == PlaybackSessionStatus.CLOSED:
+            return
+        if session.status != PlaybackSessionStatus.ACTIVE:
+            raise PlaybackSessionStateInvalidError()
+
+        now = self._clock().astimezone(UTC)
+        self._session_repository.save(
+            replace(session, status=PlaybackSessionStatus.CLOSED, updated_at=now)
+        )
+        location = session.remote_resource_location
+        if location is None:
+            return
+        try:
+            self._whep_client.delete(location)
+        except (WhepUnavailableError, WhepTimeoutError):
+            # remote cleanup 실패는 log 대상이다. local session은 CLOSED를 유지한다.
+            logger.warning(
+                "playback session remote cleanup failed session_id=%s",
+                session.session_id,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _hash_owner_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def _find_live_session(
+        self,
+        session_id: str,
+        stream_id: str,
+        owner_token: str | None,
+    ) -> PlaybackSession:
+        session = self._session_repository.find_by_id(session_id)
+        if session is None or session.stream_id != stream_id:
+            raise PlaybackSessionNotFoundError()
+        if owner_token is None or not hmac.compare_digest(
+            self._hash_owner_token(owner_token), session.owner_token_hash
+        ):
+            raise PlaybackSessionOwnerMismatchError()
+        if self._clock().astimezone(UTC) > session.expires_at:
+            self._expire_session(session)
+            raise PlaybackSessionExpiredError()
+        return session
+
+    def _expire_session(self, session: PlaybackSession) -> None:
+        """TTL 만료: EXPIRED로 저장하고 remote 정리를 한 번 시도한다.
+
+        remote 정리 실패는 log 대상이며, 세션을 다시 활성화하지 않는다.
+        """
+        now = self._clock().astimezone(UTC)
+        expired = replace(session, status=PlaybackSessionStatus.EXPIRED, updated_at=now)
+        self._session_repository.save(expired)
+        location = session.remote_resource_location
+        if session.status == PlaybackSessionStatus.ACTIVE and location is not None:
+            try:
+                self._whep_client.delete(location)
+            except (WhepUnavailableError, WhepTimeoutError):
+                logger.warning(
+                    "playback session expiry cleanup failed session_id=%s",
+                    session.session_id,
+                    exc_info=True,
+                )
+
+    def _assemble_whep_target(self, camera_id: str) -> str:
+        """proxy target은 camera_id와 deployment config로만 조립한다(SSRF 차단)."""
+        return f"{self._whep_base_url}/{camera_id}/whep"
+
+    @staticmethod
+    def _resolve_resource_location(location: str, target_url: str) -> str:
+        """MediaMTX가 돌려준 Location을 같은 origin으로 한정해 절대 URL로 만든다."""
+        if not location:
+            raise WhepUnavailableError()
+        parsed_target = urlparse(target_url)
+        if parsed_target.scheme not in {"http", "https"} or not parsed_target.netloc:
+            raise WhepUnavailableError()
+        parsed_location = urlparse(location)
+        if parsed_location.scheme:
+            if (parsed_location.scheme, parsed_location.netloc) != (
+                parsed_target.scheme,
+                parsed_target.netloc,
+            ):
+                raise WhepUnavailableError()
+            return location
+        if not location.startswith("/"):
+            raise WhepUnavailableError()
+        return f"{parsed_target.scheme}://{parsed_target.netloc}{location}"
+
+    @staticmethod
+    def _is_playable(stream: VideoStream) -> bool:
+        return stream.enabled and not stream.is_demo and stream.playback_kind == PlaybackKind.WEBRTC

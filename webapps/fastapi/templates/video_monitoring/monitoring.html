@@ -2,89 +2,60 @@
 
 {% block title %}실시간 모니터링 · 학습 모니터링{% endblock %}
 {% block head_extra %}
-{% if demo_enabled %}<script src="/demo-assets/demo-video.js" defer></script>{% endif %}
 <script src="{{ url_for('static', path='/monitoring.js') }}" defer></script>
 {% endblock %}
 
 {% block content %}
   <header class="page-header">
     <div>
-      <p class="eyebrow">영상 source 상태</p>
+      <p class="eyebrow">연결된 카메라</p>
       <h1>실시간 모니터링</h1>
-      {% if demo_enabled %}<p class="summary">합성 자료를 사용하는 local/dev 데모입니다. 실제 CCTV나 실시간 스트림이 아닙니다.</p>{% else %}<p class="summary">실제 영상 공급원이 아직 연결되지 않았습니다. 연결 실패를 학생 부재로 해석하지 않습니다.</p>{% endif %}
     </div>
-    <div class="demo-clock"><span>조회 시각</span><strong>{{ current_time|kst_datetime }}</strong></div>
+    <div class="page-header-actions">
+      <button class="fullscreen-toggle" type="button" data-fullscreen-toggle aria-pressed="false">
+        <span class="fullscreen-toggle-icon" aria-hidden="true">⛶</span>
+        <span data-fullscreen-label>전체화면</span>
+      </button>
+      <div class="camera-monitoring-refresh-time"><span>마지막 화면 갱신</span><strong>{{ current_time|kst_datetime }}</strong></div>
+    </div>
   </header>
 
-  <section class="panel" aria-labelledby="monitoring-filter-title">
-    <h2 id="monitoring-filter-title">source 필터</h2>
-    <form method="get" action="/monitoring" class="filter-form">
-      <label>검색<input name="q" value="{{ selected_query }}" maxlength="100" placeholder="A101 또는 전면"></label>
-      <label>강의실<select name="classroom_id"><option value="">전체</option>{% for value, label in classroom_options %}<option value="{{ value }}"{% if value == selected_classroom_id %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-      <label>연결 상태<select name="status"><option value="">전체</option>{% for status in statuses %}<option value="{{ status.value }}"{% if selected_status == status %} selected{% endif %}>{{ '연결됨' if status.value == 'CONNECTED' else '영상 없음' }}</option>{% endfor %}</select></label>
-      <button type="submit" class="secondary">적용</button>
-    </form>
-  </section>
-
-  {# ── 실제 source ── #}
   {% if real_streams %}
-  <section aria-labelledby="real-streams-title">
-    <div class="section-heading"><div><h2 id="real-streams-title">실제 영상 source</h2><p class="summary">{{ real_streams|length }}개 표시 중</p></div></div>
-    <div class="demo-video-grid">
-      {% for stream in real_streams %}
-        {% set source_status = stream_service.get_source_status(stream) %}
-        <article class="demo-video-card" data-real-stream data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}">
-          <div class="demo-video-frame">
-            <video data-webrtc muted autoplay playsinline aria-label="{{ stream.camera_label }} 실시간 영상"></video>
-            <div class="demo-video-error" data-video-error hidden role="alert">영상을 불러오지 못했습니다.</div>
-            <span class="demo-ribbon" style="background:#00685f;color:#fff;">실시간</span>
-          </div>
-          <div class="demo-video-copy">
-            <div>
-              <p class="eyebrow">{{ stream.camera_id }}</p>
-              <h3>{{ stream.camera_label }}</h3>
-              <p>{{ stream.classroom_id }}</p>
+    <section aria-labelledby="monitoring-streams-title">
+      <div class="section-heading">
+        <div><h2 id="monitoring-streams-title">연결된 카메라 영상</h2><p class="summary">{{ real_streams|length }}대 표시 중</p></div>
+      </div>
+      <div class="camera-monitoring-grid{% if real_streams|length == 1 %} camera-monitoring-grid--single{% endif %}">
+        {% for stream in real_streams %}
+          {% set source_status = stream_service.get_source_status(stream) %}
+          {% set status_value = source_status.value %}
+          <article class="camera-monitoring-card" data-real-stream data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}">
+            <div class="camera-monitoring-frame">
+              <video data-webrtc muted autoplay playsinline aria-label="{{ stream.camera_label }} 실시간 영상"></video>
+              <div class="camera-monitoring-error" data-video-error hidden role="alert">영상을 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.</div>
             </div>
-            <span class="status-label status-label--{{ 'active' if source_status.value == 'CONNECTED' else ('stale' if source_status.value == 'STALE' else 'unknown') }}">
-              {{ '연결됨' if source_status.value == 'CONNECTED' else ('지연' if source_status.value == 'STALE' else ('영상 없음' if source_status.value == 'NO_VIDEO' else '알 수 없음')) }}
-            </span>
-          </div>
-          <p class="card-meta">
-            <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime if stream.last_detection_at else '없음' }}</strong></span>
-            <span>탐지 <strong data-detection-count>0</strong>건</span>
-          </p>
-        </article>
-      {% endfor %}
-    </div>
-  </section>
-  {% endif %}
-
-  {# ── demo source ── #}
-  <section aria-labelledby="feed-list-title">
-    <div class="section-heading"><div><h2 id="feed-list-title">{{ '합성 데모 source' if real_streams else '영상 source' }}</h2><p class="summary">{{ feeds|length }}개 표시 중</p></div>{% if not real_streams %}<a class="button-link secondary" href="/monitoring">필터 초기화</a>{% endif %}</div>
-    {% if feeds %}
-      <div class="demo-video-grid">
-        {% for feed in feeds %}
-          <article class="demo-video-card">
-            <div class="demo-video-frame">
-              {% if feed.synthetic_variant %}
-                <video data-synthetic-video data-variant="{{ feed.synthetic_variant }}" muted playsinline loop controls poster="{{ feed.poster_path }}" aria-label="{{ feed.classroom_code }} 합성 데모 피드"></video>
-                <div class="demo-video-error" data-video-error hidden role="alert">합성 피드를 불러오지 못했습니다.</div>
-              {% else %}
-                <img src="{{ feed.poster_path }}" alt="영상 source가 없는 강의실을 나타내는 합성 포스터">
-                <div class="demo-video-empty" role="status">영상 없음</div>
-              {% endif %}
-              <span class="demo-ribbon">합성 demo</span>
+            <div class="camera-monitoring-meta">
+              <div class="camera-monitoring-identity">
+                <p class="eyebrow">{{ stream.camera_id }}</p>
+                <h3>{{ stream.camera_label }}</h3>
+                <p>{{ stream.classroom_id }}</p>
+              </div>
+              <span class="status-label status-label--{{ 'active' if status_value == 'CONNECTED' else ('stale' if status_value == 'STALE' else ('no-video' if status_value == 'NO_VIDEO' else 'unknown')) }}">{{ '탐지 수신 중' if status_value == 'CONNECTED' else ('탐지 지연' if status_value == 'STALE' else ('최근 탐지 없음' if status_value == 'NO_VIDEO' else '상태 확인 중')) }}</span>
             </div>
-            <div class="demo-video-copy"><div><p class="eyebrow">{{ feed.classroom_code }}</p><h3>{{ feed.classroom_name }}</h3><p>{{ feed.camera_label }}</p></div><span class="status-label status-label--{{ 'active' if feed.status.value == 'CONNECTED' else 'unknown' }}">{{ '연결됨' if feed.status.value == 'CONNECTED' else '영상 없음' }}</span></div>
-            <p class="card-meta"><span>마지막 상태 {{ feed.last_updated_at|kst_datetime }}</span><span>is_demo=true</span></p>
+            <p class="card-meta">
+              <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime if stream.last_detection_at else '없음' }}</strong></span>
+              <span>탐지 <strong data-detection-count>0</strong>건</span>
+            </p>
           </article>
         {% endfor %}
       </div>
-    {% elif demo_enabled %}
-      <div class="empty" role="status">조건에 맞는 합성 source가 없습니다.</div>
-    {% else %}
-      <div class="empty" role="status"><strong>연결된 영상 source가 없습니다.</strong><p>worker와 전달 계약이 구현되기 전에는 빈 상태를 유지합니다.</p></div>
-    {% endif %}
-  </section>
+    </section>
+  {% else %}
+    <section aria-labelledby="monitoring-empty-title">
+      <div class="empty" role="status">
+        <strong>연결된 카메라가 없습니다.</strong>
+        <p>카메라가 연결되기 전에는 영상이 표시되지 않습니다. 연결 실패를 학생 부재로 해석하지 않습니다.</p>
+      </div>
+    </section>
+  {% endif %}
 {% endblock %}

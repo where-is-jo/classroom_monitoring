@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
@@ -45,8 +46,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: Literal["local", "dev", "prod"]
-    database_mode: Literal["memory", "mongodb"]
+    app_env: Literal["local", "dev", "prod"] = "local"
+    database_mode: Literal["memory", "mongodb"] = "memory"
     database_url: SecretStr | None = None
     database_name: str | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
@@ -54,6 +55,9 @@ class Settings(BaseSettings):
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
+    # 오프라인 migration cutover 게이트. 승인된 암호화 target/KMS가 준비된
+    # 경우에만 true로 전환한다 — false면 migration run을 차단한다.
+    migration_encryption_target_approved: bool = False
     roi_reference_image_max_bytes: int = Field(
         default=5 * 1024 * 1024, ge=1024, le=20 * 1024 * 1024
     )
@@ -87,6 +91,16 @@ class Settings(BaseSettings):
     # SSE settings
     sse_heartbeat_interval_seconds: int = Field(default=30, ge=1)
     sse_reconnection_timeout_seconds: int = Field(default=60, ge=1)
+
+    # --- WHEP 재생 proxy와 재생 세션 (결정 0014) ---
+    # proxy target은 이 base URL과 source의 camera_id로만 조립한다(SSRF 차단).
+    # 경로 접두사(예: /webrtc)가 필요하면 base URL에 함께 넣는다.
+    whep_base_url: str = "http://127.0.0.1:8889"
+    whep_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    playback_session_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    # local/http 개발 환경에서는 false로 내려야 cookie가 전송된다(ADR 남은 일).
+    playback_session_cookie_secure: bool = True
+    playback_session_sdp_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
 
     # Detection event settings
     detection_event_max_detections_per_event: int = Field(default=100, ge=1)
@@ -141,6 +155,16 @@ class Settings(BaseSettings):
     def _empty_database_name_is_missing(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("whep_base_url")
+    @classmethod
+    def _whep_base_url_must_be_http(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("WHEP_BASE_URL must be an http(s) URL.")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("WHEP_BASE_URL must not contain credentials.")
         return value
 
     @model_validator(mode="after")

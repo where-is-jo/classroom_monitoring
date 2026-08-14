@@ -4,15 +4,24 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
+from .migration import (
+    SeatMigrationPreflight,
+    SeatMigrationResult,
+    SeatMigrationStatus,
+    SeatMigrationValidation,
+)
 from .models import (
     Classroom,
     ClassroomOccupancySummary,
     ClassroomPage,
+    RepairApproval,
     Seat,
     SeatAssignmentInfo,
     SeatGeometry,
+    SeatMigrationRecord,
+    SeatMigrationSnapshot,
     SeatPage,
 )
 
@@ -101,6 +110,19 @@ class SeatCreateRequest(BaseModel):
     row: int | None = None
     column: int | None = None
     geometry: GeometryRequest | None = None
+
+
+class AutoSeatCreateRequest(BaseModel):
+    """좌석 자동 생성 요청.
+
+    UI는 이 스키마만 사용하며 코드는 서버가 할당한다. row/column은 1 이상
+    정수여야 하고, 정의되지 않은 추가 필드는 차단한다 (extra forbid).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    row: int = Field(ge=1)
+    column: int = Field(ge=1)
 
 
 class SeatUpdateRequest(BaseModel):
@@ -231,3 +253,247 @@ class SeatAssignmentListResponse(BaseModel):
     """좌석-학생 지정 목록 응답."""
 
     items: list[SeatAssignmentResponse]
+
+
+# ============================================================
+# 오프라인 migration 스키마
+# ============================================================
+
+
+class MigrationPreflightResponse(BaseModel):
+    """preflight 검사 결과."""
+
+    classroom_id: str
+    ok: bool
+    total_seats: int
+    completed_count: int
+    active_null_count: int
+    inactive_null_count: int
+    partial_coordinates_count: int
+    blocked_reason: str | None = None
+
+    @classmethod
+    def from_domain(cls, value: SeatMigrationPreflight) -> MigrationPreflightResponse:
+        return cls(
+            classroom_id=value.classroom_id,
+            ok=value.ok,
+            total_seats=value.total_seats,
+            completed_count=value.completed_count,
+            active_null_count=value.active_null_count,
+            inactive_null_count=value.inactive_null_count,
+            partial_coordinates_count=value.partial_coordinates_count,
+            blocked_reason=value.blocked_reason,
+        )
+
+
+class MigrationSnapshotResponse(BaseModel):
+    """snapshot manifest (비민감 metadata만)."""
+
+    id: str
+    classroom_id: str
+    name: str
+    seats_count: int
+    assignments_count: int
+    checksum: str
+    created_at: datetime
+    expires_at: datetime
+    restored_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, value: SeatMigrationSnapshot) -> MigrationSnapshotResponse:
+        return cls(
+            id=value.id,
+            classroom_id=value.classroom_id,
+            name=value.name,
+            seats_count=value.seats_count,
+            assignments_count=value.assignments_count,
+            checksum=value.checksum,
+            created_at=value.created_at,
+            expires_at=value.expires_at,
+            restored_at=value.restored_at,
+        )
+
+
+class MigrationRecordResponse(BaseModel):
+    """좌석별 migration 감사 기록."""
+
+    id: str
+    snapshot_id: str | None
+    classroom_id: str
+    seat_id: str
+    action: str
+    previous_row: int | None
+    previous_column: int | None
+    new_row: int | None
+    new_column: int | None
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, value: SeatMigrationRecord) -> MigrationRecordResponse:
+        return cls(
+            id=value.id,
+            snapshot_id=value.snapshot_id,
+            classroom_id=value.classroom_id,
+            seat_id=value.seat_id,
+            action=value.action.value,
+            previous_row=value.previous_row,
+            previous_column=value.previous_column,
+            new_row=value.new_row,
+            new_column=value.new_column,
+            created_at=value.created_at,
+        )
+
+
+class MigrationValidationResponse(BaseModel):
+    """migration gate 검증 결과."""
+
+    classroom_id: str
+    ok: bool
+    issues: list[str]
+    seats_count: int
+    assignments_count: int
+
+    @classmethod
+    def from_domain(cls, value: SeatMigrationValidation) -> MigrationValidationResponse:
+        return cls(
+            classroom_id=value.classroom_id,
+            ok=value.ok,
+            issues=list(value.issues),
+            seats_count=value.seats_count,
+            assignments_count=value.assignments_count,
+        )
+
+
+class MigrationRunRequest(BaseModel):
+    """migration run 요청. snapshot 이름을 선택적으로 지정할 수 있다."""
+
+    name: str | None = None
+
+
+class MigrationRunResponse(BaseModel):
+    """migration run 결과."""
+
+    classroom_id: str
+    snapshot: MigrationSnapshotResponse
+    migrated_count: int
+    skipped_with_coordinates_count: int
+    inactive_null_skipped_count: int
+    max_row: int
+    records: list[MigrationRecordResponse]
+
+    @classmethod
+    def from_domain(cls, value: SeatMigrationResult) -> MigrationRunResponse:
+        return cls(
+            classroom_id=value.classroom_id,
+            snapshot=MigrationSnapshotResponse.from_domain(value.snapshot),
+            migrated_count=value.migrated_count,
+            skipped_with_coordinates_count=value.skipped_with_coordinates_count,
+            inactive_null_skipped_count=value.inactive_null_skipped_count,
+            max_row=value.max_row,
+            records=[MigrationRecordResponse.from_domain(record) for record in value.records],
+        )
+
+
+class MigrationRollbackRequest(BaseModel):
+    """rollback 요청. snapshot_id를 선택적으로 지정할 수 있다."""
+
+    snapshot_id: str | None = None
+
+
+class MigrationRollbackResponse(BaseModel):
+    """rollback 결과."""
+
+    classroom_id: str
+    snapshot: MigrationSnapshotResponse
+
+    @classmethod
+    def from_domain(
+        cls, value: SeatMigrationSnapshot, classroom_id: str
+    ) -> MigrationRollbackResponse:
+        return cls(
+            classroom_id=classroom_id,
+            snapshot=MigrationSnapshotResponse.from_domain(value),
+        )
+
+
+class MigrationStatusResponse(BaseModel):
+    """migration 상태 조회 결과."""
+
+    classroom_id: str
+    preflight: MigrationPreflightResponse
+    snapshot: MigrationSnapshotResponse | None
+    records: list[MigrationRecordResponse]
+    validation: MigrationValidationResponse
+
+    @classmethod
+    def from_domain(cls, value: SeatMigrationStatus) -> MigrationStatusResponse:
+        return cls(
+            classroom_id=value.classroom_id,
+            preflight=MigrationPreflightResponse.from_domain(value.preflight),
+            snapshot=(
+                None
+                if value.snapshot is None
+                else MigrationSnapshotResponse.from_domain(value.snapshot)
+            ),
+            records=[MigrationRecordResponse.from_domain(record) for record in value.records],
+            validation=MigrationValidationResponse.from_domain(value.validation),
+        )
+
+
+class RepairRequestRequest(BaseModel):
+    """수동 repair 승인 요청.
+
+    좌표는 양쪽 모두 양수 정수 또는 양쪽 모두 unset(None)만 허용한다.
+    부분 입력(행만·열만)·비양수는 서비스 계층에서 ``SeatRepairInvalidError``로 거부된다.
+    """
+
+    seat_id: str
+    row: int | None = None
+    column: int | None = None
+    requested_by: str
+
+
+class RepairApproveRequest(BaseModel):
+    """수동 repair 승인 요청의 승인."""
+
+    approval_id: str
+    approved_by: str
+
+
+class RepairExecuteRequest(BaseModel):
+    """승인된 수동 repair 실행."""
+
+    seat_id: str
+    row: int | None = None
+    column: int | None = None
+    approved_by: str
+
+
+class RepairApprovalResponse(BaseModel):
+    """수동 repair 승인 기록 응답."""
+
+    id: str
+    classroom_id: str
+    seat_id: str
+    requested_row: int | None
+    requested_column: int | None
+    requested_by: str
+    requested_at: datetime
+    status: str
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, value: RepairApproval) -> RepairApprovalResponse:
+        return cls(
+            id=value.id,
+            classroom_id=value.classroom_id,
+            seat_id=value.seat_id,
+            requested_row=value.requested_row,
+            requested_column=value.requested_column,
+            requested_by=value.requested_by,
+            requested_at=value.requested_at,
+            status=value.status.value,
+            approved_by=value.approved_by,
+            approved_at=value.approved_at,
+        )

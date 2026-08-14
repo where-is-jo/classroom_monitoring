@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>classroom-admin.js form[data-api-url] contract test</title>
+</head>
+<body>
+  <!-- create.html과 동일한 구조: data-api-url/data-api-method만 있고 action/method는 없다. -->
+  <form id="create-form" data-api-url="/api/v1/classrooms" data-api-method="POST" data-success-url="/classrooms">
+    <p class="form-error" data-form-error hidden></p>
+    <input name="code" type="text" value="A101">
+    <input name="name" type="text" value="일반 강의실">
+    <input name="location" type="text" value="A동 1층">
+    <button type="submit">등록</button>
+  </form>
+
+  <!-- edit.html과 동일한 구조: checkbox(is_active) 포함. -->
+  <form id="edit-form" data-api-url="/api/v1/classrooms/room-1" data-api-method="PUT" data-success-url="/classrooms?classroom_id=room-1">
+    <p class="form-error" data-form-error hidden></p>
+    <input name="code" type="text" value="B101">
+    <input name="name" type="text" value="실습실">
+    <input name="location" type="text" value="B동 1층">
+    <label>활성화<input name="is_active" type="checkbox" checked></label>
+    <button type="submit">저장</button>
+  </form>
+
+  <pre id="test-results"></pre>
+
+  <script>
+    /* ===== 테스트 harness stubs (fetch를 대역으로 교체) =====
+       성공 응답은 window.location.href 변경(실제 이동)을 유발하므로 여기서는
+       실패 응답만 사용해 요청 payload·오류 표시를 검증한다. */
+    window.__results = { calls: [], checkpoints: [], done: false };
+    window.__scenario = { status: 422, message: "테스트 검증 오류" };
+
+    window.fetch = function (url, options) {
+      options = options || {};
+      var method = (options.method || "GET").toUpperCase();
+      var entry = { url: String(url), method: method };
+      if (options.headers && options.headers["Content-Type"]) {
+        entry.contentType = options.headers["Content-Type"];
+      }
+      if (typeof options.body === "string") {
+        entry.body = options.body;
+      }
+      window.__results.calls.push(entry);
+      return Promise.resolve({
+        ok: false,
+        status: window.__scenario.status,
+        json: function () {
+          return Promise.resolve({ error: { code: "TEST_ERROR", message: window.__scenario.message } });
+        }
+      });
+    };
+  </script>
+
+  <script src="{{ ADMIN_JS_URI }}" defer></script>
+
+  <script>
+    (async function run() {
+      var results = window.__results;
+
+      function checkpoint(name, ok, detail) {
+        results.checkpoints.push({ name: name, ok: !!ok, detail: detail == null ? null : String(detail) });
+      }
+
+      function tick() {
+        return new Promise(function (resolve) { setTimeout(resolve, 50); });
+      }
+
+      try {
+        await new Promise(function (resolve) {
+          if (document.readyState === "interactive" || document.readyState === "complete") {
+            resolve();
+          } else {
+            document.addEventListener("DOMContentLoaded", resolve, { once: true });
+          }
+        });
+        await tick(); /* deferred script의 핸들러 등록 완료 대기 */
+
+        /* 1) 강의실 생성 폼 제출 → POST /api/v1/classrooms, code/name/location payload */
+        var createForm = document.getElementById("create-form");
+        createForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+        await tick();
+        var createCalls = results.calls.filter(function (c) { return c.url === "/api/v1/classrooms"; });
+        var createBody = null;
+        try { createBody = createCalls[0] ? JSON.parse(createCalls[0].body) : null; } catch (e) { createBody = null; }
+        checkpoint("create-form-posts-with-payload",
+          createCalls.length === 1 &&
+          createCalls[0].method === "POST" &&
+          createCalls[0].contentType === "application/json" &&
+          createBody && createBody.code === "A101" && createBody.name === "일반 강의실" &&
+          createBody.location === "A동 1층",
+          JSON.stringify(createCalls));
+
+        var createError = createForm.querySelector("[data-form-error]");
+        checkpoint("create-form-shows-api-error",
+          createError && createError.hidden === false && createError.textContent.indexOf("테스트 검증 오류") !== -1,
+          createError && createError.textContent);
+
+        /* 2) 강의실 수정 폼 제출 → PUT /api/v1/classrooms/room-1, is_active 포함 */
+        var editForm = document.getElementById("edit-form");
+        editForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+        await tick();
+        var editCalls = results.calls.filter(function (c) { return c.url === "/api/v1/classrooms/room-1"; });
+        var editBody = null;
+        try { editBody = editCalls[0] ? JSON.parse(editCalls[0].body) : null; } catch (e) { editBody = null; }
+        checkpoint("edit-form-puts-with-payload",
+          editCalls.length === 1 &&
+          editCalls[0].method === "PUT" &&
+          editCalls[0].contentType === "application/json" &&
+          editBody && editBody.code === "B101" && editBody.name === "실습실" &&
+          editBody.location === "B동 1층" && editBody.is_active === true,
+          JSON.stringify(editCalls));
+
+        results.done = true;
+      } catch (err) {
+        results.error = String((err && err.stack) || err);
+        checkpoint("harness-error", false, String((err && err.message) || err));
+      }
+
+      document.getElementById("test-results").textContent = JSON.stringify(results);
+    })();
+  </script>
+</body>
+</html>
