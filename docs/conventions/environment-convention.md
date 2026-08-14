@@ -11,9 +11,9 @@
 
 각 서비스와 RPA는 `.env.example`과 `config/settings.yml`을 둔다.
 
-- **`.env.example`은 커밋한다. 실제 값이 든 `.env.local`/`.env.dev`/`.env.prod`는
-  커밋하지 않는다.** 파일 이름의 `local`/`dev`/`prod`는 [환경 구분](#환경-구분)의
-  세 값과 같다.
+- **`.env.example`은 커밋한다. 실제 값이 든 파일은 어떤 이름이든 커밋하지 않는다.**
+  파일 이름의 `local`/`dev`/`prod`는 [환경 구분](#환경-구분)의 세 값과 같다.
+  실제 값을 어느 파일에 적는지는 실행 방식에 따라 갈린다 — 바로 아래 절을 본다.
 - `.env.example`에는 **변수 이름과 설명만** 넣는다. 실제 값은 넣지 않는다.
 - **`config/settings.yml`은 커밋한다.** 환경과 무관하게 같은 값이므로 실제 값을 그대로
   적어 둔다 — 비밀값이 아니다.
@@ -42,12 +42,51 @@ max_retry: 3
 `.env.example`에서 값이 없는 항목은 비워둔다. 그럴듯한 가짜 값을 채워두면 실제 값으로
 오인된다. 형식을 알려줘야 하면 주석에 예시로 적는다.
 
+### 실행 방식에 따라 값을 채우는 파일이 다르다
+
+**변수 이름의 기준은 언제나 커밋된 `.env.example` 하나다.** 값을 어디에 적는지만 갈린다.
+
+| 실행 방식 | 값을 적는 곳 |
+| --- | --- |
+| 소스에서 직접 실행 (개발자 PC) | `<서비스>/.env.local` |
+| 컨테이너로 실행 (로컬 compose 검증, dev·prod 서버) | `.docker/env/<서비스>.<환경>.env` |
+
+컨테이너 쪽이 서비스 디렉터리 밖에 있는 이유는 **서버에 서비스 소스가 없기** 때문이다.
+서버는 GHCR 이미지를 pull하고 `.docker/`만 받는다 ([결정 0017](../architecture/decisions.md)).
+
+그래서 `<서비스>/.env.dev`와 `.env.prod`는 실제로 만들지 않는다. 로더는 계속 지원하므로
+디버깅 목적으로 소스에서 dev 설정을 띄우고 싶으면 만들어 써도 된다.
+
+### 세 계층을 섞지 않는다
+
+컨테이너로 띄울 때 환경변수는 성격이 다른 세 계층으로 나뉜다. 어느 계층인지 먼저 정하고
+파일을 고른다.
+
+| 계층 | 예 | 컨테이너에 들어가나 | 파일 |
+| --- | --- | --- | --- |
+| compose `${...}` 치환 | 이미지 태그, 호스트 경로, 공인 IP, 대외 포트 | 아니오 | `.docker/.env.<환경>` |
+| 컨테이너 앱 설정 | `DATABASE_URL`, `STREAM_SOURCES`, `SNAPSHOT_STORAGE_*` | 예 (`env_file`) | `.docker/env/<서비스>.<환경>.env` |
+| 서드파티 자격증명 | MinIO root, Grafana admin, n8n | 예 (`env_file`) | `.docker/env/<서드파티>.<환경>.env` |
+
+첫 계층은 compose가 파일을 해석할 때만 쓰고 컨테이너 안으로 들어가지 않는다. Python
+`Settings`가 읽지 않으므로 **`.env.example`에 넣지 않는다.**
+
+`.docker/.env`(환경 접미사 없는 이름)는 일부러 두지 않는다. 두면 `--env-file`을 빠뜨렸을 때
+compose가 조용히 그 파일을 집어 들어 로컬 값으로 서버를 띄운다. 없으면 즉시 실패한다.
+
+```bash
+docker compose --env-file .docker/.env.dev   -f .docker/compose.main.yml up -d
+docker compose --env-file .docker/.env.local -f .docker/compose.main.yml up -d
+```
+
 ### 어떤 파일을 읽는지는 실제 OS 환경변수 `APP_ENV`가 정한다
 
-실행 전에 셸에서 `APP_ENV`를 export하거나(`export APP_ENV=dev`) docker-compose의
-`environment:`로 주입한다. 이 값이 서비스 디렉터리의 `.env.{APP_ENV}` 중 어느 파일을
-읽을지 정한다. **export하지 않으면 `local`로 본다** — 손이 덜 가는 local을 기본값으로
-두는 원칙과 같다.
+소스에서 실행할 때는 셸에서 export한다(`export APP_ENV=dev`). 컨테이너로 띄울 때는
+`--env-file`로 고른 `.docker/.env.<환경>`의 `APP_ENV`가 `env_file` 경로의 `${APP_ENV}`를
+채우고, compose가 `environment:`로 컨테이너에도 같은 값을 주입한다 — 그래서 **선택한
+파일과 컨테이너 안의 `APP_ENV`가 어긋날 수 없다.**
+
+**export하지 않으면 `local`로 본다** — 손이 덜 가는 local을 기본값으로 두는 원칙과 같다.
 
 우선순위는 **실제 OS 환경변수 > `.env.{APP_ENV}` 파일 > `config/settings.yml`**이다.
 `config/settings.yml`에 있는 값도 필요하면 `.env.*`나 실제 export로 즉석에서 재정의할
@@ -72,8 +111,11 @@ Python 서비스는 Pydantic Settings의 `yaml_file`과 `settings_customise_sour
 - **비밀값에 기본값을 주지 않는다.** 개발 편의로 넣은 기본값이 운영까지 따라간다.
 - 비밀값을 로그·오류 메시지·응답에 출력하지 않는다.
 - 설정 객체를 통째로 로그에 찍지 않는다.
-- 비밀 관리 수단(운영 환경에서 값을 어떻게 주입할지)은 **결정 필요** 항목이다.
-  확정 전까지는 각 실행 환경의 환경변수로 주입한다.
+- **비밀 관리 수단은 실행 호스트의 파일이다** ([결정 0017](../architecture/decisions.md)).
+  dev/prod 값은 그 호스트의 `.docker/env/<서비스>.<환경>.env`에만 두고 소유자 전용
+  권한으로 막는다(`chmod 600`). secret manager는 현 단계에서 도입하지 않는다 —
+  prod가 아직 배포되지 않아 검증할 환경이 없다. prod 배포가 시작되면 재검토한다.
+- 값을 저장소로 가져오지 않는다. 서버 값이 필요하면 그 호스트에서 직접 본다.
 
 이미 커밋된 비밀값은 이력에서 지우는 것으로 해결되지 않는다.
 해당 자격 증명을 폐기하고 팀에 알린다. [Git 규칙](./git-convention.md#커밋하지-않는-것) 참고.

@@ -75,6 +75,7 @@
 | [0014](#0014--github-actions로-develop-병합-시-ci-검증과-ghcr-이미지-자동-빌드) | GitHub Actions로 develop 병합 시 CI 검증과 GHCR 이미지 자동 빌드 | 확정 |
 | [0015](#0015--서비스-설정을-localdevprod-env와-공용-configsettingsyml로-분리한다) | 서비스 설정을 local/dev/prod .env와 공용 config/settings.yml로 분리한다 | 확정 |
 | [0016](#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다) | 자연어 검색에서 LLM은 계획만 만들고 검증·조회는 fastapi가 소유한다 | 확정 |
+| [0017](#0017--컨테이너-실행의-환경변수를-세-계층으로-나누고-docker-아래에-둔다) | 컨테이너 실행의 환경변수를 세 계층으로 나누고 `.docker/` 아래에 둔다 | 확정 |
 
 ---
 
@@ -937,3 +938,87 @@ llama-server는 추론 워커와 같은 GPU를 쓴다. 인증이 없는 상태(�
   속한다(api-convention). 지금은 브라우저가 쓰는 제품 API 하나만 둔다.
 - 동시 실행 제한은 두지 않았다. GPU 경합이 실제로 관측되면 얼굴 등록의 "활성 세션
   하나" 방식을 참고해 추가한다.
+
+---
+
+## 0017 · 컨테이너 실행의 환경변수를 세 계층으로 나누고 .docker/ 아래에 둔다
+
+**상태**: 확정
+
+**배경**: [결정 0015](#0015--서비스-설정을-localdevprod-env와-공용-configsettingsyml로-분리한다)가
+`<서비스>/.env.{local,dev,prod}` 체계를 정했지만, 값 이관을 시작하자 그 경로를
+컨테이너 배포에 쓸 수 없다는 것이 드러났다. **공용 GPU 서버에는 `webapps/fastapi`와
+`worker` 소스가 없다** — GHCR 이미지를 pull하고 `.docker/`와 값 파일만 scp로 받는다.
+`env_file: ../webapps/fastapi/.env.dev`는 서버에서 경로가 존재하지 않는다.
+
+동시에 구 체계가 실제로 일으키던 문제도 확인했다.
+
+- 루트 `.env` 하나가 로컬용과 서버용을 겸해, 로컬에서 검증하려면 Atlas 주소와 서버 IP를
+  손으로 되돌렸다가 다시 넣어야 했다. `.docker/.env`도 같았다.
+- 루트 `.env`와 `env/worker.env`가 각각 `APP_ENV=dev`와 `APP_ENV=prod`를 갖고 있었다 —
+  같은 서버의 두 컨테이너가 서로 다른 환경을 주장했다.
+- `Settings`에 없는 죽은 변수가 루트 `.env`에 24개 남아 있었다(0015가 센 18개보다 많다).
+  `AUTH_*` 12개, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `CSRF_SECRET`,
+  `AUDIT_IP_HASH_SECRET`, `WEB_ORIGIN`, `EMPLOYEE_AWAY_AFTER_SECONDS`,
+  `EMPLOYEE_OFFSITE_AFTER_SECONDS`, `HIGH_CONFIDENCE_THRESHOLD`,
+  `MEDIUM_CONFIDENCE_THRESHOLD`, `MOCK_INPUTS_ENABLED`,
+  `NOTIFICATION_MOCK_DELIVERY_MODE`, `NOTIFICATION_MOCK_DELIVERY_MAX_ATTEMPTS`,
+  `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS`. `webapps/fastapi` 전체 grep에서 사용처가 없다.
+- 최상위 `env/` 디렉터리는 [최상위 구조 제약](../agents/AGENTS.md)이 허용하는 목록에
+  없다. `.gitignore` 대상이라 드러나지 않았을 뿐이다.
+
+**결정**:
+
+1. 컨테이너 실행의 환경변수를 세 계층으로 나눈다. **첫 계층은 `.env.example`에 넣지
+   않는다** — Python `Settings`가 읽지 않기 때문이다.
+
+   | 계층 | 컨테이너에 들어가나 | 파일 |
+   | --- | --- | --- |
+   | compose `${...}` 치환 (이미지 태그, 호스트 경로, 공인 IP) | 아니오 | `.docker/.env.<환경>` |
+   | 컨테이너 앱 설정 | 예 (`env_file`) | `.docker/env/<서비스>.<환경>.env` |
+   | 서드파티 자격증명 (MinIO·Grafana·n8n) | 예 (`env_file`) | `.docker/env/<서드파티>.<환경>.env` |
+
+2. 세 계층 모두에 `local`/`dev`/`prod`라는 **같은 축**을 적용한다. compose 치환 계층은
+   `--env-file`로 고르고, 그 파일의 `APP_ENV`가 `env_file` 경로의 `${APP_ENV}`를 채워
+   나머지 두 계층을 함께 정렬시킨다. compose는 `environment:`로 컨테이너에도 같은
+   `APP_ENV`를 주입해, 고른 파일과 런타임 값이 어긋날 수 없게 한다.
+3. **자동으로 읽히는 `.docker/.env`는 두지 않는다.** 두면 `--env-file`을 빠뜨렸을 때
+   compose가 조용히 그 파일을 집어 든다. 없으면 `${FASTAPI_IMAGE}`가 비어 즉시 실패한다.
+4. 소스에서 직접 실행할 때는 `<서비스>/.env.local`을 쓴다. `<서비스>/.env.dev`와
+   `.env.prod`는 만들지 않는다 — dev/prod는 컨테이너로만 돈다. 로더는 계속 지원한다.
+   **변수 이름의 기준은 실행 방식과 무관하게 커밋된 `.env.example` 하나다.**
+5. dev/prod 비밀값은 **실행 호스트의 파일**로 주입하고 소유자 전용 권한(`chmod 600`)으로
+   막는다. secret manager는 도입하지 않는다.
+6. 죽은 변수 24개는 옮기지 않고 버린다. 위 배경의 목록이 그 기록이다.
+7. 최상위 `env/` 디렉터리를 없애고 내용을 `.docker/env/`로 옮긴다.
+
+**대안**:
+
+- **서버에 소스 없는 빈 서비스 디렉터리를 만들어 0015의 경로를 그대로 쓴다** —
+  `webapps/fastapi/.env.dev`만 있고 소스가 없는 디렉터리는 "여기 소스가 있나?"를
+  매번 확인하게 만든다. 규칙 경로를 지키려고 서버 레이아웃을 왜곡하는 셈이다.
+- **`.env.{APP_ENV}`를 컨테이너에 volume으로 마운트** — 로컬 실행과 경로까지 같아지지만,
+  비밀값이 파일 형태로 컨테이너에 들어가고 마운트 관리가 서비스마다 늘어난다.
+  `env_file`은 값만 프로세스 환경으로 넣는다.
+- **Docker secrets** — `file_secret_settings` 자리는 이미 소스 튜플에 열려 있다. 그러나
+  서드파티 컨테이너(MinIO·Grafana·n8n)는 이 방식을 쓰지 않아 규칙이 둘로 갈린다.
+- **SOPS + age로 암호화해 커밋** — 값이 버전 관리되는 이점이 있으나 복호화 키 배포라는
+  같은 문제를 한 단계 미룰 뿐이다.
+- **외부 secret manager** — 가장 안전하지만 prod가 아직 배포되지 않아
+  ([결정 0010](#0010--운영-접근-통제가-정해지기-전까지-prod-배포를-하지-않는다)) 검증할
+  환경이 없다. 운영 인프라만 먼저 늘어난다.
+
+**결과**: "이 환경의 이 값이 어디서 오는가"의 답이 파일 이름 하나로 고정된다. 관리할
+파일 수는 dev 서버 기준 6개로 이전과 같지만, 이름이 서비스·환경·계층을 드러낸다.
+로컬 검증할 때 서버 값을 손으로 되돌릴 필요가 없어졌고, 배포 전송 대상이 `.docker/`
+하나로 줄었다. `APP_ENV` 불일치는 구조적으로 불가능해졌다.
+
+이 결정은 0015를 대체하지 않는다. 0015가 정한 `.env`/`config/settings.yml` 분리와
+읽기 우선순위는 그대로이고, 여기서는 **컨테이너 실행에서 그 `.env` 자리에 무엇이
+오는가**만 정한다.
+
+**남은 일**: dev 서버의 실제 값 이관과 재기동은 SSH 접근이 필요해 아직 하지 않았다 —
+`.docker/README.server.md`의 절차를 따라 사람이 실행해야 한다. MinIO root 키를 worker와
+fastapi가 공용으로 쓰는 상태(2026-08-12 결정)와 Grafana admin 비밀번호는 **운영 전환 전
+재발급이 필요하다.** `deeplearning`은 이번 범위 밖이라 여전히 순수 `os.environ`을 쓰고,
+`FACE_DETECTION_MODEL_PATH`·`FACE_LANDMARKER_MODEL_PATH`는 어떤 `.env.example`에도 없다.
