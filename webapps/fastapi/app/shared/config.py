@@ -162,7 +162,6 @@ class Settings(BaseSettings):
         if self.app_env != "local" and self.face_local_sample_storage_enabled:
             raise ValueError("얼굴 샘플 로컬 저장은 APP_ENV=local에서만 사용할 수 있습니다.")
         if self.page_size_default > self.page_size_max:
-            raise ValueError("PAGE_SIZE_DEFAULT must be less than or equal to PAGE_SIZE_MAX.")
             raise ValueError("PAGE_SIZE_DEFAULT는 PAGE_SIZE_MAX 이하여야 합니다.")
         quota_total = sum(
             (
