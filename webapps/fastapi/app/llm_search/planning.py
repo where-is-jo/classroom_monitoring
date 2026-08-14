@@ -51,12 +51,16 @@ def parse_plan(
     text: str,
     *,
     max_span_days: int,
-    default_limit: int,
+    limit_ceiling: int,
 ) -> SearchQuery:
     """모델 원문을 검증된 `SearchQuery`로 바꾼다.
 
     규격을 벗어나면 `LlmSearchPlanInvalidError`를 던진다. 사유 코드는 우리가 정의한
     값이며 모델이 쓴 글자를 절대 담지 않는다.
+
+    `limit_ceiling`은 **호출자가 요청한 상한**이다. 모델이 더 큰 수를 내도 이 값을
+    넘지 못한다. 모델이 호출자의 요청을 덮어쓸 수 있으면 API 계약이 깨진다 —
+    3건을 요청했는데 20건이 오는 일이 생긴다.
     """
     if len(text.encode("utf-8")) > MAX_PLAN_TEXT_BYTES:
         raise LlmSearchPlanInvalidError("PLAN_TOO_LARGE")
@@ -85,7 +89,7 @@ def parse_plan(
         from_at = to_at - max_span
         notes.append(f"조회 기간이 너무 길어 마지막 {max_span_days}일만 찾았습니다.")
 
-    limit, limit_note = _limit(payload, default_limit)
+    limit, limit_note = _limit(payload, limit_ceiling)
     if limit_note is not None:
         notes.append(limit_note)
 
@@ -166,18 +170,19 @@ def _required_datetime(payload: dict[str, Any], key: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _limit(payload: dict[str, Any], default_limit: int) -> tuple[int, str | None]:
+def _limit(payload: dict[str, Any], ceiling: int) -> tuple[int, str | None]:
+    effective_ceiling = _clamp(ceiling, MAX_LIMIT)
     value = payload.get("limit")
     if value is None:
-        return _clamp(default_limit), None
+        return effective_ceiling, None
     # bool은 int의 하위 타입이라 isinstance만으로는 걸러지지 않는다. true가 1이 된다.
     if isinstance(value, bool) or not isinstance(value, int):
         raise LlmSearchPlanInvalidError("INVALID_TYPE")
-    clamped = _clamp(value)
+    clamped = _clamp(value, effective_ceiling)
     if clamped != value:
-        return clamped, f"한 번에 보여줄 수 있는 최대 {MAX_LIMIT}건으로 줄였습니다."
+        return clamped, f"결과를 최대 {clamped}건까지만 보여 줍니다."
     return clamped, None
 
 
-def _clamp(value: int) -> int:
-    return min(max(value, 1), MAX_LIMIT)
+def _clamp(value: int, ceiling: int) -> int:
+    return min(max(value, 1), ceiling)

@@ -18,7 +18,7 @@ from .models import CameraChoice
 
 # app/video_monitoring/service.py와 같은 값을 쓴다. 이 서비스가 다루는 강의실이
 # 한국에 있다는 사실은 설정이 아니라 전제다.
-_KST = ZoneInfo("Asia/Seoul")
+KST = ZoneInfo("Asia/Seoul")
 
 _INSTRUCTION = """\
 너는 강의실 모니터링 시스템의 검색 조건 변환기다.
@@ -36,7 +36,7 @@ _INSTRUCTION = """\
 - from은 to보다 앞서야 한다. 같으면 안 된다.
 - to는 구간의 끝이며 그 시각 자체는 포함되지 않는다. "6시부터 7시 사이"는 06:00~07:00이다.
 - 기간을 말하지 않았으면 오늘 하루(KST 00:00 ~ 다음날 00:00)로 잡아라.
-- limit은 1 이상 {max_limit} 이하의 정수다. 말하지 않았으면 {default_limit}을 쓴다.
+- limit은 1 이상 {max_limit} 이하의 정수다. 말하지 않았으면 {max_limit}을 쓴다.
 - 위 여섯 개 말고 다른 키를 넣지 마라.
 
 강의실이나 카메라를 특정했으면 아래 목록의 식별자를 그대로 쓴다.
@@ -53,17 +53,18 @@ def build_system_prompt(
     now: datetime,
     cameras: Sequence[CameraChoice],
     max_limit: int,
-    default_limit: int,
 ) -> str:
     """모델에게 줄 지시문을 만든다.
 
     `now`는 호출자가 한 번만 구해서 넘긴다. 프롬프트의 "지금"과 검증의 "지금"이
     다른 값이면 경계 시각에서 결과가 어긋난다.
+
+    `max_limit`은 호출자가 요청한 상한과 같은 값이어야 한다. 지시문이 허용한 수를
+    검증이 되돌려 깎으면, 모델은 규격을 지켰는데 결과가 줄어든 것처럼 보인다.
     """
-    now_kst = now.astimezone(_KST)
+    now_kst = now.astimezone(KST)
     return _INSTRUCTION.format(
         max_limit=max_limit,
-        default_limit=default_limit,
         camera_lines=_format_cameras(cameras),
         now_kst=now_kst.strftime("%Y-%m-%d %H:%M:%S"),
         now_utc=now.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"),

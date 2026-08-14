@@ -24,8 +24,8 @@ _VALID = {
 }
 
 
-def _parse(text: str, *, max_span_days: int = 7, default_limit: int = 20) -> object:
-    return parse_plan(text, max_span_days=max_span_days, default_limit=default_limit)
+def _parse(text: str, *, max_span_days: int = 7, limit_ceiling: int = 20) -> object:
+    return parse_plan(text, max_span_days=max_span_days, limit_ceiling=limit_ceiling)
 
 
 def _reason(text: str, *, max_span_days: int = 7) -> str:
@@ -35,7 +35,7 @@ def _reason(text: str, *, max_span_days: int = 7) -> str:
 
 
 def test_규격에_맞는_응답을_검색_조건으로_바꾼다() -> None:
-    query = parse_plan(json.dumps(_VALID), max_span_days=7, default_limit=20)
+    query = parse_plan(json.dumps(_VALID), max_span_days=7, limit_ceiling=20)
 
     assert query.camera_id is None
     assert query.classroom_id == "A101"
@@ -48,7 +48,7 @@ def test_규격에_맞는_응답을_검색_조건으로_바꾼다() -> None:
 def test_코드펜스로_감싼_응답도_읽는다() -> None:
     text = f"```json\n{json.dumps(_VALID)}\n```"
 
-    query = parse_plan(text, max_span_days=7, default_limit=20)
+    query = parse_plan(text, max_span_days=7, limit_ceiling=20)
 
     assert query.classroom_id == "A101"
 
@@ -56,7 +56,7 @@ def test_코드펜스로_감싼_응답도_읽는다() -> None:
 def test_앞뒤에_설명이_붙어도_읽는다() -> None:
     text = f"네, 아래와 같이 변환했습니다.\n{json.dumps(_VALID)}\n필요하면 알려주세요."
 
-    query = parse_plan(text, max_span_days=7, default_limit=20)
+    query = parse_plan(text, max_span_days=7, limit_ceiling=20)
 
     assert query.classroom_id == "A101"
 
@@ -64,7 +64,7 @@ def test_앞뒤에_설명이_붙어도_읽는다() -> None:
 def test_시각대가_다른_표기도_UTC로_맞춘다() -> None:
     payload = {**_VALID, "from": "2026-08-14T15:00:00+09:00", "to": "2026-08-14T16:00:00+09:00"}
 
-    query = parse_plan(json.dumps(payload), max_span_days=7, default_limit=20)
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=20)
 
     assert query.from_at == datetime(2026, 8, 14, 6, 0, tzinfo=UTC)
 
@@ -72,7 +72,7 @@ def test_시각대가_다른_표기도_UTC로_맞춘다() -> None:
 def test_빈_문자열_식별자는_지정하지_않은_것으로_본다() -> None:
     payload = {**_VALID, "classroom_id": "   "}
 
-    query = parse_plan(json.dumps(payload), max_span_days=7, default_limit=20)
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=20)
 
     assert query.classroom_id is None
 
@@ -173,26 +173,35 @@ def test_기간_상한을_넘으면_거절하지_않고_줄인_뒤_알린다() -
     """'이번 달'은 일상적인 질문이다. 422로 돌려주면 쓸 수 없다."""
     payload = {**_VALID, "from": "2026-07-01T00:00:00Z", "to": "2026-08-14T00:00:00Z"}
 
-    query = parse_plan(json.dumps(payload), max_span_days=7, default_limit=20)
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=20)
 
     assert query.to_at == datetime(2026, 8, 14, 0, 0, tzinfo=UTC)
     assert query.from_at == datetime(2026, 8, 7, 0, 0, tzinfo=UTC)
     assert query.notes == ("조회 기간이 너무 길어 마지막 7일만 찾았습니다.",)
 
 
-def test_limit이_상한을_넘으면_줄인_뒤_알린다() -> None:
+def test_모델이_요청_상한을_넘기면_상한으로_깎고_알린다() -> None:
+    """모델이 호출자의 요청을 덮어쓸 수 있으면 API 계약이 깨진다."""
     payload = {**_VALID, "limit": 100000}
 
-    query = parse_plan(json.dumps(payload), max_span_days=7, default_limit=20)
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=8)
 
-    assert query.limit == MAX_LIMIT
+    assert query.limit == 8
     assert len(query.notes) == 1
 
 
-def test_limit이_없으면_요청값을_쓴다() -> None:
+def test_요청_상한도_절대_상한을_넘지_못한다() -> None:
+    payload = {**_VALID, "limit": 100000}
+
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=100000)
+
+    assert query.limit == MAX_LIMIT
+
+
+def test_limit이_없으면_요청_상한을_쓴다() -> None:
     payload = {key: value for key, value in _VALID.items() if key != "limit"}
 
-    query = parse_plan(json.dumps(payload), max_span_days=7, default_limit=5)
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=5)
 
     assert query.limit == 5
     assert query.notes == ()

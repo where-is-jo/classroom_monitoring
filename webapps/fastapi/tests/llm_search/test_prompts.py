@@ -16,7 +16,7 @@ _NOW = datetime(2026, 8, 14, 0, 30, tzinfo=UTC)  # KST로는 같은 날 09:30
 
 
 def _prompt(cameras: list[CameraChoice]) -> str:
-    return build_system_prompt(now=_NOW, cameras=cameras, max_limit=MAX_LIMIT, default_limit=20)
+    return build_system_prompt(now=_NOW, cameras=cameras, max_limit=MAX_LIMIT)
 
 
 def test_현재_시각을_KST와_UTC로_함께_알려준다() -> None:
