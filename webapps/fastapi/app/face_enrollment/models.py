@@ -77,6 +77,14 @@ class FaceAnalysis:
 
 
 @dataclass(frozen=True)
+class FaceSampleMetadata:
+    sample_id: str
+    pose: PoseBin
+    captured_at: datetime
+    analysis: FaceAnalysis
+
+
+@dataclass(frozen=True)
 class FrameDecision:
     enrollment: FaceEnrollment
     accepted: bool

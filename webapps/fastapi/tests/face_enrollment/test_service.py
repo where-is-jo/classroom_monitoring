@@ -42,6 +42,7 @@ def make_service(*, required: int = 5) -> FaceEnrollmentService:
         InMemoryFaceObjectStorage(),
         SyntheticFaceAnalyzer(),
         required_sample_count=required,
+        augmented_sample_count=0,
         pose_quotas=dict.fromkeys(PoseBin, 1),
         thresholds=make_thresholds(),
         clock=lambda: datetime(2026, 8, 12, tzinfo=UTC),
@@ -121,7 +122,9 @@ def test_valid_pose_is_collected_without_sequential_direction_gate() -> None:
     right = service.process_frame(enrollment_id, b"RIGHT")
     assert right.accepted
     assert right.rejection_code is None
-    assert right.enrollment.guidance_code == "MOVE_SLOWLY"
+    assert right.enrollment.guidance_code == "LOOK_FRONT"
+    assert "정면" in right.enrollment.guidance_message
+    assert "장" not in right.enrollment.guidance_message
     assert right.enrollment.valid_sample_count == 1
     right_progress = next(
         item for item in right.enrollment.pose_progress if item.pose == PoseBin.RIGHT
@@ -142,6 +145,7 @@ def test_stored_sample_keeps_masked_frame_and_uses_readable_name() -> None:
         storage,
         SyntheticFaceAnalyzer(),
         required_sample_count=5,
+        augmented_sample_count=0,
         pose_quotas=dict.fromkeys(PoseBin, 1),
         thresholds=make_thresholds(),
         clock=lambda: datetime(2026, 8, 12, tzinfo=UTC),
