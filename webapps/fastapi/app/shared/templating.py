@@ -74,7 +74,9 @@ def _nav_classrooms() -> list[Classroom]:
             page = factory().list_classrooms(limit=1, offset=0)
         else:
             settings = get_settings()
-            service = get_classroom_service(get_classroom_repository(settings), settings)
+            service = get_classroom_service(
+                get_classroom_repository(settings), settings=settings
+            )
             page = service.list_classrooms(limit=1, offset=0)
         return page.items
     except Exception:

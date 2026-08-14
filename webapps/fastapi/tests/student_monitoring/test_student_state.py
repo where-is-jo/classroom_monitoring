@@ -17,8 +17,10 @@ from app.classrooms.models import (
 )
 from app.classrooms.service import ClassroomService
 from app.main import app
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
 from app.shared.dependencies import get_student_monitoring_service
+from app.shared.student_identity import StudentIdentity
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
     MemoryVideoSegmentRepository,
@@ -30,8 +32,6 @@ from app.student_monitoring.models import (
     StudentState,
 )
 from app.student_monitoring.service import StudentMonitoringService
-from app.students.adapters.memory_repository import InMemoryStudentRepository
-from app.students.models import Student
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 
 _CLASSROOM_ID = "classroom-a101"
@@ -79,7 +79,7 @@ def _classroom_service() -> ClassroomService:
 
 def _make_service(
     *,
-    student_repository: InMemoryStudentRepository | None = None,
+    student_lookup: InMemoryStudentLookup | None = None,
 ) -> StudentMonitoringService:
     return StudentMonitoringService(
         detection_repository=MemoryDetectionEventRepository(),
@@ -89,7 +89,7 @@ def _make_service(
         classroom_service=_classroom_service(),
         occupancy_confidence_threshold=0.5,
         identity_confidence_threshold=0.5,
-        student_repository=student_repository,
+        student_lookup=student_lookup,
     )
 
 
@@ -258,20 +258,18 @@ class TestJudgeStudentStates:
         assert result[0].current_state == StudentState.PRESENT
 
     def test_student_name_and_seat_label_resolved(self) -> None:
-        """학생 저장소와 좌석 라벨이 결과에 채워진다."""
-        student_repository = InMemoryStudentRepository()
-        student_repository.create(
-            Student(
-                id="s1",
-                student_no="20260001",
-                name="홍길동",
-                department="컴퓨터공학과",
-                is_active=True,
-                created_at=_clock(),
-                updated_at=_clock(),
+        """학생 lookup과 좌석 라벨이 결과에 채워진다."""
+        student_lookup = InMemoryStudentLookup(
+            identities=(
+                StudentIdentity(
+                    id="s1",
+                    student_no="20260001",
+                    name="홍길동",
+                    is_active=True,
+                ),
             )
         )
-        service = _make_service(student_repository=student_repository)
+        service = _make_service(student_lookup=student_lookup)
         result = _judge(
             service,
             (_person("det-1", (150, 150, 250, 250), student_id="s1"),),
@@ -282,6 +280,68 @@ class TestJudgeStudentStates:
         assert result[0].student_name == "홍길동"
         assert result[0].student_no == "20260001"
         assert result[0].assigned_seat_label == "좌석 1"
+
+    def test_unknown_student_keeps_blank_name_and_no(self) -> None:
+        """lookup에 없는 학생은 blank name/no로 판단하고 throw하지 않는다."""
+        service = _make_service(
+            student_lookup=InMemoryStudentLookup(
+                identities=(
+                    StudentIdentity(
+                        id="s2",
+                        student_no="20260002",
+                        name="김철수",
+                        is_active=True,
+                    ),
+                )
+            )
+        )
+        result = _judge(
+            service,
+            (_person("det-1", (150, 150, 250, 250), student_id="unknown-1"),),
+            assignments=(_assignment("unknown-1", "seat-1"),),
+        )
+
+        assert len(result) == 1
+        assert result[0].student_name == ""
+        assert result[0].student_no == ""
+
+    def test_inactive_student_keeps_blank_name_and_no(self) -> None:
+        """inactive 학생은 blank name/no로 판단하고 throw하지 않는다."""
+        service = _make_service(
+            student_lookup=InMemoryStudentLookup(
+                identities=(
+                    StudentIdentity(
+                        id="s1",
+                        student_no="20260001",
+                        name="홍길동",
+                        is_active=False,
+                    ),
+                )
+            )
+        )
+        result = _judge(
+            service,
+            (_person("det-1", (150, 150, 250, 250), student_id="s1"),),
+            assignments=(_assignment("s1", "seat-1"),),
+        )
+
+        assert len(result) == 1
+        assert result[0].student_name == ""
+        assert result[0].student_no == ""
+
+    def test_missing_lookup_does_not_throw(self) -> None:
+        """student_lookup이 None이어도 판정은 정상 동작하고 throw하지 않는다."""
+        service = _make_service(student_lookup=None)
+        result = _judge(
+            service,
+            (_person("det-1", (150, 150, 250, 250), student_id="s1"),),
+            assignments=(_assignment("s1", "seat-1"),),
+        )
+
+        assert len(result) == 1
+        assert result[0].student_name == ""
+        assert result[0].student_no == ""
+        assert result[0].current_state == StudentState.PRESENT
 
 
 class TestListStudentStates:

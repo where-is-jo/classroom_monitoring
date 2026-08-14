@@ -11,7 +11,7 @@ from ..classrooms.mapping import find_seat_for_detection, map_detections_to_obse
 from ..classrooms.models import Seat, SeatAssignment, SeatObservation
 from ..classrooms.service import ClassroomService
 from ..shared.broadcaster import InMemoryBroadcaster
-from ..students.ports import StudentRepository
+from ..shared.student_identity import StudentLookupPort
 from ..video_monitoring.ports import VideoStreamRepository
 from .errors import VideoStreamNotFoundError
 from .models import (
@@ -48,7 +48,7 @@ class StudentMonitoringService:
         *,
         occupancy_confidence_threshold: float,
         identity_confidence_threshold: float = 0.5,  # R9: 신뢰도 임계값
-        student_repository: StudentRepository | None = None,  # 학생 이름 조회용
+        student_lookup: StudentLookupPort | None = None,  # 학생 이름 조회용 (중립 계약)
     ) -> None:
         self._detection_repository = detection_repository
         self._segment_repository = segment_repository
@@ -57,7 +57,7 @@ class StudentMonitoringService:
         self._classroom_service = classroom_service
         self._confidence_threshold = occupancy_confidence_threshold
         self._identity_confidence_threshold = identity_confidence_threshold
-        self._student_repository = student_repository
+        self._student_lookup = student_lookup
 
     def receive_inference_event(self, event: DetectionEvent) -> InferenceEventResult:
         """Receive inference event."""
@@ -248,12 +248,13 @@ class StudentMonitoringService:
             else:
                 state = StudentState.UNKNOWN
 
-            # 학생 이름·학번 조회 (StudentRepository가 있으면)
+            # 학생 이름·학번 조회 (StudentLookupPort가 있으면)
+            # unknown/inactive는 blank name/no로 판단하고 throw하지 않는다.
             student_name = ""
             student_no = ""
-            if self._student_repository is not None:
-                student = self._student_repository.get_by_id(detection.student_id)
-                if student is not None:
+            if self._student_lookup is not None:
+                student = self._student_lookup.find_by_id(detection.student_id)
+                if student is not None and student.is_active:
                     student_name = student.name
                     student_no = student.student_no
 

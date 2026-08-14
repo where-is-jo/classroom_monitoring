@@ -19,13 +19,14 @@ from app.classrooms.models import (
     Classroom,
     OccupancySource,
     Seat,
+    SeatAssignment,
     SeatCurrentOccupancy,
     SeatOccupancy,
 )
 from app.classrooms.service import ClassroomService
-from app.students.adapters.memory_repository import InMemoryStudentRepository
-from app.students.errors import StudentNotFoundError
-from app.students.models import Student
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
+from app.shared.errors import StudentNotFoundError
+from app.shared.student_identity import StudentIdentity
 
 
 @pytest.fixture
@@ -33,7 +34,28 @@ def service() -> ClassroomService:
     """활성 강의실·좌석 2개와 활성 학생 1명을 가진 서비스를 만든다."""
     now = datetime.now(UTC)
     repository = InMemoryClassroomRepository()
-    student_repo = InMemoryStudentRepository()
+    student_lookup = InMemoryStudentLookup(
+        identities=(
+            StudentIdentity(
+                id="stu-001",
+                student_no="20260101",
+                name="홍길동",
+                is_active=True,
+            ),
+            StudentIdentity(
+                id="stu-002",
+                student_no="20269999",
+                name="김비활성",
+                is_active=False,
+            ),
+            StudentIdentity(
+                id="stu-003",
+                student_no="20260203",
+                name="이지원",
+                is_active=True,
+            ),
+        )
+    )
     assignment_repo = InMemorySeatAssignmentRepository()
 
     repository.create_classroom(
@@ -71,43 +93,9 @@ def service() -> ClassroomService:
             )
         )
 
-    student_repo.create(
-        Student(
-            id="stu-001",
-            student_no="20260101",
-            name="홍길동",
-            department="컴퓨터공학과",
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-    )
-    student_repo.create(
-        Student(
-            id="stu-002",
-            student_no="20269999",
-            name="김비활성",
-            department="컴퓨터공학과",
-            is_active=False,
-            created_at=now,
-            updated_at=now,
-        )
-    )
-    student_repo.create(
-        Student(
-            id="stu-003",
-            student_no="20260203",
-            name="이지원",
-            department="컴퓨터공학과",
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-    )
-
     return ClassroomService(
         repository,
-        student_repository=student_repo,
+        student_lookup=student_lookup,
         assignment_repository=assignment_repo,
         occupancy_confidence_threshold=0.6,
         clock=lambda: datetime.now(UTC),
@@ -183,6 +171,44 @@ class TestSeatAssignment:
         assert len(assignments) == 1
         assert assignments[0].student_name == "홍길동"
         assert assignments[0].seat_label == "좌석 1"
+
+    def test_list_assignments_blank_name_for_missing_historical(
+        self, service: ClassroomService
+    ) -> None:
+        """lookup에 없는 학생의 historical 지정은 blank name으로 표시된다."""
+        assert service._assignment_repository is not None
+        service._assignment_repository.assign(
+            SeatAssignment(
+                seat_id="seat-001",
+                student_id="stu-404",
+                classroom_id="cls-001",
+                assigned_at=datetime.now(UTC),
+            )
+        )
+        assignments = service.list_assignments("cls-001")
+        assert len(assignments) == 1
+        assert assignments[0].student_id == "stu-404"
+        assert assignments[0].student_name == ""
+        assert assignments[0].student_no == ""
+
+    def test_list_assignments_blank_name_for_inactive_historical(
+        self, service: ClassroomService
+    ) -> None:
+        """inactive 학생의 historical 지정은 blank name으로 표시된다."""
+        assert service._assignment_repository is not None
+        service._assignment_repository.assign(
+            SeatAssignment(
+                seat_id="seat-001",
+                student_id="stu-002",
+                classroom_id="cls-001",
+                assigned_at=datetime.now(UTC),
+            )
+        )
+        assignments = service.list_assignments("cls-001")
+        assert len(assignments) == 1
+        assert assignments[0].student_id == "stu-002"
+        assert assignments[0].student_name == ""
+        assert assignments[0].student_no == ""
 
     def test_unassign_student(self, service: ClassroomService) -> None:
         """지정을 해제하면 목록에서 사라진다."""

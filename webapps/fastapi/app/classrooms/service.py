@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from math import isfinite
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from ..students.errors import StudentNotFoundError
-from ..students.ports import StudentRepository
+from ..shared.errors import StudentNotFoundError
+from ..shared.student_identity import StudentLookupPort
 from .errors import (
     ClassroomConcurrentUpdateError,
     ClassroomDuplicateError,
@@ -50,13 +50,13 @@ class ClassroomService:
         self,
         repository: ClassroomRepository,
         *,
-        student_repository: StudentRepository | None = None,  # 학생 활성 검증용
+        student_lookup: StudentLookupPort | None = None,  # 학생 조회·활성 검증용 (중립 계약)
         assignment_repository: SeatAssignmentRepository | None = None,  # 좌석-학생 지정 관리용
         occupancy_confidence_threshold: float,
         clock: Callable[[], datetime],
     ) -> None:
         self._repository = repository
-        self._student_repository = student_repository
+        self._student_lookup = student_lookup
         self._assignment_repository = assignment_repository
         self._threshold = occupancy_confidence_threshold
         self._clock = clock
@@ -325,8 +325,8 @@ class ClassroomService:
         if not seat.is_active:
             raise SeatInactiveForAssignmentError()
 
-        if self._student_repository is not None:
-            student = self._student_repository.get_by_id(student_id)
+        if self._student_lookup is not None:
+            student = self._student_lookup.find_by_id(student_id)
             if student is None:
                 raise StudentNotFoundError()
             if not student.is_active:
@@ -349,8 +349,8 @@ class ClassroomService:
         # SeatAssignmentInfo 조회 (학생 이름/학번 보강)
         student_name = ""
         student_no = ""
-        if self._student_repository is not None:
-            student = self._student_repository.get_by_id(student_id)
+        if self._student_lookup is not None:
+            student = self._student_lookup.find_by_id(student_id)
             if student is not None:
                 student_name = student.name
                 student_no = student.student_no
@@ -386,9 +386,10 @@ class ClassroomService:
         for assignment in assignments:
             student_name = ""
             student_no = ""
-            if self._student_repository is not None:
-                student = self._student_repository.get_by_id(assignment.student_id)
-                if student is not None:
+            if self._student_lookup is not None:
+                student = self._student_lookup.find_by_id(assignment.student_id)
+                # missing/unknown·inactive는 historical blank name으로 판단한다.
+                if student is not None and student.is_active:
                     student_name = student.name
                     student_no = student.student_no
 

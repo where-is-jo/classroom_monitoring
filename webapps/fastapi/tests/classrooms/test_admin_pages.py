@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
@@ -22,35 +22,60 @@ from app.classrooms.adapters.memory_repository import (
 )
 from app.classrooms.service import ClassroomService
 from app.main import app
-from app.shared.dependencies import get_classroom_service, get_student_service
-from app.students.adapters.memory_repository import InMemoryStudentRepository
-from app.students.service import StudentService
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
+from app.shared.dependencies import get_classroom_service, get_settings, get_student_lookup
+from app.shared.student_identity import StudentIdentity, StudentIdentityPage
+
+# 좌석-학생 지정 화면의 학생 선택 select는 중립 조회 seam(StudentLookupPort.list_active)으로
+# 활성 학생만 조회한다. CRUD API(TASK-004 제거 대상)에 의존하지 않도록 시드된 identity를 쓴다.
+_SEEDED_STUDENTS: dict[str, StudentIdentity] = {
+    "20240001": StudentIdentity(
+        id="stu-001",
+        student_no="20240001",
+        name="김철수",
+        is_active=True,
+    ),
+    "20240002": StudentIdentity(
+        id="stu-002",
+        student_no="20240002",
+        name="이영희",
+        is_active=False,
+    ),
+}
+
+
+class RecordingStudentLookup:
+    """InMemoryStudentLookup을 감싸 list_active 호출 인자를 기록한다.
+
+    assignment page가 단일 `list_active(max,0)`을 호출하는지 검증하기 위한
+    테스트 전용 wrapper다. 실제 조회 동작은 내부 어댑터에 위임한다.
+    """
+
+    def __init__(self, inner: InMemoryStudentLookup) -> None:
+        self._inner = inner
+        self.list_active_calls: list[tuple[int, int]] = []
+
+    def find_by_id(self, student_id: str) -> StudentIdentity | None:
+        return self._inner.find_by_id(student_id)
+
+    def list_active(self, *, limit: int, offset: int) -> StudentIdentityPage:
+        self.list_active_calls.append((limit, offset))
+        return self._inner.list_active(limit=limit, offset=offset)
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    # 학생/지정 저장소는 강의실 서비스와 학생 서비스가 같은 인스턴스를 공유해야
-    # 좌석-학생 지정 화면에서 학생 이름·학번을 보강해 표시할 수 있다.
-    student_repository = InMemoryStudentRepository()
-    # 학생 ID는 clock().timestamp()로 생성되어 같은 시각에 두 명을 만들면 충돌한다.
-    # 호출마다 1초씩 늘려 서로 다른 ID가 생기게 한다.
-    student_clock_tick = 0
-
-    def student_clock() -> datetime:
-        nonlocal student_clock_tick
-        student_clock_tick += 1
-        return datetime(2026, 8, 13, 9, 0, tzinfo=UTC) + timedelta(seconds=student_clock_tick)
-
+    # 중립 조회 어댑터를 명시적으로 주입한다 (DI/test fixture).
+    student_lookup = InMemoryStudentLookup(identities=tuple(_SEEDED_STUDENTS.values()))
     service = ClassroomService(
         InMemoryClassroomRepository(),
-        student_repository=student_repository,
+        student_lookup=student_lookup,
         assignment_repository=InMemorySeatAssignmentRepository(),
         occupancy_confidence_threshold=0.5,
         clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
     )
-    student_service = StudentService(student_repository, clock=student_clock)
     app.dependency_overrides[get_classroom_service] = lambda: service
-    app.dependency_overrides[get_student_service] = lambda: student_service
+    app.dependency_overrides[get_student_lookup] = lambda: student_lookup
     try:
         yield TestClient(app)
     finally:
@@ -98,18 +123,18 @@ def _create_seat(
 
 
 def _create_student(
-    client: TestClient,
     *,
     student_no: str = "20240001",
     name: str = "김철수",
-    department: str = "컴퓨터공학과",
-) -> dict[str, object]:
-    response = client.post(
-        "/api/v1/students",
-        json={"student_no": student_no, "name": name, "department": department},
-    )
-    assert response.status_code == 201
-    return cast(dict[str, object], response.json())
+) -> StudentIdentity:
+    """시드된 학생 identity를 돌려준다.
+
+    좌석-학생 지정 화면은 중립 조회 seam(StudentLookupPort)으로 학생을 조회하므로
+    CRUD API(`POST /api/v1/students`, TASK-004 제거 대상)에 의존하지 않는다.
+    """
+    identity = _SEEDED_STUDENTS[student_no]
+    assert identity.name == name
+    return identity
 
 
 # --- 강의실 화면 --------------------------------------------------------------
@@ -285,8 +310,8 @@ def test_classroom_list_page_shows_assigned_student_on_seat_map(
         label="빈 좌석",
         geometry={"x": 0.5, "y": 0.2, "width": 0.3, "height": 0.4},
     )
-    student = _create_student(client, student_no="20240001", name="김철수")
-    student_id = str(student["id"])
+    student = _create_student(student_no="20240001", name="김철수")
+    student_id = student.id
 
     assign = client.put(
         f"/api/v1/classrooms/{classroom_id}/seats/{assigned_seat['id']}/assignment",
@@ -421,8 +446,8 @@ def test_seat_assignments_page_shows_assigned_student(client: TestClient) -> Non
     classroom_id = str(classroom["id"])
     seat = _create_seat(client, classroom_id, code="SB01", label="좌석 1")
     seat_id = str(seat["id"])
-    student = _create_student(client, student_no="20240001", name="김철수")
-    student_id = str(student["id"])
+    student = _create_student(student_no="20240001", name="김철수")
+    student_id = student.id
 
     assign = client.put(
         f"/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
@@ -451,18 +476,52 @@ def test_seat_assignments_page_lists_only_active_students(client: TestClient) ->
     classroom = _create_classroom(client, code="R-C01", name="활성 학생 강의실")
     classroom_id = str(classroom["id"])
     _create_seat(client, classroom_id, code="SC01", label="좌석 1")
-    _create_student(client, student_no="20240001", name="김철수")
-    inactive = _create_student(client, student_no="20240002", name="이영희")
-    inactive_id = str(inactive["id"])
-
-    deactivate = client.delete(f"/api/v1/students/{inactive_id}")
-    assert deactivate.status_code == 204
+    _create_student(student_no="20240001", name="김철수")
+    # 이영희(비활성)는 시드에 inactive로 주입되어 있고, 중립 조회 계약상
+    # list_active는 active-only를 돌려준다. CRUD API의 비활성화 호출은 필요 없다.
+    _create_student(student_no="20240002", name="이영희")
 
     response = client.get(f"/classrooms/{classroom_id}/seat-assignments")
 
     assert response.status_code == 200
     assert "김철수" in response.text
     assert "이영희" not in response.text
+
+
+def test_seat_assignments_page_calls_list_active_once_with_max_limit(
+    client: TestClient,
+) -> None:
+    """assignment page는 list_active(max, 0)을 정확히 1회 호출한다 (SPEC).
+
+    화면은 학생 선택 드롭다운을 위해 페이지네이션 최대 크기로 활성 학생을
+    한 번에 조회한다. offset은 0, limit은 page_size_max여야 한다.
+    """
+    recording = RecordingStudentLookup(
+        InMemoryStudentLookup(identities=tuple(_SEEDED_STUDENTS.values()))
+    )
+    service = ClassroomService(
+        InMemoryClassroomRepository(),
+        student_lookup=recording,
+        assignment_repository=InMemorySeatAssignmentRepository(),
+        occupancy_confidence_threshold=0.5,
+        clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
+    )
+    app.dependency_overrides[get_classroom_service] = lambda: service
+    app.dependency_overrides[get_student_lookup] = lambda: recording
+    try:
+        classroom = _create_classroom(client, code="R-C02", name="단일 조회 강의실")
+        classroom_id = str(classroom["id"])
+        _create_seat(client, classroom_id, code="SC02", label="좌석 1")
+
+        response = client.get(f"/classrooms/{classroom_id}/seat-assignments")
+
+        assert response.status_code == 200
+        assert len(recording.list_active_calls) == 1
+        limit, offset = recording.list_active_calls[0]
+        assert limit == get_settings().page_size_max
+        assert offset == 0
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_seat_assignments_page_renders_empty_state(client: TestClient) -> None:

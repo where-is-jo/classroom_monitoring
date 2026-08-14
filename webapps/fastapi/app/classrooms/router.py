@@ -15,12 +15,12 @@ from ..shared.dependencies import (
     get_broadcaster,
     get_classroom_service,
     get_settings,
+    get_student_lookup,
     get_student_monitoring_service,
-    get_student_service,
 )
+from ..shared.student_identity import StudentLookupPort, validate_list_active_args
 from ..shared.templating import templates
 from ..student_monitoring.service import StudentMonitoringService
-from ..students.service import StudentService
 from .errors import ClassroomNotFoundError, SeatNotFoundError
 from .schemas import (
     ClassroomCreateRequest,
@@ -397,7 +397,7 @@ def seat_assignments_page(
     classroom_id: str,
     request: Request,
     service: ClassroomService = Depends(get_classroom_service),
-    student_service: StudentService = Depends(get_student_service),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
     settings: Settings = Depends(get_settings),
 ) -> Response:
     """좌석-학생 지정 관리 페이지.
@@ -415,8 +415,12 @@ def seat_assignments_page(
     # seat_id를 키로 변환해 템플릿에서 좌석별 지정을 바로 조회한다.
     assignments = {info.seat_id: info for info in assignments_list}
     # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
-    students_page = student_service.list_students(
-        limit=settings.page_size_max, offset=0, is_active=True
+    # 중립 조회 계약: limit은 1~page_size_max, offset은 0 이상이어야 한다.
+    validate_list_active_args(
+        limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
+    )
+    students_page = student_lookup.list_active(
+        limit=settings.page_size_max, offset=0
     )
 
     return templates.TemplateResponse(
