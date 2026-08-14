@@ -13,6 +13,7 @@ from app.classrooms.adapters.memory_repository import (
 from app.classrooms.errors import (
     ClassroomInputError,
     SeatInactiveForAssignmentError,
+    SeatNotFoundError,
     StudentInactiveForAssignmentError,
 )
 from app.classrooms.models import (
@@ -222,3 +223,14 @@ class TestSeatAssignment:
         count = service.unassign_by_student("stu-001")
         assert count == 1
         assert service.list_assignments("cls-001") == []
+
+    def test_delete_seat_unassigns_assignment_first(self, service: ClassroomService) -> None:
+        """좌석 삭제 시 학생 지정이 먼저 해제되어 지정 레코드가 잔존하지 않는다."""
+        service.assign_student("seat-001", "stu-001")
+        service.delete_seat("seat-001")
+        assert service.list_assignments("cls-001") == []
+        assert service._assignment_repository is not None
+        assert service._assignment_repository.get_by_seat("seat-001") is None
+        # 비활성화된 좌석은 조회에서 404 SEAT_NOT_FOUND로 노출되지 않는다.
+        with pytest.raises(SeatNotFoundError):
+            service.get_seat("seat-001")

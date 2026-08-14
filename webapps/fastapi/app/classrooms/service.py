@@ -301,6 +301,9 @@ class ClassroomService:
         seat = self._required_seat(seat_id)
         if not seat.is_active:
             raise SeatNotFoundError()
+        # 삭제 전 지정 해제 (원자적)
+        if self._assignment_repository is not None:
+            self._assignment_repository.unassign(seat.id)
         self._repository.delete_seat(seat.id)
 
     # ============================================================

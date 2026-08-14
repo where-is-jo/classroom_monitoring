@@ -154,7 +154,10 @@ def get_seat(
     seat_id: str,
     service: ClassroomService = Depends(get_classroom_service),
 ) -> SeatResponse:
-    return SeatResponse.from_domain(service.get_seat(seat_id))
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
+    return SeatResponse.from_domain(seat)
 
 
 @api_router.put("/{classroom_id}/seats/{seat_id}", response_model=SeatResponse)
@@ -167,6 +170,10 @@ def update_seat(
     # 명시적으로 null이 전달된 경우에만 해제한다 (전달 안 된 필드는 갱신하지 않는다).
     unset_row = "row" in payload.model_fields_set and payload.row is None
     unset_column = "column" in payload.model_fields_set and payload.column is None
+
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
 
     seat = service.update_seat(
         seat_id,
@@ -191,6 +198,9 @@ def delete_seat(
     seat_id: str,
     service: ClassroomService = Depends(get_classroom_service),
 ) -> Response:
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
     service.delete_seat(seat_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -203,6 +213,9 @@ def assign_student_to_seat(
     service: ClassroomService = Depends(get_classroom_service),
 ) -> SeatAssignmentResponse:
     """좌석에 학생을 지정한다."""
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
     info = service.assign_student(seat_id, payload.student_id)
     return SeatAssignmentResponse.from_domain(info)
 
@@ -217,6 +230,9 @@ def unassign_student_from_seat(
     service: ClassroomService = Depends(get_classroom_service),
 ) -> Response:
     """좌석-학생 지정을 해제한다."""
+    seat = service.get_seat(seat_id)
+    if seat.classroom_id != classroom_id:
+        raise SeatNotFoundError()
     service.unassign_student(seat_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -351,18 +367,30 @@ def seats_page(
     classroom_id: str,
     request: Request,
     service: ClassroomService = Depends(get_classroom_service),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     try:
         summary = service.occupancy_summary(classroom_id)
     except ClassroomNotFoundError:
         return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
     # 행·열이 있는 좌석만 배치도에 표시한다 (REQ-006).
-    grid_seats = [seat for seat in summary.seats if seat.row is not None and seat.column is not None]
+    grid_seats = [
+        seat for seat in summary.seats if seat.row is not None and seat.column is not None
+    ]
     # CSS Grid 크기 계산과 빈 셀 렌더링용 좌표 맵을 만든다.
     # 빈 강의실도 조작 가능한 최소 1x1 격자를 제공한다 (SPEC: max(1, current max)).
     max_row = max((seat.row for seat in grid_seats if seat.row is not None), default=1)
     max_column = max((seat.column for seat in grid_seats if seat.column is not None), default=1)
     seat_map = {(seat.row, seat.column): seat for seat in grid_seats}
+    # 통합 관리 화면용 좌석-학생 지정 현황 (seat_id → 지정 정보) (TASK-002).
+    assignments = {info.seat_id: info for info in service.list_assignments(classroom_id)}
+    # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
+    # 중립 조회 계약: limit은 1~page_size_max, offset은 0 이상이어야 한다.
+    validate_list_active_args(
+        limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
+    )
+    students = student_lookup.list_active(limit=settings.page_size_max, offset=0).items
     return templates.TemplateResponse(
         request=request,
         name="classrooms/seats.html",
@@ -374,6 +402,8 @@ def seats_page(
             "max_row": max_row,
             "max_column": max_column,
             "seat_map": seat_map,
+            "assignments": assignments,
+            "students": students,
         },
     )
 
@@ -393,45 +423,14 @@ def seat_assignments_page_any(
 
 
 @page_router.get("/{classroom_id}/seat-assignments")
-def seat_assignments_page(
-    classroom_id: str,
-    request: Request,
-    service: ClassroomService = Depends(get_classroom_service),
-    student_lookup: StudentLookupPort = Depends(get_student_lookup),
-    settings: Settings = Depends(get_settings),
-) -> Response:
-    """좌석-학생 지정 관리 페이지.
+def seat_assignments_page(classroom_id: str) -> Response:
+    """레거시 좌석-학생 지정 화면 URL은 통합 좌석 관리 화면으로 302 리다이렉트한다.
 
-    좌석 목록과 지정 현황, 활성 학생 목록을 조합해 렌더링한다.
-    지정/해제는 기존 JSON API를 classroom-admin.js가 fetch로 호출한다.
+    지정/해제는 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
     """
-    try:
-        classroom = service.get_classroom(classroom_id)
-    except ClassroomNotFoundError:
-        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
-
-    seats = service.list_all_seats(classroom_id)
-    assignments_list = service.list_assignments(classroom_id)
-    # seat_id를 키로 변환해 템플릿에서 좌석별 지정을 바로 조회한다.
-    assignments = {info.seat_id: info for info in assignments_list}
-    # 학생 선택 select에는 활성 학생만 노출한다 (UI-REQ-007).
-    # 중립 조회 계약: limit은 1~page_size_max, offset은 0 이상이어야 한다.
-    validate_list_active_args(
-        limit=settings.page_size_max, offset=0, page_size_max=settings.page_size_max
-    )
-    students_page = student_lookup.list_active(
-        limit=settings.page_size_max, offset=0
-    )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="classrooms/seat_assignments.html",
-        context={
-            "classroom": classroom,
-            "seats": seats,
-            "assignments": assignments,
-            "students": students_page.items,
-        },
+    return RedirectResponse(
+        url=f"/classrooms/{classroom_id}/seats",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
@@ -484,39 +483,24 @@ def student_states_page(
 
 
 @page_router.get("/{classroom_id}/seats/create")
-def seat_create_page(
-    classroom_id: str,
-    request: Request,
-    service: ClassroomService = Depends(get_classroom_service),
-) -> Response:
-    try:
-        classroom = service.get_classroom(classroom_id)
-    except ClassroomNotFoundError:
-        return RedirectResponse(url="/classrooms", status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse(
-        request=request,
-        name="classrooms/seat_edit.html",
-        context={"classroom": classroom, "seat": None},
+def seat_create_page(classroom_id: str) -> Response:
+    """레거시 좌석 추가 화면 URL은 통합 좌석 관리 화면으로 302 리다이렉트한다.
+
+    생성은 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
+    """
+    return RedirectResponse(
+        url=f"/classrooms/{classroom_id}/seats",
+        status_code=status.HTTP_302_FOUND,
     )
 
 
 @page_router.get("/{classroom_id}/seats/{seat_id}/edit")
-def seat_edit_page(
-    classroom_id: str,
-    seat_id: str,
-    request: Request,
-    service: ClassroomService = Depends(get_classroom_service),
-) -> Response:
-    seats_url = f"/classrooms/{classroom_id}/seats"
-    try:
-        classroom = service.get_classroom(classroom_id)
-        seat = service.get_seat(seat_id)
-    except (ClassroomNotFoundError, SeatNotFoundError):
-        return RedirectResponse(url=seats_url, status_code=status.HTTP_302_FOUND)
-    if seat.classroom_id != classroom.id:
-        return RedirectResponse(url=seats_url, status_code=status.HTTP_302_FOUND)
-    return templates.TemplateResponse(
-        request=request,
-        name="classrooms/seat_edit.html",
-        context={"classroom": classroom, "seat": seat},
+def seat_edit_page(classroom_id: str, seat_id: str) -> Response:
+    """레거시 좌석 수정 화면 URL은 통합 좌석 관리 화면으로 302 리다이렉트한다.
+
+    수정은 통합 화면(`/classrooms/{classroom_id}/seats`)에서 처리한다.
+    """
+    return RedirectResponse(
+        url=f"/classrooms/{classroom_id}/seats",
+        status_code=status.HTTP_302_FOUND,
     )

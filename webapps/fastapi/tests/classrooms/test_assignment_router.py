@@ -198,6 +198,70 @@ class TestSeatAssignmentAPI:
         assert listing.status_code == 200
         assert listing.json()["items"] == []
 
+    def test_assign_to_seat_of_other_classroom_returns_404(self, client: TestClient) -> None:
+        """URL classroom_id와 좌석 소속이 다르면 지정이 404 SEAT_NOT_FOUND다."""
+        other = client.post(
+            "/api/v1/classrooms",
+            json={"code": "R102", "name": "강의실2", "location": "별관"},
+        )
+        assert other.status_code == 201
+        other_id = str(other.json()["id"])
+        other_seat = client.post(
+            f"/api/v1/classrooms/{other_id}/seats",
+            json={"code": "S99", "label": "타 강의실 좌석"},
+        )
+        assert other_seat.status_code == 201
+        other_seat_id = str(other_seat.json()["id"])
+
+        # cls-001 경로로 다른 강의실 좌석을 지정하면 404다.
+        response = client.put(
+            f"/api/v1/classrooms/cls-001/seats/{other_seat_id}/assignment",
+            json={"student_id": "stu-001"},
+        )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "SEAT_NOT_FOUND"
+
+        # 반대로 cls-001 좌석을 다른 강의실 경로로 지정해도 404다.
+        response = client.put(
+            f"/api/v1/classrooms/{other_id}/seats/seat-001/assignment",
+            json={"student_id": "stu-001"},
+        )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "SEAT_NOT_FOUND"
+
+        # 소속 불일치 지정은 아무 좌석에도 반영되지 않는다.
+        listing = client.get("/api/v1/classrooms/cls-001/seat-assignments")
+        assert listing.status_code == 200
+        assert listing.json()["items"] == []
+
+    def test_unassign_seat_of_other_classroom_returns_404(self, client: TestClient) -> None:
+        """URL classroom_id와 좌석 소속이 다르면 해제가 404 SEAT_NOT_FOUND다."""
+        other = client.post(
+            "/api/v1/classrooms",
+            json={"code": "R102", "name": "강의실2", "location": "별관"},
+        )
+        assert other.status_code == 201
+        other_id = str(other.json()["id"])
+        other_seat = client.post(
+            f"/api/v1/classrooms/{other_id}/seats",
+            json={"code": "S99", "label": "타 강의실 좌석"},
+        )
+        assert other_seat.status_code == 201
+        other_seat_id = str(other_seat.json()["id"])
+
+        response = client.delete(f"/api/v1/classrooms/cls-001/seats/{other_seat_id}/assignment")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "SEAT_NOT_FOUND"
+
+    def test_delete_seat_unassigns_assignment_first(self, client: TestClient) -> None:
+        """좌석 삭제는 학생 지정을 먼저 해제해 지정 레코드가 잔존하지 않는다."""
+        assert client.put(_ASSIGNMENT_URL, json={"student_id": "stu-001"}).status_code == 200
+        response = client.delete("/api/v1/classrooms/cls-001/seats/seat-001")
+        assert response.status_code == 204
+        listing = client.get("/api/v1/classrooms/cls-001/seat-assignments")
+        assert listing.status_code == 200
+        assert listing.json()["items"] == []
+
     def test_list_assignments(self, client: TestClient) -> None:
         """지정 현황 목록을 items로 돌려준다."""
         client.put(_ASSIGNMENT_URL, json={"student_id": "stu-001"})

@@ -1,4 +1,4 @@
-// 강의실·좌석 관리 화면에서 폼을 JSON API에 제출한다.
+﻿// 강의실·좌석 관리 화면에서 폼을 JSON API에 제출한다.
 // 폼의 data 속성으로 API 경로·메서드·성공 시 이동할 경로·확인 문구를 정한다.
 // - data-api-url: 제출할 API 경로
 // - data-api-method: POST / PUT / DELETE
@@ -477,4 +477,369 @@ function collectPayload(form) {
       announce("좌석 저장이 완료되었습니다.");
     }
   }
+})();
+
+
+// ============================================================
+// 통합 좌석 관리 컨트롤러 (T5)
+// ============================================================
+// - 빈 칸 클릭: 좌석 생성 (code, label 입력)
+// - 좌석 클릭: 편집 패널 표시 (code, label, is_active, 학생 지정)
+// - 편집 패널: 저장, 지정/해제, 삭제
+
+(function seatEditController() {
+  const grid = document.getElementById("seat-grid");
+  const panel = document.getElementById("seat-edit-panel");
+  const form = document.getElementById("seat-edit-form");
+  if (!grid || !panel || !form) return;
+
+  const classroomId = grid.dataset.classroomId;
+  if (!classroomId) return;
+
+  const statusRegion = document.getElementById("seat-grid-status");
+  const alertRegion = document.getElementById("seat-grid-alert");
+
+  const btnAssign = document.getElementById("btn-assign");
+  const btnUnassign = document.getElementById("btn-unassign");
+  const btnDelete = document.getElementById("btn-delete");
+
+  let currentSeatId = null;
+  let saving = false;
+
+  // --- helpers ---------------------------------------------------------------
+
+  function announce(message) {
+    if (!statusRegion) return;
+    statusRegion.textContent = "";
+    void statusRegion.offsetWidth;
+    statusRegion.textContent = message;
+  }
+
+  function showAlert(message) {
+    if (!alertRegion) return;
+    alertRegion.textContent = message;
+    alertRegion.hidden = false;
+  }
+
+  function hideAlert() {
+    if (!alertRegion) return;
+    alertRegion.hidden = true;
+  }
+
+  function showFormError(message) {
+    const errorBox = form.querySelector("[data-form-error]");
+    if (!errorBox) return;
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+  }
+
+  function hideFormError() {
+    const errorBox = form.querySelector("[data-form-error]");
+    if (!errorBox) return;
+    errorBox.textContent = "";
+    errorBox.hidden = true;
+  }
+
+  async function extractApiMessage(response) {
+    try {
+      const body = await response.json();
+      if (body && typeof body.error === "object" && body.error !== null) {
+        const apiMessage = body.error.message;
+        if (typeof apiMessage === "string" && apiMessage) return apiMessage;
+      }
+    } catch {
+      // JSON이 아니면 기본 메시지를 사용한다.
+    }
+    return "";
+  }
+
+  function setBusy(busy) {
+    saving = busy;
+    const buttons = form.querySelectorAll("button");
+    buttons.forEach((btn) => { btn.disabled = busy; });
+  }
+
+  // --- 편집 패널 열기/닫기 ---------------------------------------------------
+
+  function openPanel(seatId, seatData) {
+    currentSeatId = seatId;
+    panel.dataset.seatId = seatId;
+    panel.hidden = false;
+
+    // 폼 필드 채우기
+    form.elements.code.value = seatData.code || "";
+    form.elements.label.value = seatData.label || "";
+    form.elements.is_active.checked = seatData.is_active !== false;
+
+    // 학생 지정 정보
+    const studentSelect = form.elements.student_id;
+    if (seatData.assignment_student_id) {
+      studentSelect.value = seatData.assignment_student_id;
+    } else {
+      studentSelect.value = "";
+    }
+
+    hideFormError();
+    announce("좌석 편집 패널을 열었습니다.");
+  }
+
+  function closePanel() {
+    currentSeatId = null;
+    panel.dataset.seatId = "";
+    panel.hidden = true;
+    hideFormError();
+  }
+
+  // --- 빈 칸 클릭 → 좌석 생성 ------------------------------------------------
+
+  grid.addEventListener("click", async (event) => {
+    if (saving) return;
+    const button = event.target.closest("button.seat-map__empty");
+    if (!button) return;
+
+    const row = Number(button.dataset.row);
+    const column = Number(button.dataset.column);
+
+    // code와 label 입력 받기
+    const code = prompt("좌석 코드를 입력하세요 (예: S01):");
+    if (!code || !code.trim()) return;
+
+    const label = prompt("좌석 이름을 입력하세요 (예: 좌석 1):");
+    if (!label || !label.trim()) return;
+
+    setBusy(true);
+    hideAlert();
+    announce("좌석을 생성하는 중입니다.");
+
+    try {
+      const response = await fetch(
+        "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/seats",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: code.trim(),
+            label: label.trim(),
+            row: row,
+            column: column,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        announce("좌석이 생성되었습니다.");
+        sessionStorage.setItem("seat-grid-focus", "seat-cell-" + row + "-" + column);
+        window.location.reload();
+        return;
+      }
+
+      const message = await extractApiMessage(response);
+      showAlert(message || "좌석 생성에 실패했습니다.");
+    } catch {
+      showAlert("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // --- 좌석 클릭 → 편집 패널 표시 --------------------------------------------
+
+  grid.addEventListener("click", (event) => {
+    if (saving) return;
+    const button = event.target.closest("button[data-seat-id]");
+    if (!button) return;
+
+    const seatId = button.dataset.seatId;
+    if (!seatId) return;
+
+    // 이미 선택된 좌석이면 패널 닫기
+    if (currentSeatId === seatId) {
+      closePanel();
+      announce("좌석 편집 패널을 닫았습니다.");
+      return;
+    }
+
+    // 좌석 데이터 추출
+    const seatData = {
+      code: button.querySelector("small")?.textContent?.trim() || "",
+      label: button.querySelector("strong")?.textContent?.trim() || "",
+      is_active: true, // 기본값, 실제로는 서버에서 조회해야 함
+      assignment_student_id: button.dataset.assignmentStudentId || "",
+      assignment_student_name: button.dataset.assignmentStudentName || "",
+    };
+
+    openPanel(seatId, seatData);
+  });
+
+  // --- 편집 패널 저장 --------------------------------------------------------
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentSeatId || saving) return;
+
+    const payload = {};
+    const code = form.elements.code.value.trim();
+    const label = form.elements.label.value.trim();
+    const is_active = form.elements.is_active.checked;
+
+    if (code) payload.code = code;
+    if (label) payload.label = label;
+    payload.is_active = is_active;
+
+    setBusy(true);
+    hideFormError();
+    announce("좌석을 저장하는 중입니다.");
+
+    try {
+      const response = await fetch(
+        "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/seats/" + encodeURIComponent(currentSeatId),
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (response.ok) {
+        announce("좌석이 저장되었습니다.");
+        sessionStorage.setItem("seat-grid-focus", "seat-cell-" + currentSeatId);
+        window.location.reload();
+        return;
+      }
+
+      const message = await extractApiMessage(response);
+      showFormError(message || "저장에 실패했습니다.");
+    } catch {
+      showFormError("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // --- 학생 지정 -------------------------------------------------------------
+
+  if (btnAssign) {
+    btnAssign.addEventListener("click", async () => {
+      if (!currentSeatId || saving) return;
+
+      const studentId = form.elements.student_id.value;
+      if (!studentId) {
+        showFormError("학생을 선택해 주세요.");
+        return;
+      }
+
+      setBusy(true);
+      hideFormError();
+      announce("학생을 지정하는 중입니다.");
+
+      try {
+        const response = await fetch(
+          "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/seats/" + encodeURIComponent(currentSeatId) + "/assignment",
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ student_id: studentId }),
+          }
+        );
+
+        if (response.ok) {
+          announce("학생이 지정되었습니다.");
+          sessionStorage.setItem("seat-grid-focus", "seat-cell-" + currentSeatId);
+          window.location.reload();
+          return;
+        }
+
+        const message = await extractApiMessage(response);
+        showFormError(message || "지정에 실패했습니다.");
+      } catch {
+        showFormError("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // --- 학생 해제 -------------------------------------------------------------
+
+  if (btnUnassign) {
+    btnUnassign.addEventListener("click", async () => {
+      if (!currentSeatId || saving) return;
+
+      if (!window.confirm("학생 지정을 해제할까요?")) return;
+
+      setBusy(true);
+      hideFormError();
+      announce("지정을 해제하는 중입니다.");
+
+      try {
+        const response = await fetch(
+          "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/seats/" + encodeURIComponent(currentSeatId) + "/assignment",
+          {
+            method: "DELETE",
+          }
+        );
+
+        if (response.ok) {
+          announce("지정이 해제되었습니다.");
+          sessionStorage.setItem("seat-grid-focus", "seat-cell-" + currentSeatId);
+          window.location.reload();
+          return;
+        }
+
+        const message = await extractApiMessage(response);
+        showFormError(message || "해제에 실패했습니다.");
+      } catch {
+        showFormError("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // --- 좌석 삭제 -------------------------------------------------------------
+
+  if (btnDelete) {
+    btnDelete.addEventListener("click", async () => {
+      if (!currentSeatId || saving) return;
+
+      const label = form.elements.label.value.trim() || "이 좌석";
+      if (!window.confirm("'" + label + "'을(를) 삭제할까요?")) return;
+
+      setBusy(true);
+      hideFormError();
+      announce("좌석을 삭제하는 중입니다.");
+
+      try {
+        const response = await fetch(
+          "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/seats/" + encodeURIComponent(currentSeatId),
+          {
+            method: "DELETE",
+          }
+        );
+
+        if (response.ok) {
+          announce("좌석이 삭제되었습니다.");
+          closePanel();
+          window.location.reload();
+          return;
+        }
+
+        const message = await extractApiMessage(response);
+        showFormError(message || "삭제에 실패했습니다.");
+      } catch {
+        showFormError("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // --- Escape: 패널 닫기 -----------------------------------------------------
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!currentSeatId) return;
+    closePanel();
+    announce("좌석 편집 패널을 닫았습니다.");
+  });
 })();

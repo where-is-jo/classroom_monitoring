@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -43,10 +43,10 @@
           {% if _cls %}
             {% set _cid = _cls[0].id %}
             <a href="/classrooms/{{ _cid }}/student-states"{% if '/student-states' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◉</span><span>학생 상태</span></a>
-            <a href="/classrooms/{{ _cid }}/seat-assignments"{% if '/seat-assignments' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>좌석-학생 지정</span></a>
+            <a href="/classrooms/{{ _cid }}/seats"{% if '/seats' in current_path %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span><span>좌석 관리</span></a>
           {% else %}
             <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◉</span><span>학생 상태</span></a>
-            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◎</span><span>좌석-학생 지정</span></a>
+            <a href="/classrooms/create"><span class="nav-icon" aria-hidden="true">◎</span><span>좌석 관리</span></a>
           {% endif %}
         </div>
       </nav>

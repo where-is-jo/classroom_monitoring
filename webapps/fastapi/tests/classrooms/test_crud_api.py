@@ -332,6 +332,36 @@ def test_unknown_seat_returns_not_found(client: TestClient) -> None:
     assert client.delete(f"/api/v1/classrooms/{classroom_id}/seats/missing").status_code == 404
 
 
+def test_seat_operations_via_other_classroom_returns_404(client: TestClient) -> None:
+    """URL classroom_id와 좌석 소속이 다르면 조회·수정·삭제가 404 SEAT_NOT_FOUND다."""
+    classroom_a = _create_classroom(client, code="A101")
+    classroom_b = _create_classroom(client, code="B203")
+    seat = _create_seat(client, str(classroom_a["id"]))
+    seat_id = str(seat["id"])
+    other_classroom_id = str(classroom_b["id"])
+
+    response = client.get(f"/api/v1/classrooms/{other_classroom_id}/seats/{seat_id}")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "SEAT_NOT_FOUND"
+
+    response = client.put(
+        f"/api/v1/classrooms/{other_classroom_id}/seats/{seat_id}",
+        json={"label": "변경 시도"},
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "SEAT_NOT_FOUND"
+
+    response = client.delete(f"/api/v1/classrooms/{other_classroom_id}/seats/{seat_id}")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "SEAT_NOT_FOUND"
+
+    # 소속 불일치 요청은 원래 좌석에 영향을 주지 않는다.
+    assert client.get(f"/api/v1/classrooms/{classroom_a['id']}/seats/{seat_id}").status_code == 200
+    assert (
+        client.delete(f"/api/v1/classrooms/{classroom_a['id']}/seats/{seat_id}").status_code == 204
+    )
+
+
 def test_seat_geometry_roundtrip(client: TestClient) -> None:
     """geometry 좌표가 생성·조회·수정에서 그대로 유지된다."""
     classroom = _create_classroom(client)
