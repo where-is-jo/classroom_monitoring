@@ -62,7 +62,20 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 | [`RPAs`](../../RPAs/README.md) | 업무 자동화 프로젝트. 프로젝트별 독립 디렉터리로 관리한다. | 상시 실행 서비스 |
 
 최상위에는 `webapps/`, `deeplearning/`, `worker/`, `monitoring/`, `docs/`, `RPAs/`,
-`README.md`만 둔다. 최상위에 `AGENTS.md`, 빌드 설정, 인프라 파일, `scripts/`를 새로 만들지 않는다.
+`README.md`와 아래 [`.docker/`](#docker--팀-공식-실행-수단)만 둔다.
+최상위에 `AGENTS.md`, 빌드 설정, 그 밖의 인프라 파일, `scripts/`를 새로 만들지 않는다.
+
+### `.docker/` — 팀 공식 실행 수단
+
+[결정 0018](../architecture/decisions.md#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다)로
+정한 **유일한 인프라 예외**다. docker compose 구성을 팀이 공유해야 해서 커밋한다.
+새로운 인프라 디렉터리를 최상위에 추가하려면 같은 절차(ADR + 이 문서 갱신)를 밟는다.
+
+- 파일은 `compose.<스택>.<환경>.yml`이다(`main`·`llm`·`monitoring` × `local`·`dev`).
+- **커밋되는 compose는 `${...}` 치환과 `--env-file`을 쓰지 않는다.** 저장소에서 받은
+  파일만으로 실행되어야 하기 때문이다.
+- **`.docker/env/`(비밀값)와 `.docker/models/`(가중치)는 커밋하지 않는다.**
+  새 값 파일을 만들 때 그 두 디렉터리 밖에 두지 않는다.
 
 `webapps/`는 웹 애플리케이션 전용이며 현재 `fastapi` 하나를 담는다.
 추론·스트림·관측처럼 웹 요청을 처리하지 않는 서비스는 최상위에 독립 디렉터리로 둔다.
@@ -74,7 +87,7 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 | 항목 | 용도 |
 | --- | --- |
 | `.env`, `env/` | 로컬 환경변수 값 |
-| `.docker/` | 개인 로컬 docker compose 구성. 팀 공식 실행 수단이 아니다 |
+| `.docker/env/`, `.docker/models/` | 컨테이너 주입 값과 모델 가중치. **`.docker/` 자체는 커밋한다** — 위 참고 |
 | `CLAUDE.md`, `.claude/` | Claude Code 지침·설정·스킬 |
 | `.agents/`, `.cursor/` | 다른 에이전트 도구 설정 |
 | `initial_prompt.md`, `individual_tasks/` | 개인 작업 자료 |

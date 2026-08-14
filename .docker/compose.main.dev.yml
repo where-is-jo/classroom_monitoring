@@ -1,0 +1,210 @@
+name: classroom-monitoring-dev
+
+# 공용 GPU 서버(dev)의 메인 스택. **로컬용은 compose.main.local.yml이다.**
+#
+# 실행 (저장소 루트에서):
+#   docker compose -f .docker/compose.main.dev.yml up -d
+#   docker compose -f .docker/compose.main.dev.yml config    # 문법 검증
+#
+# **--env-file을 주지 않는다**(결정 0018). 이 파일이 커밋되므로 실행에 필요한 값을
+# 파일 안에 직접 적었다. 비밀값만 env_file로 주입하고 그 파일들은 커밋하지 않는다
+# (.docker/env/*.env는 .gitignore 대상, 변수 목록은 각 서비스의 .env.example).
+#
+# 이 파일이 backend network를 만든다. compose.llm.dev.yml과 compose.monitoring.dev.yml은
+# 그 network를 external로 참조하므로 **이 스택을 먼저 올려야 한다.**
+#
+# MongoDB Atlas는 외부 서비스라 컨테이너로 두지 않는다. fastapi가
+# .docker/env/fastapi.dev.env의 DATABASE_URL로 직접 접속한다.
+# worker/recorder는 이 스택에 넣지 않는다. **영상 원본을 저장하지 않기로 했다**
+# (결정 0011). 탐지 시점 스냅샷은 inference-worker가 MinIO에 올린다.
+
+networks:
+  backend:
+    name: classroom-monitoring-dev-backend
+
+# 컨테이너 로그 회전. Docker json-file 드라이버는 기본이 무제한이라 48GB 환경에서
+# 조용히 디스크를 채운다. worker가 프레임 샘플마다 로그를 남기므로 특히 그렇다.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+volumes:
+  minio-data:
+  n8n-data:
+
+# 포트 방침
+#
+#   외부 --- 다른 팀 nginx --- 우리 서비스들
+#
+# 1. **경로 분기는 nginx가 한다.** 우리 쪽 reverse proxy를 두지 않는다.
+#    요청서: individual_tasks/도커구성/nginx_연동_요청.md
+# 2. **꼭 필요한 것만 연다.** 서비스끼리는 backend network에서 컨테이너 이름으로 부른다.
+# 3. **여는 것도 기본은 127.0.0.1이다.** nginx만 닿으면 되는 것은 루프백에 묶는다.
+#    외부에 실제로 노출되는 것은 WebRTC 미디어(18189) 하나뿐이다.
+# 4. **호스트 쪽 번호는 5자리로 준다.** 공용 서버라 4자리 기본값은 다른 팀과 겹치기 쉽다.
+#    fastapi의 8076만 예외 — nginx 연동 요청서로 이미 알린 번호다.
+#
+# | 호스트 | → 컨테이너 | 외부 노출 |
+# | --- | --- | --- |
+# | 127.0.0.1:8076 | fastapi:8001 | nginx 경유 |
+# | 127.0.0.1:15678 | n8n:5678 | nginx 경유(/n8n/) |
+# | 127.0.0.1:18889 | mediamtx:8889 | nginx 경유(/webrtc/) |
+# | 18189 (UDP·TCP) | mediamtx:18189 | **직통.** 프록시 불가 |
+
+services:
+  fastapi:
+    # 서버에는 webapps/fastapi 소스를 옮기지 않으므로 build 블록을 두지 않는다.
+    # `docker compose pull`로만 받는다. 로컬 빌드는 compose.main.local.yml이 한다.
+    image: ghcr.io/where-is-jo/classroom-monitoring-fastapi:latest
+    env_file:
+      # 변수 이름의 기준은 webapps/fastapi/.env.example이다. 환경과 무관한 값은
+      # 여기 없다 — 이미지 안의 config/settings.yml이 갖는다.
+      - ./env/fastapi.dev.env
+    environment:
+      # env_file보다 여기 값이 우선한다. 이 파일은 dev 전용이므로 고정한다.
+      APP_ENV: dev
+    # 브라우저 진입점. nginx가 여기로 넘긴다(location /).
+    # 그 팀 nginx가 컨테이너로 돈다면 루프백에 닿지 못하므로 그때는 "8076:8001"로
+    # 바꾸고 방화벽으로 막아야 한다.
+    ports:
+      - "127.0.0.1:8076:8001"
+    networks:
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
+  # stream + inference 조립 실행(python -m pipeline.main). GPU를 쓴다.
+  inference-worker:
+    image: ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+    env_file:
+      # 변수 목록의 기준은 worker/pipeline/.env.example이다(조립 실행이라 pipeline 것을 쓴다).
+      # STREAM_SOURCES에 카메라 자격 증명이 들어가므로 이 파일 전체가 비밀값이다.
+      - ./env/worker.dev.env
+    environment:
+      APP_ENV: dev
+    volumes:
+      # 모델 가중치는 이미지에도 저장소에도 넣지 않는다(.docker/models/는 .gitignore).
+      # env/worker.dev.env의 MODEL_PATH가 이 안의 파일을 가리켜야 한다.
+      - ./models:/models:ro
+    networks:
+      - backend
+    depends_on:
+      - mediamtx
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # 서버에는 L40S가 4장 보이지만(individual_tasks/nvidia.md) 우리 계정에
+              # 실제로 할당된 건 1번 하나뿐이다. llama-server도 같은 1번을 쓴다 —
+              # 우리가 쓸 수 있는 GPU가 그것뿐이라 나눌 수 없다.
+              device_ids: ["1"]
+              capabilities: [gpu]
+    logging: *default-logging
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.20.0
+    environment:
+      # 사용자용 실시간 영상은 WebRTC로 간다. 설정은 MTX_<파라미터명 대문자> 환경변수로
+      # 준다 — 커스텀 mediamtx.yml을 마운트하지 않아도 되고 바꾼 값이 여기 다 보인다.
+      #
+      # ICE 후보로 알릴 주소. 미디어는 nginx를 타지 않고 직통하므로 nginx 주소가 아니라
+      # **서버 자신의 주소**여야 한다. 공인 IP가 아직 일부 포트만 열려 Tailscale IP와
+      # 함께 둘 다 후보로 넣는다.
+      MTX_WEBRTCADDITIONALHOSTS: 100.85.0.72,116.42.115.24
+      # 인터페이스에서 주소를 긁는 기본 동작을 끈다. 켜 두면 컨테이너 사설 IP가
+      # ICE 후보로 나가는데, 브라우저는 닿지 못하면서 내부 주소만 드러난다.
+      MTX_WEBRTCIPSFROMINTERFACES: "no"
+      # 미디어가 실제로 흐르는 포트. **기본값 8189가 아니라 18189를 쓴다** —
+      # 외부에 직접 열리는 유일한 포트라 다른 팀과 겹칠 여지를 줄인다.
+      MTX_WEBRTCLOCALUDPADDRESS: ":18189"
+      MTX_WEBRTCLOCALTCPADDRESS: ":18189"
+    # HLS(8888)와 RTSP(8554)는 열지 않는다. 화면은 WebRTC로 보고, 워커가 외부 카메라에서
+    # 당겨오므로(STREAM_SOURCES) 우리 mediamtx로 밀어 넣는 경로가 없다.
+    # **카메라가 서버로 직접 송출하는 방식으로 바꾸면 8554를 다시 열어야 한다.**
+    ports:
+      # WHEP 시그널링. nginx가 /webrtc/를 여기로 넘긴다.
+      - "127.0.0.1:18889:8889"
+      # WebRTC 미디어(ICE). **호스트와 컨테이너 번호가 같아야 한다** — MediaMTX가 위
+      # MTX_WEBRTCLOCAL*ADDRESS의 번호를 ICE 후보로 알리기 때문이다.
+      - "18189:18189/udp"
+      - "18189:18189/tcp" # UDP가 막힌 망에서의 폴백
+    networks:
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    env_file:
+      - ./env/minio.dev.env
+    # 호스트에 포트를 열지 않는다. S3 API(9000)는 같은 network의 fastapi·worker가
+    # minio:9000으로 부르고, 콘솔(9001)은 운영자 도구라 SSH 터널로 본다:
+    #   ssh -L 9001:localhost:9001 <서버>   ← 아래에 ports를 임시로 되살린 뒤
+    volumes:
+      - minio-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+    restart: unless-stopped
+
+  # 스냅샷 버킷과 보존 규칙을 한 번 만들고 끝난다(결정 0011).
+  # **삭제를 저장소가 하게 한다.** 앱이 지우면 워커가 죽어 있는 동안 삭제도 멈춘다.
+  minio-init:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    env_file:
+      - ./env/minio.dev.env
+    environment:
+      # 이미지 안의 inference/config/settings.yml이 갖는 버킷 이름과 같아야 한다.
+      SNAPSHOT_BUCKET: classroom-snapshots
+      SNAPSHOT_RETENTION_DAYS: "30"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      # 비밀번호가 -로 시작하면 mc alias set이 플래그로 오해하므로 MC_HOST_를 쓴다.
+      - |
+        set -e
+        export MC_HOST_local="http://$${MINIO_ROOT_USER}:$${MINIO_ROOT_PASSWORD}@minio:9000"
+        mc ready local
+        mc mb --ignore-existing "local/$${SNAPSHOT_BUCKET}"
+        mc ilm rule add --expire-days "$${SNAPSHOT_RETENTION_DAYS}" "local/$${SNAPSHOT_BUCKET}" 2>/dev/null \
+          || echo "보존 규칙이 이미 있다"
+        mc ilm rule ls "local/$${SNAPSHOT_BUCKET}"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - backend
+    logging: *default-logging
+    restart: "no"
+
+  n8n:
+    image: n8nio/n8n:2.33.5
+    env_file:
+      - ./env/n8n.dev.env
+    environment:
+      # nginx가 /n8n/ 접두사를 떼지 않고 넘긴다. n8n이 자기 자산·리다이렉트 경로를
+      # 같은 접두사로 만들게 해야 편집기가 뜬다.
+      N8N_PATH: /n8n/
+      # **브라우저가 보는 주소**여야 한다 — 우리 포트가 아니라 nginx가 여는 주소다.
+      # TODO: 그 팀이 열어 줄 포트가 정해지면 8080을 그 번호로 바꾼다
+      #       (individual_tasks/도커구성/nginx_연동_요청.md로 요청해 둔 값).
+      N8N_EDITOR_BASE_URL: http://116.42.115.24:8080/n8n/
+      WEBHOOK_URL: http://116.42.115.24:8080/n8n/
+    volumes:
+      - n8n-data:/home/node/.n8n
+    # nginx가 /n8n/을 여기로 넘긴다. fastapi와 같은 이유로 루프백에만 바인딩한다.
+    ports:
+      - "127.0.0.1:15678:5678"
+    networks:
+      - backend
+    logging: *default-logging
+    restart: unless-stopped

@@ -1,0 +1,43 @@
+name: classroom-monitoring-local-llm
+
+# 개발자 PC(local)의 LLM 스택. **서버용은 compose.llm.dev.yml이다.**
+#
+# 실행 (저장소 루트에서, compose.main.local.yml을 먼저 올린 뒤):
+#   docker compose -f .docker/compose.llm.local.yml up -d
+#
+# **대부분의 로컬 작업에는 이 스택이 필요 없다.** fastapi의 LLM_SEARCH_MODE=stub이
+# LLM 없이 화면과 계약을 확인하는 대역이기 때문이다(결정 0016).
+# 실제 생성 결과를 봐야 할 때만 올린다.
+#
+# **dev와 다른 점은 둘이다.**
+# 1. GPU 예약이 없다. CPU로 돈다 — 개발자 PC에 NVIDIA GPU가 없을 수 있어서다.
+#    그래서 매우 느리다. GPU가 있으면 LLAMA_ARG_N_GPU_LAYERS를 올리고 아래
+#    deploy 블록을 dev 파일에서 가져다 쓴다.
+# 2. 호스트에 포트를 연다. curl로 직접 두드려 보기 위해서다.
+
+networks:
+  backend:
+    name: classroom-monitoring-local-backend
+    external: true
+
+services:
+  llama-server:
+    # CUDA 이미지가 아니라 CPU 이미지를 쓴다. GPU 없는 PC에서 CUDA 이미지는
+    # 컨테이너 시작 자체가 막힌다.
+    image: ghcr.io/ggml-org/llama.cpp:server
+    volumes:
+      # .docker/models/는 .gitignore 대상이다. 가중치는 각자 받아서 여기 둔다.
+      - ./models:/models:ro
+    environment:
+      LLAMA_ARG_MODEL: /models/gemma.gguf
+      LLAMA_ARG_PORT: "8008"
+      LLAMA_ARG_ALIAS: gemma
+      # CPU로 돌리므로 0이다.
+      LLAMA_ARG_N_GPU_LAYERS: "0"
+      LLAMA_ARG_CTX_SIZE: "4096"
+    # 로컬에서는 열어 둔다: curl http://localhost:18008/v1/models
+    ports:
+      - "127.0.0.1:18008:8008"
+    networks:
+      - backend
+    restart: unless-stopped

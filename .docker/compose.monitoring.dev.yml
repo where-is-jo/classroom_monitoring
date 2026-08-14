@@ -1,0 +1,84 @@
+name: classroom-monitoring-dev-observability
+
+# 공용 GPU 서버(dev)의 모니터링 스택. **로컬용은 compose.monitoring.local.yml이다.**
+#
+# 실행 (저장소 루트에서, compose.main.dev.yml을 먼저 올린 뒤):
+#   docker compose -f .docker/compose.monitoring.dev.yml up -d
+#
+# 도커구조_공용서버.md는 **MVP에서 제외**한다고 적었다. 파일을 따로 둔 것이 그 제외를
+# 구현한 것이다 — 메인 스택을 올려도 이 스택은 안 뜬다.
+#
+# 지금 Prometheus는 자기 자신만 스크랩한다. 어떤 서비스도 /metrics를 노출하지 않는다
+# (monitoring/internal/README.md "구현 전"). 수집할 지표가 정해지면
+# .docker/prometheus/prometheus.yml에 job을 추가한다.
+
+networks:
+  backend:
+    name: classroom-monitoring-dev-backend
+    external: true
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  alloy-data:
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    # 호스트에 포트를 열지 않는다. Grafana가 backend network로 접근하고,
+    # 사람이 직접 볼 때는 SSH 터널을 쓴다.
+    networks:
+      - backend
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:13.0.2
+    env_file:
+      - ./env/grafana.dev.env
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # 데이터소스·대시보드 정의는 monitoring/internal이 관리한다(그 README의 책임).
+      - ../monitoring/internal/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/internal/grafana/dashboards:/etc/grafana/dashboards:ro
+    # 호스트에 포트를 열지 않는다. 운영자 도구라 SSH 터널로 본다:
+    #   ssh -L 3000:localhost:3000 <서버>   ← 아래에 ports를 임시로 되살린 뒤
+    networks:
+      - backend
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.6
+    volumes:
+      - loki-data:/loki
+    # 호스트에 포트를 열지 않는다. Grafana가 backend network로 조회한다.
+    networks:
+      - backend
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.18.1
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+    volumes:
+      # 서버 스택은 project label이 달라 설정 파일을 따로 둔다.
+      - ./alloy/config.dev.alloy:/etc/alloy/config.alloy:ro
+      # docker.sock으로 같은 daemon의 모든 컨테이너 로그를 읽는다.
+      # 메인·LLM 스택의 컨테이너도 network와 무관하게 함께 수집된다.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    # 호스트에 포트를 열지 않는다. Alloy UI는 필요할 때 SSH 터널로 본다.
+    networks:
+      - backend
+    depends_on:
+      - loki
+    restart: unless-stopped

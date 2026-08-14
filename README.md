@@ -71,11 +71,15 @@ worker/        영상 수신 · 프레임 공급 · 추론 실행 · 녹화
 monitoring/    Prometheus·Grafana 설정 / 사용자용 실시간 영상
 docs/          문서, AI 에이전트 규칙, 프롬프트
 RPAs/          업무 자동화 프로젝트
+.docker/       docker compose 실행 구성 (환경별로 나뉜다)
 README.md      이 문서
 ```
 
-최상위에는 위 항목과 `.gitignore`만 둔다. 빌드 설정, 인프라 파일, 에이전트 문서를
-최상위에 새로 만들지 않는다. 자세한 예외 범위는
+최상위에는 위 항목과 `.gitignore`만 둔다. 빌드 설정, 그 밖의 인프라 파일, 에이전트
+문서를 최상위에 새로 만들지 않는다.
+`.docker/`는 [결정 0018](./docs/architecture/decisions.md#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다)로
+정한 유일한 인프라 예외이며, 그 안의 `env/`(비밀값)와 `models/`(가중치)는 커밋하지 않는다.
+자세한 예외 범위는
 [AGENTS.md의 Repository Structure](./docs/agents/AGENTS.md#repository-structure)에 있다.
 
 ### 서비스
