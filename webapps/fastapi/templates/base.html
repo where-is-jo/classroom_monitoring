@@ -10,9 +10,7 @@
   <script src="{{ url_for('static', path='/forms.js') }}" defer></script>
   {% block head_extra %}{% endblock %}
 </head>
-{# WHEP 시그널링 주소는 배포 환경마다 다르다(앞단 proxy 유무). 정적 JS가 값을 가질 수
-   없으므로 서버가 정한 값을 여기 실어 보낸다. 판단은 설정에서 끝났고 여기서는 출력만 한다. #}
-<body class="app-body" data-webrtc-base="{{ webrtc_signaling_base_url() }}">
+<body class="app-body">
   <a class="skip-link" href="#main-content">본문으로 바로가기</a>
   {% set current_path = request.url.path %}
   <div class="app-shell">

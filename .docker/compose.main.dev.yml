@@ -50,8 +50,9 @@ volumes:
 # | --- | --- | --- |
 # | 127.0.0.1:8076 | fastapi:8001 | nginx 경유 |
 # | 127.0.0.1:15678 | n8n:5678 | nginx 경유(/n8n/) |
-# | 127.0.0.1:18889 | mediamtx:8889 | nginx 경유(/webrtc/) |
 # | 18189 (UDP·TCP) | mediamtx:18189 | **직통.** 프록시 불가 |
+#
+# WHEP 시그널링은 fastapi가 프록시하므로(결정 0014) mediamtx 포트를 열지 않는다.
 
 services:
   fastapi:
@@ -126,8 +127,10 @@ services:
     # 당겨오므로(STREAM_SOURCES) 우리 mediamtx로 밀어 넣는 경로가 없다.
     # **카메라가 서버로 직접 송출하는 방식으로 바꾸면 8554를 다시 열어야 한다.**
     ports:
-      # WHEP 시그널링. nginx가 /webrtc/를 여기로 넘긴다.
-      - "127.0.0.1:18889:8889"
+      # **WHEP 시그널링(8889)은 호스트에 열지 않는다.** fastapi가 프록시하고
+      # (WHEP_BASE_URL=http://mediamtx:8889) 브라우저는 fastapi 경로로만 붙는다
+      # (결정 0014). 같은 network 안이라 호스트를 거칠 이유가 없다.
+      #
       # WebRTC 미디어(ICE). **호스트와 컨테이너 번호가 같아야 한다** — MediaMTX가 위
       # MTX_WEBRTCLOCAL*ADDRESS의 번호를 ICE 후보로 알리기 때문이다.
       - "18189:18189/udp"

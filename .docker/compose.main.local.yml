@@ -92,9 +92,9 @@ services:
       MTX_WEBRTCLOCALUDPADDRESS: ":18189"
       MTX_WEBRTCLOCALTCPADDRESS: ":18189"
     ports:
-      # WHEP 시그널링. **로컬에는 경로를 나눠 줄 proxy가 없어 브라우저가 직접 부른다**
-      # (fastapi.local.env의 WEBRTC_SIGNALING_BASE_URL=http://localhost:18889).
-      - "127.0.0.1:18889:8889"
+      # **WHEP 시그널링(8889)은 호스트에 열지 않는다.** fastapi가 프록시하므로
+      # (WHEP_BASE_URL=http://mediamtx:8889) 브라우저는 fastapi에만 붙는다(결정 0014).
+      # 로컬도 서버와 같은 경로를 타므로 앞단 proxy 없이 실시간 영상이 확인된다.
       - "18189:18189/udp"
       - "18189:18189/tcp"
       # HLS와 RTSP는 로컬에서 열어 둔다. ffmpeg로 합성 스트림을 밀어 넣고 확인할 때 쓴다.

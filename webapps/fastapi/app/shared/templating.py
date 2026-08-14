@@ -83,21 +83,3 @@ def _nav_classrooms() -> list[Classroom]:
 
 
 templates.env.globals["nav_classrooms"] = _nav_classrooms
-
-
-def _webrtc_signaling_base_url() -> str:
-    """화면이 WHEP 요청을 보낼 주소의 접두사.
-
-    환경마다 다르다. 앞단 reverse proxy가 있으면 상대 경로(`/webrtc`), 없으면
-    MediaMTX 주소를 직접 쓴다. 판단은 설정이 하고 여기서는 그 값을 옮기기만 한다.
-    """
-    try:
-        from ..shared.dependencies import get_settings
-
-        return get_settings().webrtc_signaling_base_url
-    except Exception:
-        logger.debug("webrtc_signaling_base_url: 설정 조회 실패", exc_info=True)
-        return "/webrtc"
-
-
-templates.env.globals["webrtc_signaling_base_url"] = _webrtc_signaling_base_url

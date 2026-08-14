@@ -50,9 +50,10 @@ docker compose -f .docker/compose.main.local.yml --profile worker up -d
 | `http://localhost:19001` | MinIO 콘솔 |
 | `http://localhost:13000` | Grafana (모니터링 스택을 올렸을 때) |
 
-**로컬에는 경로를 나눠 줄 nginx가 없다.** 그래서 서버와 달리 각 포트에 직접 붙고,
-실시간 영상 시그널링도 `WEBRTC_SIGNALING_BASE_URL=http://localhost:18889`로 MediaMTX를
-직접 부른다. 이 값이 서버용 `/webrtc`로 되어 있으면 **실시간 영상만** 조용히 뜨지 않는다.
+**로컬에는 경로를 나눠 줄 nginx가 없다.** 그래서 서버와 달리 각 포트에 직접 붙는다.
+다만 **실시간 영상은 서버와 같은 경로를 탄다** — fastapi가 WHEP 시그널링을 중계하므로
+(결정 0014) 앞단 proxy 없이도 확인된다. 대신 `PLAYBACK_SESSION_COOKIE_SECURE=false`가
+필요하다. 로컬은 평문 http라 true면 브라우저가 세션 cookie를 보내지 않는다.
 
 
 ---
@@ -72,8 +73,8 @@ docker compose -f .docker/compose.main.local.yml --profile worker up -d
 
 > **지금은 이렇지 않다.** 공용 서버에서 다른 팀과 포트가 부딪히기 때문에 호스트에 여는
 > 포트를 넷으로 줄이고, 그중 셋은 루프백에만 묶었다
-> (`127.0.0.1:8076` fastapi, `127.0.0.1:15678` n8n, `127.0.0.1:18889` WebRTC 시그널링,
-> 외부에 열리는 것은 미디어용 `18189` 하나). 나머지는 `ports`를 두지 않고 SSH 터널로 본다.
+> (`127.0.0.1:8076` fastapi, `127.0.0.1:15678` n8n, 외부에 열리는 것은 미디어용
+> `18189` 하나). 나머지는 `ports`를 두지 않고 SSH 터널로 본다.
 > **reverse proxy(Caddy)도 쓰지 않기로 했다** — 앞단의 다른 팀 nginx가 경로를 나눈다.
 > 현재 표는 [README.server.md의 포트 절](./README.server.md#포트)에 있다.
 > 아래는 그때의 기록이다.

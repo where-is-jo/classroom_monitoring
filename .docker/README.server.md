@@ -63,7 +63,8 @@ n8n 5678, llama-server 8008). **그 방식을 쓰지 않는다** — 공용 서�
 
 **우리 쪽 reverse proxy(Caddy)는 두지 않는다.** 앞단에 nginx가 이미 있는데 같은 일을
 두 겹으로 할 이유가 없어서다. 컨테이너가 하나 줄고, 경로가 안 맞을 때 들여다볼 곳도
-한 군데로 준다. 대신 **경로 분기를 nginx가 해야 한다** — 요청서에 그렇게 적어 두었다.
+한 군데로 준다. nginx가 나눠야 하는 것은 `/n8n/` 하나뿐이다 — 나머지는 전부 fastapi로
+가고, 실시간 영상 시그널링도 fastapi가 중계한다(결정 0014).
 
 포트를 정한 원칙은 셋이다.
 
@@ -79,7 +80,6 @@ n8n 5678, llama-server 8008). **그 방식을 쓰지 않는다** — 공용 서�
 | --- | --- | --- | --- |
 | **127.0.0.1:8076** | `fastapi:8001` | fastapi | 웹 화면·API. nginx `location /`이 넘긴다 |
 | **127.0.0.1:15678** | `n8n:5678` | n8n | 편집기·webhook. nginx `location /n8n/`이 넘긴다 |
-| **127.0.0.1:18889** | `mediamtx:8889` | mediamtx | WHEP 시그널링. nginx `location /webrtc/`가 넘긴다 |
 | **18189** (UDP·TCP) | `mediamtx:18189` | mediamtx | **WebRTC 미디어.** UDP 기반 ICE라 프록시할 수 없어 직통한다. **외부에 열리는 유일한 포트다** |
 
 nginx 쪽에 넣을 설정과 방화벽 요청은
@@ -273,7 +273,6 @@ compose도 마운트하지 않는다.
 | --- | --- | --- |
 | `/` (나머지 전부) | `127.0.0.1:8076` → `fastapi:8001` | 실질적인 기능은 여기 안에서 쓴다 |
 | `/n8n/*` | `127.0.0.1:15678` → `n8n:5678` | 접두사를 떼지 않고 그대로 넘긴다 |
-| `/webrtc/*` | `127.0.0.1:18889` → `mediamtx:8889` | **사용자용 실시간 영상.** WHEP 시그널링만 |
 
 HLS(`/stream/*`)는 요청서에서 뺐다. 화면이 WebRTC로만 보기 때문이다.
 필요해지면 `location /stream/`과 `127.0.0.1:18888:8888`을 함께 되살린다.
@@ -291,10 +290,9 @@ Caddy로 붙여 보며 확인한 것들이다. **nginx로 넘어가면서 같은
   전부 `/n8n/…`로 만든다. `compose.main.dev.yml`의 `n8n.environment`에 있다.
   **로컬(`compose.main.local.yml`)은 nginx가 없어 `N8N_PATH=/`다** — 접두사 없이
   포트로 직접 붙는다.
-- **MediaMTX가 돌려주는 `Location`에 접두사가 없다.** 접두사를 뗀 뒤 넘기므로
-  그대로 두면 브라우저가 fastapi로 간다. Caddy에서는 `header_down Location ^/ /webrtc/`,
-  nginx에서는 `proxy_redirect / /webrtc/;`가 같은 일을 한다.
-- **WHEP이 주는 세션 주소도 같은 문제를 겪는다.** 아래 참고.
+- **MediaMTX가 돌려주는 `Location`에 접두사가 없었다.** Caddy·nginx로 직접 프록시할
+  때 겪던 문제인데, **지금은 fastapi가 시그널링을 중계하면서 자기 경로로 다시 써 주므로
+  앞단에서 손댈 것이 없다**(결정 0014).
 
 ## 사용자용 실시간 영상은 WebRTC로 간다
 
@@ -305,25 +303,22 @@ Caddy로 붙여 보며 확인한 것들이다. **nginx로 넘어가면서 같은
 
 | 무엇 | 어디로 | 프록시 |
 | --- | --- | --- |
-| WHEP 시그널링 | nginx `/webrtc/*` → `127.0.0.1:18889` → `mediamtx:8889` | 탄다 |
+| WHEP 시그널링 | 브라우저 → fastapi → `mediamtx:8889` | **fastapi가 중계한다** |
 | 영상(미디어) | `18189` UDP·TCP 직접 | **안 탄다. 포트를 열어야 한다** |
 
-### 시그널링 주소는 설정으로 정한다
+### 시그널링은 fastapi가 중계한다 (결정 0014)
 
-화면이 WHEP을 어디로 보낼지는 환경마다 다르다. 정적 JS가 그 값을 가질 수 없으므로
-**fastapi 설정 `WEBRTC_SIGNALING_BASE_URL`이 정하고**, 서버가 `base.html`의
-`data-webrtc-base` 속성으로 실어 보낸다. JS는 그 값 뒤에 `/<카메라>/whep`을 붙인다.
+브라우저는 **MediaMTX 주소·포트를 모른다.** 재생 세션을 만들면
+(`POST /api/v1/video-streams/<id>/playback-sessions`) fastapi가 자기 경로를
+`signaling_url`로 돌려주고, 화면은 그 주소로만 WHEP offer를 보낸다.
 
-| 환경 | 값 | 이유 |
+| 설정 | 값 | 이유 |
 | --- | --- | --- |
-| 서버(`fastapi.dev.env`) | `/webrtc` | nginx가 그 경로를 mediamtx로 넘긴다. **MediaMTX 포트를 외부에 열지 않는다** |
-| 로컬(`fastapi.local.env`) | `http://localhost:18889` | 경로를 나눠 줄 proxy가 없으므로 MediaMTX 시그널링에 직접 붙는다 |
+| `WHEP_BASE_URL` | `http://mediamtx:8889` | fastapi가 중계할 대상. 같은 network라 컨테이너 이름으로 부른다 |
+| `PLAYBACK_SESSION_COOKIE_SECURE` | dev `true` / local `false` | **로컬은 평문 http라 false여야** 브라우저가 세션 cookie를 보낸다 |
 
-로컬 값이 성립하는 것은 compose가 시그널링을 `127.0.0.1:18889`에 열어 두기 때문이다.
-브라우저와 MediaMTX가 같은 PC에 있어 루프백으로 닿는다.
-
-> 로컬에서 이 값을 기본값(`/webrtc`)으로 두면 요청이 fastapi로 가서 404가 나고
-> **실시간 영상만** 조용히 뜨지 않는다. 나머지 화면은 정상이라 원인을 찾기 어렵다.
+덕분에 **MediaMTX 시그널링 포트를 호스트에 열지 않는다.** 앞단 proxy가 경로를
+나눠 줄 필요도 없어서 **로컬에서도 서버와 같은 경로로 실시간 영상을 확인할 수 있다.**
 
 MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문자>` 환경변수로 준다.
 바꾼 값이 compose 파일 안에 다 보이고 마운트할 파일이 늘지 않는다.
@@ -342,8 +337,8 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
 
 세션 주소 재작성도 필요하다. WHEP은 201과 함께 `Location`으로 세션 리소스 주소를 주고,
 클라이언트가 거기로 ICE 후보를 PATCH하고 끝날 때 DELETE 한다. 접두사가 빠지면 그
-요청이 fastapi로 가서 세션이 정리되지 않는다. nginx의
-`proxy_redirect / /webrtc/;`가 그것까지 함께 고친다(Caddy에서는 `header_down`이 했다).
+접두사가 빠지면 세션이 정리되지 않는다. **fastapi가 중계하면서 자기 경로로 다시 써
+주므로 앞단에서 손댈 것이 없다**(결정 0014).
 
 ## 검증한 것 / 못 한 것
 
@@ -419,7 +414,6 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
   docker compose -f .docker/compose.main.dev.yml up -d
   curl -i http://127.0.0.1:8076/health          # 우리 쪽 (nginx 없이)
   curl -i http://127.0.0.1:15678/n8n/           # n8n
-  curl -i http://127.0.0.1:18889/               # 시그널링 (404여도 응답하면 산 것)
   curl -i http://116.42.115.24:<nginx 포트>/health   # 전체 경로 (nginx 설정 후)
   ```
 
@@ -442,7 +436,7 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
   나눠 쓸지 각각 다른 GPU에 붙일지(`device_ids`) 서버의 GPU 개수를 보고 정한다.
 - **비밀값 관리.** `env/*.env`는 지금 로컬 파일이다. 공용 서버에서 어떻게 주입할지
   정해지지 않았다.
-- **영상 스트림의 접근 제어.** 지금 `/webrtc/*`와 `/stream/*`은 인증 없이 열려 있다.
+- **영상 스트림의 접근 제어.** 재생 세션 API는 인증 없이 열려 있다.
   강의실 영상에는 사람 얼굴이 담기므로 fastapi의 인증과 어떻게 잇을지 정해야 한다
   (MediaMTX 자체 인증을 쓸지, fastapi가 발급한 토큰을 검사할지).
   `monitoring/external`의 경계 문제와 함께 다룬다.

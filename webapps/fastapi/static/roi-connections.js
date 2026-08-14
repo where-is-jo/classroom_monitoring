@@ -74,10 +74,7 @@
     });
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
-    /* 시그널링 주소는 서버가 base.html의 data 속성으로 내려 준다(설정
-       WEBRTC_SIGNALING_BASE_URL). 앞단 proxy가 있으면 "/webrtc", 없으면 MediaMTX 주소다. */
-    const whepBase = (document.body.dataset.webrtcBase || "/webrtc").replace(/\/+$/, "");
-    const response = await fetch(`${whepBase}/${encodeURIComponent(cameraId)}/whep`, {
+    const response = await fetch(`http://${location.hostname}:8889/${encodeURIComponent(cameraId)}/whep`, {
       method: "POST", headers: {"Content-Type": "application/sdp"}, body: connection.localDescription.sdp,
     });
     if (!response.ok) throw new Error(`WHEP ${response.status}`);
