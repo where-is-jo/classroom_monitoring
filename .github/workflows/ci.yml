@@ -1,0 +1,157 @@
+name: CI
+
+# 결정 0014(docs/architecture/decisions.md)를 따른다.
+# 문서 전용 변경은 fastapi/worker job이 스킵되어 필수 체크가 즉시 통과한다.
+# paths-ignore로 워크플로우 자체를 막지 않는다 — 트리거되지 않은 필수 체크는
+# 영원히 "대기 중"으로 남아 오히려 병합을 막는다.
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+# 기본을 읽기 전용으로 내린다. 저장소 Settings의 기본 권한이 write여도
+# 검사 job은 쓰기 토큰을 들고 돌지 않는다. 쓰기가 필요한 job에서만 따로 올린다.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # PR은 새 커밋이 오면 이전 실행을 취소해도 손해가 없다.
+  # 하지만 develop push를 취소하면 그 커밋의 이미지가 영영 안 올라간다 —
+  # 뒤 커밋이 다른 서비스만 건드리면 앞 커밋의 빌드를 아무도 대신해 주지 않는다.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: 변경 범위 판정
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      fastapi: ${{ steps.filter.outputs.fastapi }}
+      worker: ${{ steps.filter.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # 이 워크플로우 파일 자신을 양쪽 필터에 넣는다. 넣지 않으면 ci.yml만 고친 PR이
+          # 두 검사 job 모두 스킵되어 아무 검증 없이 병합된다.
+          filters: |
+            fastapi:
+              - 'webapps/fastapi/**'
+              - '.github/workflows/ci.yml'
+            worker:
+              - 'worker/**'
+              - '.github/workflows/ci.yml'
+
+  fastapi-checks:
+    name: fastapi 린트·타입·테스트
+    needs: changes
+    if: needs.changes.outputs.fastapi == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapps/fastapi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: webapps/fastapi/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m ruff check app tests
+      - run: python -m ruff format --check app tests
+      - run: python -m mypy app tests
+      - run: python -m pytest -q
+
+  worker-checks:
+    name: worker 테스트
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            worker/pipeline/requirements.txt
+            worker/stream/requirements.txt
+            worker/inference/requirements.txt
+            worker/recorder/requirements.txt
+      # pipeline/requirements.txt가 stream·inference 의존성을 -r로 묶어온다.
+      # recorder는 별도 파일이라 명시적으로 더해야 전체 테스트가 돈다.
+      - run: python -m pip install -r pipeline/requirements.txt -r recorder/requirements.txt
+      - run: python -m pytest -q
+
+  # 브랜치 보호 규칙에는 이 job 하나만 필수 체크로 등록한다.
+  # 깃허브의 필수 체크는 job id가 아니라 job의 name 표시값으로 등록되므로,
+  # 위 두 job의 name을 바꾸면 필수 체크가 조용히 이름 불일치가 되어 풀린다.
+  # 이름이 고정된 게이트를 하나 두면 검사 job을 자유롭게 늘리고 고칠 수 있다.
+  ci-gate:
+    name: ci-gate
+    needs: [changes, fastapi-checks, worker-checks]
+    # 스킵된 job도 결과를 받아 판정해야 하므로 always()가 필요하다.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 검증 결과 요약
+        run: |
+          echo "changes:        ${{ needs.changes.result }}"
+          echo "fastapi-checks: ${{ needs['fastapi-checks'].result }}"
+          echo "worker-checks:  ${{ needs['worker-checks'].result }}"
+      # skipped는 통과로 본다. 문서 전용 변경이 그 경우다.
+      - name: 실패한 검증이 있으면 게이트를 닫는다
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+
+  build-push-fastapi:
+    name: fastapi 이미지 빌드·업로드
+    needs: [changes, fastapi-checks]
+    if: github.event_name == 'push' && needs.changes.outputs.fastapi == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/classroom-monitoring-fastapi
+          # latest를 붙이지 않는다. 이 job은 develop 병합에서만 도는데,
+          # .docker/compose.main.yml의 기본값이 :latest라 운영 서버가 develop 코드를
+          # 끌어가게 된다. latest는 main 배포 시점에만 붙인다(결정 0014 남은 일).
+          tags: |
+            type=raw,value=develop
+            type=sha,prefix=sha-,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./webapps/fastapi
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=fastapi
+          cache-to: type=gha,mode=max,scope=fastapi
+
+  # worker 이미지 빌드 job은 두지 않는다. 이미지가 14.9GB라(torch가 번들하는 CUDA
+  # 런타임만 3.6GB) 깃허브 호스팅 러너의 디스크와 캐시 한도를 넘길 위험이 크다.
+  # 특히 Actions 캐시는 저장소당 10GB 상한이라 mode=max로 밀어 넣으면 들어가지도
+  # 못하면서 위 fastapi 캐시까지 밀어낸다.
+  # 이미지 경량화가 끝날 때까지 worker는 GPU가 달린 PC에서 수동으로 빌드해 push한다.
+  # 자동화하기로 하면 결정 0014에 새 항목을 추가하고 여기에 job을 되살린다.
