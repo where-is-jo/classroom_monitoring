@@ -16,7 +16,13 @@ from ..classrooms.adapters.memory_repository import (
 from ..classrooms.adapters.mongo_repository import MongoClassroomRepository
 from ..classrooms.ports import ClassroomRepository
 from ..classrooms.service import ClassroomService
-from ..demo_seed import seed_demo_data, seed_video_streams
+from ..demo_seed import seed_demo_data, seed_roi_test_data, seed_video_streams
+from ..face_embeddings.adapters.http_analyzer import HttpFaceEmbeddingAnalyzer
+from ..face_embeddings.adapters.local_dataset import LocalFaceDatasetReader
+from ..face_embeddings.adapters.memory import InMemoryFaceEmbeddingRepository
+from ..face_embeddings.adapters.mongo import MongoFaceEmbeddingRepository
+from ..face_embeddings.ports import FaceEmbeddingRepository
+from ..face_embeddings.service import FaceEmbeddingService
 from ..face_enrollment.adapters.http_analyzer import HttpFaceAnalyzer
 from ..face_enrollment.adapters.local_storage import LocalFaceObjectStorage
 from ..face_enrollment.adapters.memory import (
@@ -27,6 +33,10 @@ from ..face_enrollment.adapters.memory import (
 from ..face_enrollment.models import PoseBin
 from ..face_enrollment.rules import EnrollmentThresholds
 from ..face_enrollment.service import FaceEnrollmentService
+from ..roi_connections.adapters.memory import InMemoryRoiConnectionRepository
+from ..roi_connections.adapters.mongo import MongoRoiConnectionRepository
+from ..roi_connections.ports import RoiConnectionRepository
+from ..roi_connections.service import RoiConnectionService
 from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
 from ..snapshots.ports import SnapshotStorage
 from ..snapshots.service import SnapshotService
@@ -40,11 +50,15 @@ from ..student_monitoring.adapters.mongo_repository import (
 )
 from ..student_monitoring.ports import DetectionEventRepository, VideoSegmentRepository
 from ..student_monitoring.service import StudentMonitoringService
+from ..students.adapters.memory import InMemoryStudentRepository
+from ..students.adapters.mongo import MongoStudentRepository
+from ..students.models import Student
+from ..students.ports import StudentRepository
+from ..students.service import StudentService
 from ..video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from ..video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
 from ..video_monitoring.ports import VideoStreamRepository
 from ..video_monitoring.service import VideoDemoService, VideoStreamService
-from .adapters.memory_student_lookup import InMemoryStudentLookup
 from .broadcaster import InMemoryBroadcaster
 from .config import Settings
 from .database import (
@@ -90,12 +104,27 @@ def _video_stream_repository() -> MemoryVideoStreamRepository:
 
 
 @lru_cache
-def _student_lookup() -> InMemoryStudentLookup:
-    """중립 학생 조회 어댑터. runtime 기본은 empty다.
-
-    identities는 명시적 DI·테스트 fixture에서 주입하며, 여기서는 주입하지 않는다.
-    """
-    return InMemoryStudentLookup()
+def _memory_student_repository() -> InMemoryStudentRepository:
+    now = utc_now()
+    return InMemoryStudentRepository(
+        tuple(
+            Student(
+                id=f"roi-test-student-{index}",
+                student_number=f"2026{index:03d}",
+                name=f"테스트 학생 {index}",
+                birth_date=datetime(2012, 1, index, tzinfo=UTC).date(),
+                classroom_name="ROI 테스트반",
+                phone=None,
+                guardian_phone="010-0000-0000",
+                face_enrollment_id=None,
+                face_registered=False,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            )
+            for index in range(1, 7)
+        )
+    )
 
 
 @lru_cache
@@ -147,6 +176,47 @@ def _mongo_video_stream_repository() -> MongoVideoStreamRepository:
     return MongoVideoStreamRepository(_mongo_database())
 
 
+@lru_cache
+def _mongo_student_repository() -> MongoStudentRepository:
+    return MongoStudentRepository(_mongo_database())
+
+
+@lru_cache
+def _memory_face_embedding_repository() -> InMemoryFaceEmbeddingRepository:
+    return InMemoryFaceEmbeddingRepository()
+
+
+@lru_cache
+def _mongo_face_embedding_repository() -> MongoFaceEmbeddingRepository:
+    return MongoFaceEmbeddingRepository(_mongo_database())
+
+
+def get_face_embedding_repository() -> FaceEmbeddingRepository:
+    if get_settings().database_mode == "memory":
+        return _memory_face_embedding_repository()
+    return _mongo_face_embedding_repository()
+
+
+@lru_cache
+def _face_embedding_analyzer(base_url: str, timeout_seconds: float) -> HttpFaceEmbeddingAnalyzer:
+    return HttpFaceEmbeddingAnalyzer(base_url, timeout_seconds)
+
+
+@lru_cache
+def _face_dataset_reader(root: str) -> LocalFaceDatasetReader:
+    return LocalFaceDatasetReader(Path(root))
+
+
+@lru_cache
+def _memory_roi_connection_repository() -> InMemoryRoiConnectionRepository:
+    return InMemoryRoiConnectionRepository()
+
+
+@lru_cache
+def _mongo_roi_connection_repository() -> MongoRoiConnectionRepository:
+    return MongoRoiConnectionRepository(_mongo_database())
+
+
 def get_classroom_repository(
     settings: Settings = Depends(get_settings),
 ) -> ClassroomRepository:
@@ -183,9 +253,43 @@ def get_broadcaster() -> InMemoryBroadcaster:
     return _broadcaster()
 
 
+def get_student_repository(
+    settings: Settings = Depends(get_settings),
+) -> StudentRepository:
+    if settings.database_mode == "memory":
+        return _memory_student_repository()
+    return _mongo_student_repository()
+
+
 def get_student_lookup() -> StudentLookupPort:
-    """중립 학생 조회 포트. runtime 기본은 empty 어댑터다."""
-    return _student_lookup()
+    settings = get_settings()
+    return get_student_repository(settings)
+
+
+def get_roi_connection_repository() -> RoiConnectionRepository:
+    settings = get_settings()
+    if settings.database_mode == "memory":
+        return _memory_roi_connection_repository()
+    return _mongo_roi_connection_repository()
+
+
+def get_student_service(
+    repository: StudentRepository = Depends(get_student_repository),
+) -> StudentService:
+    return StudentService(repository, clock=utc_now)
+
+
+def get_face_embedding_service() -> FaceEmbeddingService:
+    settings = get_settings()
+    return FaceEmbeddingService(
+        get_face_embedding_repository(),
+        _face_embedding_analyzer(
+            settings.face_analyzer_url, settings.face_analyzer_timeout_seconds
+        ),
+        _face_dataset_reader(str(settings.face_local_sample_storage_dir)),
+        get_student_service(get_student_repository(settings)),
+        clock=utc_now,
+    )
 
 
 def get_classroom_service(
@@ -200,6 +304,35 @@ def get_classroom_service(
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         clock=utc_now,
     )
+
+
+@lru_cache
+def _roi_classroom_service() -> ClassroomService:
+    settings = get_settings()
+    service = ClassroomService(
+        InMemoryClassroomRepository(),
+        occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
+        clock=utc_now,
+    )
+    seed_roi_test_data(service)
+    return service
+
+
+@lru_cache
+def _roi_connection_service() -> RoiConnectionService:
+    settings = get_settings()
+    return RoiConnectionService(
+        get_classroom_service(get_classroom_repository(settings), get_student_lookup(), settings),
+        get_student_lookup(),
+        get_roi_connection_repository(),
+        max_upload_bytes=settings.roi_reference_image_max_bytes,
+        page_size_max=settings.page_size_max,
+        clock=utc_now,
+    )
+
+
+def get_roi_connection_service() -> RoiConnectionService:
+    return _roi_connection_service()
 
 
 @lru_cache
@@ -313,6 +446,7 @@ def get_face_enrollment_service(
             motion_speed_dps_max=settings.face_motion_speed_dps_max,
             yaw_side_degrees=settings.face_yaw_side_degrees,
             pitch_side_degrees=settings.face_pitch_side_degrees,
+            pitch_down_degrees=settings.face_pitch_down_degrees,
         ),
         clock=utc_now,
     )
@@ -362,14 +496,16 @@ def initialize_data_store() -> None:
                 MongoDetectionEventRepository.ensure_indexes,
                 MongoVideoSegmentRepository.ensure_indexes,
                 MongoVideoStreamRepository.ensure_indexes,
+                MongoStudentRepository.ensure_indexes,
+                MongoRoiConnectionRepository.ensure_indexes,
+                MongoFaceEmbeddingRepository.ensure_indexes,
             ],
         )
         return
+    classroom_service = get_classroom_service(get_classroom_repository(settings), settings=settings)
     if settings.demo_mode_enabled:
         seed_demo_data(
-            get_classroom_service(
-                get_classroom_repository(settings), settings=settings
-            ),
+            classroom_service,
             now=utc_now(),
         )
         seed_video_streams(_video_stream_repository(), now=utc_now())
@@ -382,6 +518,9 @@ def close_data_store() -> None:
     _mongo_detection_event_repository.cache_clear()
     _mongo_video_segment_repository.cache_clear()
     _mongo_video_stream_repository.cache_clear()
+    _mongo_student_repository.cache_clear()
+    _mongo_face_embedding_repository.cache_clear()
+    _mongo_roi_connection_repository.cache_clear()
     _mongo_database.cache_clear()
     _mongo_client.cache_clear()
     _face_enrollment_repository.cache_clear()
@@ -389,6 +528,13 @@ def close_data_store() -> None:
     _local_face_object_storage.cache_clear()
     _face_analyzer.cache_clear()
     _http_face_analyzer.cache_clear()
+    _roi_connection_service.cache_clear()
+    _roi_classroom_service.cache_clear()
+    _memory_roi_connection_repository.cache_clear()
+    _memory_student_repository.cache_clear()
+    _memory_face_embedding_repository.cache_clear()
+    _face_embedding_analyzer.cache_clear()
+    _face_dataset_reader.cache_clear()
 
 
 def verify_readiness(settings: Settings = Depends(get_settings)) -> None:

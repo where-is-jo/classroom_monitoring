@@ -8,6 +8,8 @@ import pytest
 
 os.environ["APP_ENV"] = "local"
 os.environ["DATABASE_MODE"] = "memory"
+os.environ["DATABASE_URL"] = ""
+os.environ["DATABASE_NAME"] = ""
 os.environ["DEMO_MODE_ENABLED"] = "false"
 os.environ["FACE_ANALYZER_MODE"] = "synthetic"
 

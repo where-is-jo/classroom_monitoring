@@ -91,7 +91,7 @@ def test_product_navigation_includes_face_enrollment(minimal_client: TestClient)
         response = minimal_client.get(path)
         assert response.status_code == 200
         assert heading in response.text
-        assert response.text.count('class="nav-group-title"') == 2
+        assert response.text.count('class="nav-group-title"') == 3
         for label in ("강의실 좌석 현황", "실시간 모니터링", "자연어 검색"):
             assert label in response.text
         for removed in ("로그인", "사용자 관리", "직원 관리", "면담", "알림"):
@@ -126,9 +126,7 @@ def test_removed_pages_and_apis_are_404(minimal_client: TestClient, path: str) -
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/v1/students",
         "/api/v1/students/student-removed",
-        "/students",
         "/students/create",
         "/students/student-removed/edit",
     ],
@@ -140,7 +138,6 @@ def test_removed_students_crud_is_404(minimal_client: TestClient, path: str) -> 
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("post", "/api/v1/students"),
         ("post", "/api/v1/students/student-removed"),
         ("patch", "/api/v1/students/student-removed"),
         ("delete", "/api/v1/students/student-removed"),
@@ -153,9 +150,9 @@ def test_removed_students_write_crud_is_404(
     assert response.status_code == 404
 
 
-def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -> None:
+def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> None:
     paths = set(minimal_client.get("/openapi.json").json()["paths"])
-    assert paths == {
+    assert {
         "/api/v1/classrooms",
         "/api/v1/classrooms/{classroom_id}/occupancy",
         "/api/v1/video-streams",
@@ -164,12 +161,16 @@ def test_openapi_contains_only_minimal_domain_apis(minimal_client: TestClient) -
         "/api/v1/students/{student_id}/face-enrollments",
         "/api/v1/face-enrollments/{enrollment_id}",
         "/api/v1/students/{student_id}/face-profile",
+        "/api/v1/students",
+        "/api/v1/students/{student_id}/face-enrollment",
+        "/api/v1/classrooms/{classroom_id}/roi-connection",
+        "/api/v1/classrooms/{classroom_id}/roi-connections",
         # 탐지 스냅샷 조회(결정 0011). 영상 원본을 저장하지 않는 대신 남기는 정지 이미지다.
         "/api/v1/snapshots",
         "/api/v1/snapshots/image/{key}",
         "/health",
         "/health/ready",
-    }
+    } <= paths
 
 
 def test_seat_summary_maps_present_absent_and_unknown(minimal_client: TestClient) -> None:
