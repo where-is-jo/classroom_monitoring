@@ -1,0 +1,163 @@
+"""ROI 연결 페이지와 API 계약 테스트."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from datetime import UTC, datetime
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.models import CreateClassroomCommand, CreateSeatCommand
+from app.classrooms.service import ClassroomService
+from app.main import app
+from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
+from app.roi_connections.service import RoiConnectionService
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
+from app.shared.dependencies import get_roi_connection_service
+from app.shared.student_identity import StudentIdentity
+
+
+def make_service(*, seeded: bool = True) -> RoiConnectionService:
+    classroom_service = ClassroomService(
+        InMemoryClassroomRepository(),
+        occupancy_confidence_threshold=0.5,
+        clock=lambda: datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
+    )
+    if seeded:
+        classroom_service.seed_classroom(
+            CreateClassroomCommand(id="room", code="ROOM", name="테스트실", location="가상")
+        )
+        classroom_service.seed_seat(
+            CreateSeatCommand(id="seat", classroom_id="room", code="S01", label="좌석 1")
+        )
+    students = InMemoryStudentLookup(
+        (StudentIdentity(id="student", student_no="001", name="학생", is_active=True),)
+    )
+    return RoiConnectionService(
+        classroom_service,
+        students,
+        InMemoryRoiConnectionRepository(),
+        max_upload_bytes=1024,
+        page_size_max=20,
+        clock=lambda: datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
+    )
+
+
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    service = make_service()
+    app.dependency_overrides[get_roi_connection_service] = lambda: service
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_page_renders_live_editor_controls_and_student_modal(client: TestClient) -> None:
+    response = client.get("/roi-connections?classroom_id=room")
+    assert response.status_code == 200
+    assert 'id="roi-start"' in response.text
+    assert 'id="roi-finish"' in response.text
+    assert 'id="roi-reset" type="button" class="secondary" disabled' in response.text
+    assert 'id="roi-cancel" type="button" class="secondary" disabled' in response.text
+    assert 'id="roi-classroom-select"' in response.text
+    assert '<dialog id="roi-student-dialog"' in response.text
+    assert 'id="roi-seat-select"' in response.text
+    assert 'value="seat"' in response.text
+    assert 'id="roi-image-form"' not in response.text
+
+
+def test_page_does_not_add_hardcoded_test_classroom() -> None:
+    app.dependency_overrides[get_roi_connection_service] = lambda: make_service(seeded=False)
+    try:
+        with TestClient(app) as test_client:
+            response = test_client.get("/roi-connections")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert "테스트 강의실" not in response.text
+    assert 'src="/roi-connections/fallback-image"' in response.text
+
+
+def test_fallback_image_is_available(client: TestClient) -> None:
+    response = client.get("/roi-connections/fallback-image")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content
+
+
+def test_live_roi_connection_saves_classroom_student_and_polygon(client: TestClient) -> None:
+    saved = client.put(
+        "/api/v1/classrooms/room/roi-connection",
+        json={
+            "seat_id": "seat",
+            "student_id": "student",
+            "polygon": [
+                {"x": 0.1, "y": 0.1},
+                {"x": 0.8, "y": 0.1},
+                {"x": 0.4, "y": 0.8},
+            ],
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["classroom_id"] == "room"
+    assert saved.json()["student_id"] == "student"
+    assert saved.json()["seat_id"] == "seat"
+
+
+def test_upload_read_and_save_connection(client: TestClient) -> None:
+    upload = client.post(
+        "/api/v1/classrooms/room/roi-reference-image",
+        files={"image": ("room.png", b"\x89PNG\r\n\x1a\nimage", "image/png")},
+    )
+    assert upload.status_code == 201
+    assert upload.json()["revision"] == 1
+
+    image = client.get("/api/v1/classrooms/room/roi-reference-image")
+    assert image.status_code == 200
+    assert image.headers["content-type"] == "image/png"
+
+    saved = client.put(
+        "/api/v1/classrooms/room/seats/seat/roi-connection",
+        json={
+            "student_id": "student",
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["student_id"] == "student"
+
+    listed = client.get("/api/v1/classrooms/room/roi-connections")
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["seat_id"] == "seat"
+
+
+def test_invalid_upload_and_stale_revision_errors(client: TestClient) -> None:
+    invalid = client.post(
+        "/api/v1/classrooms/room/roi-reference-image",
+        files={"image": ("fake.png", b"not-image", "image/png")},
+    )
+    assert invalid.status_code == 422
+
+    for suffix in (b"first", b"second"):
+        response = client.post(
+            "/api/v1/classrooms/room/roi-reference-image",
+            files={"image": ("room.png", b"\x89PNG\r\n\x1a\n" + suffix, "image/png")},
+        )
+        assert response.status_code == 201
+
+    stale = client.put(
+        "/api/v1/classrooms/room/seats/seat/roi-connection",
+        json={
+            "student_id": None,
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": 1,
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "ROI_CONNECTION_CONFLICT"

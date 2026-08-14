@@ -45,7 +45,7 @@ GUIDANCE_MESSAGES = {
     "FACE_TOO_SMALL": "카메라에 조금 더 가까이 와 주세요.",
     "FACE_NOT_CENTERED": "얼굴을 화면 중앙에 맞춰 주세요.",
     "HEAD_TILTED": "고개를 기울이지 말고 바르게 해 주세요.",
-    "BLURRY": "너무 빠르게 움직이지 말고 잠시 멈춰 주세요.",
+    "BLURRY": "얼굴이 흐리게 보입니다. 카메라를 바라보고 잠시 멈춰 주세요.",
     "BAD_LIGHTING": "얼굴이 밝게 보이도록 조명을 조정해 주세요.",
     "LANDMARK_UNSTABLE": "눈·코·입이 잘 보이도록 해 주세요.",
     "MOVING_TOO_FAST": "고개를 조금 더 천천히 움직여 주세요.",

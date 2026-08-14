@@ -73,6 +73,29 @@ def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
         )
 
 
+def seed_roi_test_data(service: ClassroomService) -> None:
+    """memory mode의 ROI 페이지에서만 사용할 가상 강의실과 좌석을 멱등하게 만든다."""
+    classroom = service.seed_classroom(
+        CreateClassroomCommand(
+            id="roi-test-classroom",
+            code="ROI-TEST",
+            name="ROI 연결 테스트 강의실",
+            location="가상 데이터",
+        )
+    )
+    for index in range(1, 7):
+        service.seed_seat(
+            CreateSeatCommand(
+                id=f"roi-test-seat-{index}",
+                classroom_id=classroom.id,
+                code=f"R{index:02d}",
+                label=f"테스트 좌석 {index}",
+                row=((index - 1) // 3) + 1,
+                column=((index - 1) % 3) + 1,
+            )
+        )
+
+
 def seed_video_streams(repository: VideoStreamRepository, *, now: datetime) -> None:
     """실제 source를 등록한다. WebRTC 재생·탐지 수신 테스트용 fixture다."""
     if now.tzinfo is None:

@@ -1,68 +1,114 @@
 (() => {
-  const form = document.querySelector("#student-registration-form");
-  const notice = document.querySelector("#student-save-notice");
-  const dialog = document.querySelector("#student-face-enrollment-dialog");
-  const openButton = document.querySelector("#open-face-enrollment");
-  const closeButton = document.querySelector("#close-face-enrollment");
-  const cancelButton = document.querySelector("#cancel-enrollment");
+  const registrationDialog = document.querySelector("#student-registration-dialog");
+  const registrationForm = document.querySelector("#student-registration-form");
+  const faceDialog = document.querySelector("#student-face-enrollment-dialog");
   const setup = document.querySelector("#enrollment-setup");
   const capture = document.querySelector("#capture-panel");
   const complete = document.querySelector("#face-enrollment-complete");
-  if (!(form instanceof HTMLFormElement) || !(notice instanceof HTMLElement)) return;
+  let activeStudentId = null;
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!form.reportValidity()) return;
-    const values = Object.fromEntries(new FormData(form).entries());
-    console.log("[학생 등록 테스트] 저장할 학생 정보", values);
-    form.reset();
-    notice.hidden = false;
-    notice.focus();
-    window.scrollTo({top: 0, behavior: "smooth"});
-  });
-
-  form.addEventListener("reset", () => {
-    notice.hidden = true;
-    openButton?.classList.remove("is-complete");
-    if (openButton) openButton.textContent = "얼굴 등록";
-  });
-  if (!(dialog instanceof HTMLDialogElement) || !(openButton instanceof HTMLButtonElement)) return;
-
-  const closeDialog = () => {
-    if (dialog.open) dialog.close();
-    document.body.classList.remove("student-modal-open");
+  const setModalState = () => {
+    document.body.classList.toggle(
+      "student-modal-open",
+      Boolean(registrationDialog?.open || faceDialog?.open),
+    );
   };
-
-  openButton.addEventListener("click", () => {
-    const name = form.elements.namedItem("name");
-    const studentNumber = form.elements.namedItem("student_number");
-    if (!(name instanceof HTMLInputElement) || !(studentNumber instanceof HTMLInputElement)) return;
-    if (!name.reportValidity() || !studentNumber.reportValidity()) return;
-    document.querySelector("#face-student-name").textContent = name.value.trim();
-    document.querySelector("#student-id").textContent = studentNumber.value.trim();
-    document.querySelector("#consent-confirmed").checked = false;
-    document.querySelector("#setup-error").hidden = true;
-    document.querySelector("#capture-error").hidden = true;
-    setup.hidden = false;
-    capture.hidden = true;
-    complete.hidden = true;
-    dialog.showModal();
-    document.body.classList.add("student-modal-open");
+  const closeDialog = (dialog) => {
+    if (dialog instanceof HTMLDialogElement && dialog.open) dialog.close();
+    setModalState();
+  };
+  const closeOnBackdrop = (dialog) => dialog?.addEventListener("click", (event) => {
+    if (event.target === dialog) closeDialog(dialog);
   });
 
-  closeButton?.addEventListener("click", closeDialog);
-  dialog.addEventListener("cancel", (event) => {
+  document.querySelector("#open-student-registration")?.addEventListener("click", () => {
+    registrationForm?.reset();
+    const error = document.querySelector("#student-save-error");
+    if (error) error.hidden = true;
+    registrationDialog.showModal();
+    setModalState();
+  });
+  document.querySelector("#close-student-registration")?.addEventListener("click", () => closeDialog(registrationDialog));
+  closeOnBackdrop(registrationDialog);
+  registrationDialog?.addEventListener("close", setModalState);
+
+  registrationForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!capture.hidden) cancelButton?.click(); else closeDialog();
+    if (!registrationForm.reportValidity()) return;
+    const submit = registrationForm.querySelector("button[type='submit']");
+    const error = document.querySelector("#student-save-error");
+    const values = Object.fromEntries(new FormData(registrationForm).entries());
+    values.phone = values.phone || null;
+    values.face_enrollment_id = null;
+    error.hidden = true;
+    submit.disabled = true;
+    try {
+      const response = await fetch("/api/v1/students", {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "학생 정보를 저장하지 못했습니다.");
+      closeDialog(registrationDialog);
+      location.reload();
+    } catch (reason) {
+      error.textContent = reason instanceof Error ? reason.message : "학생 정보를 저장하지 못했습니다.";
+      error.hidden = false;
+      error.focus();
+    } finally {
+      submit.disabled = false;
+    }
   });
-  dialog.addEventListener("close", () => document.body.classList.remove("student-modal-open"));
 
-  document.addEventListener("face-enrollment:aborted", closeDialog);
-  document.addEventListener("face-enrollment:complete", () => {
+  document.querySelectorAll(".open-face-enrollment").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeStudentId = button.dataset.studentId;
+      document.querySelector("#student-id").textContent = activeStudentId;
+      document.querySelector("#face-student-name").textContent = button.dataset.studentName;
+      document.querySelector("#face-student-number").textContent = button.dataset.studentNumber;
+      document.querySelector("#consent-confirmed").checked = false;
+      document.querySelector("#setup-error").hidden = true;
+      document.querySelector("#capture-error").hidden = true;
+      setup.hidden = false;
+      capture.hidden = true;
+      complete.hidden = true;
+      faceDialog.showModal();
+      setModalState();
+    });
+  });
+
+  const closeFaceDialog = () => closeDialog(faceDialog);
+  document.querySelector("#close-face-enrollment")?.addEventListener("click", closeFaceDialog);
+  faceDialog?.addEventListener("click", (event) => {
+    if (event.target !== faceDialog) return;
+    if (!capture.hidden) document.querySelector("#cancel-enrollment")?.click();
+    else closeFaceDialog();
+  });
+  faceDialog?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    if (!capture.hidden) document.querySelector("#cancel-enrollment")?.click();
+    else closeFaceDialog();
+  });
+  faceDialog?.addEventListener("close", setModalState);
+  document.addEventListener("face-enrollment:aborted", closeFaceDialog);
+  document.addEventListener("face-enrollment:complete", async (event) => {
     capture.hidden = true;
     complete.hidden = false;
-    openButton.textContent = "얼굴 등록 완료";
-    openButton.classList.add("is-complete");
-    window.setTimeout(closeDialog, 1800);
+    const enrollmentId = event.detail?.enrollment?.id;
+    try {
+      const response = await fetch(`/api/v1/students/${encodeURIComponent(activeStudentId)}/face-enrollment`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({enrollment_id: enrollmentId}),
+      });
+      if (!response.ok) throw new Error("얼굴 등록 상태를 저장하지 못했습니다.");
+      window.setTimeout(() => location.reload(), 1200);
+    } catch (reason) {
+      const error = document.querySelector("#setup-error");
+      error.textContent = `${reason instanceof Error ? reason.message : "얼굴 벡터를 저장하지 못했습니다."} 닫은 후 얼굴 등록을 다시 진행해 주세요.`;
+      error.hidden = false;
+      complete.hidden = true;
+      capture.hidden = true;
+      setup.hidden = false;
+    }
   });
 })();

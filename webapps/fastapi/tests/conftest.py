@@ -8,6 +8,8 @@ import pytest
 
 os.environ["APP_ENV"] = "local"
 os.environ["DATABASE_MODE"] = "memory"
+os.environ["DATABASE_URL"] = ""
+os.environ["DATABASE_NAME"] = ""
 os.environ["DEMO_MODE_ENABLED"] = "false"
 os.environ["FACE_ANALYZER_MODE"] = "synthetic"
 # 기본값이 stub이어도 명시한다. 개발자 .env에 llama가 적혀 있으면 테스트가 실제

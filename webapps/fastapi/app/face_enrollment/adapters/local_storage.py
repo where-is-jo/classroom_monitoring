@@ -100,6 +100,7 @@ class LocalFaceObjectStorage:
 
         manifest = {
             "dataset_version": "face-enrollment-v1",
+            "enrollment_id": enrollment_id,
             "student_id": student_id,
             "original_sample_count": len(original_paths),
             "augmented_sample_count": augmented_sample_count,

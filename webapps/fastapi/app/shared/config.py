@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # 오프라인 migration cutover 게이트. 승인된 암호화 target/KMS가 준비된
     # 경우에만 true로 전환한다 — false면 migration run을 차단한다.
     migration_encryption_target_approved: bool = False
+    roi_reference_image_max_bytes: int = Field(
+        default=5 * 1024 * 1024, ge=1024, le=20 * 1024 * 1024
+    )
     face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
     face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
     face_pose_front_quota: int = Field(default=32, ge=1)
@@ -76,6 +79,7 @@ class Settings(BaseSettings):
     face_motion_speed_dps_max: float = Field(default=220, gt=0, le=1000)
     face_yaw_side_degrees: float = Field(default=10, gt=0, le=90)
     face_pitch_side_degrees: float = Field(default=8, gt=0, le=90)
+    face_pitch_down_degrees: float = Field(default=5, gt=0, le=90)
     face_local_sample_storage_enabled: bool = False
     face_local_sample_storage_dir: Path = Path("local_face_data")
     # 분석 companion 프로세스의 실행 방식과 주소 — local(synthetic)과 dev/prod(http)에서
