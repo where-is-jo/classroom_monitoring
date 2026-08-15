@@ -156,6 +156,12 @@ class TestMonitoringJsStatic:
         assert "EventSource" in source
         assert "RTCPeerConnection" in source
 
+    def test_bbox_label_uses_server_verified_display_label(self) -> None:
+        """모델 class_name을 이름처럼 표시하지 않고 서버 보강 라벨만 사용한다."""
+        source = MONITORING_JS.read_text(encoding="utf-8")
+        assert 'det.display_label || "사람"' in source
+        assert "det.class_name +" not in source
+
     def test_bundle_implements_fullscreen_toggle(self) -> None:
         """전체화면 토글은 Fullscreen API로 main 영역만 확대/복원한다 (MON-008)."""
         source = MONITORING_JS.read_text(encoding="utf-8")
@@ -194,9 +200,14 @@ class TestMonitoringJsBrowser:
         assert checkpoint["ok"]
 
     def test_bbox_and_detection_metadata_updated(self, browser_results: dict[str, object]) -> None:
-        """SSE detection으로 bbox·탐지 수·마지막 탐지가 갱신된다."""
+        """SSE detection으로 bbox·안전한 식별 라벨·탐지 metadata가 갱신된다."""
         _assert_all_checkpoints(browser_results)
-        for name in ("bbox-drawn", "detection-count-updated", "last-detection-updated"):
+        for name in (
+            "bbox-drawn",
+            "safe-identification-labels",
+            "detection-count-updated",
+            "last-detection-updated",
+        ):
             checkpoint = _checkpoint(browser_results, name)
             assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"
 

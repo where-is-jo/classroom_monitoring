@@ -193,6 +193,7 @@ def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> No
         "/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment",
         # 학생 상태
         "/api/v1/classrooms/{classroom_id}/student-states",
+        "/api/v1/classrooms/{classroom_id}/student-state-events",
         # 영상 모니터링
         "/api/v1/video-streams",
         "/api/v1/video-streams/{stream_id}",

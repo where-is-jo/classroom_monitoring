@@ -45,3 +45,21 @@
 - 실시간 영상 bbox와 식별/미식별 라벨.
 - malformed event, 재연결, unload cleanup.
 - `VACANT`와 `ABSENT` 문구 분리.
+
+## 구현 결과
+
+- [x] `/api/v1/classrooms/{classroom_id}/student-state-events`를 추가하고 type·강의실별로
+  필터링하며 설정 기반 retry·heartbeat와 연결 종료 구독 해제를 구현했다.
+- [x] 신규 inference event에서 식별 후보 학생의 최신 상태를 발행하고, 같은 `event_id`
+  재수신은 detection·occupancy·student-state를 모두 중복 발행하지 않는다.
+- [x] detection SSE bbox에는 임계값 이상 활성 학생 이름 또는 안전한 `사람` 라벨만
+  보강하며 identity confidence·face bbox·이미지·embedding을 내보내지 않는다.
+- [x] 강의실 좌석 현황과 학생 상태 표는 REST 초기 상태를 적용하고, 그 사이 도착한 SSE를
+  버퍼링한 뒤 `PRESENT`·`WRONG_SEAT`·`UNKNOWN` 변경분을 반영한다.
+- [x] malformed SSE는 해당 이벤트만 무시하고 EventSource 자동 재연결을 유지하며,
+  unload에서 occupancy·student-state EventSource를 모두 닫는다.
+- [x] 좌석 `VACANT`의 `부재`와 학생 `UNKNOWN`의 `확인 필요`를 별도 DOM 상태로 유지하고
+  학생 `ABSENT`를 만들지 않는다.
+
+검증 결과: FastAPI 전체 `pytest -q` 746건, Ruff check·format check, mypy와
+두 JavaScript 파일 각각의 `node --check`를 통과했다.

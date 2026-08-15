@@ -412,6 +412,59 @@ def test_get_read_model_does_not_publish_sse() -> None:
     assert queue.empty()
 
 
+def test_new_event_publishes_safe_detection_labels_and_student_state_once() -> None:
+    context = _build_context(assign_two_students=False)
+    queue = context.broadcaster.subscribe()
+    event = _event(
+        "event-sse",
+        (
+            _person("det-active", (150, 150, 250, 250)),
+            _person(
+                "det-low",
+                (150, 150, 250, 250),
+                confidence=0.59,
+            ),
+            _person(
+                "det-missing",
+                (150, 150, 250, 250),
+                student_id="student-missing",
+            ),
+        ),
+    )
+
+    first = context.service.receive_inference_event(event)
+    second = context.service.receive_inference_event(event)
+    published: list[dict[str, object]] = []
+    while not queue.empty():
+        published.append(queue.get_nowait())
+
+    assert first.is_new is True
+    assert second.is_new is False
+    detection_events = [item for item in published if item["type"] == "detection"]
+    student_events = [item for item in published if item["type"] == "student-state"]
+    assert len(detection_events) == 1
+    assert len(student_events) == 1
+    detections = detection_events[0]["detections"]
+    assert isinstance(detections, list)
+    assert [item["display_label"] for item in detections] == ["김로운", "사람", "사람"]
+    assert all("identity_confidence" not in item for item in detections)
+    assert all("face_bbox" not in item for item in detections)
+    assert student_events[0] == {
+        "type": "student-state",
+        "event_id": "event-sse",
+        "classroom_id": CLASSROOM_ID,
+        "student_id": "student-1",
+        "student_name": "김로운",
+        "student_no": "20260001",
+        "assigned_seat_id": "seat-1",
+        "assigned_seat_label": "좌석 S01",
+        "current_seat_id": "seat-1",
+        "current_state": "PRESENT",
+        "confidence": 0.9,
+        "observed_at": "2026-08-13T09:09:00+00:00",
+    }
+
+
 def test_missing_classroom_raises_not_found() -> None:
     context = _build_context()
 

@@ -124,6 +124,7 @@ class StudentMonitoringService:
                             "confidence": d.confidence,
                             "bbox": list(d.bbox),
                             "student_id": d.student_id,
+                            "display_label": self._safe_detection_label(d),
                         }
                         for d in saved_event.detections
                     ],
@@ -175,7 +176,72 @@ class StudentMonitoringService:
                         classroom_id,
                     )
 
+            if saved_event.classroom_id:
+                try:
+                    self._publish_student_state_events(saved_event)
+                except Exception:
+                    logger.exception(
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "학생 상태 SSE 계산·발행 중 오류가 발생해 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        saved_event.classroom_id,
+                    )
+
         return InferenceEventResult(event=saved_event, is_new=is_new)
+
+    def _safe_detection_label(self, detection: Detection) -> str:
+        """활성 학생의 임계값 이상 식별만 이름으로 표시한다."""
+        if (
+            detection.class_name.casefold() != "person"
+            or detection.confidence < self._confidence_threshold
+            or detection.student_id is None
+            or detection.identity_confidence is None
+            or detection.identity_confidence < self._identity_confidence_threshold
+        ):
+            return "사람"
+        try:
+            student = self._student_lookup.find_by_id(detection.student_id)
+        except Exception:
+            logger.exception(
+                "student_id=%s 탐지 라벨 보강 중 학생 조회에 실패했습니다.",
+                detection.student_id,
+            )
+            return "사람"
+        return student.name if student is not None and student.is_active else "사람"
+
+    def _publish_student_state_events(self, event: DetectionEvent) -> None:
+        """신규 이벤트에서 식별 후보가 있었던 학생의 최신 상태를 발행한다."""
+        target_student_ids = {
+            detection.student_id
+            for detection in event.detections
+            if detection.student_id is not None
+        }
+        if not target_student_ids:
+            return
+        for state in self.list_student_states(event.classroom_id):
+            if state.student_id not in target_student_ids:
+                continue
+            self._broadcaster.publish(
+                {
+                    "type": "student-state",
+                    "event_id": event.event_id,
+                    "classroom_id": event.classroom_id,
+                    "student_id": state.student_id,
+                    "student_name": state.student_name,
+                    "student_no": state.student_no,
+                    "assigned_seat_id": state.assigned_seat_id,
+                    "assigned_seat_label": state.assigned_seat_label,
+                    "current_seat_id": state.current_seat_id,
+                    "current_state": state.current_state.value,
+                    "confidence": state.confidence,
+                    "observed_at": (
+                        state.last_observed_at.isoformat()
+                        if state.last_observed_at is not None
+                        else None
+                    ),
+                }
+            )
 
     def _publish_occupancy_events(
         self,

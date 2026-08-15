@@ -106,6 +106,8 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 삭제 (비활성화) |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy-events` | SSE 좌석 점유 실시간 구독 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-states` | 지정 학생 전체의 최근 탐지·ROI 기반 상태 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-state-events` | 강의실별 학생 상태 SSE 변경분 구독 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
@@ -198,8 +200,11 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 
 `face_enrollment`는 memory
 저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다.
-`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장·SSE 발행이
-동작한다. 
+`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장, 최근 이벤트 기반
+학생 상태 REST와 SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인한 활성 학생
+이름만 사용하고 그 외에는 `사람`으로 표시한다. 학생 상태 SSE는 현재 in-memory broadcaster를
+사용하므로 단일 FastAPI 프로세스에서만 전달되며 replay와 다중 프로세스 fan-out은 지원하지
+않는다.
 `students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
 `/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
 등록된 학생을 선택한 뒤 `PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`로
@@ -228,19 +233,13 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
 | `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
-<<<<<<< HEAD
-=======
 | `ROI_REFERENCE_IMAGE_MAX_BYTES` | ROI 임시 기준 이미지 업로드 제한 | 기본 5MB, 최대 20MB |
->>>>>>> develop
 | `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
 | `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
 | `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
 | `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
-<<<<<<< HEAD
-=======
 | `FACE_PITCH_DOWN_DEGREES` | 아래 방향으로 분류하는 최소 pitch | 기본 5도. 위 방향 기준과 별도 적용 |
->>>>>>> develop
 | `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
 | `FACE_LOCAL_SAMPLE_STORAGE_DIR` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
 | `SSE_HEARTBEAT_INTERVAL_SECONDS` | SSE heartbeat 간격 | 기본 30 |

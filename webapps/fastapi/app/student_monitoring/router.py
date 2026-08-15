@@ -11,9 +11,11 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..shared.broadcaster import InMemoryBroadcaster
+from ..shared.config import Settings
 from ..shared.dependencies import (
     get_broadcaster,
     get_detection_event_repository,
+    get_settings,
     get_student_monitoring_service,
     get_video_segment_repository,
     get_video_stream_repository,
@@ -257,4 +259,50 @@ def list_student_states(
             )
             for s in states
         ],
+    )
+
+
+@api_router.get("/classrooms/{classroom_id}/student-state-events")
+async def stream_student_state_events(
+    classroom_id: str,
+    service: StudentMonitoringService = Depends(get_student_monitoring_service),
+    broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    """강의실 학생 상태 변경을 단일 프로세스 SSE로 전달한다."""
+    service.list_student_states(classroom_id)
+
+    async def event_generator() -> AsyncIterator[str]:
+        queue = broadcaster.subscribe()
+        retry_milliseconds = settings.sse_reconnection_timeout_seconds * 1000
+        try:
+            yield f"retry: {retry_milliseconds}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=float(settings.sse_heartbeat_interval_seconds),
+                    )
+                    if (
+                        isinstance(event, dict)
+                        and event.get("type") == "student-state"
+                        and event.get("classroom_id") == classroom_id
+                    ):
+                        yield f"id: {event.get('event_id', '')}\n"
+                        yield "event: student-state\n"
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            broadcaster.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
     )

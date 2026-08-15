@@ -623,6 +623,7 @@ def test_student_states_page_renders(client: TestClient) -> None:
     assert 'name="classroom_id"' in response.text
     assert f'value="{classroom_id}"' in response.text
     assert "selected" in response.text
+    assert "/static/classrooms.js" in response.text
     # 학생 상태와 탐지 스냅샷은 직접 URL로 접근할 수 있지만 주 메뉴에는 노출하지 않는다.
     assert "학생 현황" in response.text
     assert "<span>학생 상태</span>" not in response.text
