@@ -10,6 +10,8 @@ from threading import RLock
 from ..classrooms.models import Classroom, Seat
 from ..classrooms.service import ClassroomService
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
+from ..video_monitoring.models import VideoStream
+from ..video_monitoring.ports import VideoStreamRepository
 from .errors import (
     RoiConnectionConflictError,
     RoiConnectionInputError,
@@ -36,6 +38,7 @@ class RoiConnectionService:
         classroom_service: ClassroomService,
         student_lookup: StudentLookupPort,
         repository: RoiConnectionRepository,
+        stream_repository: VideoStreamRepository,
         *,
         max_upload_bytes: int,
         page_size_max: int,
@@ -44,10 +47,11 @@ class RoiConnectionService:
         self._classrooms = classroom_service
         self._students = student_lookup
         self._repository = repository
+        self._streams = stream_repository
         self._max_upload_bytes = max_upload_bytes
         self._page_size_max = page_size_max
         self._clock = clock
-        self._images: dict[str, ReferenceImage] = {}
+        self._images: dict[tuple[str, str], ReferenceImage] = {}
         self._lock = RLock()
 
     @property
@@ -66,15 +70,24 @@ class RoiConnectionService:
     def list_students(self) -> list[StudentIdentity]:
         return self._students.list_active(limit=self._page_size_max, offset=0).items
 
+    def list_streams(self, classroom_id: str) -> list[VideoStream]:
+        self.get_classroom(classroom_id)
+        return [
+            stream
+            for stream in self._streams.find_monitoring_streams()
+            if stream.classroom_id == classroom_id
+        ]
+
     def save_reference_image(
         self,
         classroom_id: str,
+        camera_id: str,
         *,
         content_type: str | None,
         content: bytes,
         filename: str | None,
     ) -> ReferenceImage:
-        self.get_classroom(classroom_id)
+        self._required_camera(classroom_id, camera_id)
         if content_type not in ALLOWED_IMAGE_TYPES:
             raise RoiConnectionInputError("JPEG 또는 PNG 이미지만 첨부할 수 있습니다.")
         if not content:
@@ -87,56 +100,75 @@ class RoiConnectionService:
             raise RoiConnectionInputError("이미지 파일 형식이 올바르지 않습니다.")
         display_name = Path(filename or "reference-image").name
         with self._lock:
-            previous = self._images.get(classroom_id)
+            key = (classroom_id, camera_id)
+            previous = self._images.get(key)
             saved_revision = max(
                 (
                     connection.reference_image_revision
-                    for connection in self._repository.list_by_classroom(classroom_id)
+                    for connection in self._repository.list_by_camera(classroom_id, camera_id)
                 ),
                 default=0,
             )
             image = ReferenceImage(
                 classroom_id=classroom_id,
+                camera_id=camera_id,
                 content_type=content_type,
                 content=content,
                 display_name=display_name,
                 revision=(saved_revision + 1) if previous is None else previous.revision + 1,
             )
-            self._images[classroom_id] = image
+            self._images[key] = image
             return image
 
-    def get_reference_image(self, classroom_id: str) -> ReferenceImage:
-        self.get_classroom(classroom_id)
+    def get_reference_image(self, classroom_id: str, camera_id: str) -> ReferenceImage:
+        self._required_camera(classroom_id, camera_id)
         with self._lock:
-            image = self._images.get(classroom_id)
+            image = self._images.get((classroom_id, camera_id))
         if image is None:
             raise RoiConnectionNotFoundError("첨부된 기준 이미지가 없습니다.")
         return image
 
-    def find_reference_image(self, classroom_id: str) -> ReferenceImage | None:
+    def find_reference_image(self, classroom_id: str, camera_id: str) -> ReferenceImage | None:
         with self._lock:
-            return self._images.get(classroom_id)
+            return self._images.get((classroom_id, camera_id))
 
-    def list_connections(self, classroom_id: str) -> list[RoiConnectionView]:
+    def list_connections(
+        self, classroom_id: str, camera_id: str | None = None
+    ) -> list[RoiConnectionView]:
         seats = self.list_seats(classroom_id)
-        image = self.find_reference_image(classroom_id)
-        current_revision = image.revision if image is not None else None
-        by_seat = {
-            connection.seat_id: connection
-            for connection in self._repository.list_by_classroom(classroom_id)
-        }
-        return [
+        if camera_id is not None:
+            self._required_camera(classroom_id, camera_id)
+            connections = self._repository.list_by_camera(classroom_id, camera_id)
+        else:
+            connections = self._repository.list_by_classroom(classroom_id)
+        seat_order = {seat.id: index for index, seat in enumerate(seats) if seat.is_active}
+        views = [
             RoiConnectionView(
-                connection=by_seat[seat.id],
-                needs_review=by_seat[seat.id].reference_image_revision != current_revision,
+                connection=connection,
+                needs_review=self._needs_review(connection),
             )
-            for seat in seats
-            if seat.id in by_seat
+            for connection in connections
+            if connection.seat_id in seat_order
+        ]
+        return sorted(
+            views,
+            key=lambda view: (
+                view.connection.camera_id or "",
+                seat_order[view.connection.seat_id],
+            ),
+        )
+
+    def list_valid_connections(self, classroom_id: str, camera_id: str) -> list[RoiConnection]:
+        return [
+            view.connection
+            for view in self.list_connections(classroom_id, camera_id)
+            if not view.needs_review
         ]
 
     def save_connection(self, command: SaveRoiConnectionCommand) -> RoiConnectionView:
+        self._required_camera(command.classroom_id, command.camera_id)
         seats = self.list_seats(command.classroom_id)
-        if not any(seat.id == command.seat_id for seat in seats):
+        if not any(seat.id == command.seat_id and seat.is_active for seat in seats):
             raise RoiConnectionNotFoundError("좌석을 찾을 수 없습니다.")
         if command.student_id is not None:
             student = self._students.find_by_id(command.student_id)
@@ -144,7 +176,7 @@ class RoiConnectionService:
                 raise RoiConnectionNotFoundError("활성 학생을 찾을 수 없습니다.")
         _validate_polygon(command.polygon)
         with self._lock:
-            image = self._images.get(command.classroom_id)
+            image = self._images.get((command.classroom_id, command.camera_id))
             if image is None:
                 raise RoiConnectionConflictError("기준 이미지를 먼저 첨부해 주세요.")
             if image.revision != command.reference_image_revision:
@@ -153,7 +185,7 @@ class RoiConnectionService:
                 )
             if command.student_id is not None:
                 duplicate = self._repository.find_by_student(
-                    command.classroom_id, command.student_id
+                    command.classroom_id, command.camera_id, command.student_id
                 )
                 if duplicate is not None and duplicate.seat_id != command.seat_id:
                     raise RoiConnectionConflictError(
@@ -161,6 +193,7 @@ class RoiConnectionService:
                     )
             connection = RoiConnection(
                 classroom_id=command.classroom_id,
+                camera_id=command.camera_id,
                 seat_id=command.seat_id,
                 student_id=command.student_id,
                 polygon=command.polygon,
@@ -171,21 +204,25 @@ class RoiConnectionService:
         return RoiConnectionView(connection=connection, needs_review=False)
 
     def save_live_connection(self, command: SaveLiveRoiConnectionCommand) -> RoiConnectionView:
+        self._required_camera(command.classroom_id, command.camera_id)
         seats = self.list_seats(command.classroom_id)
-        if not any(seat.id == command.seat_id for seat in seats):
+        if not any(seat.id == command.seat_id and seat.is_active for seat in seats):
             raise RoiConnectionNotFoundError("선택한 강의실의 좌석을 찾을 수 없습니다.")
         student = self._students.find_by_id(command.student_id)
         if student is None or not student.is_active:
             raise RoiConnectionNotFoundError("활성 학생을 찾을 수 없습니다.")
         _validate_polygon(command.polygon)
         with self._lock:
-            duplicate = self._repository.find_by_student(command.classroom_id, command.student_id)
+            duplicate = self._repository.find_by_student(
+                command.classroom_id, command.camera_id, command.student_id
+            )
             if duplicate is not None and duplicate.seat_id != command.seat_id:
                 raise RoiConnectionConflictError(
                     "선택한 학생은 이미 다른 좌석에 연결되어 있습니다."
                 )
             connection = RoiConnection(
                 classroom_id=command.classroom_id,
+                camera_id=command.camera_id,
                 seat_id=command.seat_id,
                 student_id=command.student_id,
                 polygon=command.polygon,
@@ -194,6 +231,26 @@ class RoiConnectionService:
             )
             connection = self._repository.save(connection)
         return RoiConnectionView(connection=connection, needs_review=False)
+
+    def _required_camera(self, classroom_id: str, camera_id: str) -> VideoStream:
+        self.get_classroom(classroom_id)
+        stream = self._streams.find_by_camera_id(camera_id)
+        if (
+            stream is None
+            or not stream.enabled
+            or stream.is_demo
+            or stream.classroom_id != classroom_id
+        ):
+            raise RoiConnectionNotFoundError("선택한 강의실의 활성 카메라를 찾을 수 없습니다.")
+        return stream
+
+    def _needs_review(self, connection: RoiConnection) -> bool:
+        if connection.camera_id is None:
+            return True
+        if connection.reference_image_revision == 0:
+            return False
+        image = self.find_reference_image(connection.classroom_id, connection.camera_id)
+        return image is None or image.revision != connection.reference_image_revision
 
 
 def _validate_polygon(polygon: tuple[Point, ...]) -> None:

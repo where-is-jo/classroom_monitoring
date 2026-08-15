@@ -15,6 +15,7 @@ class Point:
 @dataclass(frozen=True)
 class ReferenceImage:
     classroom_id: str
+    camera_id: str
     content_type: str
     content: bytes
     display_name: str
@@ -24,6 +25,7 @@ class ReferenceImage:
 @dataclass(frozen=True)
 class RoiConnection:
     classroom_id: str
+    camera_id: str | None
     seat_id: str
     student_id: str | None
     polygon: tuple[Point, ...]
@@ -40,6 +42,7 @@ class RoiConnectionView:
 @dataclass(frozen=True)
 class SaveRoiConnectionCommand:
     classroom_id: str
+    camera_id: str
     seat_id: str
     student_id: str | None
     polygon: tuple[Point, ...]
@@ -49,6 +52,7 @@ class SaveRoiConnectionCommand:
 @dataclass(frozen=True)
 class SaveLiveRoiConnectionCommand:
     classroom_id: str
+    camera_id: str
     seat_id: str
     student_id: str
     polygon: tuple[Point, ...]

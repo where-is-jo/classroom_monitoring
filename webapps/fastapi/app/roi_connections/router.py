@@ -33,6 +33,7 @@ def roi_connections_page(
     selected = classroom_id or (classrooms[0].id if classrooms else None)
     classroom = service.get_classroom(selected) if selected else None
     seats = service.list_seats(selected) if selected else []
+    streams = service.list_streams(selected) if selected else []
     students = service.list_students()
     return templates.TemplateResponse(
         request=request,
@@ -41,6 +42,7 @@ def roi_connections_page(
             "classrooms": classrooms,
             "classroom": classroom,
             "seats": seats,
+            "streams": streams,
             "students": students,
         },
     )
@@ -69,12 +71,14 @@ def roi_fallback_image() -> FileResponse:
 )
 async def upload_reference_image(
     classroom_id: str,
+    camera_id: Annotated[str, Query(min_length=1, max_length=128)],
     image: Annotated[UploadFile, File()],
     service: RoiConnectionService = Depends(get_roi_connection_service),
 ) -> ReferenceImageResponse:
     content = await image.read(service.max_upload_bytes + 1)
     saved = service.save_reference_image(
         classroom_id,
+        camera_id,
         content_type=image.content_type,
         content=content,
         filename=image.filename,
@@ -85,9 +89,10 @@ async def upload_reference_image(
 @api_router.get("/classrooms/{classroom_id}/roi-reference-image")
 def get_reference_image(
     classroom_id: str,
+    camera_id: Annotated[str, Query(min_length=1, max_length=128)],
     service: RoiConnectionService = Depends(get_roi_connection_service),
 ) -> Response:
-    image = service.get_reference_image(classroom_id)
+    image = service.get_reference_image(classroom_id, camera_id)
     return Response(
         content=image.content,
         media_type=image.content_type,
@@ -101,12 +106,13 @@ def get_reference_image(
 )
 def list_roi_connections(
     classroom_id: str,
+    camera_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
     service: RoiConnectionService = Depends(get_roi_connection_service),
 ) -> RoiConnectionListResponse:
     return RoiConnectionListResponse(
         items=[
             RoiConnectionResponse.from_domain(item)
-            for item in service.list_connections(classroom_id)
+            for item in service.list_connections(classroom_id, camera_id)
         ]
     )
 

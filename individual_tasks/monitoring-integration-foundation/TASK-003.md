@@ -34,3 +34,19 @@
 - 다른 카메라 화각, live revision 0, 서버 재시작 후 검토 상태.
 - ROI legacy 학생과 assignment 학생 불일치에서도 assignment가 정본임을 확인.
 - memory와 MongoDB repository에서 같은 결과.
+
+## 구현 결과
+
+- [x] ROI와 기준 이미지를 각각 `camera_id + seat_id`, `classroom_id + camera_id`로 분리했다.
+- [x] ROI API·관리 화면이 명시적으로 카메라를 선택하고 `camera_id`를 저장한다.
+- [x] memory/MongoDB 키와 unique index를 카메라 범위로 전환했다.
+- [x] `camera_id` 없는 legacy 문서는 조회되지만 카메라별 유효 ROI에서 제외된다.
+- [x] live revision 0은 재시작 뒤에도 유효하고 기준 이미지 ROI는 revision 불일치·재시작 시
+  재검토 대상으로 제외된다.
+- [x] bbox 중심점의 polygon 포함, 경계, ROI 없음, 겹침, 잘못된 프레임·bbox를 순수 함수로
+  검증했다.
+- [x] 학생 상태 판정에서 사용할 `list_valid_connections()`는 활성 좌석과 선택 카메라의
+  검토 완료 ROI만 제공하며 `seat.geometry` fallback을 사용하지 않는다.
+
+검증 결과: FastAPI 전체 `pytest -q` 739건, Ruff check·format check, mypy와
+`node --check static/roi-connections.js`를 통과했다.

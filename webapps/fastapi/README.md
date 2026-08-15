@@ -86,7 +86,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
-| `/roi-connections` | 메모리 가상 강의실·좌석과 DB 학생을 다각형 ROI로 연결하고 MongoDB에 저장 |
+| `/roi-connections` | 강의실 카메라를 선택해 좌석별 다각형 ROI를 등록하고 MongoDB에 저장 |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
@@ -110,10 +110,11 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
 | `POST` | `/api/v1/students` | 학생 인적사항 저장. 생성 리소스는 `Location` 헤더로 반환 |
-| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
-| `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | 현재 ROI 기준 이미지 조회 |
-| `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections` | 좌석별 ROI와 연결 학생 조회 |
-| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | 좌석 ROI와 학생 연결을 `roi_connections` 컬렉션에 저장 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 현재 ROI 기준 이미지 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections?camera_id=...` | 카메라·좌석별 ROI 조회. query를 생략하면 legacy 포함 전체 조회 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | 실시간 영상에서 선택한 `camera_id`·좌석·legacy 학생 연결과 ROI 저장 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |

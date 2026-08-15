@@ -478,6 +478,7 @@ def _roi_connection_service() -> RoiConnectionService:
         ),
         get_student_lookup(),
         get_roi_connection_repository(),
+        get_video_stream_repository(settings),
         max_upload_bytes=settings.roi_reference_image_max_bytes,
         page_size_max=settings.page_size_max,
         clock=utc_now,

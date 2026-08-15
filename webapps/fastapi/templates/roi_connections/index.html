@@ -9,7 +9,7 @@
 >
   <div class="roi-filter-line" aria-label="ROI 등록 도구">
     <div class="roi-action-buttons">
-      <button id="roi-start" type="button"{% if not classroom %} disabled{% endif %}>등록 시작</button>
+      <button id="roi-start" type="button"{% if not classroom or not streams %} disabled{% endif %}>등록 시작</button>
       <button id="roi-finish" type="button" disabled>선택 완료</button>
       <button id="roi-reset" type="button" class="secondary" disabled>초기화</button>
       <button id="roi-cancel" type="button" class="secondary" disabled>등록 취소</button>
@@ -17,6 +17,12 @@
     <label class="roi-classroom-filter">강의실
       <select id="roi-classroom-select"{% if not classrooms %} disabled{% endif %}>
         {% for item in classrooms %}<option value="{{ item.id }}"{% if classroom and classroom.id == item.id %} selected{% endif %}>{{ item.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="roi-classroom-filter">카메라
+      <select id="roi-camera-select"{% if not streams %} disabled{% endif %}>
+        {% if not streams %}<option value="">연결된 카메라가 없습니다</option>{% endif %}
+        {% for stream in streams %}<option value="{{ stream.camera_id }}" data-camera-label="{{ stream.camera_label }}">{{ stream.camera_label }}</option>{% endfor %}
       </select>
     </label>
   </div>
