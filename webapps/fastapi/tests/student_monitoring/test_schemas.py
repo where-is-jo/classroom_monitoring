@@ -70,6 +70,86 @@ class TestInferenceEventRequest:
                 bbox=(-100, 120, 300, 600),
             )
 
+    @pytest.mark.parametrize("identity_confidence", [-0.01, 1.01])
+    def test_identity_confidence_out_of_range(self, identity_confidence: float) -> None:
+        with pytest.raises(ValueError):
+            DetectionSchema(
+                detection_id="det-1",
+                class_id=0,
+                class_name="person",
+                confidence=0.91,
+                bbox=(100, 120, 300, 600),
+                student_id="student-1",
+                identity_confidence=identity_confidence,
+            )
+
+    def test_face_bbox_uses_same_coordinate_validation(self) -> None:
+        with pytest.raises(ValueError, match="x_min must be less than x_max"):
+            DetectionSchema(
+                detection_id="det-1",
+                class_id=0,
+                class_name="person",
+                confidence=0.91,
+                bbox=(100, 120, 300, 600),
+                student_id="student-1",
+                identity_confidence=0.9,
+                face_bbox=(220, 130, 150, 230),
+            )
+
+    @pytest.mark.parametrize(
+        ("student_id", "identity_confidence", "face_bbox"),
+        (("student-1", None, None), (None, 0.9, None), (None, None, (100, 120, 200, 300))),
+    )
+    def test_partial_identity_fields_are_rejected(
+        self,
+        student_id: str | None,
+        identity_confidence: float | None,
+        face_bbox: tuple[int, int, int, int] | None,
+    ) -> None:
+        with pytest.raises(ValueError):
+            DetectionSchema(
+                detection_id="det-1",
+                class_id=0,
+                class_name="person",
+                confidence=0.91,
+                bbox=(100, 120, 300, 600),
+                student_id=student_id,
+                identity_confidence=identity_confidence,
+                face_bbox=face_bbox,
+            )
+
+    def test_detection_coordinates_must_stay_within_frame(self) -> None:
+        with pytest.raises(ValueError, match="bbox must stay within the frame"):
+            InferenceEventRequest(
+                event_id="test-event-1",
+                camera_id="camera-a",
+                captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
+                sequence=1,
+                frame=FrameSchema(width_pixels=1920, height_pixels=1080),
+                detections=[
+                    DetectionSchema(
+                        detection_id="det-1",
+                        class_id=0,
+                        class_name="person",
+                        confidence=0.91,
+                        bbox=(1800, 120, 2000, 600),
+                    )
+                ],
+            )
+
+    def test_unknown_business_fields_are_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            DetectionSchema.model_validate(
+                {
+                    "detection_id": "det-1",
+                    "class_id": 0,
+                    "class_name": "person",
+                    "confidence": 0.91,
+                    "bbox": [100, 120, 300, 600],
+                    "current_state": "PRESENT",
+                }
+            )
+
     def test_timezone_missing(self) -> None:
         """Missing timezone test."""
         with pytest.raises(ValueError, match="captured_at must have timezone"):

@@ -85,3 +85,14 @@ def test_bundle_preserves_card_classes() -> None:
     source = CLASSROOMS_JS.read_text(encoding="utf-8")
     assert "seatEl.className =" not in source
     assert "seatEl.classList.remove" in source
+
+
+def test_bundle_uses_rest_then_student_state_sse_and_keeps_absent_separate() -> None:
+    source = CLASSROOMS_JS.read_text(encoding="utf-8")
+
+    assert '"/student-states"' in source
+    assert '"/student-state-events"' in source
+    assert 'addEventListener("student-state"' in source
+    assert "JSON.parse(event.data)" in source
+    assert "beforeunload" in source
+    assert "ABSENT" not in source

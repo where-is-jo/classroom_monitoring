@@ -12,6 +12,7 @@
   const resetButton = document.querySelector("#roi-reset");
   const cancelButton = document.querySelector("#roi-cancel");
   const classroomSelect = document.querySelector("#roi-classroom-select");
+  const cameraSelect = document.querySelector("#roi-camera-select");
   const dialog = document.querySelector("#roi-student-dialog");
   const saveForm = document.querySelector("#roi-save-form");
   const seatSelect = document.querySelector("#roi-seat-select");
@@ -22,6 +23,7 @@
   let peerConnection = null;
 
   const selectedClassroomId = () => classroomSelect?.value || editor.dataset.classroomId;
+  const selectedCameraId = () => cameraSelect?.value || "";
   const finishRegistration = () => {
     points.length = 0;
     renderPolygon();
@@ -83,21 +85,23 @@
   const loadClassroomMedia = async () => {
     const classroomId = selectedClassroomId();
     if (!classroomId) return showPlaceholder("연결 실패", "선택할 수 있는 강의실이 없습니다.");
+    const cameraId = selectedCameraId();
+    if (!cameraId) return showPlaceholder("연결 실패", "연결된 활성 카메라가 없습니다.");
     showPlaceholder("영상 연결 중", "강의실 실시간 모니터링 영상을 불러오고 있습니다.");
     try {
-      const response = await fetch(`/api/v1/video-streams?classroom_id=${encodeURIComponent(classroomId)}`);
-      if (!response.ok) throw new Error(`stream list ${response.status}`);
-      const body = await response.json();
-      const stream = body.items?.find((item) => item.is_demo === false && item.camera_id);
-      if (!stream) throw new Error("stream not found");
-      await connectWebRTC(stream.camera_id);
-      status.textContent = `${stream.camera_label} 실시간 영상을 사용합니다.`;
+      await connectWebRTC(cameraId);
+      const label = cameraSelect?.selectedOptions?.[0]?.dataset.cameraLabel || cameraId;
+      status.textContent = `${label} 실시간 영상을 사용합니다.`;
     } catch (reason) {
       console.error("ROI 실시간 영상 연결 실패", reason);
       showPlaceholder("연결 실패", "실시간 모니터링 영상에 연결할 수 없습니다.");
       status.textContent = "5초 후 ROI 테스트용 대체 이미지를 표시합니다.";
       window.setTimeout(() => {
-        if (selectedClassroomId() !== classroomId || stage.dataset.state !== "error") return;
+        if (
+          selectedClassroomId() !== classroomId ||
+          selectedCameraId() !== cameraId ||
+          stage.dataset.state !== "error"
+        ) return;
         placeholder.hidden = true;
         video.hidden = true;
         fallbackImage.hidden = false;
@@ -111,6 +115,10 @@
     const url = new URL(location.href);
     url.searchParams.set("classroom_id", classroomSelect.value);
     location.assign(url);
+  });
+  cameraSelect?.addEventListener("change", () => {
+    finishRegistration();
+    loadClassroomMedia();
   });
   startButton?.addEventListener("click", () => {
     points.length = 0;
@@ -156,7 +164,11 @@
       status.textContent = "ROI 꼭짓점을 3개 이상 선택해 주세요.";
       return;
     }
-    console.log("ROI 선택 완료", {classroom_id: selectedClassroomId(), polygon: points});
+    console.log("ROI 선택 완료", {
+      classroom_id: selectedClassroomId(),
+      camera_id: selectedCameraId(),
+      polygon: points,
+    });
     seatSelect.value = "";
     studentSelect.value = "";
     error.hidden = true;
@@ -176,14 +188,25 @@
     const saveButton = document.querySelector("#roi-dialog-save");
     saveButton.disabled = true;
     error.hidden = true;
-    const payload = {seat_id: seatSelect.value, student_id: studentSelect.value, polygon: points};
+    const payload = {
+      camera_id: selectedCameraId(),
+      seat_id: seatSelect.value,
+      student_id: studentSelect.value,
+      polygon: points,
+    };
     try {
       const response = await fetch(`/api/v1/classrooms/${encodeURIComponent(selectedClassroomId())}/roi-connection`, {
         method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message || "ROI를 저장하지 못했습니다.");
-      console.log("ROI 연결 저장", {classroom_id: body.classroom_id, seat_id: body.seat_id, student_id: body.student_id, polygon: body.polygon});
+      console.log("ROI 연결 저장", {
+        classroom_id: body.classroom_id,
+        camera_id: body.camera_id,
+        seat_id: body.seat_id,
+        student_id: body.student_id,
+        polygon: body.polygon,
+      });
       closeDialog();
       finishRegistration();
       status.textContent = "ROI와 학생 좌석 연결을 저장했습니다.";

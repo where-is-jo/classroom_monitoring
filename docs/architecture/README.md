@@ -59,7 +59,7 @@ flowchart TB
 | 카메라 실시간 수신, 프레임 샘플링 | [`worker/stream`](../../worker/stream/README.md) | 동작. 다중 RTSP 소스 수신·재연결·샘플링. 로컬 저장은 개발용이며 기본 꺼짐 |
 | 추론 실행 단계 | [`worker/inference`](../../worker/inference/README.md) | 동작. 결과 전달 경로는 `예정`. 모델 호출은 `deeplearning` 이관 대상([결정 0009](./decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)) |
 | 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | SCRFD 검출·MediaPipe 자세 내부 HTTP 서비스 구현. 나머지 품질·인식은 `예정` |
-| 학생 상태 판정 | `webapps/fastapi` | `예정`. 소유 서비스는 fastapi로 확정([결정 0008](./decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)) |
+| 학생 상태 판정 | `webapps/fastapi` | API·판정 함수 골격 구현. 카메라별 ROI와 최근 탐지 연결은 `예정`([결정 0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)) |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 강의실·좌석·관측 컬렉션만 구현됨 |
 | 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
 | 탐지 시점 스냅샷 적재 | [`worker/inference`](../../worker/inference/README.md) | 동작. 탐지 개수가 바뀌면 JPEG를 MinIO에 올린다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)). 기본은 꺼짐 |
@@ -313,12 +313,12 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 학습 가중치를 `worker/inference` 실행 환경까지 전달하는 방식 | 후보: MinIO | deeplearning, worker |
 | `deeplearning` 호출 방식(라이브러리 import / 별도 프로세스) | 결정 필요 | worker, deeplearning |
 | 결석 유예 시간 값 | 후보: 5 / 10 / 20 / 30분 | fastapi. 실제 촬영과 운영 요구 필요 |
-| 좌석 판정 방식(bbox 중심점·하단점 / ROI 겹침 비율) | 결정 필요 | fastapi. 실제 촬영 필요 |
+| 좌석 판정 방식 | 기반 구현은 bbox 중심점과 카메라별 ROI로 확정([0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)). 실제 촬영 뒤 기준점 변경 여부는 결정 필요 | fastapi |
 | 수업 시간표의 원본 관리 주체 | 결정 필요 | fastapi |
 | 카메라 배치(대수·높이·화각·거리) | 결정 필요 | 실제 촬영으로 확정한다 |
 | 작은 얼굴 대응 — Super Resolution 도입 여부 | 후보. 카메라 배치·렌즈·crop 개선을 먼저 시도한다 | deeplearning |
 | Tracking(ByteTrack 등) 도입과 `IN_CLASSROOM` | 결정 필요 | MVP 범위 밖 |
-| 일반 모니터링 화면 갱신 방식(폴링 / SSE / WebSocket) | 결정 필요 | 얼굴 등록은 [0011](./decisions.md#0011--얼굴-등록-실시간-경계와-데이터-수명)에 따라 WebSocket 확정. 일반 모니터링은 미정 |
+| 일반 모니터링 화면 갱신 방식 | 초기 REST + 이후 SSE로 확정([0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)). 다중 프로세스 broker·replay는 결정 필요 | fastapi |
 | 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | 결정 필요 | fastapi, worker, monitoring |
 | `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 설정·문서만([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | monitoring, fastapi |
 | 자연어 검색 방식 | 확정([0016](./decisions.md#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다)). LLM은 검색 계획 JSON만 만들고 검증·조회는 fastapi가 한다. 조회 Tool을 모델에게 주지 않는다 | fastapi |

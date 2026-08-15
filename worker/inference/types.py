@@ -22,6 +22,11 @@ class Detection:
     class_name: str
     confidence: float
     bbox: BBox
+    # 얼굴 식별 모델이 연결되면 채우는 선택 필드다. 사람 탐지만 수행하는 현재
+    # detector는 기본값을 그대로 사용한다. 학생 이름·좌석 상태는 이 경계에 두지 않는다.
+    student_id: str | None = None
+    identity_confidence: float | None = None
+    face_bbox: BBox | None = None
 
 
 @dataclass(frozen=True)

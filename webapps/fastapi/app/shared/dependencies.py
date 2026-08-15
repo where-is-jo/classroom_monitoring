@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -100,6 +101,8 @@ from .database import (
 )
 from .errors import DatabaseUnavailableError
 from .student_identity import StudentLookupPort
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -475,6 +478,7 @@ def _roi_connection_service() -> RoiConnectionService:
         ),
         get_student_lookup(),
         get_roi_connection_repository(),
+        get_video_stream_repository(settings),
         max_upload_bytes=settings.roi_reference_image_max_bytes,
         page_size_max=settings.page_size_max,
         clock=utc_now,
@@ -646,10 +650,12 @@ def get_face_enrollment_service(
 
 def get_video_stream_service(
     repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    classroom_service: ClassroomService = Depends(get_classroom_service),
     settings: Settings = Depends(get_settings),
 ) -> VideoStreamService:
     return VideoStreamService(
         repository=repository,
+        classroom_service=classroom_service,
         stale_seconds=settings.detection_event_stale_seconds,
         clock=utc_now,
     )
@@ -677,6 +683,7 @@ def get_student_monitoring_service(
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
     classroom_service: ClassroomService = Depends(get_classroom_service),
+    roi_service: RoiConnectionService = Depends(get_roi_connection_service),
     student_lookup: StudentLookupPort = Depends(get_student_lookup),
     settings: Settings = Depends(get_settings),
 ) -> StudentMonitoringService:
@@ -686,14 +693,18 @@ def get_student_monitoring_service(
         stream_repository=stream_repository,
         broadcaster=broadcaster,
         classroom_service=classroom_service,
+        roi_service=roi_service,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
-        identity_confidence_threshold=0.5,  # 기본값, 설정에서 읽도록 확장 가능
+        identity_confidence_threshold=settings.student_identity_confidence_threshold,
+        stale_seconds=settings.detection_event_stale_seconds,
+        recent_event_limit=settings.student_state_recent_event_limit,
+        clock=utc_now,
         student_lookup=student_lookup,
     )
 
 
-def _build_memory_classroom_service(settings: Settings) -> ClassroomService:
-    """FastAPI 요청 경로 밖(startup demo seed 등)에서 memory 모드
+def _build_classroom_service(settings: Settings) -> ClassroomService:
+    """FastAPI 요청 경로 밖(startup 검증·demo seed)에서
     ``ClassroomService``를 직접 조립한다.
 
     ``get_classroom_service`` 등은 파라미터 기본값이 ``fastapi.Depends(...)``
@@ -734,16 +745,32 @@ def initialize_data_store() -> None:
         # UoW 생성 시 transaction topology(replica set)를 검사한다.
         # 미지원 환경이면 DatabaseOperationError로 startup fail한다.
         _mongo_seat_mutation_uow()
+        video_service = get_video_stream_service(
+            get_video_stream_repository(settings),
+            _build_classroom_service(settings),
+            settings,
+        )
+        for stream in video_service.list_invalid_classroom_references():
+            logger.error(
+                "camera_id=%s stream_id=%s classroom_id=%s 활성 강의실 참조가 유효하지 않습니다.",
+                stream.camera_id,
+                stream.id,
+                stream.classroom_id,
+            )
         return
     # settings.database_mode는 memory|mongodb 둘 뿐이고 위에서 mongodb는 이미
     # return했으므로, 여기 도달했다면 항상 memory 모드다. demo mode는 문서상
     # memory 모드 전용 로컬 실행 경로다.
     if settings.demo_mode_enabled:
+        classroom_service = _build_classroom_service(settings)
         seed_demo_data(
-            _build_memory_classroom_service(settings),
+            classroom_service,
             now=utc_now(),
         )
-        seed_video_streams(_video_stream_repository(), now=utc_now())
+        seed_video_streams(
+            get_video_stream_service(_video_stream_repository(), classroom_service, settings),
+            now=utc_now(),
+        )
 
 
 def close_data_store() -> None:

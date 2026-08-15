@@ -27,6 +27,16 @@ class DetectionEventRepository(Protocol):
         """Find recent detections by camera."""
         ...
 
+    def find_recent_by_classroom(
+        self,
+        classroom_id: str,
+        since: datetime,
+        *,
+        limit: int,
+    ) -> list[DetectionEvent]:
+        """Find recent detections for a classroom in deterministic newest-first order."""
+        ...
+
     def find_by_camera_and_period(
         self,
         camera_id: str,

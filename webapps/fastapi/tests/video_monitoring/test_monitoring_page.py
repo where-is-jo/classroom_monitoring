@@ -21,7 +21,7 @@ from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRep
 from app.video_monitoring.models import VideoStream
 from app.video_monitoring.service import VideoStreamService
 
-from .fakes import NOW, FakeClock, make_stream
+from .fakes import NOW, FakeClock, make_classroom_service, make_stream
 
 STATIC_CSS = Path(__file__).resolve().parents[2] / "static" / "style.css"
 STALE_SECONDS = 300
@@ -31,7 +31,12 @@ def _make_service(*streams: VideoStream) -> VideoStreamService:
     repository = MemoryVideoStreamRepository()
     for stream in streams:
         repository.save(stream)
-    return VideoStreamService(repository, stale_seconds=STALE_SECONDS, clock=FakeClock())
+    return VideoStreamService(
+        repository,
+        make_classroom_service(),
+        stale_seconds=STALE_SECONDS,
+        clock=FakeClock(),
+    )
 
 
 @pytest.fixture

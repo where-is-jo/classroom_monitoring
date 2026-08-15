@@ -15,7 +15,7 @@ from .classrooms.models import (
 )
 from .classrooms.service import ClassroomService
 from .video_monitoring.models import PlaybackKind, VideoStream
-from .video_monitoring.ports import VideoStreamRepository
+from .video_monitoring.service import VideoStreamService
 
 
 def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
@@ -96,18 +96,16 @@ def seed_roi_test_data(service: ClassroomService) -> None:
         )
 
 
-def seed_video_streams(repository: VideoStreamRepository, *, now: datetime) -> None:
+def seed_video_streams(service: VideoStreamService, *, now: datetime) -> None:
     """실제 source를 등록한다. WebRTC 재생·탐지 수신 테스트용 fixture다."""
     if now.tzinfo is None:
         raise ValueError("demo seed 시각은 timezone-aware 값이어야 합니다.")
-    for camera_id, classroom_id, label in (
-        ("camera-01", "classroom-a101", "A101 전면 카메라"),
-        ("camera-02", "classroom-b203", "B203 전면 카메라"),
+    for camera_id, classroom_code, label in (
+        ("camera-01", "A101", "A101 전면 카메라"),
+        ("camera-02", "B203", "B203 전면 카메라"),
     ):
-        existing = repository.find_by_camera_id(camera_id)
-        if existing is not None:
-            continue
-        repository.save(
+        classroom_id = _entity_id(f"classroom-{classroom_code.lower()}")
+        service.save_stream(
             VideoStream(
                 id=_entity_id(f"stream-{camera_id}"),
                 camera_id=camera_id,

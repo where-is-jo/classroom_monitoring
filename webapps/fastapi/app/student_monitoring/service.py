@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 
 from ..classrooms.errors import ClassroomNotFoundError
-from ..classrooms.mapping import find_seat_for_detection, map_detections_to_observations
+from ..classrooms.mapping import map_detections_to_observations
 from ..classrooms.models import Seat, SeatAssignment, SeatObservation
 from ..classrooms.service import ClassroomService
+from ..roi_connections.errors import RoiConnectionNotFoundError
+from ..roi_connections.mapping import RoiMappingReason, map_bbox_to_roi
+from ..roi_connections.models import RoiConnection
+from ..roi_connections.service import RoiConnectionService
 from ..shared.broadcaster import InMemoryBroadcaster
-from ..shared.student_identity import StudentLookupPort
+from ..shared.student_identity import StudentIdentity, StudentLookupPort
 from ..video_monitoring.ports import VideoStreamRepository
 from .errors import VideoStreamNotFoundError
 from .models import (
     Detection,
     DetectionEvent,
-    FrameInfo,
     StudentSeatState,
     StudentState,
     VideoSegment,
@@ -35,6 +39,12 @@ class InferenceEventResult:
     is_new: bool
 
 
+@dataclass(frozen=True)
+class _IdentifiedDetection:
+    event: DetectionEvent
+    detection: Detection
+
+
 class StudentMonitoringService:
     """Student monitoring service."""
 
@@ -45,18 +55,26 @@ class StudentMonitoringService:
         stream_repository: VideoStreamRepository,
         broadcaster: InMemoryBroadcaster,
         classroom_service: ClassroomService,
+        roi_service: RoiConnectionService,
         *,
         occupancy_confidence_threshold: float,
-        identity_confidence_threshold: float = 0.5,  # R9: 신뢰도 임계값
-        student_lookup: StudentLookupPort | None = None,  # 학생 이름 조회용 (중립 계약)
+        identity_confidence_threshold: float,
+        stale_seconds: int,
+        recent_event_limit: int,
+        clock: Callable[[], datetime],
+        student_lookup: StudentLookupPort,
     ) -> None:
         self._detection_repository = detection_repository
         self._segment_repository = segment_repository
         self._stream_repository = stream_repository
         self._broadcaster = broadcaster
         self._classroom_service = classroom_service
+        self._roi_service = roi_service
         self._confidence_threshold = occupancy_confidence_threshold
         self._identity_confidence_threshold = identity_confidence_threshold
+        self._stale_seconds = stale_seconds
+        self._recent_event_limit = recent_event_limit
+        self._clock = clock
         self._student_lookup = student_lookup
 
     def receive_inference_event(self, event: DetectionEvent) -> InferenceEventResult:
@@ -66,16 +84,24 @@ class StudentMonitoringService:
         if stream is None:
             raise VideoStreamNotFoundError()
 
+        resolved_event = replace(
+            event,
+            stream_id=stream.id,
+            classroom_id=stream.classroom_id,
+        )
+
         # Check if event already exists
         existing = self._detection_repository.find_by_event_id(event.event_id)
         is_new = existing is None
 
         # Save event (idempotent)
-        saved_event = self._detection_repository.save(event)
+        saved_event = self._detection_repository.save(resolved_event)
 
         # Update last detection timestamp only for new events
         if is_new:
-            self._stream_repository.update_last_detection(event.camera_id, event.captured_at)
+            self._stream_repository.update_last_detection(
+                saved_event.camera_id, saved_event.captured_at
+            )
 
             # Publish to SSE only for new events
             # frame·detections를 함께 보내야 브라우저가 bbox overlay를 그릴 수 있다.
@@ -98,6 +124,7 @@ class StudentMonitoringService:
                             "confidence": d.confidence,
                             "bbox": list(d.bbox),
                             "student_id": d.student_id,
+                            "display_label": self._safe_detection_label(d),
                         }
                         for d in saved_event.detections
                     ],
@@ -110,36 +137,111 @@ class StudentMonitoringService:
             # 같은 event_id를 다시 받으면 batch 멱등 처리와 어긋나는 관측이 생길 수 없도록
             # 재수신에서는 매핑을 반복하지 않는다.
             # 매핑·batch 기록·SSE 발행이 실패해도 탐지 이벤트 저장 결과는 그대로 돌려준다.
-            if event.detections and stream.classroom_id:
-                classroom_id = stream.classroom_id
+            if saved_event.detections and saved_event.classroom_id:
+                classroom_id = saved_event.classroom_id
                 try:
                     seats = self._classroom_service.list_all_seats(classroom_id)
                     observations = map_detections_to_observations(
-                        event.detections,
+                        saved_event.detections,
                         seats,
-                        event.frame,
+                        saved_event.frame,
                         self._confidence_threshold,
                     )
                     if observations:
                         self._classroom_service.record_seat_observation_batch(
-                            event_id=event.event_id,
+                            event_id=saved_event.event_id,
                             classroom_id=classroom_id,
                             observations=observations,
-                            observed_at=event.captured_at,
+                            observed_at=saved_event.captured_at,
                         )
                         self._publish_occupancy_events(
-                            event_id=event.event_id,
+                            event_id=saved_event.event_id,
                             classroom_id=classroom_id,
                             observations=observations,
                         )
                 except ClassroomNotFoundError:
-                    logger.warning("강의실 %s를 찾을 수 없어 좌석 매핑을 건너뜁니다.", classroom_id)
+                    logger.warning(
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "활성 강의실 참조가 없어 좌석 매핑을 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        classroom_id,
+                    )
                 except Exception:
                     logger.exception(
-                        "event_id=%s 좌석 매핑 중 오류가 발생해 건너뜁니다.", event.event_id
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "좌석 매핑 중 오류가 발생해 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        classroom_id,
+                    )
+
+            if saved_event.classroom_id:
+                try:
+                    self._publish_student_state_events(saved_event)
+                except Exception:
+                    logger.exception(
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "학생 상태 SSE 계산·발행 중 오류가 발생해 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        saved_event.classroom_id,
                     )
 
         return InferenceEventResult(event=saved_event, is_new=is_new)
+
+    def _safe_detection_label(self, detection: Detection) -> str:
+        """활성 학생의 임계값 이상 식별만 이름으로 표시한다."""
+        if (
+            detection.class_name.casefold() != "person"
+            or detection.confidence < self._confidence_threshold
+            or detection.student_id is None
+            or detection.identity_confidence is None
+            or detection.identity_confidence < self._identity_confidence_threshold
+        ):
+            return "사람"
+        try:
+            student = self._student_lookup.find_by_id(detection.student_id)
+        except Exception:
+            logger.exception(
+                "student_id=%s 탐지 라벨 보강 중 학생 조회에 실패했습니다.",
+                detection.student_id,
+            )
+            return "사람"
+        return student.name if student is not None and student.is_active else "사람"
+
+    def _publish_student_state_events(self, event: DetectionEvent) -> None:
+        """신규 이벤트에서 식별 후보가 있었던 학생의 최신 상태를 발행한다."""
+        target_student_ids = {
+            detection.student_id
+            for detection in event.detections
+            if detection.student_id is not None
+        }
+        if not target_student_ids:
+            return
+        for state in self.list_student_states(event.classroom_id):
+            if state.student_id not in target_student_ids:
+                continue
+            self._broadcaster.publish(
+                {
+                    "type": "student-state",
+                    "event_id": event.event_id,
+                    "classroom_id": event.classroom_id,
+                    "student_id": state.student_id,
+                    "student_name": state.student_name,
+                    "student_no": state.student_no,
+                    "assigned_seat_id": state.assigned_seat_id,
+                    "assigned_seat_label": state.assigned_seat_label,
+                    "current_seat_id": state.current_seat_id,
+                    "current_state": state.current_state.value,
+                    "confidence": state.confidence,
+                    "observed_at": (
+                        state.last_observed_at.isoformat()
+                        if state.last_observed_at is not None
+                        else None
+                    ),
+                }
+            )
 
     def _publish_occupancy_events(
         self,
@@ -186,110 +288,174 @@ class StudentMonitoringService:
         # Save segment (idempotent)
         return self._segment_repository.save(segment)
 
-    def _judge_student_states(
-        self,
-        detections: Sequence[Detection],
-        seats: Sequence[Seat],
-        assignments: Sequence[SeatAssignment],
-        frame: FrameInfo,
-    ) -> list[StudentSeatState]:
-        """탐지 결과와 좌석-학생 지정을 비교해 학생 상태를 판정한다.
+    def list_student_states(self, classroom_id: str) -> list[StudentSeatState]:
+        """최근 식별과 카메라 ROI를 좌석 지정에 대조한 읽기 모델을 반환한다."""
+        seats = self._classroom_service.list_all_seats(classroom_id)
+        assignments = self._classroom_service.list_assignments_raw(classroom_id)
+        active_assignments = self._active_assignments(classroom_id, seats, assignments)
+        if not active_assignments:
+            return []
 
-        판정 규칙:
-        1. identity_confidence가 임계값 미달인 탐지 → UNKNOWN (R9)
-        2. student_id가 null인 탐지 → UNKNOWN
-        3. student_id가 있지만 지정 좌석이 없는 학생 → UNKNOWN
-        4. 탐지 위치(bbox 중심점)가 지정 좌석과 일치 → PRESENT
-        5. 탐지 위치가 다른 좌석에 있음 → WRONG_SEAT
-
-        참고: 수업 시간 게이트(R8)는 현재 class_sessions 미구현으로 항상 판정 수행.
-        """
+        since = self._clock() - timedelta(seconds=self._stale_seconds)
+        events = self._detection_repository.find_recent_by_classroom(
+            classroom_id,
+            since,
+            limit=self._recent_event_limit,
+        )
+        identified = self._select_recent_identifications(
+            events,
+            {student.id for _, _, student in active_assignments},
+            classroom_id=classroom_id,
+            since=since,
+        )
+        connections_by_camera: dict[str, list[RoiConnection]] = {}
         result: list[StudentSeatState] = []
-        processed_students: set[str] = set()
 
-        for detection in detections:
-            # 신뢰도 임계값 미달 → UNKNOWN (R9)
-            if (
-                detection.identity_confidence is not None
-                and detection.identity_confidence < self._identity_confidence_threshold
-            ):
-                continue
+        for assignment, seat, student in active_assignments:
+            selected = identified.get(student.id)
+            current_seat_id: str | None = None
+            state = StudentState.UNKNOWN
+            confidence: float | None = None
+            observed_at: datetime | None = None
+            if selected is not None:
+                event = selected.event
+                detection = selected.detection
+                confidence = detection.identity_confidence
+                observed_at = event.captured_at
+                connections = connections_by_camera.get(event.camera_id)
+                if connections is None:
+                    try:
+                        connections = self._roi_service.list_valid_connections(
+                            classroom_id, event.camera_id
+                        )
+                    except RoiConnectionNotFoundError:
+                        logger.warning(
+                            "classroom_id=%s camera_id=%s 유효한 카메라 참조가 없어 "
+                            "학생 상태 ROI 매핑을 건너뜁니다.",
+                            classroom_id,
+                            event.camera_id,
+                        )
+                        connections = []
+                    connections_by_camera[event.camera_id] = connections
 
-            # student_id가 없으면 UNKNOWN (REQ-012)
-            if detection.student_id is None:
-                continue
-
-            # 이미 처리한 학생이면 건너뜀 (같은 학생 두 곳 탐지 시 먼저 탐지된 쪽만 채택)
-            if detection.student_id in processed_students:
-                continue
-            processed_students.add(detection.student_id)
-
-            # 지정 좌석 조회
-            assigned: SeatAssignment | None = None
-            for a in assignments:
-                if a.student_id == detection.student_id:
-                    assigned = a
-                    break
-
-            # 지정 좌석이 없으면 UNKNOWN
-            if assigned is None:
-                continue
-
-            # 현재 탐지 위치가 어떤 좌석인지 조회
-            current_seat = find_seat_for_detection(
-                detection, seats, frame.width_pixels, frame.height_pixels
-            )
-
-            # 상태 판정
-            if current_seat is not None and current_seat.id == assigned.seat_id:
-                state = StudentState.PRESENT
-            elif current_seat is not None:
-                state = StudentState.WRONG_SEAT
-            else:
-                state = StudentState.UNKNOWN
-
-            # 학생 이름·학번 조회 (StudentLookupPort가 있으면)
-            # unknown/inactive는 blank name/no로 판단하고 throw하지 않는다.
-            student_name = ""
-            student_no = ""
-            if self._student_lookup is not None:
-                student = self._student_lookup.find_by_id(detection.student_id)
-                if student is not None and student.is_active:
-                    student_name = student.name
-                    student_no = student.student_no
-
-            # 좌석 라벨 조회
-            seat_label = ""
-            for seat in seats:
-                if seat.id == assigned.seat_id:
-                    seat_label = seat.label
-                    break
+                mapping = map_bbox_to_roi(
+                    detection.bbox,
+                    frame_width_pixels=event.frame.width_pixels,
+                    frame_height_pixels=event.frame.height_pixels,
+                    connections=connections,
+                )
+                if mapping.reason == RoiMappingReason.AMBIGUOUS:
+                    logger.warning(
+                        "event_id=%s camera_id=%s detection_id=%s student_id=%s "
+                        "겹치는 좌석 ROI로 상태를 판정할 수 없습니다.",
+                        event.event_id,
+                        event.camera_id,
+                        detection.detection_id,
+                        student.id,
+                    )
+                if mapping.connection is not None:
+                    current_seat_id = mapping.connection.seat_id
+                    state = (
+                        StudentState.PRESENT
+                        if current_seat_id == assignment.seat_id
+                        else StudentState.WRONG_SEAT
+                    )
 
             result.append(
                 StudentSeatState(
-                    student_id=detection.student_id,
-                    student_name=student_name,
-                    student_no=student_no,
-                    assigned_seat_id=assigned.seat_id,
-                    assigned_seat_label=seat_label,
-                    current_seat_id=current_seat.id if current_seat else None,
+                    student_id=student.id,
+                    student_name=student.name,
+                    student_no=student.student_no,
+                    assigned_seat_id=assignment.seat_id,
+                    assigned_seat_label=seat.label,
+                    current_seat_id=current_seat_id,
                     current_state=state,
-                    confidence=detection.confidence,
-                    last_observed_at=None,
+                    confidence=confidence,
+                    last_observed_at=observed_at,
                 )
             )
-
         return result
 
-    def list_student_states(self, classroom_id: str) -> list[StudentSeatState]:
-        """강의실의 학생별 현재 상태를 반환한다.
+    def _active_assignments(
+        self,
+        classroom_id: str,
+        seats: list[Seat],
+        assignments: list[SeatAssignment],
+    ) -> list[tuple[SeatAssignment, Seat, StudentIdentity]]:
+        seats_by_id = {seat.id: seat for seat in seats if seat.is_active}
+        candidates: list[tuple[SeatAssignment, Seat, StudentIdentity]] = []
+        for assignment in assignments:
+            seat = seats_by_id.get(assignment.seat_id)
+            student = self._student_lookup.find_by_id(assignment.student_id)
+            if (
+                assignment.classroom_id != classroom_id
+                or seat is None
+                or student is None
+                or not student.is_active
+            ):
+                continue
+            candidates.append((assignment, seat, student))
+        candidates.sort(
+            key=lambda item: (
+                item[1].code,
+                item[1].id,
+                item[2].student_no,
+                item[2].id,
+            )
+        )
 
-        TASK-A05에서는 최근 탐지 이벤트 기반 판정을 아직 연결하지 않아
-        빈 목록을 반환한다. 이후 작업에서 최근 detection_events를 읽어
-        _judge_student_states()로 상태를 판정해 채운다.
-        """
-        # 좌석·지정 조회는 판정 로직 연결 시 사용하므로 호출부만 미리 준비한다.
-        # 강의실이 없으면 ClassroomNotFoundError가 발생해 404로 응답한다.
-        self._classroom_service.list_all_seats(classroom_id)
-        self._classroom_service.list_assignments_raw(classroom_id)
-        return []
+        result: list[tuple[SeatAssignment, Seat, StudentIdentity]] = []
+        seen_students: set[str] = set()
+        for candidate in candidates:
+            student_id = candidate[2].id
+            if student_id in seen_students:
+                logger.warning(
+                    "classroom_id=%s student_id=%s 중복 좌석 지정이 있어 후속 지정을 제외합니다.",
+                    classroom_id,
+                    student_id,
+                )
+                continue
+            seen_students.add(student_id)
+            result.append(candidate)
+        return result
+
+    def _select_recent_identifications(
+        self,
+        events: list[DetectionEvent],
+        student_ids: set[str],
+        *,
+        classroom_id: str,
+        since: datetime,
+    ) -> dict[str, _IdentifiedDetection]:
+        eligible_events = [
+            event
+            for event in events
+            if event.classroom_id == classroom_id and event.captured_at >= since
+        ]
+        eligible_events.sort(key=lambda event: event.event_id)
+        eligible_events.sort(key=lambda event: event.captured_at, reverse=True)
+        selected: dict[str, _IdentifiedDetection] = {}
+        for event in eligible_events:
+            detections = [
+                detection
+                for detection in event.detections
+                if detection.student_id in student_ids
+                and detection.class_name.casefold() == "person"
+                and detection.confidence >= self._confidence_threshold
+                and detection.identity_confidence is not None
+                and detection.identity_confidence >= self._identity_confidence_threshold
+            ]
+            detections.sort(
+                key=lambda detection: (
+                    -float(detection.identity_confidence or 0),
+                    -detection.confidence,
+                    detection.detection_id,
+                )
+            )
+            for detection in detections:
+                assert detection.student_id is not None
+                selected.setdefault(
+                    detection.student_id,
+                    _IdentifiedDetection(event=event, detection=detection),
+                )
+        return selected

@@ -26,13 +26,13 @@
                 탐지 결과(student_id · bbox · 신뢰도)
                        │
                        ▼
-                webapps/fastapi   ← 상태 판정은 여기서 한다 (전달 경로 `예정`)
+                webapps/fastapi   ← HTTP 수신·저장·상태 판정
 ```
 
 | 디렉터리 | 책임 | 상태 |
 | --- | --- | --- |
 | [`stream`](./stream/README.md) | RTSP 영상 수집, 연결 유지·재연결, 프레임 샘플링 | 동작 |
-| [`inference`](./inference/README.md) | 프레임을 꺼내 모델을 호출하는 실행 단계 | 동작. 결과는 로그로만 나간다 |
+| [`inference`](./inference/README.md) | 프레임을 꺼내 모델을 호출하는 실행 단계 | 동작. `FASTAPI_URL` 설정 시 결과를 HTTP로 전달 |
 | [`recorder`](./recorder/README.md) | 영상 세그먼트를 객체 저장소에 적재 | 동작하나 **공용 서버에서 실행하지 않는다**([결정 0011](../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
 
 워커가 아닌 디렉터리가 둘 있다.
@@ -58,16 +58,16 @@
 실행은 [`pipeline`](./pipeline/README.md) 진입점이다.
 
 ```text
-카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─최신 1장─▶ inference ─▶ 탐지 결과(로그)
+카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─최신 1장─▶ inference ─▶ 로그 + 선택적 HTTP
                                  오래된 것 버림
 ```
 
 `recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
 객체 저장소에 적재한 뒤, 보존 기간이 지난 것을 지운다.
 
-**아직 없는 것**: 얼굴 탐지·얼굴 인식(모델이 `deeplearning`에 없다), 탐지 결과를
-HTTP로 `fastapi`에 넘기는 경로([결정 0011](../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다), 현재는 로그 출력까지), 적재한 객체의
-참조를 `fastapi`에 알리는 경로, 지표 노출.
+**아직 없는 것**: 실시간 얼굴 식별 모델 연결, 적재한 객체의 참조를 `fastapi`에 알리는
+경로, 지표 노출. 탐지 HTTP 전달은 구현되어 `FASTAPI_URL`로 켠다
+([결정 0011](../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
 
 ## 워커 사이의 경계
 

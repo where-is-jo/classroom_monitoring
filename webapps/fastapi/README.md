@@ -3,11 +3,12 @@
 관리자가 사용하는 강의실 모니터링 화면과 HTTP API를 제공한다.
 이 저장소에서 실행 가능한 웹 서비스이자 브라우저의 단일 진입점이다.
 
-**이 서비스가 학생 상태 판정을 소유한다.** 탐지 결과를 `PRESENT` / `WRONG_SEAT` /
-`ABSENT`로 바꾸는 규칙은 여기 있고, `worker`나 `deeplearning`에 두지 않는다
+**이 서비스가 학생 상태 판정을 소유한다.** 현재 탐지 결과를 `PRESENT` / `WRONG_SEAT` /
+`UNKNOWN`으로 바꾸는 규칙은 여기 있고, `worker`나 `deeplearning`에 두지 않는다.
+시간표·유예 시간·카메라 건강도가 필요한 `ABSENT`도 후속 구현 시 이 서비스가 소유한다
 ([결정 0008](../../docs/architecture/decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)).
 
-> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색과 학생 등록이다.**
+> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색, 학생 등록과 합성 학생 상태 연동이다.**
 > 학생 원장은 memory 또는 MongoDB의 `students` 컬렉션에 저장된다. 얼굴 데이터 수집은 별도 프로필로 구현되어 있다.
 > 현재 좌석 상태는 "자리가 찼는지"를 뜻하며 "누가 앉았는지"가 아니다.
 > 앞으로 만들 도메인과 계약은 [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md)에 있다.
@@ -86,7 +87,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
-| `/roi-connections` | 메모리 가상 강의실·좌석과 DB 학생을 다각형 ROI로 연결하고 MongoDB에 저장 |
+| `/roi-connections` | 강의실 카메라를 선택해 좌석별 다각형 ROI를 등록하고 MongoDB에 저장 |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
@@ -106,14 +107,17 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 삭제 (비활성화) |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy-events` | SSE 좌석 점유 실시간 구독 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-states` | 지정 학생 전체의 최근 탐지·ROI 기반 상태 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-state-events` | 강의실별 학생 상태 SSE 변경분 구독 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
 | `POST` | `/api/v1/students` | 학생 인적사항 저장. 생성 리소스는 `Location` 헤더로 반환 |
-| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
-| `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | 현재 ROI 기준 이미지 조회 |
-| `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections` | 좌석별 ROI와 연결 학생 조회 |
-| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | 좌석 ROI와 학생 연결을 `roi_connections` 컬렉션에 저장 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 현재 ROI 기준 이미지 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections?camera_id=...` | 카메라·좌석별 ROI 조회. query를 생략하면 legacy 포함 전체 조회 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | 실시간 영상에서 선택한 `camera_id`·좌석·legacy 학생 연결과 ROI 저장 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |
@@ -197,8 +201,11 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 
 `face_enrollment`는 memory
 저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다.
-`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장·SSE 발행이
-동작한다. 
+`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장, 최근 이벤트 기반
+학생 상태 REST와 SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인한 활성 학생
+이름만 사용하고 그 외에는 `사람`으로 표시한다. 학생 상태 SSE는 현재 in-memory broadcaster를
+사용하므로 단일 FastAPI 프로세스에서만 전달되며 replay와 다중 프로세스 fan-out은 지원하지
+않는다.
 `students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
 `/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
 등록된 학생을 선택한 뒤 `PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`로
@@ -227,19 +234,13 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
 | `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
-<<<<<<< HEAD
-=======
 | `ROI_REFERENCE_IMAGE_MAX_BYTES` | ROI 임시 기준 이미지 업로드 제한 | 기본 5MB, 최대 20MB |
->>>>>>> develop
 | `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
 | `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
 | `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
 | `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
-<<<<<<< HEAD
-=======
 | `FACE_PITCH_DOWN_DEGREES` | 아래 방향으로 분류하는 최소 pitch | 기본 5도. 위 방향 기준과 별도 적용 |
->>>>>>> develop
 | `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
 | `FACE_LOCAL_SAMPLE_STORAGE_DIR` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
 | `SSE_HEARTBEAT_INTERVAL_SECONDS` | SSE heartbeat 간격 | 기본 30 |
@@ -265,7 +266,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | --- | --- | --- |
 | `database_connect_timeout_seconds` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
 | `demo_mode_enabled` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
-| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
+| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측·학생 사람 탐지는 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `page_size_default`, `page_size_max` | 목록 페이지 크기 | 최대 200 |
 | `face_enrollment_required_samples` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `face_enrollment_augmented_samples` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
@@ -278,13 +279,14 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `sse_reconnection_timeout_seconds` | SSE 재연결 타임아웃 | 기본 60 |
 | `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `student_identity_confidence_threshold` | 학생 상태 판정에 사용할 최소 식별 신뢰도 | 기본 0.5. `0 <= x <= 1` |
+| `student_state_recent_event_limit` | 학생 상태 조회가 확인할 최근 이벤트 상한 | 기본 500. 최대 10,000 |
 | `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
 | `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
 | `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
 | `llm_search_scan_limit` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 
-학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
-`ABSENCE_GRACE_PERIOD_SECONDS` 등)은 아직 없다. 목록은
+최종 `ABSENT` 판정에 필요한 수업 시간표·유예 시간 설정은 아직 없다. 예정 목록은
 [MVP 명세의 설정](../../docs/specs/student-monitoring-mvp.md#설정-예정)에 있다.
 
 환경변수·yml의 저장·명명 규칙은
@@ -334,9 +336,10 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 
 주의할 점 두 가지가 있다.
 
-- **탐지 이벤트를 수집하는 코드가 아직 연결되지 않았다.** `/internal/inference/events`를
-  호출하는 worker 코드가 없어 저장소가 비어 있고, 따라서 검색 결과도 비어 있다.
-  화면에 데이터를 넣어 보려면 그 엔드포인트로 이벤트를 직접 POST한다.
+- worker `pipeline`에 `FASTAPI_URL`을 설정하면 탐지 이벤트가
+  `/internal/inference/events`로 전달된다. 설정하지 않으면 로그만 남기므로 저장소와 검색
+  결과가 비어 있는 것이 정상이다. 실제 영상 없이 확인할 때는
+  [`worker/inference` 계약 fixture](../../worker/inference/MODEL_INTEGRATION.md)를 사용한다.
 - **"누가"에는 아직 답하지 못한다.** `student_id`를 채우는 얼굴 인식이 구현되지
   않았다. 응답과 화면은 값을 그대로 통과시켜 식별된 학생이 있으면 보여주고, 없으면
   "식별 미연동"으로 표시한다. 인식이 붙으면 코드 변경 없이 이름이 나타난다.

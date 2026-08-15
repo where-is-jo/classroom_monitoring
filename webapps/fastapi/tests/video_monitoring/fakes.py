@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.models import CreateClassroomCommand
+from app.classrooms.service import ClassroomService
 from app.video_monitoring.models import PlaybackKind, VideoStream
 from app.video_monitoring.ports import WhepPostResult
 
@@ -53,6 +56,25 @@ class FakeWhepClient:
         self.deleted.append(resource_url)
         if self.delete_error is not None:
             raise self.delete_error
+
+
+def make_classroom_service(*, active: bool = True) -> ClassroomService:
+    service = ClassroomService(
+        InMemoryClassroomRepository(),
+        occupancy_confidence_threshold=0.5,
+        clock=FakeClock(),
+    )
+    service.seed_classroom(
+        CreateClassroomCommand(
+            id="classroom-a101",
+            code="A101",
+            name="A101 일반 강의실",
+            location="A동 1층",
+        )
+    )
+    if not active:
+        service.update_classroom("classroom-a101", is_active=False)
+    return service
 
 
 def make_stream(

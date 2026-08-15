@@ -1,0 +1,143 @@
+"""ROI repository의 카메라 범위와 legacy Mongo 문서 호환 테스트."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import cast
+
+from app.roi_connections.adapters.mongo import MongoRoiConnectionRepository
+from app.roi_connections.models import Point, RoiConnection
+from app.shared.database import MongoDatabase
+
+NOW = datetime(2026, 8, 15, 1, 0, tzinfo=UTC)
+
+
+class FakeCollection:
+    def __init__(self) -> None:
+        self.documents: list[dict[str, object]] = []
+        self.indexes: dict[str, dict[str, object]] = {
+            "uq_roi_connections_classroom_seat": {},
+            "uq_roi_connections_classroom_student": {},
+        }
+        self.dropped: list[str] = []
+
+    def index_information(self) -> dict[str, dict[str, object]]:
+        return dict(self.indexes)
+
+    def drop_index(self, name: str) -> None:
+        self.dropped.append(name)
+        self.indexes.pop(name, None)
+
+    def create_index(
+        self,
+        fields: list[tuple[str, int]],
+        *,
+        name: str,
+        **options: object,
+    ) -> None:
+        self.indexes[name] = {"fields": fields, **options}
+
+    def find(self, query: dict[str, object]) -> Iterable[dict[str, object]]:
+        return [
+            document
+            for document in self.documents
+            if all(document.get(key) == value for key, value in query.items())
+        ]
+
+    def find_one(self, query: dict[str, object]) -> dict[str, object] | None:
+        return next(iter(self.find(query)), None)
+
+    def find_one_and_update(
+        self,
+        query: dict[str, object],
+        update: dict[str, dict[str, object]],
+        *,
+        upsert: bool,
+        return_document: object,
+    ) -> dict[str, object] | None:
+        del upsert, return_document
+        existing = self.find_one(query)
+        document = dict(existing or query)
+        document.update(update["$set"])
+        if existing is not None:
+            self.documents.remove(existing)
+        self.documents.append(document)
+        return document
+
+
+class FakeDatabase:
+    def __init__(self) -> None:
+        self.collection = FakeCollection()
+
+    def __getitem__(self, name: str) -> FakeCollection:
+        assert name == "roi_connections"
+        return self.collection
+
+
+def _repository(database: FakeDatabase) -> MongoRoiConnectionRepository:
+    return MongoRoiConnectionRepository(cast(MongoDatabase, database))
+
+
+def _connection(camera_id: str, seat_id: str = "seat-a") -> RoiConnection:
+    return RoiConnection(
+        classroom_id="room",
+        camera_id=camera_id,
+        seat_id=seat_id,
+        student_id="student-a",
+        polygon=(Point(0.1, 0.1), Point(0.8, 0.1), Point(0.4, 0.8)),
+        reference_image_revision=0,
+        updated_at=NOW,
+    )
+
+
+def test_ensure_indexes_replaces_classroom_only_unique_indexes() -> None:
+    database = FakeDatabase()
+
+    MongoRoiConnectionRepository.ensure_indexes(cast(MongoDatabase, database))
+
+    assert database.collection.dropped == [
+        "uq_roi_connections_classroom_seat",
+        "uq_roi_connections_classroom_student",
+    ]
+    assert "uq_roi_connections_classroom_camera_seat" in database.collection.indexes
+    assert "uq_roi_connections_classroom_camera_student" in database.collection.indexes
+    seat_index = database.collection.indexes["uq_roi_connections_classroom_camera_seat"]
+    assert seat_index["unique"] is True
+    assert seat_index["partialFilterExpression"] == {"camera_id": {"$type": "string"}}
+
+
+def test_save_and_list_are_scoped_by_camera() -> None:
+    database = FakeDatabase()
+    repository = _repository(database)
+    first = repository.save(_connection("camera-a"))
+    second = repository.save(_connection("camera-b"))
+
+    assert repository.list_by_camera("room", "camera-a") == [first]
+    assert repository.list_by_camera("room", "camera-b") == [second]
+    assert len(repository.list_by_classroom("room")) == 2
+    assert repository.find_by_student("room", "camera-a", "student-a") == first
+
+
+def test_legacy_document_without_camera_id_remains_readable() -> None:
+    database = FakeDatabase()
+    database.collection.documents.append(
+        {
+            "classroom_id": "room",
+            "seat_id": "seat-a",
+            "student_id": "student-a",
+            "polygon": [
+                {"x": 0.1, "y": 0.1},
+                {"x": 0.8, "y": 0.1},
+                {"x": 0.4, "y": 0.8},
+            ],
+            "reference_image_revision": 0,
+            "updated_at": NOW,
+        }
+    )
+
+    restored = _repository(database).list_by_classroom("room")
+
+    assert len(restored) == 1
+    assert restored[0].camera_id is None
+    assert _repository(database).list_by_camera("room", "camera-a") == []

@@ -36,19 +36,21 @@ MVP의 범위, 도메인 구조, 계약, 완료 조건을 정한다.
 
 | 대상 | 현재 사실 |
 | --- | --- |
-| `webapps/fastapi` | 강의실 좌석 현황(`/classrooms`), 실시간 모니터링(`/monitoring`), 자연어 검색(`/video-search`) 세 화면. 인증 없음. memory / MongoDB 두 mode |
+| `webapps/fastapi` | 강의실·좌석·학생·ROI 관리, 실시간 모니터링과 검색 화면. 인증 없음. memory / MongoDB 두 mode |
 | 좌석 상태 | `OCCUPIED` / `VACANT` / `UNKNOWN`. **자리가 찼는지**를 뜻하며 **누가 앉았는지**가 아니다 |
 | 좌석 관측 | batch 전체 선검증, event ID 멱등 처리, 오래된 관측은 현재 상태를 되돌리지 않음 |
 | 모니터링·검색 | `DEMO_MODE_ENABLED=true`인 local/dev의 고정 합성 데이터. 실제 스트림·의미 검색이 아니다 |
 | `worker/stream` | 다중 RTSP 수신·재연결·프레임 샘플링 |
-| `worker/inference` | 프레임 버퍼에서 최신 프레임을 꺼내 YOLOv8n으로 탐지. 결과는 로그로만 나간다 |
+| `worker/inference` | 프레임 버퍼에서 최신 프레임을 꺼내 YOLOv8n으로 탐지. `FASTAPI_URL` 설정 시 내부 API로 제한 재시도하며 전달 |
 | `worker/recorder` | FFmpeg 세그먼트를 객체 저장소에 적재하고 보존 기간 경과분 삭제 |
 | `deeplearning` | SCRFD 얼굴 검출·MediaPipe 자세 내부 HTTP 서비스. 나머지 품질·얼굴 인식은 미구현 |
-| 학생 식별, 얼굴 등록, 지정 좌석, 상태 판정 | 구현되어 있지 않다 |
+| 학생·얼굴·좌석 연동 | 학생 등록, 얼굴 등록 프로필, 좌석 지정, 카메라별 ROI, 합성 식별 이벤트의 `PRESENT`·`WRONG_SEAT`·`UNKNOWN` REST/SSE가 구현됨. 실제 얼굴 식별 모델과 `ABSENT`는 미구현 |
 
-**끊긴 지점은 `worker/inference` → `fastapi` 하나다.** 전달은 HTTP로 확정됐지만
-아직 구현되지 않았다
-([결정 0011](../architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
+현재 핵심 단절은 실제 얼굴 식별 모델이 worker의 선택 `student_id`·식별 신뢰도 필드를
+채우지 않는 지점이다. worker → FastAPI HTTP 전달과 FastAPI의 ROI·좌석 지정 기반 상태
+판정은 구현됐다
+([결정 0011](../architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다),
+[결정 0019](../architecture/decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)).
 
 ## 상태 정의
 

@@ -87,12 +87,35 @@ class MongoDetectionEventRepository:
         try:
             documents = list(
                 self._collection.find({"camera_id": camera_id})
-                .sort("captured_at", DESCENDING)
+                .sort([("captured_at", DESCENDING), ("_id", ASCENDING)])
                 .limit(limit)
             )
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return [self._to_domain(doc) for doc in documents]
+
+    def find_recent_by_classroom(
+        self,
+        classroom_id: str,
+        since: datetime,
+        *,
+        limit: int,
+    ) -> list[DetectionEvent]:
+        """Find recent detections for a classroom."""
+        try:
+            documents = list(
+                self._collection.find(
+                    {
+                        "classroom_id": classroom_id,
+                        "captured_at": {"$gte": since},
+                    }
+                )
+                .sort([("captured_at", DESCENDING), ("_id", ASCENDING)])
+                .limit(limit)
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return [self._to_domain(document) for document in documents]
 
     def find_by_camera_and_period(
         self,

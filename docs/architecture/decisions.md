@@ -76,7 +76,8 @@
 | [0015](#0015--서비스-설정을-localdevprod-env와-공용-configsettingsyml로-분리한다) | 서비스 설정을 local/dev/prod .env와 공용 config/settings.yml로 분리한다 | 확정 |
 | [0016](#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다) | 자연어 검색에서 LLM은 계획만 만들고 검증·조회는 fastapi가 소유한다 | 확정 |
 | [0017](#0017--컨테이너-실행의-환경변수를-세-계층으로-나누고-docker-아래에-둔다) | 컨테이너 실행의 환경변수를 세 계층으로 나누고 `.docker/` 아래에 둔다 | 확정 |
-| [0018](#0014--카메라-영상-재생을-fastapi-whep-프록시와-재생-세션으로-통제한다) | 카메라 영상 재생을 FastAPI WHEP 프록시와 재생 세션으로 통제한다 | 확정 |
+| [0018](#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다) | docker compose 구성을 저장소에 커밋하고 local/dev 파일을 나눈다 | 확정 |
+| [0019](#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다) | 실시간 학생 상태 연동은 카메라별 ROI와 FastAPI 판정을 사용한다 | 확정 |
 
 ---
 
@@ -1084,3 +1085,89 @@ diff로 남는다. 값 파일(`.docker/env/`)은 여전히 각자 채워야 하�
 **남은 일**: 이 구조로 실제 기동해 검증하지 않았다 — `docker compose config`까지만 확인했다.
 `.docker/env/*.env` 10개는 커밋되지 않으므로 **팀원이 새로 받으면 그 파일들이 없어 기동에
 실패한다.** 각 파일의 `.env.example` 대응물을 만들지, 저장소 밖에서 전달할지 정하지 않았다.
+
+---
+
+## 0019 · 실시간 학생 상태 연동은 카메라별 ROI와 FastAPI 판정을 사용한다
+
+**상태**: 확정
+
+**배경**: worker가 `student_id · 신뢰도 · bbox`를 FastAPI에 전달하는 내부 HTTP 계약과
+탐지 SSE 골격은 이미 있지만, 저장된 탐지 이벤트의 강의실 식별자가 비어 있고 학생 상태
+조회는 빈 목록을 반환한다. 좌석 위치를 찾는 기존 코드는 `seat.geometry`를 사용하는 반면
+ROI 등록 화면은 별도의 `roi_connections.polygon`을 저장한다. 또한 polygon은 카메라 한
+화각의 좌표인데 현재 ROI 키는 `classroom_id + seat_id`라서 강의실에 카메라가 둘 이상이면
+어느 화각의 영역인지 구분할 수 없다. 이 상태에서 모델만 연결하면 같은 bbox가 실행 경로에
+따라 다른 좌석으로 해석될 수 있다.
+
+**결정**:
+
+1. 좌석 위치 판정의 정본은 `roi_connections.polygon` 하나다. 학생 상태 판정에서는
+   `seat.geometry`를 fallback으로 사용하지 않는다. ROI가 없으면 좌석을 추정하지 않고
+   `UNKNOWN`으로 둔다.
+2. ROI와 ROI 기준 이미지는 `camera_id + seat_id`와 `classroom_id + camera_id` 범위로
+   관리한다. `classroom_id`는 조회와 참조 검증을 위해 함께 저장한다. video stream에
+   저장된 `camera_id → classroom_id`가 카메라 소속의 정본이며, 요청 payload가 강의실을
+   덮어쓰지 못한다.
+3. 기존 `camera_id` 없는 ROI 문서는 legacy 데이터로 읽을 수는 있지만 상태 판정에는
+   사용하지 않는다. 카메라를 추측해 자동 이관하지 않고, 관리 화면에서 카메라를 선택해
+   다시 저장해야 활성화된다. 공개 응답의 기존 필드는 삭제하지 않으며 `camera_id`를
+   추가한다.
+4. live 영상에서 저장한 ROI는 `reference_image_revision=0`으로 표시하고 재시작 뒤에도
+   유효하다. 기준 이미지에서 저장한 ROI는 같은 카메라의 현재 in-memory 이미지 revision과
+   일치할 때만 유효하다. 서버 재시작으로 기준 이미지를 잃었거나 revision이 다르면
+   `needs_review`이며 상태 판정에서 제외한다. 안전하지 않은 ROI를 살리기 위해 revision을
+   추측하거나 0으로 바꾸지 않는다.
+5. 첫 좌석 매핑 규칙은 사람 bbox 중심점을 프레임 크기로 0~1 정규화한 뒤 polygon 포함
+   여부를 계산하는 순수 함수다. 하나의 유효 ROI에만 포함될 때 좌석을 정한다. 겹치는 ROI,
+   잘못된 프레임 크기·bbox, 카메라가 다른 ROI는 모두 `UNKNOWN` 근거가 된다. 실제 촬영으로
+   하단점이나 겹침 비율이 더 적합하다는 근거가 생기면 새 결정으로 바꾼다.
+6. 학생 배정의 정본은 `seat_assignments`다. 기존 ROI 응답의 `student_id`는 호환을 위해
+   유지하지만 상태 판정에 사용하지 않는다. ROI 학생과 지정 학생이 달라도 지정 정보만
+   사용한다.
+7. worker와 deeplearning은 식별 결과까지만 만들고, `PRESENT`, `WRONG_SEAT`, `UNKNOWN`은
+   `webapps/fastapi/app/student_monitoring`이 최근 탐지, ROI, 지정 좌석, 활성 학생을 조합해
+   계산한다. 탐지가 없거나 오래됐다는 사실만으로 `ABSENT`를 만들지 않는다. 신뢰도와
+   stale 기준은 FastAPI 설정으로 주입한다.
+8. 초기 학생 상태는 REST로 읽고 이후 변경분은 강의실별 FastAPI SSE
+   `/api/v1/classrooms/{classroom_id}/student-state-events`로 받는다. 기존 in-memory
+   broadcaster를 재사용하므로 단일 FastAPI 프로세스 안에서만 전달을 보장한다. replay,
+   Redis 같은 외부 broker, 다중 프로세스 fan-out은 이번 기반 작업에 포함하지 않는다.
+9. 탐지 이벤트는 stream catalog가 해석한 실제 `stream_id`, `classroom_id`를 채워 먼저
+   저장한다. 그 뒤의 ROI·학생 상태 판정 실패는 저장을 되돌리지 않는다. 같은 `event_id`는
+   저장과 SSE를 중복 수행하지 않는다.
+10. 실제 얼굴 원본, embedding gallery 전달, 얼굴 인식 모델, tracking, 수업 시간표와
+    유예 시간을 결합한 `ABSENT`는 이 결정의 구현 범위 밖이다. 합성 식별 이벤트로 계약을
+    검증하며 얼굴 데이터 운영 정책을 우회하지 않는다.
+
+**대안**:
+
+- **강의실당 활성 카메라를 하나로 제한** — 데이터 모델 변경은 작지만 기존 video stream
+  저장소와 화면이 여러 카메라를 허용하고, 목표 구성도 좌석 라인별 카메라를 전제한다.
+  기반 단계에서 불필요하게 확장을 막으므로 채택하지 않았다.
+- **현재 `classroom_id + seat_id` ROI를 모든 카메라가 공유** — 화각이 다른 bbox 좌표를
+  같은 polygon에 대입하게 되어 좌석 판정이 우연에 의존한다. 허용하지 않는다.
+- **`seat.geometry`를 우선하거나 ROI가 없을 때 fallback** — 기존 테스트를 살리기 쉽지만
+  위치 정본이 둘이 되어 같은 좌석의 수정 순서에 따라 결과가 달라진다. ROI 등록 화면의
+  결과를 실제 판정에 쓰는 단일 경로를 택했다.
+- **ROI의 legacy `student_id`로 학생을 판정** — ROI를 다시 그릴 때 학생 배정까지 바뀌고
+  `seat_assignments`와 충돌한다. 공간 설정과 업무 배정을 분리하기 위해 채택하지 않았다.
+- **학생 상태를 worker에서 계산** — worker가 강의실·좌석·학생 원장을 읽어야 하고 결정
+  0008의 소유권을 어긴다. FastAPI에 식별 결과만 보내는 기존 방향을 유지한다.
+- **WebSocket 또는 외부 broker를 먼저 도입** — replay와 다중 프로세스 전달에는 유리하지만
+  현재 배포는 단일 FastAPI 프로세스이고 기존 SSE broadcaster가 있다. 아직 발생하지 않은
+  운영 문제를 위해 새 인프라를 추가하지 않는다.
+
+**결과**: 모델 작업자는 카메라 ID와 합성 가능한 식별 결과 계약만 맞추면 되고, 좌석과
+학생 상태의 업무 의미는 FastAPI 한 곳에서 재현된다. 여러 카메라의 좌표계가 섞이지 않고,
+미완성·겹침·stale 데이터는 확정 상태가 아니라 `UNKNOWN`으로 남는다.
+
+대신 기존 `camera_id` 없는 ROI는 다시 저장하기 전까지 판정에 쓰이지 않는다. 기준 이미지
+ROI는 서버 재시작 뒤 재검토가 필요하며, in-memory SSE는 FastAPI 프로세스를 늘리면 일부
+클라이언트에 이벤트가 전달되지 않는다. 이 세 제약은 조용한 오판보다 명시적인 미판정을
+택한 결과다.
+
+**남은 일**: camera-classroom 참조 검증과 탐지 이벤트 보강, ROI 스키마·저장소·화면의
+카메라 범위 반영, 최근 탐지 읽기 모델, 학생 상태 SSE·화면, 얼굴 데이터 없는 합성 E2E를
+순서대로 구현한다. 실제 카메라 촬영 후 bbox 기준점 조정 여부를 검토한다. 다중 FastAPI
+프로세스가 필요해지면 broker와 replay 계약을 새 결정으로 정한다.

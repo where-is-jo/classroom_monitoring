@@ -127,6 +127,7 @@ def test_list_page_renders_sse_wiring(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert f'data-classroom-id="{_CLASSROOM_ID}"' in response.text
+    assert "data-classroom-dashboard" in response.text
     assert f'data-seat-id="{_SEAT_ID}"' in response.text
     assert 'data-seat-state="unknown"' in response.text
     assert 'class="state-label"' in response.text

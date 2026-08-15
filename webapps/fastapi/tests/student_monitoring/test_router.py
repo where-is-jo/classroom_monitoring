@@ -5,8 +5,12 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.models import CreateClassroomCommand
 from app.classrooms.service import ClassroomService
 from app.main import app
+from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
+from app.roi_connections.service import RoiConnectionService
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
 from app.shared.dependencies import get_student_monitoring_service
 from app.student_monitoring.adapters.memory_repository import (
@@ -40,9 +44,27 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
     segment_repo = MemoryVideoSegmentRepository()
     stream_repo = MemoryVideoStreamRepository()
     broadcaster = InMemoryBroadcaster()
+    student_lookup = InMemoryStudentLookup()
     classroom_service = ClassroomService(
         InMemoryClassroomRepository(),
         occupancy_confidence_threshold=0.5,
+        clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+    )
+    classroom_service.seed_classroom(
+        CreateClassroomCommand(
+            id="classroom-a101",
+            code="A101",
+            name="A101 일반 강의실",
+            location="A동 1층",
+        )
+    )
+    roi_service = RoiConnectionService(
+        classroom_service,
+        student_lookup,
+        InMemoryRoiConnectionRepository(),
+        stream_repo,
+        max_upload_bytes=1024,
+        page_size_max=200,
         clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
     )
     service = StudentMonitoringService(
@@ -51,7 +73,13 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         stream_repository=stream_repo,
         broadcaster=broadcaster,
         classroom_service=classroom_service,
+        roi_service=roi_service,
         occupancy_confidence_threshold=0.5,
+        identity_confidence_threshold=0.5,
+        stale_seconds=300,
+        recent_event_limit=500,
+        clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+        student_lookup=student_lookup,
     )
     return service, detection_repo
 
@@ -61,7 +89,7 @@ class TestInferenceEventEndpoint:
 
     def test_receive_inference_event(self) -> None:
         """Normal receive test."""
-        service, _ = _make_service()
+        service, detection_repo = _make_service()
         service._stream_repository.save(_make_stream())
 
         app.dependency_overrides[get_student_monitoring_service] = lambda: service
@@ -89,6 +117,10 @@ class TestInferenceEventEndpoint:
         assert response.status_code == 201
         data = response.json()
         assert data["event_id"] == "test-event-1"
+        saved = detection_repo.find_by_event_id("test-event-1")
+        assert saved is not None
+        assert saved.stream_id == "stream-camera-a"
+        assert saved.classroom_id == "classroom-a101"
 
         app.dependency_overrides.clear()
 

@@ -10,13 +10,14 @@
   "use strict";
 
   const state = {
-    eventSource: null,
+    occupancyEventSource: null,
+    studentStateEventSource: null,
   };
 
-  function subscribeSSE(classroomId) {
+  function subscribeOccupancySSE(classroomId) {
     /* 기존 연결 해제 후 새로 맺는다 */
-    if (state.eventSource) {
-      state.eventSource.close();
+    if (state.occupancyEventSource) {
+      state.occupancyEventSource.close();
     }
 
     const eventSource = new EventSource(
@@ -36,7 +37,102 @@
       console.warn("SSE 연결 끊김 — 자동 재연결을 시도합니다.");
     };
 
-    state.eventSource = eventSource;
+    state.occupancyEventSource = eventSource;
+  }
+
+  function loadStudentStates(classroomId) {
+    return fetch(
+      "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/student-states",
+      { headers: { Accept: "application/json" } }
+    )
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      })
+      .then(function (body) {
+        (body.states || []).forEach(updateStudentState);
+      })
+      .catch(function (error) {
+        console.warn("초기 학생 상태를 불러오지 못했습니다:", error);
+      });
+  }
+
+  function subscribeStudentStateSSE(classroomId, onState) {
+    if (state.studentStateEventSource) {
+      state.studentStateEventSource.close();
+    }
+    const eventSource = new EventSource(
+      "/api/v1/classrooms/" + encodeURIComponent(classroomId) + "/student-state-events"
+    );
+    eventSource.addEventListener("student-state", function (event) {
+      try {
+        onState(JSON.parse(event.data));
+      } catch (error) {
+        /* malformed event 하나만 버리고 EventSource의 기본 재연결을 유지한다. */
+        console.error("학생 상태 SSE 데이터 파싱 오류:", error);
+      }
+    });
+    eventSource.onerror = function () {
+      console.warn("학생 상태 SSE 연결 끊김 — 자동 재연결을 시도합니다.");
+    };
+    state.studentStateEventSource = eventSource;
+  }
+
+  function updateStudentState(data) {
+    if (!data || !data.student_id) return;
+    document.querySelectorAll("[data-assigned-student-id]").forEach(function (element) {
+      if (element.dataset.assignedStudentId !== String(data.student_id)) return;
+
+      setText(element, "[data-student-name]", data.student_name || "-");
+      setText(element, "[data-student-no]", data.student_no || "-");
+      setText(element, "[data-assigned-seat-label]", data.assigned_seat_label || "-");
+      setText(element, "[data-student-confidence]", formatConfidence(data.confidence));
+      setText(
+        element,
+        "[data-student-observed-at]",
+        formatObservedAt(data.observed_at || data.last_observed_at)
+      );
+
+      const normalized = normalizeStudentState(data.current_state);
+      const stateEl = element.querySelector("[data-student-state]");
+      if (stateEl) {
+        stateEl.classList.remove("state--present", "state--wrong_seat", "state--unknown");
+        stateEl.classList.add("state--" + normalized);
+        stateEl.setAttribute("aria-label", "현재 상태 " + studentStateLabel(normalized));
+      }
+      setText(element, "[data-student-state-label]", studentStateLabel(normalized));
+      setText(element, "[data-student-state-icon]", studentStateIcon(normalized));
+      element.dataset.studentState = normalized;
+    });
+  }
+
+  function setText(root, selector, value) {
+    const element = root.querySelector(selector);
+    if (element) element.textContent = value;
+  }
+
+  function normalizeStudentState(value) {
+    const normalized = String(value || "UNKNOWN").toUpperCase();
+    return normalized === "PRESENT" || normalized === "WRONG_SEAT"
+      ? normalized.toLowerCase()
+      : "unknown";
+  }
+
+  function studentStateLabel(value) {
+    if (value === "present") return "재석";
+    if (value === "wrong_seat") return "잘못된 자리";
+    return "확인 필요";
+  }
+
+  function studentStateIcon(value) {
+    if (value === "present") return "●";
+    if (value === "wrong_seat") return "▲";
+    return "?";
+  }
+
+  function formatConfidence(value) {
+    const number = Number(value);
+    return value == null || !Number.isFinite(number) ? "-" : Math.round(number * 100) + "%";
   }
 
   function updateSeatStatus(seatId, seatState, confidence, observedAt) {
@@ -97,6 +193,7 @@
   }
 
   function formatObservedAt(observedAt) {
+    if (!observedAt) return "-";
     const value = new Date(observedAt);
     if (Number.isNaN(value.getTime())) return "-";
     return new Intl.DateTimeFormat("ko-KR", {
@@ -134,20 +231,40 @@
   }
 
   function unsubscribe() {
-    if (state.eventSource) {
-      state.eventSource.close();
-      state.eventSource = null;
+    if (state.occupancyEventSource) {
+      state.occupancyEventSource.close();
+      state.occupancyEventSource = null;
+    }
+    if (state.studentStateEventSource) {
+      state.studentStateEventSource.close();
+      state.studentStateEventSource = null;
     }
   }
 
   function init() {
-    const dashboard = document.querySelector("[data-classroom-id]");
+    const occupancyDashboard = document.querySelector(
+      "[data-classroom-dashboard][data-classroom-id]"
+    );
+    const studentDashboard = document.querySelector(
+      "[data-student-state-dashboard][data-classroom-id]"
+    );
+    const dashboard = occupancyDashboard || studentDashboard;
     if (!dashboard) return;
 
     const classroomId = dashboard.dataset.classroomId;
     if (!classroomId) return;
 
-    subscribeSSE(classroomId);
+    if (occupancyDashboard) subscribeOccupancySSE(classroomId);
+    let initialStateLoaded = false;
+    const pendingStudentStates = [];
+    subscribeStudentStateSSE(classroomId, function (studentState) {
+      if (initialStateLoaded) updateStudentState(studentState);
+      else pendingStudentStates.push(studentState);
+    });
+    loadStudentStates(classroomId).then(function () {
+      initialStateLoaded = true;
+      pendingStudentStates.forEach(updateStudentState);
+    });
   }
 
   /* 페이지 언로드 시 정리 */

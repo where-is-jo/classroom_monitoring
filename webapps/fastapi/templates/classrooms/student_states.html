@@ -31,7 +31,7 @@
   {% endif %}
 
   {% if states %}
-    <section class="panel" aria-labelledby="student-state-table-title">
+    <section class="panel" aria-labelledby="student-state-table-title" data-student-state-dashboard data-classroom-id="{{ classroom.id }}">
       <h2 id="student-state-table-title">학생 상태 목록</h2>
       <ul class="student-state-legend" aria-label="학생 상태 범례">
         <li><span class="legend-swatch legend-swatch--occupied" aria-hidden="true"></span>재석 (PRESENT)</li>
@@ -52,32 +52,32 @@
           </thead>
           <tbody>
             {% for state in states %}
-              <tr>
-                <td>{{ state.student_name }}</td>
-                <td>{{ state.student_no }}</td>
-                <td>{{ state.assigned_seat_label or '-' }}</td>
+              <tr data-assigned-student-id="{{ state.student_id }}" data-student-state="{{ state.current_state|lower }}">
+                <td data-student-name>{{ state.student_name }}</td>
+                <td data-student-no>{{ state.student_no }}</td>
+                <td data-assigned-seat-label>{{ state.assigned_seat_label or '-' }}</td>
                 <td>
-                  <span class="state state--{{ state.current_state|lower }}" aria-label="현재 상태 {{ state.current_state }}">
-                    <span class="state-icon" aria-hidden="true">
+                  <span class="state state--{{ state.current_state|lower }}" data-student-state aria-label="현재 상태 {{ state.current_state }}">
+                    <span class="state-icon" data-student-state-icon aria-hidden="true">
                       {% if state.current_state == 'PRESENT' %}●
                       {% elif state.current_state == 'WRONG_SEAT' %}▲
                       {% else %}?{% endif %}
                     </span>
-                    <span class="state-label">
+                    <span class="state-label" data-student-state-label>
                       {% if state.current_state == 'PRESENT' %}재석
                       {% elif state.current_state == 'WRONG_SEAT' %}잘못된 자리
                       {% else %}확인 필요{% endif %}
                     </span>
                   </span>
                 </td>
-                <td>
+                <td data-student-confidence>
                   {% if state.confidence is not none %}
                     {{ (state.confidence * 100)|round|int }}%
                   {% else %}
                     -
                   {% endif %}
                 </td>
-                <td>
+                <td data-student-observed-at>
                   {% if state.last_observed_at %}
                     {{ state.last_observed_at|kst_datetime }}
                   {% else %}
@@ -98,3 +98,5 @@
     </div>
   {% endif %}
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classrooms.js') }}" defer></script>{% endblock %}

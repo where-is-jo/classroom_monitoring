@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     # Detection event settings
     detection_event_max_detections_per_event: int = Field(default=100, ge=1)
     detection_event_stale_seconds: int = Field(default=300, ge=1)
+    student_identity_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
+    student_state_recent_event_limit: int = Field(default=500, ge=1, le=10_000)
     # --- 탐지 스냅샷 저장소 (결정 0011) ---
     # worker가 적재한 스냅샷을 읽기만 한다. fastapi는 만들지도 지우지도 않는다.
     # memory는 MinIO 없이 화면을 띄우기 위한 개발용이며 빈 목록을 돌려준다.
