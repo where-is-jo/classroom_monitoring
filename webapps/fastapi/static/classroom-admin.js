@@ -323,13 +323,15 @@ function collectPayload(form) {
     announce("좌석 편집 패널을 닫았습니다.");
   });
 
-  // --- 편집 패널 저장 (label만 전송) -------------------------------------------
+  // --- 편집 패널 저장 (label + 변경된 학생 지정) -------------------------------
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!currentSeatId || saving) return;
 
+    const seatId = currentSeatId;
     const label = form.elements.label.value.trim();
+    const studentId = form.elements.student_id.value;
     if (!label) {
       showFormError("좌석 이름을 입력해 주세요.");
       return;
@@ -339,25 +341,53 @@ function collectPayload(form) {
     hideFormError();
     announce("좌석을 저장하는 중입니다.");
 
+    let seatSaved = false;
     try {
       const response = await fetch(
-        `/api/v1/classrooms/${encodeURIComponent(classroomId)}/seats/${encodeURIComponent(currentSeatId)}`,
+        `/api/v1/classrooms/${encodeURIComponent(classroomId)}/seats/${encodeURIComponent(seatId)}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ label }),
         }
       );
-      if (response.ok) {
-        announce("좌석이 저장되었습니다.");
-        storeFocusTarget(`seat-cell-${currentSeatId}`);
-        window.location.reload();
+      if (!response.ok) {
+        const message = await extractApiMessage(response);
+        showFormError(message || "저장에 실패했습니다.");
         return;
       }
-      const message = await extractApiMessage(response);
-      showFormError(message || "저장에 실패했습니다.");
+      seatSaved = true;
+
+      if (studentId && studentId !== assignedStudentId) {
+        announce("좌석을 저장했고 학생을 지정하는 중입니다.");
+        const assignmentResponse = await fetch(
+          `/api/v1/classrooms/${encodeURIComponent(classroomId)}/seats/${encodeURIComponent(seatId)}/assignment`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ student_id: studentId }),
+          }
+        );
+        if (!assignmentResponse.ok) {
+          const message = await extractApiMessage(assignmentResponse);
+          showFormError(
+            message
+              ? `좌석 이름은 저장됐지만 학생 지정에 실패했습니다. ${message}`
+              : "좌석 이름은 저장됐지만 학생 지정에 실패했습니다. 다시 시도해 주세요."
+          );
+          return;
+        }
+      }
+
+      announce(studentId ? "좌석과 학생 지정이 저장되었습니다." : "좌석이 저장되었습니다.");
+      storeFocusTarget(`seat-cell-${seatId}`);
+      window.location.reload();
     } catch {
-      showFormError("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      showFormError(
+        seatSaved
+          ? "좌석 이름은 저장됐지만 학생 지정 중 서버에 연결하지 못했습니다. 다시 시도해 주세요."
+          : "서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."
+      );
     } finally {
       setBusy(false);
     }
