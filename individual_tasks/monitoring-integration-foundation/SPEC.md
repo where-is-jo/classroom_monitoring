@@ -43,21 +43,19 @@
 | R11 | 같은 `event_id` 재수신은 탐지 저장, 상태 계산, SSE 발행을 중복 수행하지 않는다. | 필수 |
 | R12 | 실제 얼굴·embedding 없이 전체 연결을 자동 검증한다. | 필수 |
 
-## 아키텍처 결정 후보
+## 아키텍처 결정
 
-다음 선택은 [TASK-001](TASK-001.md)에서 ADR과 독립 검토를 거쳐 승인되어야 한다.
-승인 전에는 구현하지 않는다.
+다음 선택은 [결정 0019](../../docs/architecture/decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)와
+[TASK-001](TASK-001.md)의 Architecture Review에서 확정했다.
 
 1. **좌석 위치 정본**: `roi_connections.polygon`을 카메라 프레임 내 좌석 영역의 정본으로
    사용한다. `seat.geometry`는 이 판정 경로에서 사용하지 않는다.
-2. **ROI 카메라 범위**: polygon은 특정 카메라 화각의 좌표이므로, 다음 둘 중 하나를
-   확정해야 한다.
-   - MVP에서 강의실당 활성 카메라 1개를 불변식으로 강제한다.
-   - `roi_connections`를 `camera_id + seat_id` 범위로 확장한다.
-   여러 카메라를 허용하면서 현재의 `classroom_id + seat_id` 키를 유지하는 선택은 금지한다.
-3. **ROI revision 수명**: live ROI의 revision 0과 기준 이미지 ROI의 revision을 재시작 뒤
-   어떻게 검증할지 확정한다. 단순히 현재 `needs_review`를 필터로 사용하면 live ROI가 전부
-   제외되므로 구현하지 않는다.
+2. **ROI 카메라 범위**: `roi_connections`를 `camera_id + seat_id` 범위로 확장하고 기준
+   이미지도 `classroom_id + camera_id`로 관리한다. 여러 카메라를 허용하면서 현재의
+   `classroom_id + seat_id` polygon 하나를 공유하지 않는다.
+3. **ROI revision 수명**: live ROI의 revision 0은 재시작 뒤에도 유효하다. 기준 이미지
+   ROI는 같은 카메라의 현재 in-memory revision과 일치할 때만 유효하며, 재시작으로 이미지를
+   잃었거나 revision이 다르면 `needs_review`로 판정에서 제외한다.
 4. **학생 배정 정본**: `seat_assignments`만 사용한다. 기존 ROI 응답의 `student_id`는 이번
    작업에서 삭제하지 않지만 상태 판정 입력에서는 제외한다.
 5. **좌석 판정점**: 첫 구현은 기존 동작과 회귀 위험을 줄이기 위해 사람 bbox 중심점을
@@ -66,6 +64,8 @@
 6. **학생 상태 소유권**: 상태 판정은 `webapps/fastapi/app/student_monitoring`이 소유한다.
 7. **실시간 전달**: 기존 FastAPI 인메모리 broadcaster를 재사용하되 단일 프로세스 범위임을
    명시한다. 외부 broker는 후속 결정으로 남긴다.
+8. **기존 ROI 호환**: `camera_id`가 없는 legacy 문서는 조회 가능하게 유지하지만 상태
+   판정에는 사용하지 않는다. 카메라를 추측해 자동 이관하지 않고 관리 화면에서 다시 저장한다.
 
 ## API 계약
 

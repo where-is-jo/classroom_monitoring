@@ -48,4 +48,24 @@
 
 ## 리뷰 결과
 
-`PENDING` — 이 문서는 구현자가 승인 결과를 임의로 `APPROVED`로 바꾸지 않는다.
+`APPROVED` — [결정 0019](../../docs/architecture/decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)에
+따라 구현을 진행할 수 있다.
+
+### Architecture Review 근거
+
+- **배치**: HTTP·SSE와 학생 상태 업무 판단은 기존 `webapps/fastapi` 기능 디렉터리에 둔다.
+  worker와 deeplearning에는 식별 결과 계약 외의 업무 상태를 추가하지 않는다.
+- **호출 방향**: worker의 내부 HTTP 요청과 브라우저 REST·SSE는 FastAPI router로 들어오고,
+  router는 service를 호출하며 외부 저장은 기존 repository port와 adapter를 사용한다.
+- **포트·패턴**: 새 외부 I/O가 없으므로 새 종류의 포트가 필요하지 않다. 반응이 3개 미만이고
+  순서가 중요하므로 Observer를 만들지 않고 service에서 저장 후 판정을 명시적으로 호출한다.
+  Facade와 Strategy도 도입 조건을 충족하지 않는다.
+- **정본**: 위치는 카메라별 ROI polygon, 배정은 `seat_assignments`, 카메라 소속은 video
+  stream catalog로 분리돼 같은 사실을 두 저장소가 동시에 소유하지 않는다.
+- **실패 경계**: 탐지 저장을 먼저 완료하고 ROI·상태 판정 실패는 해당 이벤트의 파생 처리를
+  건너뛴다. 얼굴 원본과 embedding은 계약·로그·테스트에 들어가지 않는다.
+- **제약**: SSE는 단일 FastAPI 프로세스에 한정하며, legacy ROI는 카메라를 다시 지정하기
+  전까지 판정에서 제외한다. 실제 얼굴 인식, tracking, `ABSENT`는 구현하지 않는다.
+
+BLOCKER와 MAJOR finding은 없다. 구현 중 이 경계를 바꿔야 하면 코드를 진행하지 않고 새
+Architecture Review와 ADR을 먼저 수행한다.
