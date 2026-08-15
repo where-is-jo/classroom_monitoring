@@ -119,6 +119,7 @@ function collectPayload(form) {
   const alertRegion = document.getElementById("seat-grid-alert");
   const addRow = document.getElementById("add-row");
   const addColumn = document.getElementById("add-column");
+  const btnRegisterStudent = document.getElementById("open-student-registration");
   const btnAssign = document.getElementById("btn-assign");
   const btnUnassign = document.getElementById("btn-unassign");
   const btnDelete = document.getElementById("btn-delete");
@@ -130,6 +131,7 @@ function collectPayload(form) {
   // 패널을 연 시점의 실제 지정 학생 id(서버 상태). select 값은 저장 전에
   // 자유롭게 바뀔 수 있으므로 해제 버튼 활성화 판정에는 이 값을 쓴다.
   let assignedStudentId = "";
+  let currentSeatAssignable = false;
 
   // --- 안내(live region) helpers -------------------------------------------
 
@@ -188,6 +190,7 @@ function collectPayload(form) {
       ...grid.querySelectorAll("button"),
       ...panel.querySelectorAll("button"),
       ...form.querySelectorAll("input, select"),
+      ...document.querySelectorAll("#student-registration-dialog button, #student-registration-dialog input, #student-registration-dialog select"),
       addRow,
       addColumn,
     ].filter(Boolean);
@@ -201,8 +204,9 @@ function collectPayload(form) {
   // (busy 중이면 함께 disabled). select에서 학생을 새로 고르기만 해도(저장
   // 전) 서버 상태는 그대로이므로 select 값이 아니라 assignedStudentId로 판정한다.
   function refreshPanelControls() {
-    if (!btnUnassign) return;
-    btnUnassign.disabled = saving || !assignedStudentId;
+    if (btnRegisterStudent) btnRegisterStudent.disabled = saving || !currentSeatAssignable;
+    if (btnAssign) btnAssign.disabled = saving || !currentSeatAssignable;
+    if (btnUnassign) btnUnassign.disabled = saving || !assignedStudentId;
   }
 
   function storeFocusTarget(id) {
@@ -222,6 +226,7 @@ function collectPayload(form) {
     form.elements.label.value = seatData.label || "";
     form.elements.student_id.value = seatData.assignment_student_id || "";
     assignedStudentId = seatData.assignment_student_id || "";
+    currentSeatAssignable = seatData.seat_assignable !== false;
     hideFormError();
     refreshPanelControls();
     announce("좌석 편집 패널을 열었습니다.");
@@ -232,7 +237,9 @@ function collectPayload(form) {
     panel.dataset.seatId = "";
     panel.hidden = true;
     assignedStudentId = "";
+    currentSeatAssignable = false;
     hideFormError();
+    refreshPanelControls();
   }
 
   function seatLabel() {
@@ -306,13 +313,44 @@ function collectPayload(form) {
       label: seatButton.querySelector("strong")?.textContent?.trim() || "",
       assignment_student_id: seatButton.dataset.assignmentStudentId || "",
       assignment_student_name: seatButton.dataset.assignmentStudentName || "",
+      seat_assignable: seatButton.dataset.seatAssignable !== "false",
     });
+  });
+
+  // --- 좌석 화면에서 새 학생 등록 ---------------------------------------------
+
+  document.addEventListener("student-registration:created", (event) => {
+    if (!currentSeatId || saving) return;
+    const student = event.detail;
+    if (
+      !student
+      || typeof student.id !== "string"
+      || typeof student.student_number !== "string"
+      || typeof student.name !== "string"
+    ) {
+      showFormError("등록된 학생 정보를 좌석 선택에 반영하지 못했습니다.");
+      return;
+    }
+
+    const select = form.elements.student_id;
+    let option = Array.from(select.options).find((item) => item.value === student.id);
+    if (!option) {
+      option = document.createElement("option");
+      option.value = student.id;
+      select.appendChild(option);
+    }
+    option.textContent = `${student.student_number} ${student.name}`;
+    option.selected = true;
+    select.value = student.id;
+    hideFormError();
+    announce(`${student.name} 학생을 등록하고 선택했습니다. 지정 버튼을 눌러 확정해 주세요.`);
   });
 
   // --- Escape: 패널 닫기 ------------------------------------------------------
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (document.querySelector("dialog[open]")) return;
     if (!currentSeatId) return;
     closePanel();
     announce("좌석 편집 패널을 닫았습니다.");

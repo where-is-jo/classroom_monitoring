@@ -15,6 +15,10 @@ def test_student_management_page_has_list_and_registration_modal() -> None:
     assert 'id="open-student-registration"' in response.text
     assert '<dialog id="student-registration-dialog"' in response.text
     assert 'id="student-registration-form"' in response.text
+    assert 'data-success-mode="reload"' in response.text
+    assert response.text.count("/static/student-registration.css") == 1
+    assert response.text.count("/static/student-registration.js") == 1
+    assert "목록에서 얼굴을 등록할 수 있습니다." in response.text
     for field_name in (
         "name",
         "student_number",

@@ -1,0 +1,31 @@
+<dialog id="student-registration-dialog" class="student-registration-dialog" aria-labelledby="student-form-title">
+  <section class="student-form-panel">
+    <div class="student-form-heading">
+      <div>
+        <p class="eyebrow">New student</p>
+        <h2 id="student-form-title">학생 등록</h2>
+        <p>{{ student_registration_description|default('학생 정보를 등록합니다.') }}</p>
+      </div>
+      <span><strong aria-hidden="true">*</strong> 필수 항목</span>
+    </div>
+    <form
+      id="student-registration-form"
+      class="student-registration-form"
+      data-success-mode="{{ student_registration_success_mode|default('reload') }}"
+    >
+      <div class="student-form-grid">
+        <label>학생 이름 <span class="required-mark">*</span><input name="name" type="text" maxlength="50" autocomplete="name" required></label>
+        <label>학생 번호 <span class="required-mark">*</span><input name="student_number" type="text" maxlength="30" autocomplete="off" required></label>
+        <label>생년월일 <span class="required-mark">*</span><input name="birth_date" type="date" autocomplete="bday" required></label>
+        <label>소속 반 <span class="required-mark">*</span><input name="classroom_name" type="text" maxlength="50" value="{{ student_registration_classroom_name|default('') }}" required></label>
+        <label>학생 연락처 <span class="optional-label">선택</span><input name="phone" type="tel" maxlength="20" autocomplete="tel"></label>
+        <label>보호자 연락처 <span class="required-mark">*</span><input name="guardian_phone" type="tel" maxlength="20" required></label>
+      </div>
+      <p id="student-save-error" class="form-error" role="alert" tabindex="-1" hidden></p>
+      <div class="student-form-actions">
+        <button id="close-student-registration" class="secondary" type="button">닫기</button>
+        <button type="submit">저장</button>
+      </div>
+    </form>
+  </section>
+</dialog>

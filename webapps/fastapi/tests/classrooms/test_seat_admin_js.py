@@ -31,6 +31,7 @@ import pytest
 
 BASE = Path(__file__).resolve().parents[2]
 ADMIN_JS = BASE / "static" / "classroom-admin.js"
+STUDENT_REGISTRATION_JS = BASE / "static" / "student-registration.js"
 HARNESS_TEMPLATE = Path(__file__).parent / "browser_harness" / "seat_admin_test.html"
 
 _BROWSER_CANDIDATES = (
@@ -58,6 +59,10 @@ def browser_results() -> dict[str, object]:
         pytest.skip("Edge/Chrome headless가 없어 브라우저 테스트를 건너뜁니다.")
     harness = HARNESS_TEMPLATE.read_text(encoding="utf-8")
     harness = harness.replace("{{ ADMIN_JS_URI }}", ADMIN_JS.resolve().as_uri())
+    harness = harness.replace(
+        "{{ STUDENT_REGISTRATION_JS_URI }}",
+        STUDENT_REGISTRATION_JS.resolve().as_uri(),
+    )
 
     # 브라우저 첫 실행 프로필 충돌을 피하기 위해 사용자 데이터를 임시 디렉터리에 둔다.
     with tempfile.TemporaryDirectory() as profile_dir:
@@ -168,6 +173,25 @@ class TestSeatAdminJsStatic:
         # 자동 재시도 루프(재귀 fetch 호출)가 없다.
         assert "retry" not in source.lower()
 
+    def test_bundle_consumes_student_created_event_without_auto_assignment(self) -> None:
+        """학생 등록 이벤트는 option만 선택하고 assignment 요청을 만들지 않는다."""
+        source = ADMIN_JS.read_text(encoding="utf-8")
+        event_handler = source.split('"student-registration:created"', maxsplit=1)[1]
+        event_handler = event_handler.split("// --- Escape", maxsplit=1)[0]
+
+        assert 'document.createElement("option")' in event_handler
+        assert "option.textContent" in event_handler
+        assert "student.student_number" in event_handler
+        assert "/assignment" not in event_handler
+
+    def test_student_registration_bundle_dispatches_response_event(self) -> None:
+        """좌석 성공 모드는 StudentResponse를 detail로 담은 DOM 이벤트를 발생시킨다."""
+        source = STUDENT_REGISTRATION_JS.read_text(encoding="utf-8")
+
+        assert 'registrationForm.dataset.successMode === "event"' in source
+        assert 'new CustomEvent("student-registration:created", {detail: body})' in source
+        assert "body?.error?.message" in source
+
 
 # ── 브라우저 검증 (headless, 없으면 skip) ────────────────────────────────────
 
@@ -242,5 +266,39 @@ class TestSeatAdminJsBrowser:
         """해제는 '영구 해제' 확인 대화상자 후 assignment DELETE를 호출한다."""
         _assert_all_checkpoints(browser_results)
         for name in ("release-confirm-message", "release-issues-delete-after-confirm"):
+            checkpoint = _checkpoint(browser_results, name)
+            assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"
+
+    def test_student_registration_adds_selected_option_without_assignment(
+        self,
+        browser_results: dict[str, object],
+    ) -> None:
+        """등록 성공은 StudentResponse 이벤트로 option만 선택하고 자동 지정하지 않는다."""
+        _assert_all_checkpoints(browser_results)
+        for name in (
+            "registration-posts-once-without-retry",
+            "registration-event-has-student-response",
+            "registration-adds-and-selects-option",
+            "registration-does-not-auto-assign",
+            "registration-closes-dialog-and-restores-focus",
+        ):
+            checkpoint = _checkpoint(browser_results, name)
+            assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"
+
+    def test_student_registration_busy_and_failures_preserve_state(
+        self,
+        browser_results: dict[str, object],
+    ) -> None:
+        """busy 제어와 API·network 실패가 dialog·입력·좌석 선택을 보존한다."""
+        _assert_all_checkpoints(browser_results)
+        for name in (
+            "registration-busy-disables-all-controls",
+            "registration-busy-blocks-dialog-close",
+            "registration-dialog-escape-keeps-seat-panel",
+            "registration-failure-preserves-state",
+            "registration-failure-no-retry",
+            "registration-network-failure-preserves-state",
+            "registration-network-failure-no-retry",
+        ):
             checkpoint = _checkpoint(browser_results, name)
             assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"

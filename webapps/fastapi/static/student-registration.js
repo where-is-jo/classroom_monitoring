@@ -1,11 +1,13 @@
 (() => {
   const registrationDialog = document.querySelector("#student-registration-dialog");
   const registrationForm = document.querySelector("#student-registration-form");
+  const registrationOpenButton = document.querySelector("#open-student-registration");
   const faceDialog = document.querySelector("#student-face-enrollment-dialog");
   const setup = document.querySelector("#enrollment-setup");
   const capture = document.querySelector("#capture-panel");
   const complete = document.querySelector("#face-enrollment-complete");
   let activeStudentId = null;
+  let registrationBusy = false;
 
   const setModalState = () => {
     document.body.classList.toggle(
@@ -18,44 +20,119 @@
     setModalState();
   };
   const closeOnBackdrop = (dialog) => dialog?.addEventListener("click", (event) => {
-    if (event.target === dialog) closeDialog(dialog);
+    if (event.target === dialog && !registrationBusy) closeDialog(dialog);
   });
 
-  document.querySelector("#open-student-registration")?.addEventListener("click", () => {
+  const registrationControls = () => document.querySelectorAll([
+    "#open-student-registration",
+    "#add-row",
+    "#add-column",
+    "#seat-grid button",
+    "#seat-edit-panel button",
+    "#seat-edit-panel input",
+    "#seat-edit-panel select",
+    "#student-registration-dialog button",
+    "#student-registration-dialog input",
+    "#student-registration-dialog select",
+  ].join(", "));
+
+  const setRegistrationBusy = (busy) => {
+    registrationBusy = busy;
+    for (const control of registrationControls()) {
+      if (busy) {
+        control.dataset.registrationWasDisabled = control.disabled ? "true" : "false";
+        control.disabled = true;
+        continue;
+      }
+      const wasDisabled = control.dataset.registrationWasDisabled;
+      if (wasDisabled !== undefined) {
+        control.disabled = wasDisabled === "true";
+        delete control.dataset.registrationWasDisabled;
+      }
+    }
+  };
+
+  const clearRegistrationError = () => {
+    const error = registrationForm?.querySelector("#student-save-error");
+    if (!error) return;
+    error.textContent = "";
+    error.hidden = true;
+  };
+
+  const showRegistrationError = (message) => {
+    const error = registrationForm?.querySelector("#student-save-error");
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = false;
+    error.focus();
+  };
+
+  registrationOpenButton?.addEventListener("click", () => {
     registrationForm?.reset();
-    const error = document.querySelector("#student-save-error");
-    if (error) error.hidden = true;
+    clearRegistrationError();
     registrationDialog.showModal();
     setModalState();
+    registrationForm?.elements.name?.focus();
   });
   document.querySelector("#close-student-registration")?.addEventListener("click", () => closeDialog(registrationDialog));
   closeOnBackdrop(registrationDialog);
-  registrationDialog?.addEventListener("close", setModalState);
+  registrationDialog?.addEventListener("cancel", (event) => {
+    if (registrationBusy) event.preventDefault();
+  });
+  registrationDialog?.addEventListener("close", () => {
+    setModalState();
+    registrationOpenButton?.focus();
+  });
 
   registrationForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!registrationForm.reportValidity()) return;
-    const submit = registrationForm.querySelector("button[type='submit']");
-    const error = document.querySelector("#student-save-error");
     const values = Object.fromEntries(new FormData(registrationForm).entries());
     values.phone = values.phone || null;
     values.face_enrollment_id = null;
-    error.hidden = true;
-    submit.disabled = true;
+    clearRegistrationError();
+    setRegistrationBusy(true);
+    let shouldRestoreFocus = false;
     try {
-      const response = await fetch("/api/v1/students", {
-        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error?.message || "학생 정보를 저장하지 못했습니다.");
-      closeDialog(registrationDialog);
-      location.reload();
+      let response;
+      try {
+        response = await fetch("/api/v1/students", {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values),
+        });
+      } catch {
+        throw new Error("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+      let body = null;
+      try {
+        body = await response.json();
+      } catch {
+        // JSON이 아니면 아래의 안전한 기본 메시지를 사용한다.
+      }
+      if (!response.ok) {
+        throw new Error(body?.error?.message || "학생 정보를 저장하지 못했습니다.");
+      }
+      if (
+        !body
+        || typeof body.id !== "string"
+        || typeof body.student_number !== "string"
+        || typeof body.name !== "string"
+      ) {
+        throw new Error("등록된 학생 정보를 확인하지 못했습니다.");
+      }
+      if (registrationForm.dataset.successMode === "event") {
+        closeDialog(registrationDialog);
+        document.dispatchEvent(new CustomEvent("student-registration:created", {detail: body}));
+        shouldRestoreFocus = true;
+      } else {
+        location.reload();
+      }
     } catch (reason) {
-      error.textContent = reason instanceof Error ? reason.message : "학생 정보를 저장하지 못했습니다.";
-      error.hidden = false;
-      error.focus();
+      showRegistrationError(
+        reason instanceof Error ? reason.message : "학생 정보를 저장하지 못했습니다.",
+      );
     } finally {
-      submit.disabled = false;
+      setRegistrationBusy(false);
+      if (shouldRestoreFocus) registrationOpenButton?.focus();
     }
   });
 

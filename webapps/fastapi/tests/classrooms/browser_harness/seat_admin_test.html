@@ -39,6 +39,7 @@
         </select>
       </label>
       <div class="assignment-actions">
+        <button type="button" id="open-student-registration">새 학생 등록</button>
         <button type="button" id="btn-assign">지정</button>
         <button type="button" id="btn-unassign" class="danger">해제</button>
       </div>
@@ -49,14 +50,40 @@
     </form>
   </aside>
 
+  <dialog id="student-registration-dialog" aria-labelledby="student-form-title">
+    <h2 id="student-form-title">학생 등록</h2>
+    <form id="student-registration-form" data-success-mode="event">
+      <label>학생 이름<input name="name" required></label>
+      <label>학생 번호<input name="student_number" required></label>
+      <label>생년월일<input name="birth_date" type="date" required></label>
+      <label>소속 반<input name="classroom_name" value="A101" required></label>
+      <label>학생 연락처<input name="phone"></label>
+      <label>보호자 연락처<input name="guardian_phone" required></label>
+      <p id="student-save-error" role="alert" tabindex="-1" hidden></p>
+      <button id="close-student-registration" type="button">닫기</button>
+      <button type="submit">저장</button>
+    </form>
+  </dialog>
+
   <pre id="test-results"></pre>
 
   <script>
     /* ===== 테스트 harness stubs (fetch·confirm·prompt를 대역으로 교체) =====
        성공 응답은 페이지 reload를 유발하므로(브라우저 재시도 없음의 일부) 여기서는
        실패 응답만 사용한다. 성공 시 reload 여부는 정적 검증이 확인한다. */
-    window.__results = { calls: [], checkpoints: [], promptCalls: 0, confirmCalls: [], log: [] };
-    window.__scenario = { autoStatus: 422, deleteStatus: 500, confirmResult: true };
+    window.__results = { calls: [], checkpoints: [], promptCalls: 0, confirmCalls: [], studentEvents: [], log: [] };
+    window.__scenario = {
+      autoStatus: 422,
+      deleteStatus: 500,
+      confirmResult: true,
+      studentStatus: 201,
+      studentDelayMs: 0,
+      studentNetworkFailure: false
+    };
+
+    document.addEventListener("student-registration:created", function (event) {
+      window.__results.studentEvents.push(event.detail);
+    });
 
     function recordCall(entry) {
       window.__results.calls.push(entry);
@@ -96,6 +123,40 @@
         }
         return errorResponse(window.__scenario.autoStatus, "테스트 자동 생성 오류");
       }
+      if (method === "POST" && s === "/api/v1/students") {
+        return new Promise(function (resolve, reject) {
+          setTimeout(function () {
+            if (window.__scenario.studentNetworkFailure) {
+              reject(new Error("network failure"));
+              return;
+            }
+            if (window.__scenario.studentStatus >= 200 && window.__scenario.studentStatus < 300) {
+              resolve({
+                ok: true,
+                status: window.__scenario.studentStatus,
+                json: function () {
+                  return Promise.resolve({
+                    id: "student-new-1",
+                    student_number: "20260002",
+                    name: "이영희",
+                    classroom_name: "A101",
+                    face_registered: false,
+                    created_at: "2026-08-15T01:00:00Z"
+                  });
+                }
+              });
+              return;
+            }
+            resolve({
+              ok: false,
+              status: window.__scenario.studentStatus,
+              json: function () {
+                return Promise.resolve({ error: { code: "STUDENT_DUPLICATE", message: "이미 등록된 학생 번호입니다." } });
+              }
+            });
+          }, window.__scenario.studentDelayMs);
+        });
+      }
       if (method === "DELETE" && /\/assignment$/.test(s)) {
         return errorResponse(window.__scenario.deleteStatus, "테스트 해제 오류");
       }
@@ -117,6 +178,7 @@
   </script>
 
   <script src="{{ ADMIN_JS_URI }}" defer></script>
+  <script src="{{ STUDENT_REGISTRATION_JS_URI }}" defer></script>
 
   <script>
     /* ===== 시나리오 러너: seat admin 계약 검증 ===== */
@@ -238,6 +300,92 @@
         var unassignMsg6 = results.confirmCalls[confirmBefore6] || "";
         checkpoint("release-confirm-message", unassignMsg6.indexOf("영구 해제") !== -1, unassignMsg6);
         checkpoint("release-issues-delete-after-confirm", unassignCalls6.length === 1, JSON.stringify(unassignCalls6));
+
+        /* 7) 좌석 화면 학생 등록: busy → 이벤트 → option 선택, 자동 지정 없음 */
+        window.__scenario.studentStatus = 201;
+        window.__scenario.studentDelayMs = 100;
+        window.__scenario.studentNetworkFailure = false;
+        document.getElementById("open-student-registration").click();
+        var registrationDialog = document.getElementById("student-registration-dialog");
+        var registrationForm = document.getElementById("student-registration-form");
+        registrationForm.elements.name.value = "이영희";
+        registrationForm.elements.student_number.value = "20260002";
+        registrationForm.elements.birth_date.value = "2012-03-04";
+        registrationForm.elements.guardian_phone.value = "010-1111-2222";
+        var base7 = results.calls.length;
+        registrationForm.requestSubmit();
+        var busyCancelEvent = new Event("cancel", { cancelable: true });
+        registrationDialog.dispatchEvent(busyCancelEvent);
+        registrationDialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        checkpoint("registration-busy-disables-all-controls",
+          Array.from(document.querySelectorAll(
+            "#add-row, #add-column, #seat-grid button, #seat-edit-panel button, #seat-edit-panel input, #seat-edit-panel select, #student-registration-dialog button, #student-registration-dialog input"
+          )).every(function (control) { return control.disabled; }),
+          "disabled control contract");
+        checkpoint("registration-busy-blocks-dialog-close",
+          registrationDialog.open === true && busyCancelEvent.defaultPrevented,
+          "open=" + registrationDialog.open + ", cancelPrevented=" + busyCancelEvent.defaultPrevented);
+        checkpoint("registration-dialog-escape-keeps-seat-panel",
+          panel.hidden === false && panel.dataset.seatId === "seat-01",
+          "hidden=" + panel.hidden + ", seatId=" + panel.dataset.seatId);
+        await new Promise(function (resolve) { setTimeout(resolve, 150); });
+        var calls7 = callsSince(base7);
+        var studentPosts7 = calls7.filter(function (c) { return c.method === "POST" && c.url === "/api/v1/students"; });
+        var assignmentCalls7 = calls7.filter(function (c) { return /\/assignment$/.test(c.url); });
+        var studentSelect = registrationForm.ownerDocument.querySelector('#seat-edit-form [name="student_id"]');
+        var createdOption = studentSelect.querySelector('option[value="student-new-1"]');
+        checkpoint("registration-posts-once-without-retry", studentPosts7.length === 1, JSON.stringify(studentPosts7));
+        checkpoint("registration-event-has-student-response",
+          results.studentEvents.length === 1 &&
+          results.studentEvents[0].id === "student-new-1" &&
+          results.studentEvents[0].student_number === "20260002" &&
+          results.studentEvents[0].name === "이영희",
+          JSON.stringify(results.studentEvents));
+        checkpoint("registration-adds-and-selects-option",
+          createdOption && createdOption.selected && createdOption.textContent === "20260002 이영희" && studentSelect.value === "student-new-1",
+          createdOption && createdOption.outerHTML);
+        checkpoint("registration-does-not-auto-assign", assignmentCalls7.length === 0, JSON.stringify(assignmentCalls7));
+        checkpoint("registration-closes-dialog-and-restores-focus",
+          registrationDialog.open === false && document.activeElement === document.getElementById("open-student-registration"),
+          "open=" + registrationDialog.open + ", active=" + (document.activeElement && document.activeElement.id));
+
+        /* 8) API 실패: dialog·입력·좌석 선택 유지, 오류 focus, 재시도 없음 */
+        window.__scenario.studentStatus = 409;
+        window.__scenario.studentDelayMs = 0;
+        document.getElementById("open-student-registration").click();
+        registrationForm.elements.name.value = "중복 학생";
+        registrationForm.elements.student_number.value = "20260002";
+        registrationForm.elements.birth_date.value = "2012-03-04";
+        registrationForm.elements.guardian_phone.value = "010-1111-2222";
+        var base8 = results.calls.length;
+        registrationForm.requestSubmit();
+        await tick();
+        var calls8 = callsSince(base8).filter(function (c) { return c.method === "POST" && c.url === "/api/v1/students"; });
+        var saveError = document.getElementById("student-save-error");
+        checkpoint("registration-failure-preserves-state",
+          registrationDialog.open === true &&
+          registrationForm.elements.name.value === "중복 학생" &&
+          studentSelect.value === "student-new-1" &&
+          saveError.hidden === false &&
+          document.activeElement === saveError,
+          "dialog=" + registrationDialog.open + ", student=" + studentSelect.value + ", error=" + saveError.textContent);
+        checkpoint("registration-failure-no-retry", calls8.length === 1, JSON.stringify(calls8));
+
+        /* 9) network 실패도 안전한 fallback을 표시하고 상태를 보존한다. */
+        window.__scenario.studentNetworkFailure = true;
+        var base9 = results.calls.length;
+        registrationForm.requestSubmit();
+        await tick();
+        var calls9 = callsSince(base9).filter(function (c) { return c.method === "POST" && c.url === "/api/v1/students"; });
+        checkpoint("registration-network-failure-preserves-state",
+          registrationDialog.open === true &&
+          registrationForm.elements.name.value === "중복 학생" &&
+          studentSelect.value === "student-new-1" &&
+          saveError.hidden === false &&
+          saveError.textContent === "서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+          saveError.textContent);
+        checkpoint("registration-network-failure-no-retry", calls9.length === 1, JSON.stringify(calls9));
 
         results.done = true;
       } catch (err) {
