@@ -175,19 +175,19 @@
 
 ## 완료 조건
 
-- [ ] `TASK-001` 결정이 승인되고 구현 파일 배치와 호출 방향이 확정됐다.
-- [ ] 유효하지 않은 camera→classroom 연결을 저장·기동 전에 발견할 수 있다.
-- [ ] 강의실당 카메라 수와 ROI의 camera scope·revision 정책이 ADR로 확정됐다.
-- [ ] 저장된 detection event에 서버가 해석한 실제 `stream_id`, `classroom_id`가 있다.
-- [ ] ROI와 좌석 지정이 서로 다른 학생을 가리켜도 상태 판정은 `seat_assignments`만 따른다.
-- [ ] ROI 없는 좌석과 겹치는 ROI는 `UNKNOWN`이며 `VACANT/ABSENT`로 오판하지 않는다.
-- [ ] 합성 `student_id` 이벤트가 MongoDB에 저장되고 REST에서 `PRESENT` 또는
+- [x] `TASK-001` 결정이 승인되고 구현 파일 배치와 호출 방향이 확정됐다.
+- [x] 유효하지 않은 camera→classroom 연결을 저장·기동 전에 발견할 수 있다.
+- [x] 강의실당 카메라 수와 ROI의 camera scope·revision 정책이 ADR로 확정됐다.
+- [x] 저장된 detection event에 서버가 해석한 실제 `stream_id`, `classroom_id`가 있다.
+- [x] ROI와 좌석 지정이 서로 다른 학생을 가리켜도 상태 판정은 `seat_assignments`만 따른다.
+- [x] ROI 없는 좌석과 겹치는 ROI는 `UNKNOWN`이며 `VACANT/ABSENT`로 오판하지 않는다.
+- [x] 합성 `student_id` 이벤트가 MongoDB에 저장되고 REST에서 `PRESENT` 또는
   `WRONG_SEAT`로 조회된다.
-- [ ] 실시간 영상 화면에 bbox와 안전한 식별 라벨이 SSE로 갱신된다.
-- [ ] 강의실 대시보드의 학생 이름·좌석·상태·마지막 관측이 SSE로 갱신된다.
-- [ ] 같은 이벤트 재전송에서 상태 SSE가 중복 발행되지 않는다.
-- [ ] memory와 MongoDB adapter 계약 테스트가 모두 통과한다.
-- [ ] 실제 얼굴·영상·embedding을 테스트 자산이나 로그에 남기지 않는다.
+- [x] 실시간 영상 화면에 bbox와 안전한 식별 라벨이 SSE로 갱신된다.
+- [x] 강의실 대시보드의 학생 이름·좌석·상태·마지막 관측이 SSE로 갱신된다.
+- [x] 같은 이벤트 재전송에서 상태 SSE가 중복 발행되지 않는다.
+- [x] memory와 MongoDB adapter 계약 테스트가 모두 통과한다.
+- [x] 실제 얼굴·영상·embedding을 테스트 자산이나 로그에 남기지 않는다.
 
 ## 작업 의존성
 

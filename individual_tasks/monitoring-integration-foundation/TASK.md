@@ -12,6 +12,15 @@
 | [TASK-005](TASK-005.md) | 학생 상태 SSE와 두 화면 갱신 | TASK-004 | bbox·학생 상태가 실시간 반영 |
 | [TASK-006](TASK-006.md) | 합성 E2E·회귀·인계 문서 | TASK-005 | 모델 작업자가 fixture로 계약 검증 |
 
+## 진행 상태
+
+- [x] TASK-001 아키텍처 결정과 계약 승인
+- [x] TASK-002 camera→classroom 참조 무결성
+- [x] TASK-003 카메라별 ROI polygon 매핑
+- [x] TASK-004 최근 탐지 기반 학생 상태 REST
+- [x] TASK-005 학생 상태 SSE와 화면 갱신
+- [x] TASK-006 합성 E2E, worker 계약 fixture, 인계 문서와 전체 회귀
+
 ## 공통 구현 규율
 
 - 제품 코드는 `TASK-001` 승인 전 변경하지 않는다.

@@ -5,14 +5,16 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import requests
 from shared.types import CapturedFrame
 
-from ..handler import FastAPIResultHandler, build_event_id
+from ..handler import FastAPIResultHandler, build_event_id, build_event_payload
 from ..types import Detection, InferenceResult
 
 
@@ -137,6 +139,65 @@ def test_detection_id는_event_id에_인덱스를_붙인다() -> None:
         f"{event_id}-det-0",
         f"{event_id}-det-1",
     ]
+
+
+def test_식별_탐지는_승인된_handoff_fixture와_같은_payload를_만든다() -> None:
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "identified_student_event.json"
+    expected = json.loads(fixture_path.read_text(encoding="utf-8"))
+    captured = CapturedFrame(
+        camera_id="synthetic-camera-001",
+        frame=np.zeros((1000, 1000, 3), dtype=np.uint8),
+        captured_at=datetime(2026, 8, 15, 3, 0, tzinfo=UTC),
+        sequence=42,
+    )
+    result = InferenceResult(
+        frame_shape=(1000, 1000, 3),
+        detections=(
+            Detection(
+                class_id=0,
+                class_name="person",
+                confidence=0.91,
+                bbox=(100, 100, 300, 700),
+                student_id="synthetic-student-001",
+                identity_confidence=0.88,
+                face_bbox=(150, 130, 220, 230),
+            ),
+        ),
+    )
+
+    assert build_event_payload(captured, result) == expected
+
+
+def test_미식별_탐지는_신원_선택_필드를_생략한다() -> None:
+    payload = build_event_payload(build_captured(), build_result())
+    detections = cast(list[dict[str, object]], payload["detections"])
+    detection = detections[0]
+
+    assert "student_id" not in detection
+    assert "identity_confidence" not in detection
+    assert "face_bbox" not in detection
+
+
+def test_불완전한_식별_필드는_미식별로_낮춘다() -> None:
+    result = InferenceResult(
+        frame_shape=(480, 640, 3),
+        detections=(
+            Detection(
+                class_id=0,
+                class_name="person",
+                confidence=0.9,
+                bbox=(10, 20, 30, 40),
+                student_id="student-without-confidence",
+            ),
+        ),
+    )
+
+    payload = build_event_payload(build_captured(), result)
+    detection = cast(list[dict[str, object]], payload["detections"])[0]
+
+    assert "student_id" not in detection
+    assert "identity_confidence" not in detection
+    assert "face_bbox" not in detection
 
 
 def test_탐지가_없어도_빈_목록으로_전송한다() -> None:

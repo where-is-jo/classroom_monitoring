@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import DetectionEvent, VideoSegment
 
 
 class FrameSchema(BaseModel):
     """Frame size schema."""
+
+    model_config = ConfigDict(extra="forbid")
 
     width_pixels: int = Field(..., gt=0)
     height_pixels: int = Field(..., gt=0)
@@ -19,18 +21,22 @@ class FrameSchema(BaseModel):
 class DetectionSchema(BaseModel):
     """Detection result schema."""
 
+    model_config = ConfigDict(extra="forbid")
+
     detection_id: str
     class_id: int
     class_name: str
     confidence: float = Field(..., ge=0, le=1)
     bbox: tuple[int, int, int, int]
     student_id: str | None = None
-    identity_confidence: float | None = None
+    identity_confidence: float | None = Field(default=None, ge=0, le=1)
     face_bbox: tuple[int, int, int, int] | None = None
 
-    @field_validator("bbox")
+    @field_validator("bbox", "face_bbox")
     @classmethod
-    def validate_bbox(cls, v: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    def validate_bbox(cls, v: tuple[int, int, int, int] | None) -> tuple[int, int, int, int] | None:
+        if v is None:
+            return None
         x_min, y_min, x_max, y_max = v
         if x_min >= x_max:
             raise ValueError("x_min must be less than x_max")
@@ -40,9 +46,21 @@ class DetectionSchema(BaseModel):
             raise ValueError("bbox coordinates must be non-negative")
         return v
 
+    @model_validator(mode="after")
+    def validate_identity_fields(self) -> DetectionSchema:
+        has_student = self.student_id is not None
+        has_confidence = self.identity_confidence is not None
+        if has_student != has_confidence:
+            raise ValueError("student_id and identity_confidence must be provided together")
+        if self.face_bbox is not None and not has_student:
+            raise ValueError("face_bbox requires identified student fields")
+        return self
+
 
 class InferenceEventRequest(BaseModel):
     """Inference event request schema."""
+
+    model_config = ConfigDict(extra="forbid")
 
     event_id: str
     camera_id: str
@@ -60,6 +78,16 @@ class InferenceEventRequest(BaseModel):
         if v.tzinfo is None:
             raise ValueError("captured_at must have timezone")
         return v
+
+    @model_validator(mode="after")
+    def validate_detection_coordinates(self) -> InferenceEventRequest:
+        for detection in self.detections:
+            for field_name, bbox in (("bbox", detection.bbox), ("face_bbox", detection.face_bbox)):
+                if bbox is not None and (
+                    bbox[2] > self.frame.width_pixels or bbox[3] > self.frame.height_pixels
+                ):
+                    raise ValueError(f"{field_name} must stay within the frame")
+        return self
 
 
 class InferenceEventResponse(BaseModel):

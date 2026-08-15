@@ -1,6 +1,6 @@
 # 실시간 학생 상태 연동 기반 작업 인계
 
-**상태**: 구현 준비. `TASK-001` 아키텍처 결정 승인 전에는 제품 코드를 변경하지 않는다.
+**상태**: `TASK-001`~`TASK-006` 구현·검증 완료. 실제 모델 연결은 후속 작업이다.
 **작업 브랜치**: `feature/monitoring-integration-foundation`
 **기준 브랜치**: `feature/seat-student-registration` (`d04b463`)
 **최종 PR 대상**: PR1 병합 후 `develop`
@@ -33,6 +33,10 @@
 2. [SPEC.md](SPEC.md) — 목표, 경계, 계약, 예외 정책, 완료 조건
 3. [TASK.md](TASK.md) — 구현 순서와 의존성
 4. `TASK-001.md`부터 번호 순서대로 수행
+
+모델 작업자는 구현 결과를 먼저 읽은 뒤
+[`worker/inference/MODEL_INTEGRATION.md`](../../worker/inference/MODEL_INTEGRATION.md)의
+fixture와 검증 명령을 사용한다.
 
 ## 고정된 책임 경계
 

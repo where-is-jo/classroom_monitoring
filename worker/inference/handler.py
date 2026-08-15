@@ -56,6 +56,38 @@ def build_event_payload(
 ) -> dict[str, object]:
     """`/internal/inference/events` 스키마에 맞는 요청 본문을 만든다."""
     event_id = build_event_id(captured)
+    detections: list[dict[str, object]] = []
+    for index, detection in enumerate(result.detections):
+        item: dict[str, object] = {
+            "detection_id": f"{event_id}-det-{index}",
+            "class_id": detection.class_id,
+            "class_name": detection.class_name,
+            "confidence": detection.confidence,
+            "bbox": list(detection.bbox),
+        }
+        # 미식별 탐지는 선택 필드를 생략한다. 얼굴 식별 모델이 값을 만든 경우에만
+        # 내부 API로 전달하며, 이름·학번·학생 상태는 FastAPI가 보강·판정한다.
+        is_identified = (
+            detection.student_id is not None and detection.identity_confidence is not None
+        )
+        if is_identified:
+            item["student_id"] = detection.student_id
+            item["identity_confidence"] = detection.identity_confidence
+        if is_identified and detection.face_bbox is not None:
+            item["face_bbox"] = list(detection.face_bbox)
+        if not is_identified and any(
+            value is not None
+            for value in (
+                detection.student_id,
+                detection.identity_confidence,
+                detection.face_bbox,
+            )
+        ):
+            logger.warning(
+                "불완전한 학생 식별 필드를 미식별로 전송합니다. detection_id=%s",
+                item["detection_id"],
+            )
+        detections.append(item)
     return {
         "event_id": event_id,
         "camera_id": captured.camera_id,
@@ -65,16 +97,7 @@ def build_event_payload(
             "width_pixels": result.frame_shape[1],
             "height_pixels": result.frame_shape[0],
         },
-        "detections": [
-            {
-                "detection_id": f"{event_id}-det-{index}",
-                "class_id": detection.class_id,
-                "class_name": detection.class_name,
-                "confidence": detection.confidence,
-                "bbox": list(detection.bbox),
-            }
-            for index, detection in enumerate(result.detections)
-        ],
+        "detections": detections,
     }
 
 
