@@ -393,6 +393,42 @@ def test_classroom_list_page_shows_assigned_student_on_seat_map(
     assert response.text.count("미지정") == 1
 
 
+def test_classroom_list_page_shows_seat_status_student_and_info_cards(
+    client: TestClient,
+) -> None:
+    """좌표 없는 좌석 카드에는 좌석 정보·상태·학생 이름을 명시한다."""
+    classroom = _create_classroom(client, code="R-C01", name="카드테스트 강의실")
+    classroom_id = str(classroom["id"])
+    assigned_seat = _create_seat(
+        client,
+        classroom_id,
+        code="SC01",
+        label="앞줄 좌석",
+    )
+    _create_seat(client, classroom_id, code="SC02", label="뒷줄 좌석")
+    student = _create_student(student_no="20240001", name="김철수")
+    assign = client.put(
+        f"/api/v1/classrooms/{classroom_id}/seats/{assigned_seat['id']}/assignment",
+        json={"student_id": student.id},
+    )
+    assert assign.status_code == 200
+
+    response = client.get(f"/classrooms?classroom_id={classroom_id}")
+
+    assert response.status_code == 200
+    assert "좌석 현황" in response.text
+    assert "마지막 관측 -" not in response.text
+    assert '<h2 id="seat-list-title">좌석</h2>' in response.text
+    assert "기타 좌석" not in response.text
+    assert response.text.count("좌석 정보") == 2
+    assert response.text.count("좌석 상태") >= 2
+    assert response.text.count("학생 이름") == 2
+    assert "SC01" in response.text
+    assert "확인 필요" in response.text
+    assert "김철수" in response.text
+    assert "미지정" in response.text
+
+
 # --- 좌석 생성/수정 화면 (레거시 URL → 통합 화면 리다이렉트) -------------------
 
 
