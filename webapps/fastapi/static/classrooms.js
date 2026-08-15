@@ -26,7 +26,7 @@
     eventSource.addEventListener("occupancy", (event) => {
       try {
         const data = JSON.parse(event.data);
-        updateSeatStatus(data.seat_id, data.state, data.confidence);
+        updateSeatStatus(data.seat_id, data.state, data.confidence, data.observed_at);
       } catch (err) {
         console.error("SSE 데이터 파싱 오류:", err);
       }
@@ -39,13 +39,16 @@
     state.eventSource = eventSource;
   }
 
-  function updateSeatStatus(seatId, seatState, confidence) {
+  function updateSeatStatus(seatId, seatState, confidence, observedAt) {
     const seatEl = document.querySelector('[data-seat-id="' + seatId + '"]');
     if (!seatEl) return;
 
     const label = displayLabel(seatState);
-    const normalized = String(seatState || "UNKNOWN").toLowerCase();
-    seatEl.className = "seat-card seat-card--" + normalized;
+    const normalized = normalizeState(seatState);
+    const previous = normalizeState(seatEl.dataset.seatState);
+    seatEl.classList.remove("seat-card--occupied", "seat-card--vacant", "seat-card--unknown");
+    seatEl.classList.add("seat-card--" + normalized);
+    seatEl.dataset.seatState = normalized;
 
     const stateEl = seatEl.querySelector(".state");
     if (stateEl) {
@@ -66,6 +69,46 @@
     if (confEl) {
       confEl.textContent = confidence == null ? "" : Math.round(confidence * 100) + "%";
     }
+
+    if (previous !== normalized) {
+      adjustCount(previous, -1);
+      adjustCount(normalized, 1);
+    }
+
+    if (observedAt) {
+      const observedEl = document.querySelector("[data-last-observed]");
+      if (observedEl) {
+        observedEl.textContent = " · 마지막 관측 " + formatObservedAt(observedAt);
+      }
+    }
+  }
+
+  function normalizeState(seatState) {
+    const normalized = String(seatState || "UNKNOWN").toLowerCase();
+    return normalized === "occupied" || normalized === "vacant" ? normalized : "unknown";
+  }
+
+  function adjustCount(stateName, delta) {
+    const countEl = document.querySelector('[data-occupancy-count="' + stateName + '"]');
+    if (!countEl) return;
+    const current = Number(countEl.textContent);
+    if (!Number.isFinite(current)) return;
+    countEl.textContent = String(Math.max(0, current + delta));
+  }
+
+  function formatObservedAt(observedAt) {
+    const value = new Date(observedAt);
+    if (Number.isNaN(value.getTime())) return "-";
+    return new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(value);
   }
 
   function displayLabel(seatState) {
@@ -98,10 +141,10 @@
   }
 
   function init() {
-    const seatMap = document.querySelector("[data-classroom-id]");
-    if (!seatMap) return;
+    const dashboard = document.querySelector("[data-classroom-id]");
+    if (!dashboard) return;
 
-    const classroomId = seatMap.dataset.classroomId;
+    const classroomId = dashboard.dataset.classroomId;
     if (!classroomId) return;
 
     subscribeSSE(classroomId);

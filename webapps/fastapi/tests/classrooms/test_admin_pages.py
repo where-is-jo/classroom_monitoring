@@ -418,7 +418,8 @@ def test_classroom_list_page_shows_seat_status_student_and_info_cards(
     assert response.status_code == 200
     assert "좌석 현황" in response.text
     assert "마지막 관측 -" not in response.text
-    assert '<h2 id="seat-list-title">좌석</h2>' in response.text
+    assert '<h2 id="seat-list-title">' not in response.text
+    assert 'aria-label="좌석 현황 상세"' in response.text
     assert "기타 좌석" not in response.text
     assert response.text.count("좌석 정보") == 2
     assert response.text.count("좌석 상태") >= 2

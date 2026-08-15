@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>classrooms.js SSE contract test</title>
+</head>
+<body>
+  <section data-classroom-id="classroom-a101">
+    <p data-occupancy-count="total">1</p>
+    <p data-occupancy-count="occupied">0</p>
+    <p data-occupancy-count="vacant">0</p>
+    <p data-occupancy-count="unknown">1</p>
+  </section>
+  <p>좌석 현황<span data-last-observed></span></p>
+  <ul>
+    <li class="seat-list-card seat-card--unknown" data-seat-id="seat-01" data-seat-state="unknown">
+      <strong>좌석 1</strong>
+      <dl><div><dt>좌석 상태</dt><dd class="state-label">확인 필요</dd></div></dl>
+    </li>
+  </ul>
+  <pre id="test-results"></pre>
+
+  <script>
+    window.__eventSources = [];
+    window.__results = { checkpoints: [], done: false, error: null };
+
+    function FakeEventSource(url) {
+      this.url = String(url);
+      this.listeners = {};
+      this.closed = false;
+      window.__eventSources.push(this);
+    }
+
+    FakeEventSource.prototype.addEventListener = function (type, handler) {
+      (this.listeners[type] = this.listeners[type] || []).push(handler);
+    };
+
+    FakeEventSource.prototype.emit = function (type, data) {
+      (this.listeners[type] || []).forEach(function (handler) {
+        handler({ data: JSON.stringify(data) });
+      });
+    };
+
+    FakeEventSource.prototype.close = function () {
+      this.closed = true;
+    };
+
+    window.EventSource = FakeEventSource;
+  </script>
+  <script src="{{ CLASSROOMS_JS_URI }}" defer></script>
+  <script>
+    (async function run() {
+      var results = window.__results;
+
+      function checkpoint(name, ok, detail) {
+        results.checkpoints.push({ name: name, ok: !!ok, detail: String(detail || "") });
+      }
+
+      function tick() {
+        return new Promise(function (resolve) { setTimeout(resolve, 50); });
+      }
+
+      try {
+        await new Promise(function (resolve) {
+          if (document.readyState === "interactive" || document.readyState === "complete") resolve();
+          else document.addEventListener("DOMContentLoaded", resolve, { once: true });
+        });
+        await tick();
+
+        var source = window.__eventSources[0];
+        checkpoint("subscribes-selected-classroom",
+          window.__eventSources.length === 1 && source.url.indexOf("/classroom-a101/occupancy-events") !== -1,
+          source && source.url);
+
+        source.emit("occupancy", {
+          seat_id: "seat-01",
+          state: "OCCUPIED",
+          confidence: 0.91,
+          observed_at: "2026-08-15T07:30:00+00:00"
+        });
+        await tick();
+
+        var seat = document.querySelector('[data-seat-id="seat-01"]');
+        checkpoint("list-card-state-updates",
+          seat.classList.contains("seat-list-card") &&
+          seat.classList.contains("seat-card--occupied") &&
+          seat.dataset.seatState === "occupied" &&
+          seat.querySelector(".state-label").textContent === "재석",
+          seat.outerHTML);
+        checkpoint("summary-counts-update",
+          document.querySelector('[data-occupancy-count="occupied"]').textContent === "1" &&
+          document.querySelector('[data-occupancy-count="unknown"]').textContent === "0" &&
+          document.querySelector('[data-occupancy-count="total"]').textContent === "1",
+          document.querySelector("[data-classroom-id]").textContent);
+        checkpoint("last-observed-updates",
+          document.querySelector("[data-last-observed]").textContent.indexOf("마지막 관측") !== -1,
+          document.querySelector("[data-last-observed]").textContent);
+
+        window.dispatchEvent(new Event("beforeunload"));
+        checkpoint("unload-closes-event-source", source.closed, "closed=" + source.closed);
+        results.done = true;
+      } catch (error) {
+        results.error = String((error && error.stack) || error);
+        checkpoint("harness-error", false, results.error);
+      }
+
+      document.getElementById("test-results").textContent = JSON.stringify(results);
+    })();
+  </script>
+</body>
+</html>

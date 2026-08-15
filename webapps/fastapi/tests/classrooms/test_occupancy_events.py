@@ -128,9 +128,30 @@ def test_list_page_renders_sse_wiring(client: TestClient) -> None:
     assert response.status_code == 200
     assert f'data-classroom-id="{_CLASSROOM_ID}"' in response.text
     assert f'data-seat-id="{_SEAT_ID}"' in response.text
+    assert 'data-seat-state="unknown"' in response.text
     assert 'class="state-label"' in response.text
     assert 'class="state-icon"' in response.text
     assert "/static/classrooms.js" in response.text
+
+
+def test_list_page_renders_sse_wiring_for_non_geometry_seat(client: TestClient) -> None:
+    """좌표 없는 일반 좌석 카드도 SSE 갱신 대상과 실시간 집계를 렌더링한다."""
+    response = client.post(
+        f"/api/v1/classrooms/{_CLASSROOM_ID}/seats",
+        json={"code": "S02", "label": "좌석 2"},
+    )
+    assert response.status_code == 201
+    seat_id = response.json()["id"]
+
+    page = client.get(f"/classrooms?classroom_id={_CLASSROOM_ID}")
+
+    assert page.status_code == 200
+    assert f'data-seat-id="{seat_id}"' in page.text
+    assert 'data-seat-state="unknown"' in page.text
+    assert 'data-occupancy-count="occupied"' in page.text
+    assert 'data-occupancy-count="vacant"' in page.text
+    assert 'data-occupancy-count="unknown"' in page.text
+    assert "실시간으로 확인하는 대시보드" in page.text
 
 
 def test_unknown_classroom_returns_not_found(client: TestClient) -> None:
