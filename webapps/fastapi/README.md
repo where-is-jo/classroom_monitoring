@@ -83,10 +83,11 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms` | 강의실 선택, 좌석 지도, 재석·부재·확인 필요 집계와 마지막 관측 시각 |
 | `/classrooms/create` | 강의실 등록 |
 | `/classrooms/{id}/edit` | 강의실 수정 |
-| `/classrooms/{id}/seats` | 강의실별 좌석 목록·배치도 관리 |
+| `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
 | `/roi-connections` | 메모리 가상 강의실·좌석과 DB 학생을 다각형 ROI로 연결하고 MongoDB에 저장 |
+| `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
 | `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다 |
@@ -108,7 +109,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
-| `POST` | `/api/v1/students` | 학생 인적사항과 완료된 얼굴 등록 참조 저장 |
+| `POST` | `/api/v1/students` | 학생 인적사항 저장. 생성 리소스는 `Location` 헤더로 반환 |
 | `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image` | 현재 ROI 기준 이미지 조회 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections` | 좌석별 ROI와 연결 학생 조회 |
@@ -179,6 +180,7 @@ HTTP 변환만, 서비스는 프레임워크와 분리된 판단만 담당한다
 app/
 ├─ main.py              앱 조립, 라우터 등록, 예외 처리
 ├─ classrooms/          강의실, 좌석, 좌석 점유 관측
+├─ students/            학생 원장 등록·조회와 memory/MongoDB 저장소
 ├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
 ├─ face_enrollment/     능동형 얼굴 등록 세션·품질·pose 완료 판정
 ├─ student_monitoring/  탐지 이벤트 수신·SSE·영상 세그먼트 메타데이터
@@ -197,10 +199,11 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다.
 `student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장·SSE 발행이
 동작한다. 
-`students`에는 DB 연결 전 화면 흐름을 확인하기 위한 학생 등록 프로토타입이 있다.
-`/students/new`에서 최소 인적사항을 입력하면 서버 전송 없이 브라우저 콘솔에 출력하고
-페이지 상단 성공 배너를 표시한다. 같은 화면의 얼굴 등록 모달은 기존 얼굴 등록 API를
-재사용하며 동의 확인, 촬영, 완료 순서로 진행된다. 학생 API와 MongoDB 저장은 후속 작업이다.
+`students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
+`/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
+등록된 학생을 선택한 뒤 `PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`로
+지정한다. 학생 관리 화면의 얼굴 등록 모달은 기존 얼굴 등록 API를 재사용하며 동의 확인,
+촬영, 완료 순서로 진행된다.
 책임과 목표 계약은 [MVP 명세의 도메인 구조](../../docs/specs/student-monitoring-mvp.md#도메인-구조-예정)에 있다.
 
 추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.

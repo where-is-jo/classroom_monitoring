@@ -82,7 +82,7 @@ def minimal_client() -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
-def test_product_navigation_includes_face_enrollment(minimal_client: TestClient) -> None:
+def test_product_navigation_shows_current_product_sections(minimal_client: TestClient) -> None:
     root = minimal_client.get("/", follow_redirects=False)
     assert root.status_code in {302, 307}
     assert root.headers["location"] == "/classrooms"
@@ -99,16 +99,17 @@ def test_product_navigation_includes_face_enrollment(minimal_client: TestClient)
         assert heading in response.text
         # 모니터링 / 등록 관리 / 학생 현황 세 묶음이다.
         assert response.text.count('class="nav-group-title"') == 3
-        # 얼굴 등록은 이 테스트 이름이 약속한 항목이다. 단언이 빠져 있어 함께 넣는다.
         for label in (
             "강의실 좌석 현황",
             "실시간 모니터링",
             "자연어 탐지 검색",
             "데모 영상 검색",
-            "얼굴 등록",
+            "학생 관리",
+            "ROI 연결",
+            "좌석 관리",
         ):
             assert label in response.text
-        for removed in ("로그인", "사용자 관리", "직원 관리", "면담", "알림"):
+        for removed in ("얼굴 등록", "로그인", "사용자 관리", "직원 관리", "면담", "알림"):
             assert removed not in response.text
         assert "set-cookie" not in response.headers
 

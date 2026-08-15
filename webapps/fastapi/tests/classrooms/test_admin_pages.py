@@ -232,11 +232,11 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
     assert f'data-seat-id="{seat_id}"' in response.text
     assert 'data-row="1"' in response.text
     assert 'data-column="1"' in response.text
-    # 편집 패널: label·학생 지정·danger 버튼만 노출된다 (코드·활성 입력 제거)
+    # 편집 패널: label·학생 선택·danger 버튼만 노출된다 (별도 지정·코드·활성 입력 제거)
     assert 'id="seat-edit-panel"' in response.text
     assert 'name="label"' in response.text
     assert 'name="student_id"' in response.text
-    assert 'id="btn-assign"' in response.text
+    assert 'id="btn-assign"' not in response.text
     assert 'id="btn-unassign"' in response.text
     assert 'id="btn-delete"' in response.text
     assert 'name="code"' not in response.text
@@ -393,6 +393,45 @@ def test_classroom_list_page_shows_assigned_student_on_seat_map(
     assert response.text.count("미지정") == 1
 
 
+def test_classroom_list_page_shows_seat_status_student_and_info_cards(
+    client: TestClient,
+) -> None:
+    """좌표 없는 좌석 카드에는 좌석 정보·상태·학생 이름을 명시한다."""
+    classroom = _create_classroom(client, code="R-C01", name="카드테스트 강의실")
+    classroom_id = str(classroom["id"])
+    assigned_seat = _create_seat(
+        client,
+        classroom_id,
+        code="SC01",
+        label="앞줄 좌석",
+    )
+    _create_seat(client, classroom_id, code="SC02", label="뒷줄 좌석")
+    student = _create_student(student_no="20240001", name="김철수")
+    assign = client.put(
+        f"/api/v1/classrooms/{classroom_id}/seats/{assigned_seat['id']}/assignment",
+        json={"student_id": student.id},
+    )
+    assert assign.status_code == 200
+
+    response = client.get(f"/classrooms?classroom_id={classroom_id}")
+
+    assert response.status_code == 200
+    assert "좌석 현황" in response.text
+    assert "마지막 관측 -" not in response.text
+    assert '<h2 id="seat-list-title">' not in response.text
+    assert 'aria-label="좌석 현황 상세"' in response.text
+    assert "기타 좌석" not in response.text
+    assert "<strong>앞줄 좌석</strong>" not in response.text
+    assert "<strong>빈 좌석</strong>" not in response.text
+    assert response.text.count("좌석 정보") == 2
+    assert response.text.count("좌석 상태") >= 2
+    assert response.text.count("학생 이름") == 2
+    assert "SC01" in response.text
+    assert "확인 필요" in response.text
+    assert "김철수" in response.text
+    assert "미지정" in response.text
+
+
 # --- 좌석 생성/수정 화면 (레거시 URL → 통합 화면 리다이렉트) -------------------
 
 
@@ -540,6 +579,21 @@ def test_seats_page_calls_list_active_once_with_max_limit(client: TestClient) ->
         assert offset == 0
     finally:
         app.dependency_overrides.clear()
+
+
+def test_seats_page_does_not_offer_student_registration(client: TestClient) -> None:
+    """좌석 편집 화면은 학생 등록 진입점이나 관련 정적 자산을 포함하지 않는다."""
+    classroom = _create_classroom(client, code="R-C03", name="좌석 지정반")
+    classroom_id = str(classroom["id"])
+    _create_seat(client, classroom_id, code="SC03", label="좌석 1")
+
+    response = client.get(f"/classrooms/{classroom_id}/seats")
+
+    assert response.status_code == 200
+    assert 'id="open-student-registration"' not in response.text
+    assert '<dialog id="student-registration-dialog"' not in response.text
+    assert "/static/student-registration.css" not in response.text
+    assert "/static/student-registration.js" not in response.text
 
 
 def test_seat_assignments_page_redirects_when_classroom_missing(client: TestClient) -> None:

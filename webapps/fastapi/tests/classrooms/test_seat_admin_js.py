@@ -202,6 +202,21 @@ class TestSeatAdminJsBrowser:
         checkpoint = _checkpoint(browser_results, "create-failure-shows-alert")
         assert checkpoint["ok"], f"alert 미표시: {checkpoint['detail']}"
 
+    def test_save_selected_student_updates_seat_and_assignment_once(
+        self,
+        browser_results: dict[str, object],
+    ) -> None:
+        """저장은 좌석 PUT 뒤 변경된 학생 assignment PUT을 정확히 한 번 호출한다."""
+        _assert_all_checkpoints(browser_results)
+        for name in (
+            "save-selected-student-updates-seat",
+            "save-selected-student-assigns-once",
+            "save-assignment-failure-shows-partial-error",
+            "save-assignment-network-error-shows-partial-error",
+        ):
+            checkpoint = _checkpoint(browser_results, name)
+            assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"
+
     def test_occupied_cell_opens_panel_without_code_active(
         self,
         browser_results: dict[str, object],

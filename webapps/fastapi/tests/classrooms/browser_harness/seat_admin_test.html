@@ -36,10 +36,10 @@
         <select name="student_id">
           <option value="">학생 선택</option>
           <option value="stu-001">20240001 김철수</option>
+          <option value="stu-002">20240002 이영희</option>
         </select>
       </label>
       <div class="assignment-actions">
-        <button type="button" id="btn-assign">지정</button>
         <button type="button" id="btn-unassign" class="danger">해제</button>
       </div>
       <div class="edit-actions">
@@ -56,7 +56,7 @@
        성공 응답은 페이지 reload를 유발하므로(브라우저 재시도 없음의 일부) 여기서는
        실패 응답만 사용한다. 성공 시 reload 여부는 정적 검증이 확인한다. */
     window.__results = { calls: [], checkpoints: [], promptCalls: 0, confirmCalls: [], log: [] };
-    window.__scenario = { autoStatus: 422, deleteStatus: 500, confirmResult: true };
+    window.__scenario = { autoStatus: 422, assignmentStatus: 422, assignmentThrows: false, deleteStatus: 500, confirmResult: true };
 
     function recordCall(entry) {
       window.__results.calls.push(entry);
@@ -95,6 +95,12 @@
           });
         }
         return errorResponse(window.__scenario.autoStatus, "테스트 자동 생성 오류");
+      }
+      if (method === "PUT" && /\/assignment$/.test(s)) {
+        if (window.__scenario.assignmentThrows) {
+          return Promise.reject(new Error("테스트 네트워크 오류"));
+        }
+        return errorResponse(window.__scenario.assignmentStatus, "테스트 지정 오류");
       }
       if (method === "DELETE" && /\/assignment$/.test(s)) {
         return errorResponse(window.__scenario.deleteStatus, "테스트 해제 오류");
@@ -202,7 +208,39 @@
           document.getElementById("btn-unassign").disabled === false,
           "disabled=" + document.getElementById("btn-unassign").disabled);
 
-        /* 4) 삭제: '영구 삭제' 확인 후 DELETE 1회 (실패 응답 → reload 없음) */
+        /* 4) 저장: label 저장 후 선택 학생이 바뀌면 assignment PUT 1회 */
+        var baseSave = results.calls.length;
+        labelInput.value = "좌석 1 수정";
+        document.querySelector('#seat-edit-form [name="student_id"]').value = "stu-002";
+        document.getElementById("seat-edit-form").requestSubmit();
+        await tick();
+        var saveCalls = callsSince(baseSave);
+        var seatPut = saveCalls.filter(function (c) {
+          return c.method === "PUT" && /\/seats\/seat-01$/.test(c.url);
+        });
+        var assignmentPut = saveCalls.filter(function (c) {
+          return c.method === "PUT" && /\/seats\/seat-01\/assignment$/.test(c.url);
+        });
+        var seatBody = seatPut[0] ? JSON.parse(seatPut[0].body) : null;
+        var assignmentBody = assignmentPut[0] ? JSON.parse(assignmentPut[0].body) : null;
+        checkpoint("save-selected-student-updates-seat",
+          seatPut.length === 1 && seatBody && seatBody.label === "좌석 1 수정",
+          JSON.stringify(saveCalls));
+        checkpoint("save-selected-student-assigns-once",
+          assignmentPut.length === 1 && assignmentBody && assignmentBody.student_id === "stu-002",
+          JSON.stringify(saveCalls));
+        checkpoint("save-assignment-failure-shows-partial-error",
+          formErrorVisible() && document.querySelector("#seat-edit-form [data-form-error]").textContent.indexOf("좌석 이름은 저장됐지만") !== -1,
+          document.querySelector("#seat-edit-form [data-form-error]").textContent);
+        window.__scenario.assignmentThrows = true;
+        document.getElementById("seat-edit-form").requestSubmit();
+        await tick();
+        checkpoint("save-assignment-network-error-shows-partial-error",
+          formErrorVisible() && document.querySelector("#seat-edit-form [data-form-error]").textContent.indexOf("좌석 이름은 저장됐지만") !== -1,
+          document.querySelector("#seat-edit-form [data-form-error]").textContent);
+        window.__scenario.assignmentThrows = false;
+
+        /* 5) 삭제: '영구 삭제' 확인 후 DELETE 1회 (실패 응답 → reload 없음) */
         var base4 = results.calls.length;
         var confirmBefore4 = results.confirmCalls.length;
         window.__scenario.confirmResult = true;
@@ -216,7 +254,7 @@
         checkpoint("delete-issues-delete-after-confirm", deleteCalls4.length === 1, JSON.stringify(deleteCalls4));
         checkpoint("delete-failure-no-retry", deleteCalls4.length === 1, JSON.stringify(deleteCalls4));
 
-        /* 5) 삭제 취소: confirm false → DELETE 호출 없음 */
+        /* 6) 삭제 취소: confirm false → DELETE 호출 없음 */
         window.__scenario.confirmResult = false;
         var base5 = results.calls.length;
         document.getElementById("btn-delete").click();
@@ -225,7 +263,7 @@
         var deleteCalls5 = calls5.filter(function (c) { return c.method === "DELETE" && c.url.indexOf("/seats/seat-01") !== -1; });
         checkpoint("delete-cancel-no-request", deleteCalls5.length === 0, JSON.stringify(calls5));
 
-        /* 6) 해제: '영구 해제' 확인 후 assignment DELETE 1회 */
+        /* 7) 해제: '영구 해제' 확인 후 assignment DELETE 1회 */
         window.__scenario.confirmResult = true;
         var base6 = results.calls.length;
         var confirmBefore6 = results.confirmCalls.length;

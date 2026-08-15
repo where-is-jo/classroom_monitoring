@@ -12,12 +12,20 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.shared.dependencies import get_student_service
+from app.shared.errors import RepositoryUnavailableError
 from app.students.adapters.memory import InMemoryStudentRepository
 from app.students.errors import StudentDuplicateError, StudentInputError
-from app.students.models import CreateStudentCommand, RegisterStudentFaceCommand
+from app.students.models import CreateStudentCommand, RegisterStudentFaceCommand, Student
 from app.students.service import StudentService
 
 NOW = datetime(2026, 8, 14, 9, 0, tzinfo=UTC)
+
+
+class UnavailableStudentRepository(InMemoryStudentRepository):
+    """학생 생성 시 저장소 장애를 재현하는 API 테스트 대역."""
+
+    def create(self, student: Student) -> Student:
+        raise RepositoryUnavailableError()
 
 
 def make_service() -> StudentService:
@@ -154,3 +162,63 @@ def test_duplicate_student_api_returns_conflict(client: TestClient) -> None:
     duplicate = client.post("/api/v1/students", json=payload)
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "STUDENT_DUPLICATE"
+
+
+def test_student_api_separates_schema_and_domain_validation_errors(
+    client: TestClient,
+) -> None:
+    """Pydantic 형식 검증과 서비스 의미 검증은 기존 오류 코드를 구분한다."""
+    payload = {
+        "student_number": "ST-2026-002",
+        "name": "박서준",
+        "birth_date": "2012-05-03",
+        "classroom_name": "중등 수학 A반",
+        "phone": None,
+        "guardian_phone": "010-9876-5432",
+        "face_enrollment_id": None,
+    }
+
+    missing_required = dict(payload)
+    del missing_required["guardian_phone"]
+    schema_error = client.post("/api/v1/students", json=missing_required)
+
+    assert schema_error.status_code == 422
+    assert schema_error.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert schema_error.json()["error"]["message"] == "Request value is invalid."
+    assert schema_error.json()["error"]["details"]["errors"]
+
+    invalid_phone = dict(payload, phone="123")
+    domain_error = client.post("/api/v1/students", json=invalid_phone)
+
+    assert domain_error.status_code == 422
+    assert domain_error.json()["error"]["code"] == "STUDENT_INPUT_INVALID"
+    assert "학생 연락처" in domain_error.json()["error"]["message"]
+
+
+def test_student_api_returns_service_unavailable_for_repository_failure() -> None:
+    """학생 저장소 장애는 내부 정보를 숨긴 503 오류 envelope로 변환한다."""
+    service = StudentService(UnavailableStudentRepository(), clock=lambda: NOW)
+    app.dependency_overrides[get_student_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/students",
+                json={
+                    "student_number": "ST-2026-003",
+                    "name": "최민준",
+                    "birth_date": "2012-05-03",
+                    "classroom_name": "중등 수학 A반",
+                    "phone": None,
+                    "guardian_phone": "010-9876-5432",
+                    "face_enrollment_id": None,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["error"] == {
+        "code": "REPOSITORY_UNAVAILABLE",
+        "message": "데이터 저장소를 일시적으로 사용할 수 없습니다.",
+        "details": {},
+    }
