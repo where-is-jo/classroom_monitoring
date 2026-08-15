@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.models import CreateClassroomCommand
 from app.classrooms.service import ClassroomService
 from app.main import app
 from app.shared.broadcaster import InMemoryBroadcaster
@@ -45,6 +46,14 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         occupancy_confidence_threshold=0.5,
         clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
     )
+    classroom_service.seed_classroom(
+        CreateClassroomCommand(
+            id="classroom-a101",
+            code="A101",
+            name="A101 일반 강의실",
+            location="A동 1층",
+        )
+    )
     service = StudentMonitoringService(
         detection_repository=detection_repo,
         segment_repository=segment_repo,
@@ -61,7 +70,7 @@ class TestInferenceEventEndpoint:
 
     def test_receive_inference_event(self) -> None:
         """Normal receive test."""
-        service, _ = _make_service()
+        service, detection_repo = _make_service()
         service._stream_repository.save(_make_stream())
 
         app.dependency_overrides[get_student_monitoring_service] = lambda: service
@@ -89,6 +98,10 @@ class TestInferenceEventEndpoint:
         assert response.status_code == 201
         data = response.json()
         assert data["event_id"] == "test-event-1"
+        saved = detection_repo.find_by_event_id("test-event-1")
+        assert saved is not None
+        assert saved.stream_id == "stream-camera-a"
+        assert saved.classroom_id == "classroom-a101"
 
         app.dependency_overrides.clear()
 

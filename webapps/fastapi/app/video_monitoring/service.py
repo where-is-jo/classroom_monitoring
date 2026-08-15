@@ -14,6 +14,8 @@ from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from ..classrooms.errors import ClassroomNotFoundError
+from ..classrooms.service import ClassroomService
 from .catalog import DEMO_STREAMS, DEMO_VIDEO_CLIPS
 from .errors import (
     DemoStreamNotFoundError,
@@ -300,12 +302,34 @@ class VideoStreamService:
     def __init__(
         self,
         repository: VideoStreamRepository,
+        classroom_service: ClassroomService,
         stale_seconds: int,
         clock: Callable[[], datetime],
     ) -> None:
         self._repository = repository
+        self._classroom_service = classroom_service
         self._stale_seconds = stale_seconds
         self._clock = clock
+
+    def save_stream(self, stream: VideoStream) -> VideoStream:
+        """활성 실제 stream이 존재하는 활성 강의실만 참조하게 저장한다."""
+        if stream.enabled and not stream.is_demo:
+            self._classroom_service.get_classroom(stream.classroom_id)
+        return self._repository.save(stream)
+
+    def list_invalid_classroom_references(self) -> list[VideoStream]:
+        """이미 저장된 활성 실제 stream 중 깨진 강의실 참조를 찾는다.
+
+        기존 운영 데이터를 자동으로 고치지 않는다. startup에서 이 결과를 기록해
+        관리자가 정확한 대상 강의실을 선택할 수 있게 한다.
+        """
+        invalid: list[VideoStream] = []
+        for stream in self._repository.find_monitoring_streams():
+            try:
+                self._classroom_service.get_classroom(stream.classroom_id)
+            except ClassroomNotFoundError:
+                invalid.append(stream)
+        return invalid
 
     def list_streams(self) -> list[VideoStream]:
         """List all enabled streams."""

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
 
+from app.classrooms.errors import ClassroomNotFoundError
 from app.video_monitoring.adapters.memory_playback_session_repository import (
     MemoryPlaybackSessionRepository,
 )
@@ -33,6 +35,7 @@ from .fakes import (
     WHEP_BASE_URL,
     FakeClock,
     FakeWhepClient,
+    make_classroom_service,
     make_stream,
 )
 
@@ -83,7 +86,12 @@ def test_list_monitoring_streams_returns_only_enabled_real_streams() -> None:
         ),
     ):
         repository.save(stream)
-    service = VideoStreamService(repository, stale_seconds=300, clock=FakeClock())
+    service = VideoStreamService(
+        repository,
+        make_classroom_service(),
+        stale_seconds=300,
+        clock=FakeClock(),
+    )
 
     assert [item.camera_id for item in service.list_monitoring_streams()] == ["camera-01"]
 
@@ -97,12 +105,82 @@ def test_list_monitoring_streams_keeps_existing_all_enabled_contract() -> None:
         make_stream(stream_id="stream-03", camera_id="camera-03", enabled=False),
     ):
         repository.save(stream)
-    service = VideoStreamService(repository, stale_seconds=300, clock=FakeClock())
+    service = VideoStreamService(
+        repository,
+        make_classroom_service(),
+        stale_seconds=300,
+        clock=FakeClock(),
+    )
 
     assert {item.camera_id for item in service.list_streams()} == {
         "camera-01",
         "camera-02",
     }
+
+
+def test_save_stream_accepts_active_classroom_reference() -> None:
+    repository = MemoryVideoStreamRepository()
+    service = VideoStreamService(
+        repository,
+        make_classroom_service(),
+        stale_seconds=300,
+        clock=FakeClock(),
+    )
+
+    saved = service.save_stream(make_stream())
+
+    assert repository.find_by_camera_id(saved.camera_id) == saved
+
+
+def test_save_stream_rejects_missing_classroom_reference() -> None:
+    repository = MemoryVideoStreamRepository()
+    service = VideoStreamService(
+        repository,
+        make_classroom_service(),
+        stale_seconds=300,
+        clock=FakeClock(),
+    )
+    stream = replace(make_stream(), classroom_id="classroom-missing")
+
+    with pytest.raises(ClassroomNotFoundError):
+        service.save_stream(stream)
+
+    assert repository.find_by_camera_id(stream.camera_id) is None
+
+
+def test_save_stream_rejects_inactive_classroom_reference() -> None:
+    repository = MemoryVideoStreamRepository()
+    service = VideoStreamService(
+        repository,
+        make_classroom_service(active=False),
+        stale_seconds=300,
+        clock=FakeClock(),
+    )
+    stream = make_stream()
+
+    with pytest.raises(ClassroomNotFoundError):
+        service.save_stream(stream)
+
+    assert repository.find_by_camera_id(stream.camera_id) is None
+
+
+def test_list_invalid_classroom_references_reports_persisted_legacy_stream() -> None:
+    repository = MemoryVideoStreamRepository()
+    valid = make_stream(stream_id="stream-valid", camera_id="camera-valid")
+    invalid = replace(
+        make_stream(stream_id="stream-invalid", camera_id="camera-invalid"),
+        classroom_id="classroom-missing",
+    )
+    repository.save(valid)
+    repository.save(invalid)
+    service = VideoStreamService(
+        repository,
+        make_classroom_service(),
+        stale_seconds=300,
+        clock=FakeClock(),
+    )
+
+    assert service.list_invalid_classroom_references() == [invalid]
 
 
 # ── create_session ────────────────────────────────────────────────────────────

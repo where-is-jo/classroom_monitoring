@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..classrooms.errors import ClassroomNotFoundError
 from ..classrooms.mapping import find_seat_for_detection, map_detections_to_observations
@@ -66,16 +66,24 @@ class StudentMonitoringService:
         if stream is None:
             raise VideoStreamNotFoundError()
 
+        resolved_event = replace(
+            event,
+            stream_id=stream.id,
+            classroom_id=stream.classroom_id,
+        )
+
         # Check if event already exists
         existing = self._detection_repository.find_by_event_id(event.event_id)
         is_new = existing is None
 
         # Save event (idempotent)
-        saved_event = self._detection_repository.save(event)
+        saved_event = self._detection_repository.save(resolved_event)
 
         # Update last detection timestamp only for new events
         if is_new:
-            self._stream_repository.update_last_detection(event.camera_id, event.captured_at)
+            self._stream_repository.update_last_detection(
+                saved_event.camera_id, saved_event.captured_at
+            )
 
             # Publish to SSE only for new events
             # frame·detections를 함께 보내야 브라우저가 bbox overlay를 그릴 수 있다.
@@ -110,33 +118,43 @@ class StudentMonitoringService:
             # 같은 event_id를 다시 받으면 batch 멱등 처리와 어긋나는 관측이 생길 수 없도록
             # 재수신에서는 매핑을 반복하지 않는다.
             # 매핑·batch 기록·SSE 발행이 실패해도 탐지 이벤트 저장 결과는 그대로 돌려준다.
-            if event.detections and stream.classroom_id:
-                classroom_id = stream.classroom_id
+            if saved_event.detections and saved_event.classroom_id:
+                classroom_id = saved_event.classroom_id
                 try:
                     seats = self._classroom_service.list_all_seats(classroom_id)
                     observations = map_detections_to_observations(
-                        event.detections,
+                        saved_event.detections,
                         seats,
-                        event.frame,
+                        saved_event.frame,
                         self._confidence_threshold,
                     )
                     if observations:
                         self._classroom_service.record_seat_observation_batch(
-                            event_id=event.event_id,
+                            event_id=saved_event.event_id,
                             classroom_id=classroom_id,
                             observations=observations,
-                            observed_at=event.captured_at,
+                            observed_at=saved_event.captured_at,
                         )
                         self._publish_occupancy_events(
-                            event_id=event.event_id,
+                            event_id=saved_event.event_id,
                             classroom_id=classroom_id,
                             observations=observations,
                         )
                 except ClassroomNotFoundError:
-                    logger.warning("강의실 %s를 찾을 수 없어 좌석 매핑을 건너뜁니다.", classroom_id)
+                    logger.warning(
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "활성 강의실 참조가 없어 좌석 매핑을 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        classroom_id,
+                    )
                 except Exception:
                     logger.exception(
-                        "event_id=%s 좌석 매핑 중 오류가 발생해 건너뜁니다.", event.event_id
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "좌석 매핑 중 오류가 발생해 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        classroom_id,
                     )
 
         return InferenceEventResult(event=saved_event, is_new=is_new)

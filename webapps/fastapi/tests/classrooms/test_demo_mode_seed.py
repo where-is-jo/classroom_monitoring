@@ -70,9 +70,13 @@ def test_initialize_data_store_demo_mode_memory_does_not_crash(
     assert settings.demo_mode_enabled is True
     assert settings.database_mode == "memory"
 
-    service = dependencies._build_memory_classroom_service(settings)
+    service = dependencies._build_classroom_service(settings)
     page = service.list_classrooms(limit=10, offset=0)
     assert page.items, "demo seed가 강의실을 만들지 않았다"
+    classroom_ids = {item.id for item in page.items}
+    streams = dependencies._video_stream_repository().find_monitoring_streams()
+    assert streams
+    assert all(stream.classroom_id in classroom_ids for stream in streams)
 
     for classroom in page.items:
         summary = service.occupancy_summary(classroom.id)

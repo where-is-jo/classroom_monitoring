@@ -42,3 +42,14 @@
 - 존재하지 않거나 비활성 강의실 연결은 원시 이벤트만 저장한다.
 - 같은 event_id 재수신은 추가 상태 처리를 하지 않는다.
 - 기존 video stream 목록·재생 API에 회귀가 없다.
+
+## 구현 결과
+
+- [x] stream 저장 경로가 활성 실제 stream의 강의실 참조를 검증한다.
+- [x] memory demo seed의 stream이 실제 seed 강의실 UUID를 참조한다.
+- [x] MongoDB 시작 시 기존 활성 stream의 깨진 참조를 자동 수정 없이 식별자 로그로 남긴다.
+- [x] 추론 이벤트를 stream catalog의 `stream_id`, `classroom_id`로 보강해 저장한다.
+- [x] 깨진 강의실 참조에서도 원시 탐지를 저장하고 좌석 파생 처리를 건너뛴다.
+- [x] 중복 이벤트는 파생 처리와 SSE를 다시 실행하지 않는다.
+
+검증 결과: FastAPI 전체 `pytest -q` 720건, Ruff check·format check, mypy를 통과했다.
