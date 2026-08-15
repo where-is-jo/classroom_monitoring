@@ -30,7 +30,7 @@
                 {% set seat = seat_map.get((r, c)) %}
                 {% if seat %}
                   {% set assignment = assignments.get(seat.id) %}
-                  <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" data-seat-id="{{ seat.id }}" data-seat-assignable="{{ 'true' if seat.is_active else 'false' }}" data-row="{{ r }}" data-column="{{ c }}"{% if assignment %} data-assignment-student-id="{{ assignment.student_id }}" data-assignment-student-name="{{ assignment.student_name }}"{% endif %} style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
+                  <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}"{% if assignment %} data-assignment-student-id="{{ assignment.student_id }}" data-assignment-student-name="{{ assignment.student_name }}"{% endif %} style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
                     <strong>{{ seat.label }}</strong>
                     <small>{{ seat.code }}</small>
                     {% if assignment %}<small class="assigned-student">{{ assignment.student_name }}</small>{% endif %}
@@ -58,9 +58,7 @@
                 {% endfor %}
               </select>
             </label>
-            <small class="summary">학생을 선택한 뒤 저장하면 좌석 지정도 함께 반영됩니다.</small>
             <div class="assignment-actions">
-              <button type="button" id="btn-assign" class="secondary">지정</button>
               <button type="button" id="btn-unassign" class="danger">해제</button>
             </div>
           </div>

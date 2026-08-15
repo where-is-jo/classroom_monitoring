@@ -232,11 +232,11 @@ def test_seats_page_renders_list_and_map(client: TestClient) -> None:
     assert f'data-seat-id="{seat_id}"' in response.text
     assert 'data-row="1"' in response.text
     assert 'data-column="1"' in response.text
-    # 편집 패널: label·학생 지정·danger 버튼만 노출된다 (코드·활성 입력 제거)
+    # 편집 패널: label·학생 선택·danger 버튼만 노출된다 (별도 지정·코드·활성 입력 제거)
     assert 'id="seat-edit-panel"' in response.text
     assert 'name="label"' in response.text
     assert 'name="student_id"' in response.text
-    assert 'id="btn-assign"' in response.text
+    assert 'id="btn-assign"' not in response.text
     assert 'id="btn-unassign"' in response.text
     assert 'id="btn-delete"' in response.text
     assert 'name="code"' not in response.text

@@ -197,7 +197,7 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
   opacity: .55;
 }
 
-/* 좌석 편집 패널: select·지정·해제는 480px 이상 flex 한 행,
+/* 좌석 편집 패널: select·해제는 480px 이상 flex 한 행,
    480px 미만은 라벨 포함 wrap (TASK-004). */
 .assignment-section { display: flex; align-items: flex-end; gap: 8px; }
 .assignment-section > label { flex: 1 1 150px; }
@@ -309,7 +309,7 @@ main:fullscreen {
 }
 
 @media (max-width: 480px) {
-  /* 편집 패널: 학생 선택·지정·해제를 라벨 포함 wrap한다 (겹침·순서 오류 방지). */
+  /* 편집 패널: 학생 선택·해제를 라벨 포함 wrap한다 (겹침·순서 오류 방지). */
   .assignment-section { flex-wrap: wrap; }
   .assignment-section > label { flex: 1 1 100%; }
   .assignment-actions { justify-content: flex-start; }

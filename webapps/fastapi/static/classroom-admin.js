@@ -119,7 +119,6 @@ function collectPayload(form) {
   const alertRegion = document.getElementById("seat-grid-alert");
   const addRow = document.getElementById("add-row");
   const addColumn = document.getElementById("add-column");
-  const btnAssign = document.getElementById("btn-assign");
   const btnUnassign = document.getElementById("btn-unassign");
   const btnDelete = document.getElementById("btn-delete");
 
@@ -130,7 +129,6 @@ function collectPayload(form) {
   // 패널을 연 시점의 실제 지정 학생 id(서버 상태). select 값은 저장 전에
   // 자유롭게 바뀔 수 있으므로 해제 버튼 활성화 판정에는 이 값을 쓴다.
   let assignedStudentId = "";
-  let currentSeatAssignable = false;
 
   // --- 안내(live region) helpers -------------------------------------------
 
@@ -202,7 +200,6 @@ function collectPayload(form) {
   // (busy 중이면 함께 disabled). select에서 학생을 새로 고르기만 해도(저장
   // 전) 서버 상태는 그대로이므로 select 값이 아니라 assignedStudentId로 판정한다.
   function refreshPanelControls() {
-    if (btnAssign) btnAssign.disabled = saving || !currentSeatAssignable;
     if (btnUnassign) btnUnassign.disabled = saving || !assignedStudentId;
   }
 
@@ -223,7 +220,6 @@ function collectPayload(form) {
     form.elements.label.value = seatData.label || "";
     form.elements.student_id.value = seatData.assignment_student_id || "";
     assignedStudentId = seatData.assignment_student_id || "";
-    currentSeatAssignable = seatData.seat_assignable !== false;
     hideFormError();
     refreshPanelControls();
     announce("좌석 편집 패널을 열었습니다.");
@@ -234,7 +230,6 @@ function collectPayload(form) {
     panel.dataset.seatId = "";
     panel.hidden = true;
     assignedStudentId = "";
-    currentSeatAssignable = false;
     hideFormError();
     refreshPanelControls();
   }
@@ -310,7 +305,6 @@ function collectPayload(form) {
       label: seatButton.querySelector("strong")?.textContent?.trim() || "",
       assignment_student_id: seatButton.dataset.assignmentStudentId || "",
       assignment_student_name: seatButton.dataset.assignmentStudentName || "",
-      seat_assignable: seatButton.dataset.seatAssignable !== "false",
     });
   });
 
@@ -392,46 +386,6 @@ function collectPayload(form) {
       setBusy(false);
     }
   });
-
-  // --- 학생 지정 --------------------------------------------------------------
-
-  if (btnAssign) {
-    btnAssign.addEventListener("click", async () => {
-      if (!currentSeatId || saving) return;
-      const studentId = form.elements.student_id.value;
-      if (!studentId) {
-        showFormError("학생을 선택해 주세요.");
-        return;
-      }
-
-      setBusy(true);
-      hideFormError();
-      announce("학생을 지정하는 중입니다.");
-
-      try {
-        const response = await fetch(
-          `/api/v1/classrooms/${encodeURIComponent(classroomId)}/seats/${encodeURIComponent(currentSeatId)}/assignment`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ student_id: studentId }),
-          }
-        );
-        if (response.ok) {
-          announce("학생이 지정되었습니다.");
-          storeFocusTarget(`seat-cell-${currentSeatId}`);
-          window.location.reload();
-          return;
-        }
-        const message = await extractApiMessage(response);
-        showFormError(message || "지정에 실패했습니다.");
-      } catch {
-        showFormError("서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-      } finally {
-        setBusy(false);
-      }
-    });
-  }
 
   // --- 학생 해제 (danger, 확인 후 DELETE, 재시도 없음) ---------------------------
 
