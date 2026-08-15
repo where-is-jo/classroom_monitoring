@@ -22,13 +22,15 @@ def _make_event(
     camera_id: str = "camera-a",
     sequence: int = 1,
     detections: tuple[Detection, ...] = (),
+    classroom_id: str = "classroom-a101",
+    captured_at: datetime | None = None,
 ) -> DetectionEvent:
     return DetectionEvent(
         event_id=event_id,
         camera_id=camera_id,
         stream_id="stream-camera-a",
-        classroom_id="classroom-a101",
-        captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
+        classroom_id=classroom_id,
+        captured_at=captured_at or datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
         sequence=sequence,
         frame=FrameInfo(width_pixels=1920, height_pixels=1080),
         detections=detections,
@@ -107,6 +109,27 @@ class TestMemoryDetectionEventRepository:
         repo.save(_make_event(event_id="event-3", camera_id="camera-b"))
         events = repo.find_recent_by_camera("camera-a", limit=10)
         assert len(events) == 2
+
+    def test_find_recent_by_classroom_filters_stale_and_is_deterministic(self) -> None:
+        repo = MemoryDetectionEventRepository()
+        same_time = datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC)
+        repo.save(_make_event(event_id="event-b", captured_at=same_time))
+        repo.save(_make_event(event_id="event-a", captured_at=same_time))
+        repo.save(
+            _make_event(
+                event_id="event-stale",
+                captured_at=datetime(2026, 8, 12, 0, 0, tzinfo=UTC),
+            )
+        )
+        repo.save(_make_event(event_id="event-other", classroom_id="classroom-b203"))
+
+        events = repo.find_recent_by_classroom(
+            "classroom-a101",
+            datetime(2026, 8, 12, 1, 0, tzinfo=UTC),
+            limit=10,
+        )
+
+        assert [event.event_id for event in events] == ["event-a", "event-b"]
 
 
 class TestMemoryVideoSegmentRepository:

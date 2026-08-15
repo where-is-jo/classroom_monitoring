@@ -41,3 +41,19 @@
 - 동일 학생 다중 탐지의 결정적 선택.
 - 비활성 학생·좌석과 깨진 참조 처리.
 - 기존 `StudentStateListResponse` 계약과 404 envelope 유지.
+
+## 구현 결과
+
+- [x] detection event 저장소에 강의실·stale 시각 범위·조회 상한을 받는 최신순 계약을
+  추가하고 memory/MongoDB adapter를 동일하게 구현했다.
+- [x] `list_student_states()`가 활성 좌석에 지정된 활성 학생 전체를 안정적인 좌석 코드
+  순서로 반환하며, 미관측 학생도 `UNKNOWN`으로 포함한다.
+- [x] 사람 탐지와 학생 식별 신뢰도 임계값을 모두 적용하고, 같은 이벤트에서는 식별
+  신뢰도 → 탐지 신뢰도 → detection ID 순으로 결정적으로 선택한다.
+- [x] 최근 유효 식별의 bbox를 해당 카메라의 검토 완료 ROI에만 매핑하고, assignment와
+  일치하면 `PRESENT`, 다르면 `WRONG_SEAT`, 미매핑·겹침이면 `UNKNOWN`으로 둔다.
+- [x] `roi_connections.student_id`와 `seat.geometry`는 학생 상태 판정에 사용하지 않는다.
+- [x] identity 임계값, stale 기준, 최근 이벤트 조회 상한을 공통 설정으로 주입한다.
+- [x] GET 조회는 상태 저장이나 SSE 발행을 하지 않고 기존 응답·404 envelope를 유지한다.
+
+검증 결과: FastAPI 전체 `pytest -q` 739건, Ruff check·format check와 mypy를 통과했다.

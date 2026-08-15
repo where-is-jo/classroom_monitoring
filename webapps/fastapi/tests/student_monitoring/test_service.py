@@ -17,6 +17,9 @@ from app.classrooms.models import (
     SeatOccupancy,
 )
 from app.classrooms.service import ClassroomService
+from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
+from app.roi_connections.service import RoiConnectionService
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
@@ -92,17 +95,34 @@ def _make_service(
     classroom_service: ClassroomService,
     *,
     stream_classroom_id: str = _CLASSROOM_ID,
+    broadcaster: InMemoryBroadcaster | None = None,
 ) -> tuple[StudentMonitoringService, MemoryDetectionEventRepository, ClassroomService]:
     detection_repo = MemoryDetectionEventRepository()
     segment_repo = MemoryVideoSegmentRepository()
     stream_repo = _stream_repository(stream_classroom_id)
+    student_lookup = InMemoryStudentLookup()
+    roi_service = RoiConnectionService(
+        classroom_service,
+        student_lookup,
+        InMemoryRoiConnectionRepository(),
+        stream_repo,
+        max_upload_bytes=1024,
+        page_size_max=200,
+        clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
+    )
     service = StudentMonitoringService(
         detection_repository=detection_repo,
         segment_repository=segment_repo,
         stream_repository=stream_repo,
-        broadcaster=InMemoryBroadcaster(),
+        broadcaster=broadcaster or InMemoryBroadcaster(),
         classroom_service=classroom_service,
+        roi_service=roi_service,
         occupancy_confidence_threshold=0.5,
+        identity_confidence_threshold=0.5,
+        stale_seconds=300,
+        recent_event_limit=500,
+        clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
+        student_lookup=student_lookup,
     )
     return service, detection_repo, classroom_service
 
@@ -321,18 +341,11 @@ class TestAutomaticSeatMapping:
     def test_receive_event_publishes_occupancy_events(self) -> None:
         """탐지 수신 시 좌석 관측 batch와 함께 occupancy SSE 이벤트를 발행한다."""
         classroom_service = _build_classroom_service(_two_seats())
-        detection_repo = MemoryDetectionEventRepository()
-        segment_repo = MemoryVideoSegmentRepository()
-        stream_repo = _stream_repository()
         broadcaster = InMemoryBroadcaster()
         queue = broadcaster.subscribe()
-        service = StudentMonitoringService(
-            detection_repository=detection_repo,
-            segment_repository=segment_repo,
-            stream_repository=stream_repo,
+        service, _, _ = _make_service(
+            classroom_service,
             broadcaster=broadcaster,
-            classroom_service=classroom_service,
-            occupancy_confidence_threshold=0.5,
         )
         # 좌석 1 영역 [0.1, 0.3]x[0.1, 0.3] 안 중심 (200, 200)
         event = _event("event-occ", (_person("det-1", (150, 150, 250, 250)),))
@@ -360,18 +373,11 @@ class TestAutomaticSeatMapping:
     def test_receive_duplicate_event_publishes_no_occupancy_events(self) -> None:
         """같은 event_id 재수신에서는 occupancy SSE 이벤트를 다시 발행하지 않는다."""
         classroom_service = _build_classroom_service(_two_seats())
-        detection_repo = MemoryDetectionEventRepository()
-        segment_repo = MemoryVideoSegmentRepository()
-        stream_repo = _stream_repository()
         broadcaster = InMemoryBroadcaster()
         queue = broadcaster.subscribe()
-        service = StudentMonitoringService(
-            detection_repository=detection_repo,
-            segment_repository=segment_repo,
-            stream_repository=stream_repo,
+        service, _, _ = _make_service(
+            classroom_service,
             broadcaster=broadcaster,
-            classroom_service=classroom_service,
-            occupancy_confidence_threshold=0.5,
         )
         event = _event("event-occ-dup", (_person("det-1", (150, 150, 250, 250)),))
 

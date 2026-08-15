@@ -266,7 +266,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | --- | --- | --- |
 | `database_connect_timeout_seconds` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
 | `demo_mode_enabled` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
-| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
+| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측·학생 사람 탐지는 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `page_size_default`, `page_size_max` | 목록 페이지 크기 | 최대 200 |
 | `face_enrollment_required_samples` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `face_enrollment_augmented_samples` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
@@ -279,13 +279,14 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `sse_reconnection_timeout_seconds` | SSE 재연결 타임아웃 | 기본 60 |
 | `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `student_identity_confidence_threshold` | 학생 상태 판정에 사용할 최소 식별 신뢰도 | 기본 0.5. `0 <= x <= 1` |
+| `student_state_recent_event_limit` | 학생 상태 조회가 확인할 최근 이벤트 상한 | 기본 500. 최대 10,000 |
 | `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
 | `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
 | `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
 | `llm_search_scan_limit` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 
-학생 식별·상태 판정에 필요한 설정(`IDENTITY_CONFIDENCE_THRESHOLD`,
-`ABSENCE_GRACE_PERIOD_SECONDS` 등)은 아직 없다. 목록은
+최종 `ABSENT` 판정에 필요한 수업 시간표·유예 시간 설정은 아직 없다. 예정 목록은
 [MVP 명세의 설정](../../docs/specs/student-monitoring-mvp.md#설정-예정)에 있다.
 
 환경변수·yml의 저장·명명 규칙은

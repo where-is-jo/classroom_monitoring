@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import StrEnum
 
 from .models import Point, RoiConnection
+
+
+class RoiMappingReason(StrEnum):
+    """bbox가 좌석 하나로 매핑되지 않은 이유."""
+
+    MATCHED = "MATCHED"
+    INVALID_INPUT = "INVALID_INPUT"
+    NO_MATCH = "NO_MATCH"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+@dataclass(frozen=True)
+class RoiMappingResult:
+    """좌석 ROI 매핑 결과와 안전한 진단 코드."""
+
+    connection: RoiConnection | None
+    reason: RoiMappingReason
 
 
 def find_roi_connection_for_bbox(
@@ -15,13 +34,29 @@ def find_roi_connection_for_bbox(
     connections: Sequence[RoiConnection],
 ) -> RoiConnection | None:
     """bbox 중심이 정확히 한 polygon에 있을 때만 해당 ROI를 반환한다."""
+    return map_bbox_to_roi(
+        bbox,
+        frame_width_pixels=frame_width_pixels,
+        frame_height_pixels=frame_height_pixels,
+        connections=connections,
+    ).connection
+
+
+def map_bbox_to_roi(
+    bbox: tuple[int, int, int, int],
+    *,
+    frame_width_pixels: int,
+    frame_height_pixels: int,
+    connections: Sequence[RoiConnection],
+) -> RoiMappingResult:
+    """bbox 중심을 매핑하고 미매핑 원인을 분리한다."""
     if frame_width_pixels <= 0 or frame_height_pixels <= 0:
-        return None
+        return RoiMappingResult(None, RoiMappingReason.INVALID_INPUT)
     x_min, y_min, x_max, y_max = bbox
     if x_min < 0 or y_min < 0 or x_max <= x_min or y_max <= y_min:
-        return None
+        return RoiMappingResult(None, RoiMappingReason.INVALID_INPUT)
     if x_max > frame_width_pixels or y_max > frame_height_pixels:
-        return None
+        return RoiMappingResult(None, RoiMappingReason.INVALID_INPUT)
     center = Point(
         x=(x_min + x_max) / 2 / frame_width_pixels,
         y=(y_min + y_max) / 2 / frame_height_pixels,
@@ -29,7 +64,11 @@ def find_roi_connection_for_bbox(
     matches = [
         connection for connection in connections if _point_in_polygon(center, connection.polygon)
     ]
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return RoiMappingResult(matches[0], RoiMappingReason.MATCHED)
+    if len(matches) > 1:
+        return RoiMappingResult(None, RoiMappingReason.AMBIGUOUS)
+    return RoiMappingResult(None, RoiMappingReason.NO_MATCH)
 
 
 def _point_in_polygon(point: Point, polygon: tuple[Point, ...]) -> bool:

@@ -683,6 +683,7 @@ def get_student_monitoring_service(
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
     classroom_service: ClassroomService = Depends(get_classroom_service),
+    roi_service: RoiConnectionService = Depends(get_roi_connection_service),
     student_lookup: StudentLookupPort = Depends(get_student_lookup),
     settings: Settings = Depends(get_settings),
 ) -> StudentMonitoringService:
@@ -692,8 +693,12 @@ def get_student_monitoring_service(
         stream_repository=stream_repository,
         broadcaster=broadcaster,
         classroom_service=classroom_service,
+        roi_service=roi_service,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
-        identity_confidence_threshold=0.5,  # 기본값, 설정에서 읽도록 확장 가능
+        identity_confidence_threshold=settings.student_identity_confidence_threshold,
+        stale_seconds=settings.detection_event_stale_seconds,
+        recent_event_limit=settings.student_state_recent_event_limit,
+        clock=utc_now,
         student_lookup=student_lookup,
     )
 

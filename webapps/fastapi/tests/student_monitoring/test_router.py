@@ -8,6 +8,9 @@ from app.classrooms.adapters.memory_repository import InMemoryClassroomRepositor
 from app.classrooms.models import CreateClassroomCommand
 from app.classrooms.service import ClassroomService
 from app.main import app
+from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
+from app.roi_connections.service import RoiConnectionService
+from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
 from app.shared.dependencies import get_student_monitoring_service
 from app.student_monitoring.adapters.memory_repository import (
@@ -41,6 +44,7 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
     segment_repo = MemoryVideoSegmentRepository()
     stream_repo = MemoryVideoStreamRepository()
     broadcaster = InMemoryBroadcaster()
+    student_lookup = InMemoryStudentLookup()
     classroom_service = ClassroomService(
         InMemoryClassroomRepository(),
         occupancy_confidence_threshold=0.5,
@@ -54,13 +58,28 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
             location="A동 1층",
         )
     )
+    roi_service = RoiConnectionService(
+        classroom_service,
+        student_lookup,
+        InMemoryRoiConnectionRepository(),
+        stream_repo,
+        max_upload_bytes=1024,
+        page_size_max=200,
+        clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+    )
     service = StudentMonitoringService(
         detection_repository=detection_repo,
         segment_repository=segment_repo,
         stream_repository=stream_repo,
         broadcaster=broadcaster,
         classroom_service=classroom_service,
+        roi_service=roi_service,
         occupancy_confidence_threshold=0.5,
+        identity_confidence_threshold=0.5,
+        stale_seconds=300,
+        recent_event_limit=500,
+        clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
+        student_lookup=student_lookup,
     )
     return service, detection_repo
 

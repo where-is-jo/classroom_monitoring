@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.roi_connections.mapping import find_roi_connection_for_bbox
+from app.roi_connections.mapping import (
+    RoiMappingReason,
+    find_roi_connection_for_bbox,
+    map_bbox_to_roi,
+)
 from app.roi_connections.models import Point, RoiConnection
 
 NOW = datetime(2026, 8, 15, 1, 0, tzinfo=UTC)
@@ -88,6 +92,14 @@ def test_overlapping_polygons_return_none() -> None:
         )
         is None
     )
+    diagnostic = map_bbox_to_roi(
+        (200, 200, 300, 300),
+        frame_width_pixels=1000,
+        frame_height_pixels=1000,
+        connections=[_connection("seat-a", polygon), _connection("seat-b", polygon)],
+    )
+    assert diagnostic.connection is None
+    assert diagnostic.reason == RoiMappingReason.AMBIGUOUS
 
 
 @pytest.mark.parametrize(

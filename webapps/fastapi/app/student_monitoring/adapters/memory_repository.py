@@ -42,7 +42,25 @@ class MemoryDetectionEventRepository:
     def find_recent_by_camera(self, camera_id: str, limit: int) -> list[DetectionEvent]:
         """Find recent detections by camera."""
         events = [e for e in self._events.values() if e.camera_id == camera_id]
+        events.sort(key=lambda e: e.event_id)
         events.sort(key=lambda e: e.captured_at, reverse=True)
+        return events[:limit]
+
+    def find_recent_by_classroom(
+        self,
+        classroom_id: str,
+        since: datetime,
+        *,
+        limit: int,
+    ) -> list[DetectionEvent]:
+        """Find recent detections for a classroom."""
+        events = [
+            event
+            for event in self._events.values()
+            if event.classroom_id == classroom_id and event.captured_at >= since
+        ]
+        events.sort(key=lambda event: event.event_id)
+        events.sort(key=lambda event: event.captured_at, reverse=True)
         return events[:limit]
 
     def find_by_camera_and_period(
