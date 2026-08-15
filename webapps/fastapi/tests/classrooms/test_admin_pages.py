@@ -542,24 +542,19 @@ def test_seats_page_calls_list_active_once_with_max_limit(client: TestClient) ->
         app.dependency_overrides.clear()
 
 
-def test_seats_page_embeds_student_registration_dialog_once(client: TestClient) -> None:
-    """좌석 편집 화면은 공통 학생 등록 UI를 현재 강의실 기본값으로 한 번만 포함한다."""
-    classroom = _create_classroom(client, code="R-C03", name="신규 학생 등록반")
+def test_seats_page_does_not_offer_student_registration(client: TestClient) -> None:
+    """좌석 편집 화면은 학생 등록 진입점이나 관련 정적 자산을 포함하지 않는다."""
+    classroom = _create_classroom(client, code="R-C03", name="좌석 지정반")
     classroom_id = str(classroom["id"])
     _create_seat(client, classroom_id, code="SC03", label="좌석 1")
 
     response = client.get(f"/classrooms/{classroom_id}/seats")
 
     assert response.status_code == 200
-    assert response.text.count('id="open-student-registration"') == 1
-    assert response.text.count('<dialog id="student-registration-dialog"') == 1
-    assert response.text.count('id="student-registration-form"') == 1
-    assert 'data-success-mode="event"' in response.text
-    assert 'name="classroom_name"' in response.text
-    assert 'value="신규 학생 등록반"' in response.text
-    assert "좌석 지정을 확정할 수 있습니다." in response.text
-    assert response.text.count("/static/student-registration.css") == 1
-    assert response.text.count("/static/student-registration.js") == 1
+    assert 'id="open-student-registration"' not in response.text
+    assert '<dialog id="student-registration-dialog"' not in response.text
+    assert "/static/student-registration.css" not in response.text
+    assert "/static/student-registration.js" not in response.text
 
 
 def test_seat_assignments_page_redirects_when_classroom_missing(client: TestClient) -> None:

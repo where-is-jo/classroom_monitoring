@@ -25,12 +25,6 @@
 
   const registrationControls = () => document.querySelectorAll([
     "#open-student-registration",
-    "#add-row",
-    "#add-column",
-    "#seat-grid button",
-    "#seat-edit-panel button",
-    "#seat-edit-panel input",
-    "#seat-edit-panel select",
     "#student-registration-dialog button",
     "#student-registration-dialog input",
     "#student-registration-dialog select",
@@ -92,7 +86,6 @@
     values.face_enrollment_id = null;
     clearRegistrationError();
     setRegistrationBusy(true);
-    let shouldRestoreFocus = false;
     try {
       let response;
       try {
@@ -119,20 +112,13 @@
       ) {
         throw new Error("등록된 학생 정보를 확인하지 못했습니다.");
       }
-      if (registrationForm.dataset.successMode === "event") {
-        closeDialog(registrationDialog);
-        document.dispatchEvent(new CustomEvent("student-registration:created", {detail: body}));
-        shouldRestoreFocus = true;
-      } else {
-        location.reload();
-      }
+      location.reload();
     } catch (reason) {
       showRegistrationError(
         reason instanceof Error ? reason.message : "학생 정보를 저장하지 못했습니다.",
       );
     } finally {
       setRegistrationBusy(false);
-      if (shouldRestoreFocus) registrationOpenButton?.focus();
     }
   });
 

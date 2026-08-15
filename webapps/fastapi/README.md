@@ -83,7 +83,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms` | 강의실 선택, 좌석 지도, 재석·부재·확인 필요 집계와 마지막 관측 시각 |
 | `/classrooms/create` | 강의실 등록 |
 | `/classrooms/{id}/edit` | 강의실 수정 |
-| `/classrooms/{id}/seats` | 좌석 배치 관리, 학생 등록, 좌석-학생 지정·해제 |
+| `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
 | `/roi-connections` | 메모리 가상 강의실·좌석과 DB 학생을 다각형 ROI로 연결하고 MongoDB에 저장 |
@@ -199,13 +199,11 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다.
 `student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장·SSE 발행이
 동작한다. 
-`students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. `/students`의
-등록 dialog와 `/classrooms/{id}/seats`의 좌석 편집 dialog는 같은 학생 등록 UI와
-`POST /api/v1/students` 계약을 사용한다. 좌석 화면에서 학생 등록이 성공하면 새 학생을
-선택만 하며, 실제 좌석 지정은 관리자가 기존 `지정` 버튼을 눌러
-`PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`를 호출할 때 확정된다.
-학생 관리 화면의 얼굴 등록 모달은 기존 얼굴 등록 API를 재사용하며 동의 확인, 촬영,
-완료 순서로 진행된다.
+`students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
+`/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
+등록된 학생을 선택한 뒤 `PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`로
+지정한다. 학생 관리 화면의 얼굴 등록 모달은 기존 얼굴 등록 API를 재사용하며 동의 확인,
+촬영, 완료 순서로 진행된다.
 책임과 목표 계약은 [MVP 명세의 도메인 구조](../../docs/specs/student-monitoring-mvp.md#도메인-구조-예정)에 있다.
 
 추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.

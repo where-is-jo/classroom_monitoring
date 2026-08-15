@@ -2,8 +2,6 @@
 
 {% block title %}{{ classroom.code }} 좌석 관리 · 학습 모니터링{% endblock %}
 
-{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', path='/student-registration.css') }}">{% endblock %}
-
 {% block content %}
   <header class="page-header">
     <div><p class="eyebrow">{{ classroom.code }}</p><h1>{{ classroom.name }} 좌석 관리</h1><p class="summary">{{ classroom.location }} · 전체 {{ total }}좌석</p></div>
@@ -61,7 +59,6 @@
               </select>
             </label>
             <div class="assignment-actions">
-              <button type="button" id="open-student-registration" class="secondary">새 학생 등록</button>
               <button type="button" id="btn-assign" class="secondary">지정</button>
               <button type="button" id="btn-unassign" class="danger">해제</button>
             </div>
@@ -74,11 +71,6 @@
       </aside>
     </div>
   </section>
-
-  {% set student_registration_success_mode = "event" %}
-  {% set student_registration_classroom_name = classroom.name %}
-  {% set student_registration_description = "학생 정보를 먼저 저장한 후 좌석 지정을 확정할 수 있습니다." %}
-  {% include "students/_registration_dialog.html" %}
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script><script src="{{ url_for('static', path='/student-registration.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}
