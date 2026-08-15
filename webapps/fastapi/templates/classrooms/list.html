@@ -70,7 +70,6 @@
         <ul class="card-list seat-grid">
           {% for seat in list_seats %}
             <li class="seat-list-card seat-card--{{ seat.current_occupancy.state.value|lower }}" data-seat-id="{{ seat.id }}" data-seat-state="{{ seat.current_occupancy.state.value|lower }}">
-              <strong>{{ seat.label }}</strong>
               <dl class="seat-list-card__details">
                 <div><dt>좌석 정보</dt><dd>{{ seat.code }}</dd></div>
                 <div><dt>좌석 상태</dt><dd class="state-label">{{ seat.current_occupancy.state.value|display_label }}</dd></div>
