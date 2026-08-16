@@ -119,7 +119,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | 실시간 영상에서 선택한 `camera_id`·좌석·legacy 학생 연결과 ROI 저장 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
-| `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
+| `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태. 목록의 `id`로 조회하며 `camera_id`도 받는다 |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP offer signaling (MediaMTX proxy) |
 | `PATCH` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | ACTIVE 세션 재협상 signaling |

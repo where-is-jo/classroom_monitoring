@@ -21,6 +21,7 @@ from ..shared.dependencies import (
     get_video_stream_repository,
     utc_now,
 )
+from ..video_monitoring.errors import VideoStreamNotFoundError
 from ..video_monitoring.ports import VideoStreamRepository
 from .models import (
     Detection,
@@ -141,9 +142,7 @@ def list_detections(
         stream_id
     )
     if stream is None:
-        from ..video_monitoring.errors import DemoStreamNotFoundError
-
-        raise DemoStreamNotFoundError()
+        raise VideoStreamNotFoundError()
 
     if from_at is not None and to_at is not None:
         page = detection_repository.find_by_camera_and_period(
@@ -203,9 +202,7 @@ async def stream_detection_events(
         stream_id
     )
     if stream is None:
-        from ..video_monitoring.errors import DemoStreamNotFoundError
-
-        raise DemoStreamNotFoundError()
+        raise VideoStreamNotFoundError()
 
     async def event_generator() -> AsyncIterator[str]:
         queue = broadcaster.subscribe()
