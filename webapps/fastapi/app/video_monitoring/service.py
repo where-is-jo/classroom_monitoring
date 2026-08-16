@@ -26,6 +26,7 @@ from .errors import (
     PlaybackSourceUnavailableError,
     PlaybackStreamNotFoundError,
     VideoSearchInputError,
+    VideoStreamNotFoundError,
     WhepTimeoutError,
     WhepUnavailableError,
 )
@@ -343,11 +344,19 @@ class VideoStreamService:
         """
         return self._repository.find_monitoring_streams()
 
-    def get_stream(self, camera_id: str) -> VideoStream:
-        """Get stream by camera ID."""
-        stream = self._repository.find_by_camera_id(camera_id)
+    def get_stream(self, stream_id: str) -> VideoStream:
+        """source 식별자로 stream을 찾는다. id를 먼저 보고 camera_id로 fallback한다.
+
+        목록이 돌려주는 `id`로 상세를 다시 조회하는 것이 기본 사용 흐름이다.
+        기존 호출자가 쓰던 `camera_id`도 계속 받는다 — 같은 경로의 detections·
+        detection-events·playback-sessions가 이미 이 두 단계 조회를 쓰고 있어
+        하위 경로끼리 식별자 규칙이 갈리지 않게 맞춘다.
+        """
+        stream = self._repository.find_by_id(stream_id) or self._repository.find_by_camera_id(
+            stream_id
+        )
         if stream is None:
-            raise DemoStreamNotFoundError()
+            raise VideoStreamNotFoundError()
         return stream
 
     def get_source_status(self, stream: VideoStream) -> SourceStatus:

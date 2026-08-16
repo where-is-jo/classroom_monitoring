@@ -8,7 +8,6 @@ import pytest
 from app.student_monitoring.errors import (
     InferenceEventConflictError,
     RepositoryError,
-    VideoStreamNotFoundError,
 )
 from app.student_monitoring.models import (
     Detection,
@@ -16,6 +15,7 @@ from app.student_monitoring.models import (
     FrameInfo,
     VideoSegment,
 )
+from app.video_monitoring.errors import VideoStreamNotFoundError
 
 
 class TestDetectionEvent:

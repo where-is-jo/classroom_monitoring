@@ -119,7 +119,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | 실시간 영상에서 선택한 `camera_id`·좌석·legacy 학생 연결과 ROI 저장 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
-| `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태 |
+| `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태. 목록의 `id`로 조회하며 `camera_id`도 받는다 |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP offer signaling (MediaMTX proxy) |
 | `PATCH` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | ACTIVE 세션 재협상 signaling |
@@ -148,6 +148,12 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 
 색만으로 상태를 구분하지 않고 문구와 기호를 함께 쓴다.
 **관측 실패나 영상 없음을 `VACANT`로 바꾸지 않는다.**
+
+좌석 점유도 학생 상태와 같은 카메라별 ROI로 판정한다
+([결정 0020](../../docs/architecture/decisions.md#0020--좌석-위치-판정의-정본을-roi-하나로-통일한다)).
+**관측 대상은 그 카메라에 ROI가 등록된 좌석뿐이다** — 강의실을 나눠 보는 구성에서 다른
+카메라 담당 좌석을 덮어쓰지 않기 위해서다. 그래서 **ROI를 등록하지 않은 카메라의 좌석은
+계속 `UNKNOWN`으로 남는다.** `seat.geometry`는 배치도를 그리는 좌표이며 판정에 쓰지 않는다.
 
 ### 합성 데모
 

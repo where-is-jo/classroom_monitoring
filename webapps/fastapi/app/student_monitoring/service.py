@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from ..classrooms.errors import ClassroomNotFoundError
-from ..classrooms.mapping import map_detections_to_observations
 from ..classrooms.models import Seat, SeatAssignment, SeatObservation
 from ..classrooms.service import ClassroomService
 from ..roi_connections.errors import RoiConnectionNotFoundError
@@ -17,8 +16,8 @@ from ..roi_connections.models import RoiConnection
 from ..roi_connections.service import RoiConnectionService
 from ..shared.broadcaster import InMemoryBroadcaster
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
+from ..video_monitoring.errors import VideoStreamNotFoundError
 from ..video_monitoring.ports import VideoStreamRepository
-from .errors import VideoStreamNotFoundError
 from .models import (
     Detection,
     DetectionEvent,
@@ -26,6 +25,7 @@ from .models import (
     StudentState,
     VideoSegment,
 )
+from .occupancy_mapping import map_detections_to_observations
 from .ports import DetectionEventRepository, VideoSegmentRepository
 
 logger = logging.getLogger(__name__)
@@ -137,13 +137,19 @@ class StudentMonitoringService:
             # 같은 event_id를 다시 받으면 batch 멱등 처리와 어긋나는 관측이 생길 수 없도록
             # 재수신에서는 매핑을 반복하지 않는다.
             # 매핑·batch 기록·SSE 발행이 실패해도 탐지 이벤트 저장 결과는 그대로 돌려준다.
+            #
+            # 관측 범위는 이 카메라에 ROI가 등록된 좌석뿐이다(결정 0020). 강의실을
+            # 나눠 보는 구성에서 다른 카메라 담당 좌석까지 "비어 있음"으로 덮어쓰지
+            # 않게 하려는 것이다. ROI가 하나도 없으면 관측을 만들지 않는다.
             if saved_event.detections and saved_event.classroom_id:
                 classroom_id = saved_event.classroom_id
                 try:
-                    seats = self._classroom_service.list_all_seats(classroom_id)
+                    connections = self._roi_service.list_valid_connections(
+                        classroom_id, saved_event.camera_id
+                    )
                     observations = map_detections_to_observations(
                         saved_event.detections,
-                        seats,
+                        connections,
                         saved_event.frame,
                         self._confidence_threshold,
                     )
@@ -163,6 +169,16 @@ class StudentMonitoringService:
                     logger.warning(
                         "event_id=%s camera_id=%s classroom_id=%s "
                         "활성 강의실 참조가 없어 좌석 매핑을 건너뜁니다.",
+                        saved_event.event_id,
+                        saved_event.camera_id,
+                        classroom_id,
+                    )
+                except RoiConnectionNotFoundError:
+                    # ROI 미등록은 오류가 아니라 아직 설정하지 않은 상태다.
+                    # 좌석을 추정하지 않고 관측을 만들지 않는다(결정 0020).
+                    logger.warning(
+                        "event_id=%s camera_id=%s classroom_id=%s "
+                        "등록된 좌석 ROI가 없어 좌석 관측을 만들지 않습니다.",
                         saved_event.event_id,
                         saved_event.camera_id,
                         classroom_id,

@@ -18,6 +18,7 @@ from app.classrooms.models import (
 )
 from app.classrooms.service import ClassroomService
 from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
+from app.roi_connections.models import Point, RoiConnection
 from app.roi_connections.service import RoiConnectionService
 from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
@@ -91,20 +92,61 @@ def _stream_repository(
     return repository
 
 
+def _rectangle_roi(
+    seat_id: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    *,
+    camera_id: str = "camera-a",
+) -> RoiConnection:
+    """좌석 사각형을 카메라 ROI로 등록한다.
+
+    revision 0은 live 영상에서 저장한 ROI라 기준 이미지 없이도 유효하다(결정 0019).
+    """
+    return RoiConnection(
+        classroom_id=_CLASSROOM_ID,
+        camera_id=camera_id,
+        seat_id=seat_id,
+        student_id=None,
+        polygon=(
+            Point(x=x, y=y),
+            Point(x=x + width, y=y),
+            Point(x=x + width, y=y + height),
+            Point(x=x, y=y + height),
+        ),
+        reference_image_revision=0,
+        updated_at=datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
+    )
+
+
+def _two_seat_rois() -> tuple[RoiConnection, ...]:
+    """_two_seats()와 같은 영역을 카메라 ROI로 등록한다."""
+    return (
+        _rectangle_roi("seat-1", 0.1, 0.1, 0.2, 0.2),
+        _rectangle_roi("seat-2", 0.5, 0.1, 0.2, 0.2),
+    )
+
+
 def _make_service(
     classroom_service: ClassroomService,
     *,
     stream_classroom_id: str = _CLASSROOM_ID,
     broadcaster: InMemoryBroadcaster | None = None,
+    rois: tuple[RoiConnection, ...] = (),
 ) -> tuple[StudentMonitoringService, MemoryDetectionEventRepository, ClassroomService]:
     detection_repo = MemoryDetectionEventRepository()
     segment_repo = MemoryVideoSegmentRepository()
     stream_repo = _stream_repository(stream_classroom_id)
     student_lookup = InMemoryStudentLookup()
+    roi_repository = InMemoryRoiConnectionRepository()
+    for roi in rois:
+        roi_repository.save(roi)
     roi_service = RoiConnectionService(
         classroom_service,
         student_lookup,
-        InMemoryRoiConnectionRepository(),
+        roi_repository,
         stream_repo,
         max_upload_bytes=1024,
         page_size_max=200,
@@ -167,8 +209,8 @@ class TestAutomaticSeatMapping:
     def test_receive_event_creates_observation_batch_and_updates_occupancy(self) -> None:
         """탐지 수신 시 좌석 관측 batch가 생기고 seats.current_occupancy가 갱신된다."""
         classroom_service = _build_classroom_service(_two_seats())
-        service, _, _ = _make_service(classroom_service)
-        # 좌석 1 영역 [0.1, 0.3]x[0.1, 0.3] 안 중심 (200, 200)
+        service, _, _ = _make_service(classroom_service, rois=_two_seat_rois())
+        # 좌석 1 ROI [0.1, 0.3]x[0.1, 0.3] 안 중심 (200, 200)
         event = _event("event-1", (_person("det-1", (150, 150, 250, 250)),))
 
         result = service.receive_inference_event(event)
@@ -244,7 +286,7 @@ class TestAutomaticSeatMapping:
     def test_receive_duplicate_event_does_not_repeat_mapping(self) -> None:
         """같은 event_id 재수신에서는 매핑을 반복하지 않는다."""
         classroom_service = _build_classroom_service(_two_seats())
-        service, _, _ = _make_service(classroom_service)
+        service, _, _ = _make_service(classroom_service, rois=_two_seat_rois())
         event = _event("event-dup", (_person("det-1", (150, 150, 250, 250)),))
 
         first = service.receive_inference_event(event)
@@ -256,45 +298,50 @@ class TestAutomaticSeatMapping:
         assert batch is not None
         assert batch.status == ObservationBatchStatus.COMPLETED
 
-    def test_receive_with_seat_without_geometry_excludes_seat(self) -> None:
-        """geometry가 없는 좌석은 매핑에서 제외된다."""
-        classroom_service = _build_classroom_service(
-            (
-                CreateSeatCommand(
-                    id="seat-1",
-                    classroom_id=_CLASSROOM_ID,
-                    code="S01",
-                    label="좌석 1",
-                    geometry=SeatGeometry(x=0.1, y=0.1, width=0.2, height=0.2),
-                ),
-                CreateSeatCommand(
-                    id="seat-2",
-                    classroom_id=_CLASSROOM_ID,
-                    code="S02",
-                    label="좌석 2",
-                    geometry=None,
-                ),
-            )
+    def test_seat_without_roi_for_this_camera_is_not_observed(self) -> None:
+        """이 카메라에 ROI가 없는 좌석은 관측 대상이 아니다 (결정 0020).
+
+        강의실을 나눠 보는 구성에서 다른 카메라 담당 좌석까지 "비어 있음"으로
+        기록하면 그쪽 관측을 덮어쓰게 된다.
+        """
+        classroom_service = _build_classroom_service(_two_seats())
+        # 좌석 2는 다른 카메라 담당이라 이 카메라에 ROI가 없다.
+        service, _, _ = _make_service(
+            classroom_service,
+            rois=(_rectangle_roi("seat-1", 0.1, 0.1, 0.2, 0.2),),
         )
-        service, _, _ = _make_service(classroom_service)
 
         service.receive_inference_event(
-            _event("event-geom", (_person("det-1", (150, 150, 250, 250)),))
+            _event("event-roi-scope", (_person("det-1", (150, 150, 250, 250)),))
         )
 
-        batch = classroom_service._repository.get_observation_batch("event-geom")
+        batch = classroom_service._repository.get_observation_batch("event-roi-scope")
         assert batch is not None
         assert len(batch.observations) == 1
         assert batch.observations[0].seat_id == "seat-1"
-        # geometry가 없는 좌석의 상태는 바뀌지 않는다.
+        # 관측 대상이 아닌 좌석의 상태는 이 이벤트로 바뀌지 않는다.
         seat_2 = classroom_service._repository.get_seat("seat-2")
         assert seat_2 is not None
         assert seat_2.current_occupancy.state == SeatOccupancy.UNKNOWN
+        assert seat_2.current_occupancy.event_id is None
+
+    def test_receive_without_any_roi_creates_no_batch(self) -> None:
+        """ROI가 하나도 없으면 좌석을 추정하지 않고 관측을 만들지 않는다."""
+        classroom_service = _build_classroom_service(_two_seats())
+        service, detection_repo, _ = _make_service(classroom_service)
+
+        result = service.receive_inference_event(
+            _event("event-no-roi", (_person("det-1", (150, 150, 250, 250)),))
+        )
+
+        assert result.is_new is True
+        assert detection_repo.find_by_event_id("event-no-roi") is not None
+        assert classroom_service._repository.get_observation_batch("event-no-roi") is None
 
     def test_receive_with_low_confidence_detection_keeps_seat_unknown(self) -> None:
         """신뢰도가 임계값 미만이면 좌석을 점유로 바꾸지 않는다."""
         classroom_service = _build_classroom_service(_two_seats())
-        service, _, _ = _make_service(classroom_service)
+        service, _, _ = _make_service(classroom_service, rois=_two_seat_rois())
         event = _event(
             "event-low",
             (_person("det-1", (150, 150, 250, 250), confidence=0.3),),
@@ -307,13 +354,13 @@ class TestAutomaticSeatMapping:
         assert seat_1.current_occupancy.state == SeatOccupancy.UNKNOWN
 
     def test_mapping_failure_does_not_block_event_save(self) -> None:
-        """좌석 목록 조회가 예기치 못한 예외로 실패해도 탐지 이벤트는 정상 저장된다."""
+        """ROI 조회가 예기치 못한 예외로 실패해도 탐지 이벤트는 정상 저장된다."""
         classroom_service = _build_classroom_service(_two_seats())
-        service, detection_repo, _ = _make_service(classroom_service)
+        service, detection_repo, _ = _make_service(classroom_service, rois=_two_seat_rois())
         event = _event("event-map-fail", (_person("det-1", (150, 150, 250, 250)),))
 
         with patch.object(
-            classroom_service, "list_all_seats", side_effect=RuntimeError("저장소 오류")
+            service._roi_service, "list_valid_connections", side_effect=RuntimeError("저장소 오류")
         ):
             result = service.receive_inference_event(event)
 
@@ -325,7 +372,7 @@ class TestAutomaticSeatMapping:
     def test_observation_record_failure_does_not_block_event_save(self) -> None:
         """관측 batch 기록이 실패해도 탐지 이벤트는 정상 저장된다."""
         classroom_service = _build_classroom_service(_two_seats())
-        service, detection_repo, _ = _make_service(classroom_service)
+        service, detection_repo, _ = _make_service(classroom_service, rois=_two_seat_rois())
         event = _event("event-record-fail", (_person("det-1", (150, 150, 250, 250)),))
 
         with patch.object(
@@ -346,8 +393,9 @@ class TestAutomaticSeatMapping:
         service, _, _ = _make_service(
             classroom_service,
             broadcaster=broadcaster,
+            rois=_two_seat_rois(),
         )
-        # 좌석 1 영역 [0.1, 0.3]x[0.1, 0.3] 안 중심 (200, 200)
+        # 좌석 1 ROI [0.1, 0.3]x[0.1, 0.3] 안 중심 (200, 200)
         event = _event("event-occ", (_person("det-1", (150, 150, 250, 250)),))
 
         service.receive_inference_event(event)
@@ -378,6 +426,7 @@ class TestAutomaticSeatMapping:
         service, _, _ = _make_service(
             classroom_service,
             broadcaster=broadcaster,
+            rois=_two_seat_rois(),
         )
         event = _event("event-occ-dup", (_person("det-1", (150, 150, 250, 250)),))
 

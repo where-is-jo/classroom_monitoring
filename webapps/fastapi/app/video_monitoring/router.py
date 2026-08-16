@@ -15,7 +15,7 @@ from ..shared.dependencies import (
     get_video_stream_service,
 )
 from ..shared.templating import templates
-from .errors import PlaybackSessionInputError, VideoSearchInputError
+from .errors import DemoStreamNotFoundError, PlaybackSessionInputError, VideoSearchInputError
 from .models import DemoStreamStatus
 from .schemas import (
     DemoStreamResponse,
@@ -71,13 +71,14 @@ def get_video_stream(
     demo_service: VideoDemoService = Depends(get_video_demo_service),
     stream_service: VideoStreamService = Depends(get_video_stream_service),
 ) -> DemoStreamResponse | RealStreamResponse:
-    # Try demo stream first
+    # demo catalog를 먼저 본다. 없으면 실제 source에서 찾는다.
+    # 여기서 삼키는 것은 "demo에 없다"는 사실 하나뿐이다. 실제 source 조회의
+    # 실패는 그대로 올라가야 하므로 넓은 except로 감싸지 않는다.
     try:
         return DemoStreamResponse.from_domain(demo_service.get_stream(stream_id))
-    except Exception:
+    except DemoStreamNotFoundError:
         pass
 
-    # Try real stream
     stream = stream_service.get_stream(stream_id)
     status = stream_service.get_source_status(stream)
     return RealStreamResponse.from_domain(stream, status)

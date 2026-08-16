@@ -13,6 +13,20 @@ class DemoStreamNotFoundError(DomainError):
         super().__init__("요청한 데모 피드를 찾을 수 없습니다.")
 
 
+class VideoStreamNotFoundError(DomainError):
+    """실제 영상 source를 찾을 수 없음.
+
+    영상 source 원장은 이 도메인이 소유하므로 조회 실패 오류도 여기 둔다.
+    참조하는 쪽(student_monitoring)이 이 오류를 import한다.
+    """
+
+    code = "VIDEO_STREAM_NOT_FOUND"
+    status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__("Requested camera not found.")
+
+
 class VideoSearchInputError(DomainError):
     code = "VIDEO_SEARCH_INPUT_INVALID"
     status_code = 422
