@@ -36,6 +36,7 @@ from ..student_monitoring.models import DetectionEvent
 from ..student_monitoring.ports import DetectionEventRepository
 from ..video_monitoring.models import VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
+from .errors import LlmSearchPlanInvalidError
 from .models import CameraChoice, DetectionHit, IdentifiedStudent, SearchOutcome, SearchQuery
 from .planning import MAX_LIMIT, parse_plan
 from .ports import PlanPrompt, QueryPlanner
@@ -74,21 +75,8 @@ class LlmSearchService:
         # 호출자가 요청한 상한이 곧 모델에게 알리는 상한이다. 지시문과 검증이 다른
         # 수를 쓰면 모델은 규격을 지켰는데 결과만 조용히 줄어든다.
         ceiling = min(limit, MAX_LIMIT)
-        raw = self._planner.plan(
-            PlanPrompt(
-                system=build_system_prompt(
-                    now=now,
-                    cameras=[_to_choice(stream) for stream in streams],
-                    max_limit=ceiling,
-                ),
-                question=question,
-                now=now,
-            )
-        )
-        # 원문은 로그에만 남긴다. 응답에 실으면 프롬프트에 넣은 카메라 목록이
-        # 되돌아 나올 수 있다.
-        logger.debug("검색 계획 원문: %s", raw)
-        query = parse_plan(raw, max_span_days=self._max_span_days, limit_ceiling=ceiling)
+        choices = [_to_choice(stream) for stream in streams]
+        query = self._plan(question, now=now, cameras=choices, ceiling=ceiling)
 
         targets, notes = self._resolve_targets(query, streams)
         events, scan_truncated = self._collect_events(query, targets)
@@ -108,6 +96,54 @@ class LlmSearchService:
             truncated=truncated,
             snapshot_lookup_failed=snapshot_lookup_failed,
         )
+
+    def _plan(
+        self,
+        question: str,
+        *,
+        now: datetime,
+        cameras: Sequence[CameraChoice],
+        ceiling: int,
+    ) -> SearchQuery:
+        """질문을 검증된 검색 조건으로 바꾼다. **한 번은 다시 시도한다.**
+
+        작은 모델은 첫 응답에서 형식이 깨져도 다시 물으면 붙는 일이 흔하다. 한 번의
+        실패로 422를 돌려주면 사용자는 아무 잘못이 없는데 질문을 고치라는 말을 듣는다.
+
+        **닿지 못한 경우는 재시도하지 않는다.** `LlmSearchPlannerUnavailableError`는
+        여기서 잡지 않으므로 그대로 올라간다. 서버가 죽었거나 타임아웃이 난 상황이라
+        한 번 더 부르면 사용자를 두 배로 기다리게 할 뿐이다. 반대로 규격 위반은
+        **모델이 이미 답을 냈다는 뜻**이라 재시도 비용이 첫 시도와 같다.
+        """
+        try:
+            return self._attempt(question, now=now, cameras=cameras, ceiling=ceiling, retry=False)
+        except LlmSearchPlanInvalidError as error:
+            # 사유는 우리가 정의한 코드다. 모델이 쓴 글자가 아니다.
+            logger.info("계획이 규격을 벗어나 한 번 더 시도한다: %s", error.details)
+        return self._attempt(question, now=now, cameras=cameras, ceiling=ceiling, retry=True)
+
+    def _attempt(
+        self,
+        question: str,
+        *,
+        now: datetime,
+        cameras: Sequence[CameraChoice],
+        ceiling: int,
+        retry: bool,
+    ) -> SearchQuery:
+        raw = self._planner.plan(
+            PlanPrompt(
+                system=build_system_prompt(
+                    now=now, cameras=cameras, max_limit=ceiling, retry=retry
+                ),
+                question=question,
+                now=now,
+            )
+        )
+        # 원문은 로그에만 남긴다. 응답에 실으면 프롬프트에 넣은 카메라 목록이
+        # 되돌아 나올 수 있다.
+        logger.debug("검색 계획 원문: %s", raw)
+        return parse_plan(raw, max_span_days=self._max_span_days, limit_ceiling=ceiling)
 
     def _resolve_targets(
         self, query: SearchQuery, enabled: Sequence[VideoStream]

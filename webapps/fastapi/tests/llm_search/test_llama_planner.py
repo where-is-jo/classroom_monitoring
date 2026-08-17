@@ -16,6 +16,7 @@ import pytest
 
 from app.llm_search.adapters.llama_planner import LlamaQueryPlanner
 from app.llm_search.errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
+from app.llm_search.planning import PLAN_JSON_SCHEMA
 from app.llm_search.ports import PlanPrompt
 
 _PROMPT = PlanPrompt(
@@ -47,6 +48,18 @@ def _planner(response: httpx.Response | Exception) -> tuple[LlamaQueryPlanner, d
     return LlamaQueryPlanner("http://llama:8008/", 20.0, "gemma", post=fake_post), captured
 
 
+def _sequence_planner(*responses: httpx.Response) -> tuple[LlamaQueryPlanner, list[dict[str, Any]]]:
+    """호출마다 다른 응답을 돌려준다. 폴백을 확인하려면 두 번의 요청을 봐야 한다."""
+    sent: list[dict[str, Any]] = []
+    remaining = list(responses)
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        sent.append(kwargs["json"])
+        return remaining.pop(0)
+
+    return LlamaQueryPlanner("http://llama:8008/", 20.0, "gemma", post=fake_post), sent
+
+
 def test_모델_원문을_그대로_돌려준다() -> None:
     """해석은 어댑터가 하지 않는다. 검증 없이 통과시키면 방어선이 두 곳이 된다."""
     content = '{"intent":"detection_search"}'
@@ -64,11 +77,45 @@ def test_결정적인_응답을_받도록_요청한다() -> None:
     body = captured["json"]
     assert body["temperature"] == 0
     assert body["model"] == "gemma"
-    assert body["response_format"] == {"type": "json_object"}
     # 타임아웃은 멈추지 않는 모델의 해법이 아니다. 생성 길이 자체를 막는다.
     assert body["max_tokens"] > 0
     assert captured["timeout"] == 20.0
     assert captured["url"] == "http://llama:8008/v1/chat/completions"
+
+
+def test_생성_단계에서_스키마로_구조를_강제한다() -> None:
+    """저양자화 모델에서 코드펜스·없는 키가 애초에 나오지 않게 만드는 장치다."""
+    planner, captured = _planner(_response({"choices": [{"message": {"content": "{}"}}]}))
+
+    planner.plan(_PROMPT)
+
+    response_format = captured["json"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    schema = response_format["json_schema"]["schema"]
+    # 검증의 정본은 planning.py다. 어댑터가 규격을 따로 들고 있으면 갈라진다.
+    assert schema is PLAN_JSON_SCHEMA
+    assert schema["additionalProperties"] is False
+
+
+def test_스키마를_모르는_서버에는_json_object로_낮춰_다시_보낸다() -> None:
+    """지원 여부를 아직 실측하지 못했다. 거절당하면 기능이 통째로 죽는다."""
+    planner, sent = _sequence_planner(
+        _response({"error": "unsupported response_format"}, status=400),
+        _response({"choices": [{"message": {"content": '{"intent":"detection_search"}'}}]}),
+    )
+
+    assert planner.plan(_PROMPT) == '{"intent":"detection_search"}'
+    assert [body["response_format"]["type"] for body in sent] == ["json_schema", "json_object"]
+
+
+def test_서버_오류에는_폴백하지_않는다() -> None:
+    """5xx는 낮춰 보내도 같은 결과다. 요청만 두 배가 된다."""
+    planner, sent = _sequence_planner(_response({"error": "no model"}, status=503))
+
+    with pytest.raises(LlmSearchPlannerUnavailableError):
+        planner.plan(_PROMPT)
+
+    assert len(sent) == 1
 
 
 def test_지시문과_질문을_나눠_보낸다() -> None:

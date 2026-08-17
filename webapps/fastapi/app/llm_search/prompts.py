@@ -62,11 +62,18 @@ _INSTRUCTION = """\
 """
 
 
+_RETRY_SUFFIX = """
+
+**직전 응답이 규격을 벗어났다.** 이번에는 JSON 객체 하나만, 위에 적힌 키만 써서
+출력하라. 설명도 코드펜스도 붙이지 마라."""
+
+
 def build_system_prompt(
     *,
     now: datetime,
     cameras: Sequence[CameraChoice],
     max_limit: int,
+    retry: bool = False,
 ) -> str:
     """모델에게 줄 지시문을 만든다.
 
@@ -78,14 +85,19 @@ def build_system_prompt(
 
     `max_limit`은 호출자가 요청한 상한과 같은 값이어야 한다. 지시문이 허용한 수를
     검증이 되돌려 깎으면, 모델은 규격을 지켰는데 결과가 줄어든 것처럼 보인다.
+
+    `retry`는 직전 응답이 규격을 벗어났을 때 켠다. **모델이 뱉은 원문은 넣지 않는다.**
+    되돌려 넣어 봐야 같은 실수를 다시 읽게 만들 뿐이고, 프롬프트를 모델 출력으로
+    오염시키는 경로가 된다. 규격을 다시 못 박는 문장 하나면 족하다.
     """
     now_kst = now.astimezone(KST)
-    return _INSTRUCTION.format(
+    instruction = _INSTRUCTION.format(
         max_limit=max_limit,
         camera_lines=_format_cameras(cameras),
         now_kst=now_kst.strftime("%Y-%m-%d %H:%M:%S"),
         today_kst=now_kst.strftime("%Y-%m-%d"),
     )
+    return instruction + _RETRY_SUFFIX if retry else instruction
 
 
 def _format_cameras(cameras: Sequence[CameraChoice]) -> str:

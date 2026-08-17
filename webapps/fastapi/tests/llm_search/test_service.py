@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.llm_search.errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
-from app.llm_search.ports import PlanPrompt
+from app.llm_search.ports import PlanPrompt, QueryPlanner
 from app.llm_search.service import LlmSearchService
 from app.snapshots.errors import SnapshotStorageUnavailableError
 from app.snapshots.models import build_snapshot_key
@@ -36,14 +36,28 @@ class FakePlanner:
         self._plan = plan
         self._fails = fails
         self.last_prompt: PlanPrompt | None = None
+        self.calls = 0
 
     def plan(self, prompt: PlanPrompt) -> str:
         self.last_prompt = prompt
+        self.calls += 1
         if self._fails:
             raise LlmSearchPlannerUnavailableError()
         if self._plan is None:
             return "무슨 말인지 모르겠습니다."
         return json.dumps(self._plan)
+
+
+class SequencePlanner:
+    """호출마다 다른 원문을 돌려준다. 재시도를 보려면 두 번의 프롬프트가 필요하다."""
+
+    def __init__(self, *raws: str) -> None:
+        self._raws = list(raws)
+        self.prompts: list[PlanPrompt] = []
+
+    def plan(self, prompt: PlanPrompt) -> str:
+        self.prompts.append(prompt)
+        return self._raws.pop(0)
 
 
 class FakeStorage:
@@ -112,7 +126,7 @@ def _event(
 
 def _build(
     *,
-    planner: FakePlanner | None = None,
+    planner: QueryPlanner | None = None,
     events: list[DetectionEvent] | None = None,
     streams: list[VideoStream] | None = None,
     snapshot_keys: list[str] | None = None,
@@ -304,12 +318,59 @@ def test_프롬프트에_등록된_카메라를_넣어_준다() -> None:
     assert planner.last_prompt.now == _NOW
 
 
-def test_모델이_규격을_벗어나면_계획_오류를_던진다() -> None:
+def test_모델이_규격을_벗어나면_한_번_더_시도한다() -> None:
+    """작은 모델은 첫 응답이 깨져도 다시 물으면 붙는 일이 흔하다.
+
+    한 번의 실패로 422를 돌려주면 사용자는 잘못이 없는데 질문을 고치라는 말을 듣는다.
+    """
+    valid = json.dumps(
+        {
+            "intent": "detection_search",
+            "camera_id": None,
+            "classroom_id": None,
+            "from": _FROM,
+            "to": _TO,
+        }
+    )
+    planner = SequencePlanner("```json\n설명을 덧붙였습니다```", valid)
+
+    outcome = _build(planner=planner).search("오늘", limit=20)
+
+    assert outcome.query.from_at == datetime(2026, 8, 14, 0, 0, tzinfo=UTC)
+    assert len(planner.prompts) == 2
+
+
+def test_재시도할_때만_규격을_다시_못_박는다() -> None:
+    """모델 원문은 되돌려 넣지 않는다. 같은 실수를 다시 읽게 만들 뿐이다."""
+    valid = json.dumps({"intent": "detection_search", "from": _FROM, "to": _TO})
+    planner = SequencePlanner("엉터리", valid)
+
+    _build(planner=planner).search("오늘", limit=20)
+
+    first, second = planner.prompts
+    assert "직전 응답이 규격을 벗어났다" not in first.system
+    assert "직전 응답이 규격을 벗어났다" in second.system
+    assert "엉터리" not in second.system
+
+
+def test_두_번_다_규격을_벗어나면_계획_오류를_던진다() -> None:
+    planner = FakePlanner(None)
+
     with pytest.raises(LlmSearchPlanInvalidError):
-        _build(planner=FakePlanner(None)).search("오늘", limit=20)
+        _build(planner=planner).search("오늘", limit=20)
+
+    assert planner.calls == 2
 
 
-def test_LLM에_닿지_못하면_그대로_전달한다() -> None:
-    """'조건을 못 만들었다'와 다르다. 질문을 고쳐도 해결되지 않는다."""
+def test_LLM에_닿지_못하면_재시도하지_않고_그대로_전달한다() -> None:
+    """'조건을 못 만들었다'와 다르다. 질문을 고쳐도 해결되지 않는다.
+
+    한 번 더 부르면 사용자를 두 배로 기다리게 할 뿐이다 — 이미 타임아웃을 다 쓴
+    상황일 수 있다.
+    """
+    planner = FakePlanner(fails=True)
+
     with pytest.raises(LlmSearchPlannerUnavailableError):
-        _build(planner=FakePlanner(fails=True)).search("오늘", limit=20)
+        _build(planner=planner).search("오늘", limit=20)
+
+    assert planner.calls == 1

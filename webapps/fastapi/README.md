@@ -288,7 +288,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `student_identity_confidence_threshold` | 학생 상태 판정에 사용할 최소 식별 신뢰도 | 기본 0.5. `0 <= x <= 1` |
 | `student_state_recent_event_limit` | 학생 상태 조회가 확인할 최근 이벤트 상한 | 기본 500. 최대 10,000 |
 | `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
-| `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다 |
+| `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다. **호출 한 번의 상한이다** — 모델이 규격을 벗어나면 한 번 더 물으므로 최악의 경우 두 배까지 걸린다 |
 | `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
 | `llm_search_scan_limit` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 

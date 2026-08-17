@@ -12,7 +12,12 @@ from datetime import UTC, datetime
 import pytest
 
 from app.llm_search.errors import LlmSearchPlanInvalidError
-from app.llm_search.planning import MAX_LIMIT, MAX_PLAN_TEXT_BYTES, parse_plan
+from app.llm_search.planning import (
+    MAX_LIMIT,
+    MAX_PLAN_TEXT_BYTES,
+    PLAN_JSON_SCHEMA,
+    parse_plan,
+)
 
 _VALID = {
     "intent": "detection_search",
@@ -205,3 +210,35 @@ def test_limit이_없으면_요청_상한을_쓴다() -> None:
 
     assert query.limit == 5
     assert query.notes == ()
+
+
+def test_생성_스키마와_검증_규격이_어긋나지_않는다() -> None:
+    """스키마는 생성 힌트고 `parse_plan`은 검증이다. 둘이 갈라지면 모델이 스키마를
+    지켜서 낸 응답이 422가 된다 — 고치기 가장 어려운 종류의 실패다.
+
+    스키마가 허용하는 키만으로 만든 응답이 실제로 통과하는지로 확인한다. 키 집합을
+    직접 비교하지 않는 이유는, 통과 여부가 진짜 계약이기 때문이다.
+    """
+    properties = PLAN_JSON_SCHEMA["properties"]
+    assert isinstance(properties, dict)
+
+    payload: dict[str, object] = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": "A101",
+        "from": "2026-08-14T06:00:00+09:00",
+        "to": "2026-08-14T07:00:00+09:00",
+        "limit": 10,
+    }
+    assert set(payload) == set(properties)
+
+    query = parse_plan(json.dumps(payload), max_span_days=7, limit_ceiling=MAX_LIMIT)
+
+    assert query.limit == 10
+    assert query.notes == ()
+
+
+def test_스키마가_모르는_키를_막는다() -> None:
+    """생성 단계에서 막아도 검증은 그대로 한다. 서버가 스키마를 무시할 수 있다."""
+    assert PLAN_JSON_SCHEMA["additionalProperties"] is False
+    assert _reason(json.dumps({**_VALID, "order_by": "captured_at"})) == "UNKNOWN_FIELD"
