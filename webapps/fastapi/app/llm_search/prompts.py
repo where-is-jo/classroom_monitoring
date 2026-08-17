@@ -5,7 +5,20 @@
 모델이 규격에 맞는 답을 내도 422가 된다.
 
 시각대를 여기서 다룬다. 사용자는 "오늘 6시"처럼 한국 시각으로 말하고 저장소는
-UTC로 조회하므로, **변환을 모델에게 맡기고 그 결과를 우리가 검증한다.**
+UTC로 조회한다. **그 변환을 모델에게 시키지 않는다.**
+
+## 왜 모델에게 9시간을 빼게 하지 않는가
+
+이전 지시문은 "KST에서 9시간을 빼서 UTC로 적어라"였다. 작은 모델이 가장 자주 틀리는
+종류의 작업이고, 특히 자정을 넘길 때(06:00 KST → 전날 21:00 UTC) 날짜를 그대로 두는
+실패가 흔하다. 더 나쁜 것은 **검증이 이 실패를 잡지 못한다는 점이다.** 9시간 어긋난
+값도 형식상 완벽한 ISO 8601이라 `planning.py`를 그대로 통과하고, 사용자는 조용히
+빈 결과를 받는다.
+
+그래서 모델에게는 **들은 시각을 그대로 적고 `+09:00`만 붙이라고** 요구한다. 산술이
+`datetime.astimezone`으로 옮겨 가고, 모델이 하는 일은 "6시"를 알아보는 것까지로
+줄어든다. 검증은 바뀌지 않는다 — `_required_datetime`이 이미 어떤 오프셋이든 UTC로
+정규화하므로, 모델이 굳이 UTC로 답해도 정답이면 통과한다.
 """
 
 from __future__ import annotations
@@ -31,11 +44,12 @@ _INSTRUCTION = """\
 
 규칙:
 - intent는 항상 "detection_search"다. 다른 값을 쓰지 마라.
-- from, to는 UTC ISO 8601이고 반드시 Z로 끝난다. 예: "2026-08-14T06:00:00Z"
-- 사용자는 한국 시각(KST, UTC+9)으로 말한다. **KST에서 9시간을 빼서 UTC로 적어라.**
+- from, to는 **사용자가 말한 시각을 그대로 적고 뒤에 +09:00을 붙인다.**
+  예) "6시" -> "{today_kst}T06:00:00+09:00"
+- **시각을 계산하지 마라.** 빼지도 더하지도 말고 들은 그대로 적는다.
 - from은 to보다 앞서야 한다. 같으면 안 된다.
 - to는 구간의 끝이며 그 시각 자체는 포함되지 않는다. "6시부터 7시 사이"는 06:00~07:00이다.
-- 기간을 말하지 않았으면 오늘 하루(KST 00:00 ~ 다음날 00:00)로 잡아라.
+- 기간을 말하지 않았으면 오늘 하루(00:00부터 다음날 00:00까지)로 잡아라.
 - limit은 1 이상 {max_limit} 이하의 정수다. 말하지 않았으면 {max_limit}을 쓴다.
 - 위 여섯 개 말고 다른 키를 넣지 마라.
 
@@ -43,9 +57,15 @@ _INSTRUCTION = """\
 **목록에 없는 곳을 말했거나 특정하지 않았으면 null을 쓴다. 식별자를 지어내지 마라.**
 {camera_lines}
 
-지금 시각: {now_kst} (KST) = {now_utc} (UTC)
-오늘 날짜: {today_kst} (KST)\
+지금 시각: {now_kst}
+오늘 날짜: {today_kst}\
 """
+
+
+_RETRY_SUFFIX = """
+
+**직전 응답이 규격을 벗어났다.** 이번에는 JSON 객체 하나만, 위에 적힌 키만 써서
+출력하라. 설명도 코드펜스도 붙이지 마라."""
 
 
 def build_system_prompt(
@@ -53,23 +73,31 @@ def build_system_prompt(
     now: datetime,
     cameras: Sequence[CameraChoice],
     max_limit: int,
+    retry: bool = False,
 ) -> str:
     """모델에게 줄 지시문을 만든다.
 
     `now`는 호출자가 한 번만 구해서 넘긴다. 프롬프트의 "지금"과 검증의 "지금"이
     다른 값이면 경계 시각에서 결과가 어긋난다.
 
+    **"지금"을 한국 시각으로만 알려준다.** UTC를 함께 주면 모델이 그쪽으로 변환하려
+    들고, 그 변환이 이 기능에서 없애려는 실패 그 자체다.
+
     `max_limit`은 호출자가 요청한 상한과 같은 값이어야 한다. 지시문이 허용한 수를
     검증이 되돌려 깎으면, 모델은 규격을 지켰는데 결과가 줄어든 것처럼 보인다.
+
+    `retry`는 직전 응답이 규격을 벗어났을 때 켠다. **모델이 뱉은 원문은 넣지 않는다.**
+    되돌려 넣어 봐야 같은 실수를 다시 읽게 만들 뿐이고, 프롬프트를 모델 출력으로
+    오염시키는 경로가 된다. 규격을 다시 못 박는 문장 하나면 족하다.
     """
     now_kst = now.astimezone(KST)
-    return _INSTRUCTION.format(
+    instruction = _INSTRUCTION.format(
         max_limit=max_limit,
         camera_lines=_format_cameras(cameras),
         now_kst=now_kst.strftime("%Y-%m-%d %H:%M:%S"),
-        now_utc=now.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"),
         today_kst=now_kst.strftime("%Y-%m-%d"),
     )
+    return instruction + _RETRY_SUFFIX if retry else instruction
 
 
 def _format_cameras(cameras: Sequence[CameraChoice]) -> str:

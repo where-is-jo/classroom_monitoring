@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from ..ports import PlanPrompt
 from ..prompts import KST
@@ -30,13 +30,13 @@ class StubQueryPlanner:
                 "intent": "detection_search",
                 "camera_id": None,
                 "classroom_id": None,
-                "from": _to_utc_text(start_kst),
-                "to": _to_utc_text(end_kst),
+                "from": _to_kst_text(start_kst),
+                "to": _to_kst_text(end_kst),
             }
         )
 
 
-def _to_utc_text(moment: datetime) -> str:
-    # isoformat()은 +00:00을 쓰지만 계약은 Z로 끝나는 형식이다. 실제 모델에게
-    # 요구하는 형식과 대역이 내는 형식을 같게 둬야 계약이 실제로 검증된다.
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _to_kst_text(moment: datetime) -> str:
+    # 프롬프트가 모델에게 요구하는 형식과 같다 — 한국 시각 + "+09:00". 대역만 UTC로
+    # 답하면 "모델이 낸 값이 UTC로 정규화되는가"가 검증되지 않는다.
+    return moment.astimezone(KST).strftime("%Y-%m-%dT%H:%M:%S+09:00")

@@ -8,8 +8,17 @@
 - `temperature: 0` — 같은 질문이 매번 다른 계획을 내면 기능 자체를 시험할 수 없다
 - `max_tokens` — 타임아웃은 멈추지 않는 모델의 해법이 아니다. 타임아웃 안에서
   수 MB를 읽을 수 있다. 생성 길이 자체를 막는다
-- `response_format: json_object` — 설명을 덧붙이는 실패를 줄인다. 다만 이것만으로
-  키가 맞는다는 보장은 없어서 검증은 그대로 한다
+- `response_format: json_schema` — llama.cpp가 스키마를 grammar로 바꿔 **생성
+  단계에서** 구조를 강제한다. 코드펜스·설명·없는 키·틀린 타입이 애초에 나오지
+  않는다. 저양자화 모델에서 특히 크게 작동한다. 다만 이것으로 값이 맞는다는 보장은
+  없어서 검증은 그대로 한다
+
+## 스키마를 지원하지 않는 서버로 폴백한다
+
+`json_schema`를 모르는 빌드는 요청 자체를 4xx로 거절한다. 그러면 기능이 통째로
+죽는데, **우리는 아직 실제 서버에서 확인하지 못했다.** 4xx를 받으면 한 번만
+`json_object`로 낮춰 다시 보낸다. 재시도가 아니라 호환성 처리라 이 계층에 둔다 —
+모델이 규격을 벗어난 경우의 재시도는 서비스가 담당한다.
 
 ## GPU를 추론 워커와 나눠 쓴다
 
@@ -20,16 +29,26 @@ llama-server와 inference-worker가 같은 GPU를 쓴다(compose 주석). 인증
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 
 from ..errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
+from ..planning import PLAN_JSON_SCHEMA
 from ..ports import PlanPrompt
+
+logger = logging.getLogger(__name__)
 
 # 계획 JSON은 200바이트 남짓이다. 넉넉히 잡아도 이 정도면 끝난다.
 _MAX_TOKENS = 256
+
+_SCHEMA_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {"name": "detection_search_plan", "schema": PLAN_JSON_SCHEMA},
+}
+_OBJECT_FORMAT: dict[str, Any] = {"type": "json_object"}
 
 PostCallable = Callable[..., httpx.Response]
 
@@ -54,20 +73,14 @@ class LlamaQueryPlanner:
 
     def plan(self, prompt: PlanPrompt) -> str:
         try:
-            response = self._post(
-                self._url,
-                json={
-                    "model": self._model,
-                    "messages": [
-                        {"role": "system", "content": prompt.system},
-                        {"role": "user", "content": prompt.question},
-                    ],
-                    "temperature": 0,
-                    "max_tokens": _MAX_TOKENS,
-                    "response_format": {"type": "json_object"},
-                },
-                timeout=self._timeout,
-            )
+            response = self._request(prompt, _SCHEMA_FORMAT)
+            if 400 <= response.status_code < 500:
+                # 스키마를 모르는 빌드다. 5xx는 폴백해도 같은 결과라 그대로 둔다.
+                logger.warning(
+                    "llama-server가 json_schema 요청을 거절했다(%s). json_object로 낮춘다",
+                    response.status_code,
+                )
+                response = self._request(prompt, _OBJECT_FORMAT)
             response.raise_for_status()
             payload = response.json()
         except httpx.HTTPError as error:
@@ -77,6 +90,22 @@ class LlamaQueryPlanner:
             raise LlmSearchPlanInvalidError("RESPONSE_NOT_JSON") from error
 
         return _extract_content(payload)
+
+    def _request(self, prompt: PlanPrompt, response_format: dict[str, Any]) -> httpx.Response:
+        return self._post(
+            self._url,
+            json={
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": prompt.system},
+                    {"role": "user", "content": prompt.question},
+                ],
+                "temperature": 0,
+                "max_tokens": _MAX_TOKENS,
+                "response_format": response_format,
+            },
+            timeout=self._timeout,
+        )
 
 
 def _extract_content(payload: object) -> str:

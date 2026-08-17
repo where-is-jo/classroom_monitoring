@@ -430,10 +430,19 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
 
 - **스냅샷 버킷의 접근 권한.** 지금은 worker와 fastapi가 모두 MinIO root 키로 붙는다.
   쓰기(worker)와 읽기(fastapi)를 나눈 전용 키가 필요하다.
-- **Gemma 모델의 정확한 GGUF 파일.** 어떤 크기·양자화를 쓸지 정해지지 않아
-  `compose.llm.dev.yml`의 `LLAMA_ARG_MODEL`을 placeholder(`gemma.gguf`)로 두었다.
-- **GPU 분배.** inference worker와 llama-server 둘 다 `count: 1`이다. 같은 GPU를
-  나눠 쓸지 각각 다른 GPU에 붙일지(`device_ids`) 서버의 GPU 개수를 보고 정한다.
+- **어떤 GGUF를 `gemma.gguf`로 둘 것인가.** 파일명은 `compose.llm.dev.yml`에
+  고정했고 바꾸지 않는다 — 모델을 바꿀 때마다 compose를 고치면 서버와 저장소가
+  어긋난다. **받은 가중치를 `models/gemma.gguf`로 이름을 바꿔 두고, 무엇을 두었는지
+  아래 표에 적는다.**
+
+  | 날짜 | 모델 | 양자화 | 크기 |
+  | --- | --- | --- | --- |
+  | (미기재) | | | |
+
+  아직 아무것도 올리지 않았다. 이 표가 비어 있으면 llama-server는 기동에 실패한다.
+- **GPU 분배.** inference worker와 llama-server 둘 다 `device_ids: ["1"]`이다.
+  계정에 할당된 GPU가 그것뿐이라 나눌 수 없다. **GPU가 1장뿐인 다른 PC에서는 이
+  설정으로 기동에 실패한다** — 그 환경을 쓰려면 별도 파일이 필요하다.
 - **비밀값 관리.** `env/*.env`는 지금 로컬 파일이다. 공용 서버에서 어떻게 주입할지
   정해지지 않았다.
 - **영상 스트림의 접근 제어.** 재생 세션 API는 인증 없이 열려 있다.

@@ -119,9 +119,14 @@ class Settings(BaseSettings):
     snapshot_storage_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
     # --- 자연어 탐지 검색 ---
-    # stub은 LLM 없이 계약과 화면을 확인하기 위한 대역이며 "오늘 하루"만 돌려준다.
-    # 기본을 stub으로 두는 이유는 개발과 테스트가 GPU 서버에 매이지 않게 하기 위해서다.
-    llm_search_mode: Literal["stub", "llama"] = "stub"
+    # disabled는 기능 자체를 끈다. API는 503, 화면은 검색 폼 없이 안내만 보여준다.
+    # stub은 LLM 없이 계약과 화면을 확인하기 위한 대역이며 **질문을 읽지 않고**
+    # "오늘 하루"만 돌려준다. 테스트 전용이다.
+    #
+    # **기본값이 disabled인 이유**: stub을 기본으로 두면 로컬에서 질문을 넣었을 때
+    # 그럴듯한 결과가 나오는데 그것은 질문과 무관한 결과다. 꺼진 기능이 켜진 것처럼
+    # 보이는 쪽이 아예 막힌 것보다 나쁘다. GPU가 있는 환경에서만 llama로 올린다.
+    llm_search_mode: Literal["disabled", "stub", "llama"] = "disabled"
     llm_search_url: str = "http://127.0.0.1:8008"
     # 생성은 조회보다 훨씬 느려서 다른 외부 호출(5초)과 같은 값을 쓸 수 없다.
     llm_search_timeout_seconds: float = Field(default=20, gt=0, le=120)

@@ -11,6 +11,24 @@ from __future__ import annotations
 from ..shared.errors import DomainError
 
 
+class LlmSearchDisabledError(DomainError):
+    """이 배포에서 자연어 검색을 제공하지 않는다.
+
+    **"닿지 못했다"와 다르다.** 서버가 잠시 죽은 것이 아니라 애초에 없는 것이므로
+    기다리거나 다시 시도할 이유가 없다. 세 상태(비활성 / 닿지 못함 / 조건으로 바꾸지
+    못함)를 코드로 구분해야 로그에서도 섞이지 않는다.
+
+    501이 아니라 503인 이유는 구현이 없는 것이 아니라 **의존 서비스(LLM)가 이 환경에
+    없기** 때문이다. api-convention의 503("의존 서비스 사용 불가")이 그 자리다.
+    """
+
+    code = "LLM_SEARCH_DISABLED"
+    status_code = 503
+
+    def __init__(self) -> None:
+        super().__init__("자연어 검색은 이 환경에서 제공하지 않습니다.")
+
+
 class LlmSearchPlannerUnavailableError(DomainError):
     """LLM 서버에 닿지 못했다.
 

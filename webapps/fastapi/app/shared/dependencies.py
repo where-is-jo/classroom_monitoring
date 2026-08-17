@@ -551,12 +551,22 @@ def get_llm_search_service(
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
     snapshot_service: SnapshotService = Depends(get_snapshot_service),
     settings: Settings = Depends(get_settings),
-) -> LlmSearchService:
-    """자연어 검색 조립.
+) -> LlmSearchService | None:
+    """자연어 검색 조립. **비활성 환경에서는 `None`이다.**
 
     스냅샷만 포트가 아니라 서비스를 받는다. 객체 키 규칙의 해석과 저장소 장애 처리가
     그 안에 있어서, 포트를 직접 넘기면 키 규칙이 세 번째로 복사된다.
+
+    비활성을 여기서 판정하는 이유는 **조립 지점이 mode를 아는 유일한 곳**이기
+    때문이다(결정 0002). 라우터가 `Settings`를 직접 읽으면 설정 세부가 HTTP 계층으로
+    새고, 서비스가 읽으면 "만들어졌는데 쓰면 안 되는 객체"가 생긴다.
+
+    예외를 던지지 않고 `None`을 돌려주는 이유는 화면 때문이다. 의존성이 예외를 던지면
+    화면도 오류 페이지가 되어, 정작 보여줘야 할 **"왜 못 쓰는지"를 안내할 자리가
+    사라진다.** 호출자 둘(API·화면)이 각자 알맞게 처리한다.
     """
+    if settings.llm_search_mode == "disabled":
+        return None
     return LlmSearchService(
         _query_planner(settings),
         detection_repository,

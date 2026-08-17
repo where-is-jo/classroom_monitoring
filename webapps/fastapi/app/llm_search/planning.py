@@ -46,6 +46,31 @@ _INTENT: Final = "detection_search"
 _ALLOWED_KEYS: Final = frozenset({"intent", "camera_id", "classroom_id", "from", "to", "limit"})
 _MAX_IDENTIFIER_LENGTH: Final = 128
 
+# 어댑터가 생성 단계에서 구조를 강제하는 데 쓴다(llama.cpp가 grammar로 바꿔 준다).
+# **검증이 아니라 생성 힌트다.** 이 스키마를 통과한 값도 아래 `parse_plan`을 전부
+# 거친다 — 서버가 스키마를 무시하거나 지원하지 않을 수 있고, 스키마로는 표현되지
+# 않는 규칙(시각대, from < to, 기간 상한)이 남기 때문이다.
+#
+# 여기 두는 이유는 키 목록의 정본이 이 파일이기 때문이다. 어댑터에 두면 규격이
+# 두 곳에서 갈라진다. 정합성은 test_planning.py가 고정한다.
+#
+# `const`가 아니라 `enum`을 쓰고 시각에 `pattern`을 걸지 않은 것은 의도적이다.
+# JSON Schema의 표현 중 grammar로 변환되지 않는 것이 있으면 서버가 요청을 통째로
+# 거절할 수 있어, 확실히 지원되는 표현만 쓴다.
+PLAN_JSON_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "properties": {
+        "intent": {"enum": [_INTENT]},
+        "camera_id": {"type": ["string", "null"]},
+        "classroom_id": {"type": ["string", "null"]},
+        "from": {"type": "string"},
+        "to": {"type": "string"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT},
+    },
+    "required": ["intent", "from", "to"],
+    "additionalProperties": False,
+}
+
 
 def parse_plan(
     text: str,
