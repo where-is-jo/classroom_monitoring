@@ -91,7 +91,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
-| `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다 |
+| `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다. **`LLM_SEARCH_MODE=disabled`(기본값)에서는 검색 폼 없이 안내만 나온다** — GPU가 있는 환경에서만 동작한다 |
 
 `/classrooms/{id}` 상세 페이지는 없다. `/classrooms?classroom_id={id}`에서 같은
 정보를 선택해 본다.
@@ -261,7 +261,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `FACE_ANALYZER_MODE`, `FACE_ANALYZER_URL` | 얼굴 분석 companion 방식과 주소 | local은 보통 `synthetic`, dev/prod는 `http` |
 | `SNAPSHOT_STORAGE_BACKEND` | 탐지 스냅샷 저장소 | `memory` / `minio`. local은 보통 `memory` |
 | `SNAPSHOT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필수. 비밀값 |
-| `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `stub`. `stub`은 LLM 없이 "오늘 하루"만 돌려주는 대역, `llama`는 llama-server 호출 |
+| `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `disabled`(기능 차단). `stub`은 질문을 읽지 않고 "오늘 하루"만 돌려주는 **테스트 전용** 대역, `llama`는 llama-server 호출. [결정 0021](../../docs/architecture/decisions.md#0021--자연어-검색을-gpu-서버에서만-켜고-그-밖의-환경에서는-기능을-끈다) |
 | `LLM_SEARCH_URL` | llama-server의 OpenAI 호환 API 주소 | `llama` mode에서 필수. 기본 `http://127.0.0.1:8008` |
 | `LLM_SEARCH_MODEL` | 요청에 넣을 모델 이름 | llama-server의 `LLAMA_ARG_ALIAS`와 같아야 한다. 기본 `gemma` |
 | `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |

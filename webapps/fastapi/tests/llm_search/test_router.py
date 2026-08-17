@@ -1,8 +1,8 @@
 """검색 API와 화면의 계약.
 
-화면이 구분해야 하는 상태가 다섯이다 — 질문 전 / 결과 없음 / LLM에 닿지 못함 /
-조건으로 바꾸지 못함 / 이미지 확인 실패. **묶어서 보여주면 사용자가 무엇을 해야
-하는지 알 수 없다.** 여기서 다섯을 모두 고정한다.
+화면이 구분해야 하는 상태가 여섯이다 — 기능 비활성 / 질문 전 / 결과 없음 /
+LLM에 닿지 못함 / 조건으로 바꾸지 못함 / 이미지 확인 실패. **묶어서 보여주면
+사용자가 무엇을 해야 하는지 알 수 없다.** 여기서 여섯을 모두 고정한다.
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ from fastapi.testclient import TestClient
 from app.llm_search.errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
 from app.llm_search.models import DetectionHit, IdentifiedStudent, SearchOutcome, SearchQuery
 from app.main import app
-from app.shared.dependencies import get_llm_search_service
+from app.shared.config import Settings
+from app.shared.dependencies import get_llm_search_service, get_settings
 
 _QUERY = SearchQuery(
     camera_id=None,
@@ -68,10 +69,32 @@ def client() -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_llm_search_service, None)
+    app.dependency_overrides.pop(get_settings, None)
 
 
 def _override(service: FakeService) -> None:
     app.dependency_overrides[get_llm_search_service] = lambda: service
+
+
+def _disable() -> None:
+    """기능을 끈 환경을 만든다.
+
+    서비스를 `None`으로 갈아끼우지 않고 **설정을 바꾼다.** 조립 지점
+    (`get_llm_search_service`)이 mode를 보고 실제로 `None`을 돌려주는지까지 함께
+    확인해야, "설정은 disabled인데 서비스가 만들어지는" 실패를 잡을 수 있다.
+    """
+
+    def settings() -> Settings:
+        # _env_file=None으로 개발자 .env를 무시한다. 로컬 파일이 mode를 덮어쓰면
+        # 이 테스트가 사람마다 다르게 통과한다.
+        return Settings(  # type: ignore[call-arg]
+            _env_file=None,
+            app_env="local",
+            database_mode="memory",
+            llm_search_mode="disabled",
+        )
+
+    app.dependency_overrides[get_settings] = settings
 
 
 def test_검색_결과와_해석한_계획을_함께_돌려준다(client: TestClient) -> None:
@@ -220,3 +243,38 @@ def test_화면이_해석한_계획과_조정_사유를_보여준다(client: Tes
     assert "이렇게 이해했습니다" in response.text
     assert "마지막 7일만 찾았습니다" in response.text
     assert "이것이 전부가 아닙니다" in response.text
+
+
+def test_기능을_끈_환경에서는_API가_503이다(client: TestClient) -> None:
+    """'닿지 못함'과 다른 코드를 쓴다. 기다린다고 켜지지 않는다."""
+    _disable()
+
+    response = client.post("/api/v1/llm-searches", json={"question": "오늘"})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "LLM_SEARCH_DISABLED"
+
+
+def test_기능을_끈_화면은_폼_없이_안내만_보여준다(client: TestClient) -> None:
+    """누를 수 있는 검색창을 남겨 두면 눌러 보고 '고장'으로 읽는다."""
+    _disable()
+
+    response = client.get("/llm-search")
+
+    assert response.status_code == 200
+    assert "로컬 환경에서는 사용할 수 없습니다" in response.text
+    assert 'name="q"' not in response.text
+    # 대신 갈 곳을 알려준다. 막아 두기만 하면 사용자가 할 수 있는 일이 없다.
+    assert "/snapshots" in response.text
+
+
+def test_기능을_끈_환경에서는_질문을_붙여도_검색하지_않는다(client: TestClient) -> None:
+    """URL로 q를 직접 붙이는 경로가 남아 있다. 그쪽으로도 새면 안 된다."""
+    _disable()
+
+    response = client.get("/llm-search", params={"q": "오늘 A101에 누가 있었어?"})
+
+    assert response.status_code == 200
+    assert "로컬 환경에서는 사용할 수 없습니다" in response.text
+    assert "이렇게 이해했습니다" not in response.text
+    assert "탐지 기록이 없습니다" not in response.text
