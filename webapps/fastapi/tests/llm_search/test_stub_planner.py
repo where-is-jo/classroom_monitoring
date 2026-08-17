@@ -40,6 +40,14 @@ def test_하루의_경계를_한국_시각으로_자른다() -> None:
     assert query.from_at == datetime(2026, 8, 13, 15, 0, tzinfo=UTC)
 
 
+def test_모델에게_요구하는_것과_같은_시각_형식을_쓴다() -> None:
+    """대역만 UTC로 답하면 "모델이 낸 값이 UTC로 정규화되는가"가 검증되지 않는다."""
+    raw = _plan(datetime(2026, 8, 14, 10, 0, tzinfo=UTC))
+
+    assert "+09:00" in raw
+    assert "Z" not in raw
+
+
 def test_요청한_limit을_그대로_쓴다() -> None:
     """대역은 limit을 정하지 않는다. 요청값이 그대로 살아야 한다."""
     query = parse_plan(
