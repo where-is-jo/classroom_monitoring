@@ -4,8 +4,7 @@
 YOLO 데이터셋을 발행한다.
 **대상 독자**: 개발자 PC에서 데이터셋을 준비하는 팀원과 labelImg 검수자.
 
-이 도구는 웹 서비스나 상시 워커가 아닌 오프라인 CLI다. 구조 결정과 범위는
-[결정 0022](../../../docs/architecture/decisions.md#0022--사람-탐지-학습-데이터셋을-로컬-반자동-라벨링-도구로-만든다)가 기준이다.
+이 도구는 웹 서비스나 상시 워커가 아닌 오프라인 CLI다.
 
 ## 안전 범위
 
@@ -20,6 +19,55 @@ labelImg는 저장소에 포함하거나 이 도구에서 설치·업데이트�
 확인한 로컬 버전을 고정해 사용하며, 완료 영수증에는 실행 파일 SHA-256과 smoke test 확인이
 기록된다. YOLO 파일 사용법은 [labelImg 공식 README](https://github.com/HumanSignal/labelImg/blob/master/README.rst)를
 기준으로 한다.
+
+## 최초 1회 설정
+
+모델 가중치는 크기가 크고 버전마다 Git 이력을 늘리므로 저장소에 커밋하지 않는다.
+다음 PowerShell 블록을 `deeplearning/training`에서 실행하면 Python 3.12 가상환경과
+의존성을 준비하고, 공식 `yolov8n.pt`를 Git 제외 경로에 내려받은 뒤 파일 해시와
+`.gitignore` 적용을 확인한다. 이미 준비된 항목은 재생성하거나 다시 받지 않는다.
+
+```powershell
+$ErrorActionPreference = "Stop"
+$trainingRoot = (Get-Location).Path
+$python = Join-Path $trainingRoot ".venv\Scripts\python.exe"
+$modelDir = Join-Path $trainingRoot "data\auto-labeling\models"
+$modelPath = Join-Path $modelDir "yolov8n.pt"
+$expectedModelSha256 = "f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36"
+
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    py -3.12 -m venv .venv
+}
+
+& $python -m pip install --upgrade pip
+& $python -m pip install -r requirements.txt
+New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+
+if (-not (Test-Path -LiteralPath $modelPath -PathType Leaf)) {
+    Push-Location $modelDir
+    try {
+        & $python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+$actualModelSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $modelPath).Hash.ToLowerInvariant()
+if ($actualModelSha256 -ne $expectedModelSha256) {
+    throw "yolov8n.pt SHA-256이 검증값과 다릅니다: $actualModelSha256"
+}
+
+git check-ignore --quiet -- "data/auto-labeling/models/yolov8n.pt"
+if ($LASTEXITCODE -ne 0) {
+    throw "모델 파일이 .gitignore 대상이 아닙니다. 커밋하지 말고 설정을 확인하세요."
+}
+
+Write-Host "자동 라벨링 실행 환경 준비 완료: $modelPath"
+```
+
+labelImg는 이 설정에 포함하지 않는다. 검수 단계에서는 별도로 설치한 실행 파일 경로를
+`review-complete --labelimg-executable`에 전달한다.
 
 ## 입력 manifest
 
@@ -52,10 +100,12 @@ labelImg는 저장소에 포함하거나 이 도구에서 설치·업데이트�
 `deeplearning/training`에서 실행한다.
 
 ```powershell
-python -m pip install -r requirements.txt
-python -m auto_labeling prepare --manifest <manifest.json>
-python -m auto_labeling prelabel --run-dir <run-dir> --model-path <yolov8n.pt> --device cpu
-python -m auto_labeling prepare-review --run-dir <run-dir>
+.\.venv\Scripts\python.exe -m auto_labeling prepare --manifest <manifest.json>
+.\.venv\Scripts\python.exe -m auto_labeling prelabel `
+  --run-dir <run-dir> `
+  --model-path data\auto-labeling\models\yolov8n.pt `
+  --device cpu
+.\.venv\Scripts\python.exe -m auto_labeling prepare-review --run-dir <run-dir>
 ```
 
 첫 파일럿과 보정 파일이 없는 실행은 모든 프레임을 검수 폴더에 넣는다. 출력된
