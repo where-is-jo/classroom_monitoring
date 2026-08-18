@@ -95,7 +95,7 @@ README.md      이 문서
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
 | [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD 검출·MediaPipe 자세 구현. 나머지 예정 |
-| [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | Grafana 설정 + 추론 파이프라인·자연어 검색 지표 수집. 대시보드·알림 규칙은 아직 없음 |
+| [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | Grafana 설정 + 세 서비스 지표 수집. 애플리케이션 대시보드·알림 규칙은 아직 없음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 
 `webapps/`는 웹 애플리케이션 전용이다. 웹 요청을 처리하지 않는 서비스는

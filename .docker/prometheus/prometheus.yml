@@ -18,6 +18,14 @@ scrape_configs:
     static_configs:
       - targets: ["fastapi:8001"]
 
+  # 얼굴 분석 내부 서비스. 앱과 같은 포트(8100)에 /metrics를 연다.
+  #
+  # **이 컨테이너도 기본으로 뜨지 않는다.** 모델 가중치 346MB를 .docker/models/face에
+  # 미리 두고 `--profile face`로 올려야 한다. 그 전까지 up=0으로 보인다.
+  - job_name: deeplearning
+    static_configs:
+      - targets: ["deeplearning:8100"]
+
   # 추론 파이프라인(stream + inference). METRICS_ENABLED=true(기본)일 때 9101을 연다.
   #
   # **이 컨테이너는 기본으로 뜨지 않는다.** GPU가 있는 PC에서 `--profile worker`로

@@ -6,9 +6,9 @@
 사용자에게 제품으로 제공하는 영상 실시간 모니터링은 이 디렉터리가 아니라
 [`monitoring/external`](../external/README.md)이다. 둘은 이름만 같고 목적·대상·수요자가 다르다.
 
-> 현재 상태: **추론 파이프라인과 자연어 검색 지표를 수집한다.** `worker`의 조립
-> 실행(`python -m pipeline.main`)과 `fastapi`가 각각 `/metrics`를 노출하고, 로컬
-> docker 스택의 Prometheus가 두 job을 긁는다. `deeplearning`은 아직 노출하지 않는다.
+> 현재 상태: **세 서비스가 모두 지표를 노출한다.** `worker`의 조립 실행
+> (`python -m pipeline.main`)·`fastapi`·`deeplearning`이 각각 `/metrics`를 열고, 로컬
+> docker 스택의 Prometheus가 세 job을 긁는다.
 > Grafana 데이터소스·대시보드 provisioning은 이 디렉터리에서 관리한다.
 > **알림 규칙은 아직 없다** — 알림 채널이 `결정 필요`이고, 임계값의 근거가 될
 > 정상 범위 데이터가 아직 쌓이지 않았다.
@@ -175,13 +175,57 @@ rate(classroom_monitoring_llm_schema_fallback_total[30m]) > 0
 **검색과 추론을 함께 봐야 하는 이유**는 llama-server와 inference-worker가 같은 GPU를
 나눠 쓰기 때문이다. 검색이 몰려 탐지가 느려지는지는 두 지연을 겹쳐 봐야 알 수 있다.
 
+### 지금 노출하는 지표 — deeplearning
+
+얼굴 분석 내부 서비스가 앱과 같은 포트(8100)의 `/metrics`에 노출한다. 정의는
+[`deeplearning/metrics.py`](../../deeplearning/metrics.py)에 있다.
+
+| 지표 | 타입 | label | 무엇을 답하는가 |
+| --- | --- | --- | --- |
+| `classroom_monitoring_face_analysis_duration_seconds` | Histogram | `stage` | **느린 쪽이 SCRFD인가 MediaPipe인가** |
+| `classroom_monitoring_face_analysis_requests_total` | Counter | `result` | 분석이 왜 끝났는가 |
+| `classroom_monitoring_face_analysis_sessions_active` | Gauge | 없음 | **세션이 정리되지 않고 쌓이는가** |
+| `classroom_monitoring_face_embedding_duration_seconds` | Histogram | 없음 | 등록 사진 처리에 걸리는 시간 |
+| `classroom_monitoring_face_embedding_requests_total` | Counter | `result` | 등록이 왜 실패하는가 |
+
+`stage`는 4(`detect`·`pose`·`quality`·`total`), 분석 `result`는 5(`ok`·`no_face`·
+`bad_image`·`missing_session`·`error`), embedding `result`는 6이다.
+
+**`no_face`를 실패로 묶지 않는다.** 사용자가 아직 가이드 안에 얼굴을 두지 못했다는
+정상적인 결과이고, 등록 화면은 그것을 보고 안내를 띄운다. `bad_image`와 섞으면
+"사용자가 자세를 못 잡았다"와 "클라이언트가 잘못 보내고 있다"가 구분되지 않는다.
+
+**세션 Gauge는 메모리 누수 감시용이다.** 등록 세션 이력은 `DELETE`가 와야 비워지는데
+브라우저가 화면을 그냥 닫으면 항목이 남는다. 이 값이 단조 증가하면 그 상태다.
+
+**`enrollment_id`와 얼굴에서 나온 수치(신뢰도·blur·yaw)는 지표로 내보내지 않는다.**
+앞은 값이 무한히 늘어나면서 개인을 가리키고, 뒤는 개인의 촬영 상태가 집계 밖으로
+나가는 일이다. 등록 화면이 이미 응답으로 받는 값이다.
+
+### PromQL 예시 — deeplearning
+
+```promql
+# 어느 구간이 느린가 (p95를 구간별로 나란히 본다)
+histogram_quantile(0.95,
+  sum by (stage, le) (rate(classroom_monitoring_face_analysis_duration_seconds_bucket[5m])))
+
+# 정리되지 않고 쌓이는 등록 세션 — 단조 증가하면 누수다
+classroom_monitoring_face_analysis_sessions_active
+
+# 분석이 500으로 실패하는 비율
+rate(classroom_monitoring_face_analysis_requests_total{result="error"}[5m])
+  / rate(classroom_monitoring_face_analysis_requests_total[5m])
+
+# 등록이 왜 실패하는가 (사유마다 조치가 다르다)
+sum by (result) (rate(classroom_monitoring_face_embedding_requests_total[30m]))
+```
+
 ### 아직 노출하지 않는 것
 
 `예정`이며 코드가 없다. **없는 지표의 패널을 미리 만들지 않는다.**
 
 | 대상 | 담당 | 비고 |
 | --- | --- | --- |
-| 얼굴 분석 단계별 지연·세션 수 | `deeplearning` | |
 | 탐지 결과 HTTP 전달 실패 건수 | `worker/inference` | 지금은 로그로만 남는다 |
 | 카메라 연결 상태·재연결 횟수 | `worker/stream` | |
 | 식별 성공률 | — | **얼굴 인식이 미구현이라 지금 만들면 항상 0이다** |
@@ -197,8 +241,7 @@ rate(classroom_monitoring_llm_schema_fallback_total[30m]) > 0
 
 ## 다른 서비스와의 관계
 
-- `fastapi`, `worker`: 지표를 노출한다. monitoring은 이를 수집만 한다.
-- `deeplearning`: 지표 노출은 `예정`이다.
+- `fastapi`, `worker`, `deeplearning`: 지표를 노출한다. monitoring은 이를 수집만 한다.
 - 브라우저: 지표를 직접 조회하지 않는다. 필요하면 `fastapi`를 통한다.
 - `RPAs`: 자동화 실행 결과를 지표로 다룰지는 **결정 필요**.
 
