@@ -398,12 +398,25 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
   환경변수로 인자를 넘긴다.
 - `server-cuda`와 `server-cuda-b10362`의 digest가 같은 것을 registry API로 대조.
 
+**llama-server는 실제로 기동해 응답까지 확인했다**(2026-08-18, L40S):
+
+- `compose.llm.dev.yml`로 기동 → `model loaded` → `listening on 0.0.0.0:8008`.
+  모델 로딩은 2초 남짓이고 `n_slots=4`, `n_ctx_slot=4096`으로 뜬다.
+- **compose의 GPU 예약이 실제로 GPU를 잡는다.** `deploy.resources.reservations.devices`
+  경로로 GPU 1번에 7,441 MiB를 점유했다 — `LLAMA_ARG_N_GPU_LAYERS=99`가 먹은 것이다.
+  worker의 `docker run --gpus all`과 달리 이 경로는 그동안 확인하지 못했던 부분이다.
+- **healthcheck가 healthy가 된다.** 이미지에 curl이 있어, 없으면 지우라고 적어 둔
+  `compose.llm.dev.yml`의 단서는 그대로 두어도 된다.
+- **chat completions가 `system` role을 받는다.** 이 GGUF의 내장 template은
+  `System role not supported`로 예외를 던지게 되어 있지만, 서버가 `--jinja` 없이
+  도는 legacy 경로라 llama.cpp의 gemma template이 system을 user에 합쳐 준다.
+  **`LLAMA_ARG_JINJA`를 켜면 자연어 검색의 모든 요청이 400이 된다** — 켜지 않는다.
+- 실제 지시문으로 계획 JSON을 받는 데 **질문당 0.8~0.9초**가 걸렸다.
+  `llm_search_timeout_seconds`(20초)는 여유가 크다.
+
 확인하지 못한 것:
 
-- **llama-server는 아직 기동하지 못했다.** Gemma GGUF 가중치가 없다.
-- **compose의 GPU 예약이 실제로 GPU를 잡는지.** worker 이미지의 GPU 동작은
-  `docker run --gpus all`로 확인했지만, compose의
-  `deploy.resources.reservations.devices` 경로로는 아직 확인하지 않았다.
+- **실제 카메라로 들어오는 영상.** 아래 검증은 합성 RTSP 스트림으로 했다.
 - **실제 카메라.** 아래 검증은 합성 RTSP 스트림으로 했다.
 
 **스냅샷 전 구간은 실제로 확인했다**(CUDA PC, GTX 1060 3GB):
@@ -447,9 +460,10 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
 
   | 날짜 | 모델 | 양자화 | 크기 |
   | --- | --- | --- | --- |
-  | (미기재) | | | |
+  | 2026-08-12 | gemma-2-9b-it | Q4_K_M | 5,761,057,728 B (5.4 GiB) |
 
-  아직 아무것도 올리지 않았다. 이 표가 비어 있으면 llama-server는 기동에 실패한다.
+  모델·양자화는 GGUF 헤더의 `general.name`과 `general.file_type`(15)에서 읽었다.
+  컨텍스트 상한은 8192이고 compose는 그중 4096만 쓴다.
 - **GPU 분배.** inference worker와 llama-server 둘 다 `device_ids: ["1"]`이다.
   계정에 할당된 GPU가 그것뿐이라 나눌 수 없다. **GPU가 1장뿐인 다른 PC에서는 이
   설정으로 기동에 실패한다** — 그 환경을 쓰려면 별도 파일이 필요하다.
