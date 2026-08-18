@@ -1,0 +1,8 @@
+# auto_labeling의 로컬 자동 검사에 필요한 경량 의존성.
+# 실제 YOLO 추론용 ultralytics·torch와 Jupyter는 requirements.txt에서만 설치한다.
+numpy>=1.26
+opencv-python-headless>=4.10
+pyyaml>=6.0
+pytest>=8.0
+ruff>=0.9
+mypy>=1.14
