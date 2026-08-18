@@ -44,7 +44,9 @@ from ..face_enrollment.adapters.memory import (
     InMemoryFaceObjectStorage,
     SyntheticFaceAnalyzer,
 )
+from ..face_enrollment.adapters.mongo import MongoFaceEnrollmentRepository
 from ..face_enrollment.models import PoseBin
+from ..face_enrollment.ports import FaceEnrollmentRepository
 from ..face_enrollment.rules import EnrollmentThresholds
 from ..face_enrollment.service import FaceEnrollmentService
 from ..llm_search.adapters.llama_planner import LlamaQueryPlanner
@@ -587,8 +589,19 @@ def get_video_demo_service(
 
 
 @lru_cache
-def _face_enrollment_repository() -> InMemoryFaceEnrollmentRepository:
+def _memory_face_enrollment_repository() -> InMemoryFaceEnrollmentRepository:
     return InMemoryFaceEnrollmentRepository()
+
+
+@lru_cache
+def _mongo_face_enrollment_repository() -> MongoFaceEnrollmentRepository:
+    return MongoFaceEnrollmentRepository(_mongo_database())
+
+
+def get_face_enrollment_repository() -> FaceEnrollmentRepository:
+    if get_settings().database_mode == "memory":
+        return _memory_face_enrollment_repository()
+    return _mongo_face_enrollment_repository()
 
 
 @lru_cache
@@ -630,7 +643,7 @@ def get_face_enrollment_service(
         PoseBin.DOWN: settings.face_pose_down_quota,
     }
     return FaceEnrollmentService(
-        _face_enrollment_repository(),
+        get_face_enrollment_repository(),
         get_face_object_storage(settings),
         (
             _http_face_analyzer(settings.face_analyzer_url, settings.face_analyzer_timeout_seconds)
@@ -750,6 +763,7 @@ def initialize_data_store() -> None:
                 MongoStudentRepository.ensure_indexes,
                 MongoRoiConnectionRepository.ensure_indexes,
                 MongoFaceEmbeddingRepository.ensure_indexes,
+                MongoFaceEnrollmentRepository.ensure_indexes,
             ],
         )
         # UoW 생성 시 transaction topology(replica set)를 검사한다.
@@ -799,7 +813,6 @@ def close_data_store() -> None:
     _mongo_roi_connection_repository.cache_clear()
     _mongo_database.cache_clear()
     _mongo_client.cache_clear()
-    _face_enrollment_repository.cache_clear()
     _memory_face_object_storage.cache_clear()
     _local_face_object_storage.cache_clear()
     _face_analyzer.cache_clear()
@@ -808,6 +821,8 @@ def close_data_store() -> None:
     _roi_classroom_service.cache_clear()
     _memory_roi_connection_repository.cache_clear()
     _memory_student_repository.cache_clear()
+    _memory_face_enrollment_repository.cache_clear()
+    _mongo_face_enrollment_repository.cache_clear()
     _memory_face_embedding_repository.cache_clear()
     _face_embedding_analyzer.cache_clear()
     _face_dataset_reader.cache_clear()

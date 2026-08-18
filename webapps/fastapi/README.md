@@ -29,29 +29,30 @@ python -m uvicorn app.main:app --reload --port 8001
 어떤 파일을 읽을지는 실제 OS 환경변수 `APP_ENV`가 정한다. 재시도 횟수·타임아웃·판정
 임계값처럼 환경과 무관한 값은 `.env.*`가 아니라 커밋된 [`config/settings.yml`](./config/settings.yml)에 있다.
 
-얼굴 등록 기능을 로컬에서 실행할 때는 SCRFD·MediaPipe·품질 검사를 담당하는
-`deeplearning` 서버도 필요하다. 필요한 패키지가 설치된 Python 또는 Conda 환경을
-활성화한 뒤 아래 스크립트를 실행하면 분석 서버(`8100`)와 웹 서버(`8000`)가 함께
-시작된다.
+### 얼굴 등록을 확인할 때
 
-```powershell
-cd webapps/fastapi
-.\run-face-enrollment.ps1
+SCRFD·MediaPipe 분석을 담당하는 `deeplearning`이 함께 떠 있어야 한다.
+**컨테이너로 띄운다**([결정 0022](../../docs/architecture/decisions.md)).
+가중치 346MB를 미리 `.docker/models/face`에 두어야 하므로 기본으로는 뜨지 않는다.
+
+```bash
+docker compose -f .docker/compose.main.local.yml --profile face up -d
 ```
 
-PowerShell 실행 정책으로 차단되면 현재 실행에만 우회 정책을 적용할 수 있다.
+그리고 `.docker/env/fastapi.local.env`에서 분석기를 실제 서비스로 돌린다.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run-face-enrollment.ps1
+```
+FACE_ANALYZER_MODE=http
+FACE_ANALYZER_URL=http://deeplearning:8100
 ```
 
-특정 Python 실행 파일을 사용하려면 `-PythonPath`로 지정한다.
+**`synthetic`으로 두면 안 된다.** 대역 분석기는 이미지를 읽지 않고 호출 횟수에 따라
+정해진 순서대로 자세를 돌려주므로, 가만히 정면만 봐도 등록이 완주된다. 검사가 있는
+것처럼 보이지만 아무것도 검사하지 않는 상태다.
 
-```powershell
-.\run-face-enrollment.ps1 -PythonPath "$env:CONDA_PREFIX\python.exe"
-```
-
-스크립트를 실행한 창에서 Enter를 누르면 두 서버를 함께 종료한다.
+> 소스에서 두 서버를 직접 띄우던 `run-face-enrollment.ps1`은 삭제했다. 실행 수단이
+> 둘이면 한쪽만 고쳐지고 다른 쪽이 낡는다 — 그 스크립트는 `FACE_ANALYZER_MODE`를
+> 주입하지 않아, 분석 서버를 띄워 놓고 정작 `synthetic`으로 도는 상태였다.
 
 기본 예제는 `APP_ENV=local`, `DATABASE_MODE=memory`라서 외부 서비스 없이 기동한다.
 **로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8001`을 열면

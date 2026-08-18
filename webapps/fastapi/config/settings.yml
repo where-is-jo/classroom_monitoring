@@ -37,6 +37,12 @@ face_duplicate_score_max: 0.99
 face_motion_speed_dps_max: 220
 face_yaw_side_degrees: 10
 face_pitch_side_degrees: 8
+# 아래를 볼 때의 임계값. **이 항목이 빠져 있어 Python 기본값 5도가 조용히 쓰였다.**
+# 5도는 너무 좁다 — MediaPipe pitch는 카메라 설치 각도에 그대로 편향되어, 정면을 보고
+# 있어도 20~30도가 나온다. 그러면 FRONT가 아니라 DOWN으로 분류된다.
+# **8은 실측값이 아니라 face_pitch_side_degrees에 맞춘 임시값이다.** 실제 카메라
+# 구도에서 정면 pitch 분포를 재고 조정한다.
+face_pitch_down_degrees: 8
 
 # local 테스트에서만 유효 JPEG를 파일로 확인한다. 실제 얼굴이므로 기본 비활성화한다.
 face_local_sample_storage_enabled: false
