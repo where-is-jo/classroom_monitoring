@@ -23,6 +23,21 @@
 기간이 너무 길거나 `limit`이 크면 **거절하지 않고 줄인 뒤 그 사실을 알린다.**
 "이번 달"은 일상적인 질문인데 매번 422를 돌려주면 쓸 수 없다. 다만 조용히 줄이면
 사용자가 잘못된 답을 맞는 답으로 읽으므로 `notes`에 반드시 남긴다.
+
+## 미래는 잘라 낸다
+
+모델이 "지난 한 달"을 앞으로 한 달로 잡는 일이 실제로 있었다(2026-08-18 실측).
+미래 구간은 탐지가 존재할 수 없어 언제나 0건인데, 화면에는 "그 시간에 아무도
+없었다"로 보인다.
+
+**이 절삭만은 `notes`를 남기지 않는다.** 결과가 달라지지 않기 때문이다 — 아직 오지
+않은 시각에는 데이터가 없으므로 자르든 말든 같은 결과다. "오늘 하루"처럼 끝을
+자정으로 잡는 정상적인 계획마다 안내가 붙으면 정작 읽어야 할 조정 사유가 묻힌다.
+자르는 진짜 이유는 따로 있다. **기간 상한 절삭의 기준점을 현실로 되돌리는 것**이다.
+`to`가 미래인 채로 7일을 세면 결과 구간이 통째로 미래에 남는다.
+
+구간 전체가 미래면 자를 수 없으므로 그때는 오류다. 사용자가 할 수 있는 일이
+질문을 고치는 것뿐이라 `EMPTY_RANGE`와 같은 성격이다.
 """
 
 from __future__ import annotations
@@ -57,6 +72,17 @@ _MAX_IDENTIFIER_LENGTH: Final = 128
 # `const`가 아니라 `enum`을 쓰고 시각에 `pattern`을 걸지 않은 것은 의도적이다.
 # JSON Schema의 표현 중 grammar로 변환되지 않는 것이 있으면 서버가 요청을 통째로
 # 거절할 수 있어, 확실히 지원되는 표현만 쓴다.
+#
+# **`required`에 여섯 키를 전부 넣는다. 하나라도 빼면 그 키는 영영 생성되지 않는다.**
+# llama.cpp가 스키마를 grammar로 바꿀 때 optional 필드를 "생략 가능"으로 만들고,
+# `temperature: 0`이라 모델은 언제나 같은 선택 — 생략 — 을 한다. 2026-08-18 GPU
+# 서버(gemma-2-9b-it)에서 `intent`/`from`/`to`만 required였을 때 `camera_id`와
+# `classroom_id`가 한 번도 나오지 않았고, 그래서 "A동 201호"를 물어도 전체 카메라를
+# 뒤지는 계획이 만들어졌다. 아래 `parse_plan`은 이것을 잡지 못한다 — 키가 없는 것과
+# "특정하지 않음"이 같은 값(None)이 되기 때문이다.
+#
+# 값을 강제하는 것이 아니라 **키를 강제하는 것**이다. 타입이 `["string", "null"]`이라
+# 대상이 없으면 모델은 그대로 null을 쓴다.
 PLAN_JSON_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "properties": {
@@ -67,7 +93,7 @@ PLAN_JSON_SCHEMA: Final[dict[str, object]] = {
         "to": {"type": "string"},
         "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT},
     },
-    "required": ["intent", "from", "to"],
+    "required": ["intent", "camera_id", "classroom_id", "from", "to", "limit"],
     "additionalProperties": False,
 }
 
@@ -75,6 +101,7 @@ PLAN_JSON_SCHEMA: Final[dict[str, object]] = {
 def parse_plan(
     text: str,
     *,
+    now: datetime,
     max_span_days: int,
     limit_ceiling: int,
 ) -> SearchQuery:
@@ -86,6 +113,9 @@ def parse_plan(
     `limit_ceiling`은 **호출자가 요청한 상한**이다. 모델이 더 큰 수를 내도 이 값을
     넘지 못한다. 모델이 호출자의 요청을 덮어쓸 수 있으면 API 계약이 깨진다 —
     3건을 요청했는데 20건이 오는 일이 생긴다.
+
+    `now`는 프롬프트를 만들 때 쓴 것과 **같은 값이어야 한다.** 지시문의 "지금"과
+    검증의 "지금"이 다르면 모델이 규격을 지켜 낸 계획이 경계에서 거부된다.
     """
     if len(text.encode("utf-8")) > MAX_PLAN_TEXT_BYTES:
         raise LlmSearchPlanInvalidError("PLAN_TOO_LARGE")
@@ -106,6 +136,12 @@ def parse_plan(
         # 저장소가 반개구간(from <= x < to)으로 조회한다. 두 값이 같으면 결과가
         # 항상 0건인데, 사용자에게는 "그 시간에 아무도 없었다"로 보인다.
         raise LlmSearchPlanInvalidError("EMPTY_RANGE")
+
+    if to_at > now:
+        if from_at >= now:
+            # 구간 전체가 미래다. 자르면 빈 구간이 되므로 알려 주는 편이 낫다.
+            raise LlmSearchPlanInvalidError("FUTURE_RANGE")
+        to_at = now
 
     notes: list[str] = []
 

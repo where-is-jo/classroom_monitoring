@@ -143,7 +143,9 @@ class LlmSearchService:
         # 원문은 로그에만 남긴다. 응답에 실으면 프롬프트에 넣은 카메라 목록이
         # 되돌아 나올 수 있다.
         logger.debug("검색 계획 원문: %s", raw)
-        return parse_plan(raw, max_span_days=self._max_span_days, limit_ceiling=ceiling)
+        # 프롬프트에 넣은 "지금"과 같은 값을 넘긴다. 둘이 다르면 모델이 지시대로
+        # 낸 계획이 경계에서 거부된다.
+        return parse_plan(raw, now=now, max_span_days=self._max_span_days, limit_ceiling=ceiling)
 
     def _resolve_targets(
         self, query: SearchQuery, enabled: Sequence[VideoStream]
@@ -152,6 +154,11 @@ class LlmSearchService:
 
         찾지 못해도 오류로 만들지 않는다. "그런 강의실은 없다"는 정상적인 0건이고,
         다만 **왜 0건인지**를 사용자가 알아야 하므로 사유를 남긴다.
+
+        **등록 여부를 판정하는 곳이 여기다.** 프롬프트는 모델에게 들은 이름을 그대로
+        옮기라고만 요구한다(`prompts.py`). 모델이 "목록에 없으니 null"이라고 판단해
+        버리면 없는 강의실을 물은 사람과 아무 곳도 말하지 않은 사람이 구분되지 않아,
+        아래 사유들이 영영 나가지 못한다.
         """
         if query.camera_id is not None:
             # 카메라를 콕 집었을 때는 비활성 카메라도 찾는다. 지금 꺼져 있어도
