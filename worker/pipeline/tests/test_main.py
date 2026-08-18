@@ -158,3 +158,51 @@ def test_조립_시_FASTAPI_URL_빈_문자열이면_전송을_켜지_않는다(
     # 핸들러는 조립 결과로만 확인할 수 있어 소비자 내부 필드를 본다.
     handler = runner._consumer._result_handler  # type: ignore[attr-defined]
     assert handler is log_result
+
+
+class MetricsSpy:
+    """지표 등록·서버 기동 호출을 기록한다. 전역 레지스트리를 건드리지 않는다."""
+
+    def __init__(self) -> None:
+        self.registered: list[object] = []
+        self.started: list[tuple[str, int]] = []
+
+    def register(self, frame_buffer: object) -> object:
+        self.registered.append(frame_buffer)
+        return frame_buffer
+
+    def start(self, *, host: str, port: int) -> bool:
+        self.started.append((host, port))
+        return True
+
+
+def install_metrics_spy(monkeypatch: pytest.MonkeyPatch) -> MetricsSpy:
+    spy = MetricsSpy()
+    monkeypatch.setattr(pipeline_main, "register_frame_buffer", spy.register)
+    monkeypatch.setattr(pipeline_main, "start_metrics_server", spy.start)
+    return spy
+
+
+def test_지표를_켜면_버퍼를_등록하고_서버를_띄운다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = build_runner(monkeypatch)
+    spy = install_metrics_spy(monkeypatch)
+    settings = PipelineSettings(_env_file=None)  # type: ignore[call-arg]
+
+    pipeline_main.enable_metrics(runner, settings)
+
+    assert spy.registered == [runner.frame_buffer]
+    assert spy.started == [(settings.metrics_host, settings.metrics_port)]
+
+
+def test_지표를_끄면_아무것도_열지_않는다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """포트를 여는 것은 노출 범위를 넓히는 일이라 끌 수 있어야 한다."""
+    runner = build_runner(monkeypatch)
+    spy = install_metrics_spy(monkeypatch)
+    settings = PipelineSettings(_env_file=None, metrics_enabled=False)  # type: ignore[call-arg]
+
+    pipeline_main.enable_metrics(runner, settings)
+
+    assert spy.registered == []
+    assert spy.started == []

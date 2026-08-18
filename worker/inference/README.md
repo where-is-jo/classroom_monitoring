@@ -29,7 +29,9 @@ YOLOv8n으로 프레임 한 장에서 `person`과 `cell phone`을 탐지한다. 
 
 **아직 없는 것**: 얼굴 탐지와 얼굴 인식(`deeplearning` `예정`). HTTP 전달 경로는
 구현되어 `pipeline`의 `FASTAPI_URL`을 설정하면 `/internal/inference/events`로 전송한다.
-설정하지 않으면 기존처럼 로그만 출력한다. 추론 지연·처리량·식별 성공률 지표도 `예정`이다.
+설정하지 않으면 기존처럼 로그만 출력한다. 추론 지연·처리량·탐지 신뢰도는 Prometheus
+지표로 노출한다([아래](#노출하는-지표)). **식별 성공률 지표는 `예정`이다** — 얼굴
+인식이 아직 없어 지금 만들면 값이 항상 0이다.
 
 ## 서비스 목적
 
@@ -43,9 +45,10 @@ YOLOv8n으로 프레임 한 장에서 `person`과 `cell phone`을 탐지한다. 
 | `config.py` | 모델 경로·장치·임계값 설정 |
 | `types.py` | `Detection`, `InferenceResult` — 탐지 결과 형식 |
 | `model.py` | `Yolo8nDetector` — 모델 로딩과 탐지 |
-| `processor.py` | 프레임을 모델에 넘기는 경계 |
+| `processor.py` | 프레임을 모델에 넘기는 경계. 추론 지연·탐지 신뢰도를 재는 자리 |
 | `consumer.py` | 프레임 버퍼에서 최신 프레임을 꺼내 도는 소비자 루프 |
 | `handler.py` | 결과를 FastAPI 내부 API 계약으로 직렬화하고 제한 재시도 |
+| `metrics.py` | Prometheus 지표 정의. 계측은 `processor.py`·`consumer.py` 두 자리뿐 |
 | `fixtures/` | 얼굴·영상 없는 모델 연동 계약 fixture |
 | `main.py` | 이미지 파일 한 장을 검사하는 진입점 |
 
@@ -208,6 +211,30 @@ python -m pipeline.main
 - **연속 실패가 한계를 넘음** — 종료 신호를 켜서 수신까지 함께 멈춘다. 계속 실패하는
   상태로 도는 것은 프레임만 버리면서 아무것도 만들지 않는 것과 같다.
 
+## 노출하는 지표
+
+정의는 [`metrics.py`](./metrics.py) 한곳에 모으고, 계측은 `processor.py`(모델 호출
+한 번)와 `consumer.py`(루프 한 바퀴) 두 자리에서만 한다. 노출 경로와 포트는
+[조립 진입점](../pipeline/README.md#지표-노출)이 연다.
+
+| 지표 | 타입 | label |
+| --- | --- | --- |
+| `classroom_monitoring_inference_duration_seconds` | Histogram | 없음 |
+| `classroom_monitoring_frames_processed_total` | Counter | `camera_id`, `result` |
+| `classroom_monitoring_inference_consecutive_failures` | Gauge | 없음 |
+| `classroom_monitoring_detections_total` | Counter | `class_name` |
+| `classroom_monitoring_detection_confidence` | Histogram | `class_name` |
+
+**실패한 추론의 시간은 지연 분포에 넣지 않는다.** 즉시 터진 호출이 "아주 빠른 추론"
+으로 섞이면 분포가 거짓말을 한다. 실패는 `frames_processed_total{result="failed"}`가
+따로 센다.
+
+**프레임 번호·이벤트 id·학생 id를 label로 쓰지 않는다.** 값이 무한히 늘어나고,
+학생 id는 개인을 식별하는 값이라 접근 통제가 약한 `/metrics`로 나가서는 안 된다.
+무엇을 왜 재는지와 PromQL 예시는
+[`monitoring/internal/README.md`](../../monitoring/internal/README.md#지금-노출하는-지표)가
+정본이다.
+
 ## 테스트 전략
 
 기본 테스트는 실제 가중치와 GPU 없이 돈다. 모델 호출을 대역으로 바꾼다.
@@ -220,6 +247,8 @@ python -m pytest inference/tests -q
 - `test_model.py` — 대역 모델로 탐지 결과 변환 검증
 - `test_consumer.py` — 최신 프레임 선택, 실패 누적과 중단, 종료 처리
 - `test_handler.py` — 승인 fixture와 payload 일치, 멱등 ID, HTTP 제한 재시도 검증
+- `test_metrics.py` — 지연·탐지 신뢰도·처리 결과 계측. 실패한 추론이 지연 분포에
+  들어가지 않는 것과 연속 실패 Gauge가 성공 시 0으로 돌아가는 것을 함께 본다
 
 실제 가중치가 필요한 확인은 기본 실행에 넣지 않는다.
 측정하지 않은 성능 수치를 문서나 보고에 적지 않는다.

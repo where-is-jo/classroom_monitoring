@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from shared.frame_buffer import FrameBuffer
 from shared.types import CapturedFrame
 
+from .metrics import CONSECUTIVE_FAILURES, FRAMES_PROCESSED_TOTAL
 from .processor import InferenceProcessor
 from .types import InferenceResult
 
@@ -112,6 +113,11 @@ class InferenceConsumer:
             # 않는다. 스택을 남기고, 연속으로 실패하면 멈춘다.
             self._failed += 1
             self._consecutive_failures += 1
+            FRAMES_PROCESSED_TOTAL.labels(
+                camera_id=captured.camera_id, result="failed"
+            ).inc()
+            # 한계에 닿기 전에 알아채려면 지금 몇 번째인지가 보여야 한다.
+            CONSECUTIVE_FAILURES.set(self._consecutive_failures)
             logger.exception(
                 "카메라 %s 프레임 %d 추론 실패 (연속 %d회)",
                 captured.camera_id,
@@ -128,5 +134,7 @@ class InferenceConsumer:
             return
 
         self._consecutive_failures = 0
+        CONSECUTIVE_FAILURES.set(0)
         self._processed += 1
+        FRAMES_PROCESSED_TOTAL.labels(camera_id=captured.camera_id, result="ok").inc()
         self._result_handler(captured, result)
