@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 # 계획 JSON은 200바이트 남짓이다. 넉넉히 잡아도 이 정도면 끝난다.
 _MAX_TOKENS = 256
 
+# 오류 본문 전체를 로그에 붓지 않는다. 원인을 가리는 문장은 앞쪽에 있다.
+_MAX_ERROR_LOG_CHARS = 300
+
 _SCHEMA_FORMAT: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {"name": "detection_search_plan", "schema": PLAN_JSON_SCHEMA},
@@ -76,9 +79,16 @@ class LlamaQueryPlanner:
             response = self._request(prompt, _SCHEMA_FORMAT)
             if 400 <= response.status_code < 500:
                 # 스키마를 모르는 빌드다. 5xx는 폴백해도 같은 결과라 그대로 둔다.
+                #
+                # **본문을 함께 남긴다.** 스키마 미지원·모델명 불일치·컨텍스트 초과·
+                # 템플릿이 거부한 role이 전부 4xx라, 상태 코드만 남기면 어느 쪽인지
+                # 알 수 없다. 폴백까지 실패해 503이 나가면 남는 단서가 이 줄뿐이다.
+                # 응답에는 실리지 않는다 — 이것은 서버가 낸 오류 메시지이지 모델
+                # 생성물이 아니라, 결정 0016이 막는 "모델 원문"에 해당하지 않는다.
                 logger.warning(
-                    "llama-server가 json_schema 요청을 거절했다(%s). json_object로 낮춘다",
+                    "llama-server가 json_schema 요청을 거절했다(%s): %s. json_object로 낮춘다",
                     response.status_code,
+                    _brief(response),
                 )
                 response = self._request(prompt, _OBJECT_FORMAT)
             response.raise_for_status()
@@ -106,6 +116,18 @@ class LlamaQueryPlanner:
             },
             timeout=self._timeout,
         )
+
+
+def _brief(response: httpx.Response) -> str:
+    """오류 본문의 앞부분만 꺼낸다.
+
+    서버가 무엇을 돌려주든 로깅이 실패해서는 안 된다. 본문이 비어 있거나 디코딩할 수
+    없으면 빈 문자열로 둔다 — 진단을 돕자고 넣은 코드가 새 실패 경로가 되면 안 된다.
+    """
+    try:
+        return response.text[:_MAX_ERROR_LOG_CHARS]
+    except (UnicodeDecodeError, httpx.HTTPError):
+        return "<본문을 읽지 못함>"
 
 
 def _extract_content(payload: object) -> str:

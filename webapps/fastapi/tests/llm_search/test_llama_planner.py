@@ -8,6 +8,7 @@ GPU 서버 없이 확인할 수 있는 것은 여기까지이며, 모델이 실�
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -179,3 +180,34 @@ def test_본문이_JSON이_아니면_연결_문제와_구분한다() -> None:
 
     with pytest.raises(LlmSearchPlanInvalidError):
         planner.plan(_PROMPT)
+
+
+def test_거절당한_이유를_로그에_남긴다(caplog: pytest.LogCaptureFixture) -> None:
+    """상태 코드만으로는 원인을 가릴 수 없다.
+
+    스키마 미지원·모델명 불일치·컨텍스트 초과·템플릿이 거부한 role이 전부 4xx다.
+    폴백까지 실패하면 사용자에게는 503만 나가므로, 서버 로그의 이 한 줄이 유일한
+    단서가 된다. 본문이 없으면 "json_object로 낮췄다"는 사실만 남아 진단이 막힌다.
+    """
+    planner, _ = _sequence_planner(
+        _response({"error": {"message": "System role not supported"}}, status=400),
+        _response({"choices": [{"message": {"content": '{"intent":"detection_search"}'}}]}),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        planner.plan(_PROMPT)
+
+    assert "System role not supported" in caplog.text
+
+
+def test_오류_본문이_길어도_로그를_뒤덮지_않는다(caplog: pytest.LogCaptureFixture) -> None:
+    """서버가 프롬프트를 통째로 되돌려주는 경우가 있다. 앞부분이면 원인은 충분히 읽힌다."""
+    planner, _ = _sequence_planner(
+        _response({"error": "가" * 5000}, status=400),
+        _response({"choices": [{"message": {"content": '{"intent":"detection_search"}'}}]}),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        planner.plan(_PROMPT)
+
+    assert len(caplog.text) < 2000
