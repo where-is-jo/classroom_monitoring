@@ -67,3 +67,23 @@ def test_계약의_핵심_규칙이_프롬프트에_들어_있다() -> None:
     assert "detection_search" in prompt
     assert f"{MAX_LIMIT} 이하" in prompt
     assert "다른 키를 넣지 마라" in prompt
+
+
+def test_목록에_없는_곳도_들은_이름을_적으라고_지시한다() -> None:
+    """null로 뭉개면 **없는 강의실을 물은 사람과 아무 곳도 말하지 않은 사람이 같아진다.**
+
+    서버는 null을 "전체 카메라"로 해석하므로, 없는 곳을 물은 사용자는 안내 대신
+    엉뚱한 전체 결과를 받는다. 등록 여부 판정과 안내 문구는 service.py의
+    `_resolve_targets`가 갖고 있고, 모델이 미리 판단해 버리면 그 경로에 닿지 못한다.
+    """
+    prompt = _prompt([CameraChoice(camera_id="camera-01", classroom_id="A101", label="A101 앞문")])
+
+    assert "그대로 옮겨 적는다" in prompt
+    assert "안내는 서버가 한다" in prompt
+
+
+def test_아무_곳도_말하지_않았을_때만_null이라고_지시한다() -> None:
+    """ "없으면 null"과 "말하지 않았으면 null"은 다르다. 둘을 섞으면 위 구분이 무너진다."""
+    prompt = _prompt([CameraChoice(camera_id="camera-01", classroom_id="A101", label="A101 앞문")])
+
+    assert "아무 곳도 말하지 않았을 때만 null이다" in prompt
