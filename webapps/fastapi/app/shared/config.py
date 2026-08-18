@@ -118,6 +118,15 @@ class Settings(BaseSettings):
     snapshot_storage_secure: bool = True
     snapshot_storage_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
+    # --- 지표 노출 (Prometheus) ---
+    # `/metrics`를 여는지 정한다. 나가는 값은 처리량·지연 같은 집계 숫자뿐이고
+    # 개인을 식별하는 값은 담기지 않는다(app/llm_search/metrics.py의 label 점검 표).
+    #
+    # **기본값이 켜짐인 이유**는 이 앱이 이미 같은 포트로 `/health`와 자동 생성
+    # 문서(`/docs`)를 공개하고 있어, `/metrics`가 새로운 종류의 노출이 아니기
+    # 때문이다. 운영 접근 통제가 정해지면(`결정 필요`) 함께 다시 본다.
+    metrics_enabled: bool = True
+
     # --- 자연어 탐지 검색 ---
     # disabled는 기능 자체를 끈다. API는 503, 화면은 검색 폼 없이 안내만 보여준다.
     # stub은 LLM 없이 계약과 화면을 확인하기 위한 대역이며 **질문을 읽지 않고**

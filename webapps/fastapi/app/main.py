@@ -28,6 +28,7 @@ from .shared.dependencies import (
     verify_readiness,
 )
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
+from .shared.metrics import render_metrics
 from .shared.schemas import HealthResponse, ReadinessResponse
 from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
 from .snapshots.router import api_router as snapshot_api_router
@@ -199,6 +200,22 @@ def index() -> RedirectResponse:
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> RedirectResponse:
     return RedirectResponse(url="/static/favicon.svg")
+
+
+if get_settings().metrics_enabled:
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics() -> Response:
+        """Prometheus 스크랩 경로. 지금은 자연어 검색 지표만 나온다.
+
+        **끄면 라우트 자체를 만들지 않는다.** 500이나 404를 돌려주는 경로를 남기면
+        "지표가 있는데 지금 실패한 것"과 "이 배포에는 없는 것"이 구분되지 않는다.
+        위의 demo-assets 마운트가 같은 방식이다.
+
+        OpenAPI 문서에는 넣지 않는다. 제품 API가 아니라 운영용 경로다.
+        """
+        body, content_type = render_metrics()
+        return Response(content=body, media_type=content_type)
 
 
 @app.get("/health", tags=["system"], response_model=HealthResponse)

@@ -36,6 +36,7 @@ from typing import Any
 import httpx
 
 from ..errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
+from ..metrics import record_schema_fallback
 from ..planning import PLAN_JSON_SCHEMA
 from ..ports import PlanPrompt
 
@@ -90,6 +91,9 @@ class LlamaQueryPlanner:
                     response.status_code,
                     _brief(response),
                 )
+                # 로그만으로는 이 경로가 상시 발동 중인지 알 수 없다. 그렇다면 생성
+                # 단계에서 구조를 강제하지 못하고 있다는 뜻이라 규격 위반이 늘어난다.
+                record_schema_fallback()
                 response = self._request(prompt, _OBJECT_FORMAT)
             response.raise_for_status()
             payload = response.json()
