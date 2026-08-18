@@ -66,7 +66,7 @@
 객체 저장소에 적재한 뒤, 보존 기간이 지난 것을 지운다.
 
 **아직 없는 것**: 실시간 얼굴 식별 모델 연결, 적재한 객체의 참조를 `fastapi`에 알리는
-경로, 지표 노출. 탐지 HTTP 전달은 구현되어 `FASTAPI_URL`로 켠다
+경로. 탐지 HTTP 전달은 구현되어 `FASTAPI_URL`로 켠다
 ([결정 0011](../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
 
 ## 워커 사이의 경계
@@ -115,7 +115,9 @@
 - **`fastapi`**: 탐지 결과의 소비자이자 상태 판정 주체다. worker가 HTTP로 전달한다.
 - **브라우저**: 제품 API와 탐지 SSE는 `fastapi`를 호출한다. 영상은 허용된 WebRTC
   세션에 한해 MediaMTX에 연결하며 worker를 직접 호출하지 않는다.
-- **`monitoring`**: 연결 상태·프레임 처리량 지표를 노출한다 (`예정`).
+- **`monitoring`**: 조립 실행이 프레임 처리량·추론 지연·탐지 신뢰도 지표를 노출하고
+  Prometheus가 긁어간다([pipeline README](./pipeline/README.md#지표-노출)).
+  카메라 연결 상태 지표는 아직 없다(`예정`).
 
 ## 영상 데이터와 메타데이터의 분리
 

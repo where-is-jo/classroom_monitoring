@@ -45,6 +45,24 @@ class PipelineSettings(BaseSettings):
     # 도는 것은 프레임을 버리면서 아무것도 만들지 않는 것과 같다.
     inference_max_consecutive_failures: int = Field(default=5, ge=1, le=100)
 
+    # --- 지표 노출 ---
+    # 워커는 웹 서버가 아니라서 Prometheus가 긁어갈 곳이 없다. 켜면 전용 포트에
+    # /metrics만 여는 최소 HTTP 서버가 데몬 스레드로 뜬다.
+    #
+    # 기본값이 켜짐인 이유는 스냅샷·녹화와 성격이 다르기 때문이다. 저장 기능은
+    # 개인정보를 남기므로 명시적으로 켜야 하지만, 여기서 나가는 것은 처리량과
+    # 지연 같은 집계 숫자뿐이고 개인을 식별하는 값은 담기지 않는다.
+    metrics_enabled: bool = True
+
+    # **바인딩 주소는 노출 범위를 정한다.** 컨테이너 안에서 Prometheus가 다른
+    # 컨테이너로 붙어야 해서 기본값이 0.0.0.0이다. 호스트에서 직접 돌릴 때 사설망에
+    # 열고 싶지 않으면 127.0.0.1로 낮춘다. 앱 전체에 인증이 없는 상태(결정 0010)라
+    # 이 포트를 공인 IP에 그대로 여는 것은 접근 통제 결정 전까지 피한다.
+    metrics_host: str = Field(default="0.0.0.0")
+
+    # 9090(Prometheus)·9100(node_exporter)과 겹치지 않는 값을 골랐다.
+    metrics_port: int = Field(default=9101, ge=1024, le=65535)
+
     # 탐지 결과를 전송할 FastAPI URL. 조립 실행에서 worker는 HTTP POST로 여기에
     # 적재한다. 웹앱이 다른 주소로 뜨면 이 값만 바꾸면 된다.
     # 환경마다 다른 주소이므로 .env.{APP_ENV} 쪽에 둔다 — settings.yml에 넣지 않는다.

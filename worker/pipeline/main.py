@@ -25,6 +25,7 @@ from shared.config_errors import format_validation_error
 from shared.object_storage.factory import build_object_storage
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
+from shared.metrics import register_frame_buffer, start_metrics_server
 from stream.config import StreamSettings
 from stream.errors import StreamWorkerError
 from stream.main import build_publisher
@@ -126,6 +127,21 @@ def build_runner(
     )
 
 
+def enable_metrics(runner: PipelineRunner, settings: PipelineSettings) -> None:
+    """지표 노출을 켠다. 실패해도 파이프라인은 그대로 시작한다.
+
+    **조립(`build_runner`)이 아니라 여기서 부른다.** 버퍼 collector는 전역
+    레지스트리에 한 번만 들어갈 수 있는데, 조립 함수는 테스트가 여러 번 호출한다.
+    실행 진입점은 프로세스당 한 번뿐이라 등록 지점으로 맞다.
+    """
+    if not settings.metrics_enabled:
+        logger.info("지표 노출이 꺼져 있다(METRICS_ENABLED=false).")
+        return
+
+    register_frame_buffer(runner.frame_buffer)
+    start_metrics_server(host=settings.metrics_host, port=settings.metrics_port)
+
+
 def _install_signal_handlers(runner: PipelineRunner) -> None:
     def handle_signal(signal_number: int, frame: FrameType | None) -> None:
         logger.info(
@@ -172,6 +188,7 @@ def main() -> int:
         logger.error("추론 모델을 준비하지 못했다: %s", error)
         return 1
 
+    enable_metrics(runner, pipeline_settings)
     _install_signal_handlers(runner)
 
     try:

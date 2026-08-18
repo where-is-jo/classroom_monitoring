@@ -63,6 +63,9 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `frame_buffer_maxsize` | 버퍼에 담아둘 최대 프레임 수 | 기본 1 |
 | `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
 | `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
+| `metrics_enabled` | 지표 노출 여부 | 기본 `true` |
+| `metrics_host` | 지표 서버 바인딩 주소 | 기본 `0.0.0.0` |
+| `metrics_port` | 지표 서버 포트 | 기본 9101 |
 
 ### 버퍼 크기를 1로 두는 이유
 
@@ -73,6 +76,36 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 버린 프레임 수는 종료 시 로그에 남는다. `dropped`가 계속 늘면 추론이 수신을
 못 따라가고 있다는 뜻이므로, 버퍼를 키울 게 아니라 `FRAME_SAMPLE_INTERVAL_FRAMES`를
 늘리거나 추론을 GPU로 옮기는 것이 맞다.
+
+## 지표 노출
+
+워커는 웹 서버가 아니라서 Prometheus가 긁어갈 곳이 없다. `metrics_enabled`가 켜져
+있으면(기본) 조립 진입점이 `metrics_port`에 `/metrics`만 여는 최소 HTTP 서버를
+데몬 스레드로 띄운다.
+
+```bash
+curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
+```
+
+**서버를 열지 못해도 파이프라인은 그대로 시작한다.** 포트가 이미 쓰이고 있다고 해서
+영상 수신과 추론이 멈출 이유가 없다. 관측 수단이 없어진 것이지 기능이 고장 난 것이
+아니라서, 오류 로그만 남기고 계속 돈다.
+
+무엇을 왜 재는지와 PromQL 예시는
+[`monitoring/internal/README.md`](../../monitoring/internal/README.md#지금-노출하는-지표)가
+정본이다. 여기서 반복하지 않는다.
+
+**바인딩 주소 기본값이 `0.0.0.0`인 이유**는 컨테이너 밖(다른 컨테이너의 Prometheus)에서
+붙어야 하기 때문이다. 세 환경 모두 컨테이너로 돌아 값이 같아서 `config/settings.yml`에
+둔다. 호스트에서 직접 돌리며 사설망에 열고 싶지 않으면 환경변수로 낮춘다
+(`METRICS_HOST=127.0.0.1`) — 환경변수가 yml보다 우선한다. 앱 전체에 인증이 없는 상태([결정 0010](../../docs/architecture/decisions.md))라
+공인 IP에 그대로 여는 것은 접근 통제 결정 전까지 피한다.
+
+> **직접 확인한 것**: 서버 기동 → `/metrics` 응답 → 9개 지표(카메라 1대 기준 46개
+> 시계열)가 나오는 것을 대역 모델로 실측했다.
+> **확인하지 못한 것**: docker 스택의 Prometheus가 `inference-worker:9101`을 실제로
+> 수집하는 것. `--profile worker`로 컨테이너를 띄울 수 있는 환경에서 확인한 뒤
+> 이 문단을 갱신한다.
 
 ## 실패했을 때
 

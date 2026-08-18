@@ -25,6 +25,7 @@ worker·snapshots에 이어 **세 번째로 복사된다.**
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -36,7 +37,8 @@ from ..student_monitoring.models import DetectionEvent
 from ..student_monitoring.ports import DetectionEventRepository
 from ..video_monitoring.models import VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
-from .errors import LlmSearchPlanInvalidError
+from .errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
+from .metrics import record_plan_attempt, record_search, record_search_truncated
 from .models import CameraChoice, DetectionHit, IdentifiedStudent, SearchOutcome, SearchQuery
 from .planning import MAX_LIMIT, parse_plan
 from .ports import PlanPrompt, QueryPlanner
@@ -68,7 +70,29 @@ class LlmSearchService:
         self._clock = clock
 
     def search(self, question: str, *, limit: int) -> SearchOutcome:
-        """자연어 질문 하나를 탐지 검색 결과로 바꾼다."""
+        """자연어 질문 하나를 탐지 검색 결과로 바꾼다. 걸린 시간을 지표로 남긴다.
+
+        본문을 `_run_search`로 뺀 이유는 계측 때문이다. **실패로 끝난 검색도 사용자는
+        똑같이 기다렸으므로** 지연 분포에 남겨야 하는데, 세 갈래(성공·규격 위반·닿지
+        못함)를 한 함수 안에서 나누면 본문 전체가 try 블록에 파묻힌다.
+        """
+        started_at = time.perf_counter()
+        try:
+            outcome = self._run_search(question, limit=limit)
+        except LlmSearchPlannerUnavailableError:
+            record_search(outcome="unavailable", started_at=started_at)
+            raise
+        except LlmSearchPlanInvalidError:
+            record_search(outcome="invalid", started_at=started_at)
+            raise
+
+        record_search(outcome="success", started_at=started_at)
+        if outcome.truncated:
+            # 상한에 계속 걸리면 SCAN_LIMIT이 실제 이벤트 양에 비해 작다는 신호다.
+            record_search_truncated()
+        return outcome
+
+    def _run_search(self, question: str, *, limit: int) -> SearchOutcome:
         now = self._clock()
         streams = self._streams.find_all_enabled()
 
@@ -131,21 +155,36 @@ class LlmSearchService:
         ceiling: int,
         retry: bool,
     ) -> SearchQuery:
-        raw = self._planner.plan(
-            PlanPrompt(
-                system=build_system_prompt(
-                    now=now, cameras=cameras, max_limit=ceiling, retry=retry
-                ),
-                question=question,
-                now=now,
+        started_at = time.perf_counter()
+        try:
+            raw = self._planner.plan(
+                PlanPrompt(
+                    system=build_system_prompt(
+                        now=now, cameras=cameras, max_limit=ceiling, retry=retry
+                    ),
+                    question=question,
+                    now=now,
+                )
             )
-        )
-        # 원문은 로그에만 남긴다. 응답에 실으면 프롬프트에 넣은 카메라 목록이
-        # 되돌아 나올 수 있다.
-        logger.debug("검색 계획 원문: %s", raw)
-        # 프롬프트에 넣은 "지금"과 같은 값을 넘긴다. 둘이 다르면 모델이 지시대로
-        # 낸 계획이 경계에서 거부된다.
-        return parse_plan(raw, now=now, max_span_days=self._max_span_days, limit_ceiling=ceiling)
+            # 원문은 로그에만 남긴다. 응답에 실으면 프롬프트에 넣은 카메라 목록이
+            # 되돌아 나올 수 있다. 지표에도 넣지 않는다 — label로 쓰면 값이 무한히
+            # 늘어나고 질문에는 사람이 찾는 대상이 담긴다.
+            logger.debug("검색 계획 원문: %s", raw)
+            # 프롬프트에 넣은 "지금"과 같은 값을 넘긴다. 둘이 다르면 모델이 지시대로
+            # 낸 계획이 경계에서 거부된다.
+            query = parse_plan(
+                raw, now=now, max_span_days=self._max_span_days, limit_ceiling=ceiling
+            )
+        except LlmSearchPlannerUnavailableError:
+            record_plan_attempt(retry=retry, outcome="unavailable", started_at=started_at)
+            raise
+        except LlmSearchPlanInvalidError:
+            record_plan_attempt(retry=retry, outcome="invalid", started_at=started_at)
+            raise
+
+        # 검증까지 통과한 것만 성공이다. 파싱 시간은 마이크로초라 분포를 흔들지 않는다.
+        record_plan_attempt(retry=retry, outcome="success", started_at=started_at)
+        return query
 
     def _resolve_targets(
         self, query: SearchQuery, enabled: Sequence[VideoStream]

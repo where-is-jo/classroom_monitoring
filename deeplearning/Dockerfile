@@ -49,6 +49,8 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /deeplearning
 COPY app.py ./app.py
+# 지표 정의. app.py가 `import metrics`로 찾는다.
+COPY metrics.py ./metrics.py
 
 # 모델 가중치는 이미지에 넣지 않는다. .models/는 .gitignore 대상이고 448MB다.
 # 경로는 FACE_DETECTION_MODEL_PATH·FACE_LANDMARKER_MODEL_PATH·

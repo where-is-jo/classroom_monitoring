@@ -86,4 +86,8 @@ RUN useradd --create-home --shell /usr/sbin/nologin worker \
     && chown -R worker:worker /worker
 USER worker
 
+# Prometheus 지표 노출 포트(METRICS_PORT 기본값). 문서용 선언이며 실제 공개는
+# compose가 정한다 — 같은 네트워크의 Prometheus가 붙으므로 호스트에 열 필요는 없다.
+EXPOSE 9101
+
 CMD ["python", "-m", "pipeline.main"]

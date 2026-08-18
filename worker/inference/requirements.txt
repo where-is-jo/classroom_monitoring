@@ -13,5 +13,9 @@ minio>=7.2
 # 탐지 결과를 FastAPI 내부 API로 전송한다(결정 0011).
 requests>=2.31
 
+# Prometheus 지표를 노출한다. shared/metrics.py도 이 패키지를 쓴다.
+# 순수 파이썬이라 가볍고, 없으면 워커가 import 단계에서 죽으므로 선택 의존이 아니다.
+prometheus-client>=0.20
+
 # 테스트
 pytest>=8.0

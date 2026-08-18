@@ -1,5 +1,5 @@
-# 로컬 검증용 최소 설정. fastapi는 아직 /metrics를 노출하지 않으므로(monitoring/internal/README.md
-# "구현 전") 지금은 Prometheus 자기 자신만 스크랩한다. 서비스가 지표를 노출하면 여기에 job을 추가한다.
+# 로컬 검증용 최소 설정. 지표 이름·label 규칙과 무엇을 왜 재는지는
+# monitoring/internal/README.md가 정본이다.
 
 global:
   scrape_interval: 15s
@@ -8,3 +8,29 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # 웹앱. 앱과 같은 포트(8001)에 /metrics를 연다. METRICS_ENABLED=true가 기본이다.
+  # 지금 나오는 것은 자연어 검색 지표뿐이다.
+  #
+  # **uvicorn을 워커 여러 개로 띄우면 값이 갈라진다.** 프로세스마다 레지스트리가
+  # 따로 생기고 스크랩은 그중 하나에만 닿는다. 배포 방식이 정해질 때 함께 본다.
+  - job_name: fastapi
+    static_configs:
+      - targets: ["fastapi:8001"]
+
+  # 얼굴 분석 내부 서비스. 앱과 같은 포트(8100)에 /metrics를 연다.
+  #
+  # **이 컨테이너도 기본으로 뜨지 않는다.** 모델 가중치 346MB를 .docker/models/face에
+  # 미리 두고 `--profile face`로 올려야 한다. 그 전까지 up=0으로 보인다.
+  - job_name: deeplearning
+    static_configs:
+      - targets: ["deeplearning:8100"]
+
+  # 추론 파이프라인(stream + inference). METRICS_ENABLED=true(기본)일 때 9101을 연다.
+  #
+  # **이 컨테이너는 기본으로 뜨지 않는다.** GPU가 있는 PC에서 `--profile worker`로
+  # 올릴 때만 존재하므로, 그 전까지 이 타겟은 up=0으로 보인다. 실패가 아니라
+  # "아직 안 띄웠다"는 뜻이다.
+  - job_name: inference-worker
+    static_configs:
+      - targets: ["inference-worker:9101"]

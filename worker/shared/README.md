@@ -31,6 +31,7 @@ recorder ─┘
 | `object_keys.py` | 객체 키 규칙 — `<카메라>/<날짜>/<시각><확장자>` |
 | `object_storage/` | 객체 저장소 포트와 어댑터. `inference`(스냅샷)와 `recorder`(영상)가 함께 쓴다 |
 | `logging_setup.py` | 진입점의 로깅·콘솔 인코딩 설정 |
+| `metrics.py` | Prometheus 노출 경로와 프레임 버퍼 지표. 워커별 지표는 각 워커에 둔다 |
 | `config_errors.py` | 설정 오류를 값 노출 없이 사람이 읽을 형태로 |
 | `settings_sources.py` | `.env.{APP_ENV}`·`config/settings.yml` 소스 우선순위를 네 워커가 같게 쓰게 한다 |
 

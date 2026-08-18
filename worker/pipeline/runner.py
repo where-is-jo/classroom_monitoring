@@ -36,6 +36,15 @@ class PipelineRunner:
         self._shutdown_event = shutdown_event
         self._consumer_join_timeout_seconds = consumer_join_timeout_seconds
 
+    @property
+    def frame_buffer(self) -> FrameBuffer:
+        """조립 지점이 버퍼 지표를 등록할 때 쓴다.
+
+        `build_runner`가 아니라 `main`에서 등록하는 이유는 전역 레지스트리에 같은
+        collector를 두 번 넣을 수 없어서다. 조립 함수는 테스트가 여러 번 부른다.
+        """
+        return self._frame_buffer
+
     def request_shutdown(self) -> None:
         self._shutdown_event.set()
         # 버퍼에서 대기 중인 소비자를 즉시 깨운다. 이게 없으면 poll timeout만큼
