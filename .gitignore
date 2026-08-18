@@ -43,6 +43,11 @@ CLAUDE.md
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 .venv/
 venv/
 
@@ -75,6 +80,8 @@ deeplearning/.models/
 *.gguf
 
 # 모델 학습 데이터셋과 산출물(결정 0012) — 대용량이고 공용 서버 로컬에만 둔다.
+# 자동 라벨링의 촬영 영상, 추출 프레임, 검수 라벨, 모델과 발행 데이터셋도
+# deeplearning/training/data/ 아래에 있으므로 이 규칙으로 함께 제외한다.
 # deeplearning/training/README.md 참고.
 deeplearning/**/data/
 deeplearning/**/runs/
