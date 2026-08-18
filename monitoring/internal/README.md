@@ -6,10 +6,12 @@
 사용자에게 제품으로 제공하는 영상 실시간 모니터링은 이 디렉터리가 아니라
 [`monitoring/external`](../external/README.md)이다. 둘은 이름만 같고 목적·대상·수요자가 다르다.
 
-> 현재 상태: **Grafana 설정만 있다.** 데이터소스(Prometheus·Loki) provisioning과
-> 대시보드 하나를 이 디렉터리에서 관리한다. **Prometheus 수집 설정과 알림 규칙은 아직 없다** —
-> 어떤 서비스도 `/metrics`를 노출하지 않아 지금 수집할 지표가 없기 때문이다.
-> 알림 규칙은 알림 채널이 `결정 필요` 상태라 시작하지 않았다.
+> 현재 상태: **추론 파이프라인 지표만 수집한다.** `worker`의 조립 실행
+> (`python -m pipeline.main`)이 `/metrics`를 노출하고, 로컬 docker 스택의 Prometheus가
+> 그 job 하나를 긁는다. `fastapi`와 `deeplearning`은 아직 노출하지 않는다.
+> Grafana 데이터소스·대시보드 provisioning은 이 디렉터리에서 관리한다.
+> **알림 규칙은 아직 없다** — 알림 채널이 `결정 필요`이고, 임계값의 근거가 될
+> 정상 범위 데이터가 아직 쌓이지 않았다.
 
 ## 디렉터리 구조
 
@@ -20,8 +22,10 @@ monitoring/internal/grafana/
   dashboards/                 대시보드 정의 JSON
 ```
 
-**Prometheus 설정 파일(`prometheus.yml`)은 아직 여기 없다.** 로컬 docker 스택의 개인용
-최소 설정으로만 존재하며, 수집할 지표가 정해지면 이 디렉터리로 옮긴다.
+**Prometheus 설정 파일(`prometheus.yml`)은 아직 여기 없다.** 로컬 docker 스택의
+개인용 최소 설정(`.docker/prometheus/prometheus.yml`)으로만 존재하며, 지금은 그 파일이
+`inference-worker` job 하나를 들고 있다. 통합 실행 수단이 공식화되면 이 디렉터리로
+옮긴다(`결정 필요`).
 
 ### 대시보드
 
@@ -69,15 +73,71 @@ export해서 `grafana/dashboards/` 아래 파일을 갱신해야 한다.
 
 - 프로젝트 지표 이름은 `classroom_monitoring_` 접두사를 사용한다.
   이전 주제에서 쓰던 `smart_office_` 접두사는 더 이상 쓰지 않는다.
-  **아직 지표를 노출하는 서비스가 없어 바꿀 코드는 없다.**
+  지금 노출 중인 지표는 모두 이 접두사를 따른다.
 - **값이 무한히 늘어나는 label을 사용하지 않는다.** 이 프로젝트에서는
   `student_id`, 요청 ID, 이벤트 ID가 여기 해당한다.
 - **개인을 식별하는 값을 label에 넣지 않는다.** 학생별 지표가 필요하면 집계값으로
   만든다. 지표는 접근 통제가 약한 경로로 노출되기 쉽다.
 - 지표 추가 절차는 `add-monitoring-metric` 스킬을 따른다.
 
-예상 지표 대상: 카메라 연결 상태, 프레임 처리량과 드롭률, 추론 지연, 식별 성공률,
-상태 판정 처리량, 저장소 적재 실패 건수. 모두 `예정`이다.
+### 지금 노출하는 지표
+
+`worker`의 조립 실행(stream + inference)이 `METRICS_PORT`(기본 9101)에 노출한다.
+정의는 [`worker/inference/metrics.py`](../../worker/inference/metrics.py)와
+[`worker/shared/metrics.py`](../../worker/shared/metrics.py)에 있다.
+
+| 지표 | 타입 | label | 무엇을 답하는가 |
+| --- | --- | --- | --- |
+| `classroom_monitoring_inference_duration_seconds` | Histogram | 없음 | 프레임 한 장 추론에 얼마나 걸리는가 |
+| `classroom_monitoring_frames_processed_total` | Counter | `camera_id`, `result` | 처리량과 실패율 |
+| `classroom_monitoring_inference_consecutive_failures` | Gauge | 없음 | 파이프라인이 멈추기 전에 알 수 있는가 |
+| `classroom_monitoring_detections_total` | Counter | `class_name` | 탐지 자체가 끊겼는가 |
+| `classroom_monitoring_detection_confidence` | Histogram | `class_name` | 모델 품질이 조용히 나빠지고 있는가 |
+| `classroom_monitoring_frames_buffered_total` | Counter | 없음 | 수신이 버퍼에 넣은 프레임 수 |
+| `classroom_monitoring_frames_dropped_total` | Counter | `reason` | 추론이 수신을 못 따라간 양 |
+| `classroom_monitoring_frames_consumed_total` | Counter | 없음 | 소비자가 가져간 프레임 수 |
+| `classroom_monitoring_frame_buffer_depth` | Gauge | 없음 | 지금 버퍼에 남은 프레임 수 |
+
+label 값 종류 수는 `camera_id`가 등록 카메라 대수, `result`가 2(`ok`·`failed`),
+`class_name`이 2(`person`·`cell phone`), `reason`이 2(`dropped`·`skipped`)다.
+카메라 1대·클래스 2종 기준으로 실측한 시계열 수는 46개다(`_created` 제외).
+
+**신뢰도 분포를 재는 이유**는 지연과 처리량이 시스템이 도는지만 알려주기 때문이다.
+정답 라벨이 없는 운영 환경에서 모델 품질 저하를 잡는 대리 지표가 신뢰도 분포이며,
+촬영 환경이 바뀌면 탐지가 끊기기 전에 분포가 먼저 내려간다.
+
+### PromQL 예시
+
+```promql
+# 추론 지연 p95
+histogram_quantile(0.95, rate(classroom_monitoring_inference_duration_seconds_bucket[5m]))
+
+# 추론 실패율
+rate(classroom_monitoring_frames_processed_total{result="failed"}[5m])
+  / rate(classroom_monitoring_frames_processed_total[5m])
+
+# 탐지 신뢰도 중앙값 — 내려가면 모델이나 촬영 환경이 바뀐 것이다
+histogram_quantile(0.5, rate(classroom_monitoring_detection_confidence_bucket{class_name="person"}[30m]))
+
+# 프레임 드롭률 — 추론이 수신을 못 따라가는가
+rate(classroom_monitoring_frames_dropped_total[5m])
+  / rate(classroom_monitoring_frames_buffered_total[5m])
+
+# 파이프라인이 멈추기 직전인가 (한계 기본값은 5)
+classroom_monitoring_inference_consecutive_failures >= 3
+```
+
+### 아직 노출하지 않는 것
+
+`예정`이며 코드가 없다. **없는 지표의 패널을 미리 만들지 않는다.**
+
+| 대상 | 담당 | 비고 |
+| --- | --- | --- |
+| 자연어 검색 계획 지연·재시도율 | `fastapi` | LLM 호출 경계 |
+| 얼굴 분석 단계별 지연·세션 수 | `deeplearning` | |
+| 탐지 결과 HTTP 전달 실패 건수 | `worker/inference` | 지금은 로그로만 남는다 |
+| 카메라 연결 상태·재연결 횟수 | `worker/stream` | |
+| 식별 성공률 | — | **얼굴 인식이 미구현이라 지금 만들면 항상 0이다** |
 
 ## 예상 기술
 
