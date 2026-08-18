@@ -15,9 +15,21 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response
 from insightface.model_zoo import get_model
 from insightface.utils import face_align
 from pydantic import BaseModel
+
+# **상대 import를 쓰지 않는다.** 컨테이너는 `uvicorn app:app`으로 띄우므로
+# app.py가 패키지의 일부가 아니다(Dockerfile). 테스트는 `deeplearning.tests.conftest`가
+# 이 디렉터리를 sys.path에 넣어 같은 이름으로 찾게 한다.
+from metrics import (
+    install_session_gauge,
+    observe_analysis_stage,
+    record_analysis_request,
+    record_embedding_request,
+    render_metrics,
+)
 
 
 class AnalysisResponse(BaseModel):
@@ -63,6 +75,17 @@ class FingerprintHistory:
 _frame_history: dict[str, FrameHistory] = {}
 _fingerprint_history: dict[str, list[FingerprintHistory]] = {}
 _history_lock = RLock()
+
+
+def _active_session_count() -> int:
+    with _history_lock:
+        return len(_frame_history)
+
+
+# **세션이 정리되지 않는 것을 잡기 위한 연결이다.** 브라우저가 등록 화면을 그냥 닫으면
+# DELETE가 오지 않아 위 두 딕셔너리에 항목이 남는다. 스크랩 시점에만 세므로 요청
+# 경로에는 아무것도 추가되지 않는다.
+install_session_gauge(_active_session_count)
 
 
 def _model_path() -> Path:
@@ -230,15 +253,36 @@ def _temporal_quality(
 
 @app.post("/internal/face-analysis", response_model=AnalysisResponse)
 async def analyze(request: Request) -> AnalysisResponse:
+    """프레임 한 장을 분석한다. 실패로 끝난 것도 사유별로 센다.
+
+    본문을 `_analyze`로 뺀 이유는 **예상하지 못한 실패(500)를 세기 위해서다.** 세지
+    않으면 대시보드에는 "느려졌다"만 보이고 "실패하고 있다"는 보이지 않는다.
+    """
+    try:
+        return await _analyze(request)
+    except HTTPException:
+        # 사유별 계측은 `_analyze` 안에서 이미 끝났다. 여기서 또 세면 두 번 센다.
+        raise
+    except Exception:
+        record_analysis_request("error")
+        raise
+
+
+async def _analyze(request: Request) -> AnalysisResponse:
+    request_started_at = time.perf_counter()
     enrollment_id = request.headers.get("X-Face-Enrollment-ID")
     if not enrollment_id:
+        record_analysis_request("missing_session")
         raise HTTPException(status_code=400, detail="얼굴 등록 세션 ID가 필요합니다.")
     content = await request.body()
     encoded = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if encoded is None:
+        record_analysis_request("bad_image")
         raise HTTPException(status_code=400, detail="JPEG 프레임을 해석할 수 없습니다.")
     detector: Any = request.app.state.detector
+    detect_started_at = time.perf_counter()
     detections, _ = detector.detect(encoded, max_num=0)
+    observe_analysis_stage("detect", detect_started_at)
     height, width = encoded.shape[:2]
     guide_indices = [
         index
@@ -251,6 +295,10 @@ async def analyze(request: Request) -> AnalysisResponse:
     ]
     face_count = len(guide_indices)
     if face_count == 0:
+        # 실패가 아니라 정상적인 결과다. 사용자가 아직 가이드 안에 얼굴을 두지
+        # 못했다는 뜻이고, 등록 화면은 그것을 보고 안내를 띄운다.
+        record_analysis_request("no_face")
+        observe_analysis_stage("total", request_started_at)
         return AnalysisResponse(
             face_count=0,
             detection_confidence=0,
@@ -265,10 +313,16 @@ async def analyze(request: Request) -> AnalysisResponse:
         max(0, int(top)) : min(height, int(bottom)),
         max(0, int(left)) : min(width, int(right)),
     ]
+    quality_started_at = time.perf_counter()
     blur_score, brightness_score, fingerprint = _face_quality(face_crop)
+    observe_analysis_stage("quality", quality_started_at)
+    # MediaPipe 랜드마크는 SCRFD와 함께 이 경로에서 가장 무거운 두 축이다.
+    # 나눠 재지 않으면 느려졌을 때 어느 쪽인지 알 수 없다.
+    pose_started_at = time.perf_counter()
     yaw, pitch, roll, landmark_confidence, occlusion_score = _head_pose(
         request, encoded
     )
+    observe_analysis_stage("pose", pose_started_at)
     motion_speed, duplicate_score = _temporal_quality(
         enrollment_id,
         yaw=yaw,
@@ -276,6 +330,8 @@ async def analyze(request: Request) -> AnalysisResponse:
         fingerprint=fingerprint,
         captured_at=time.monotonic(),
     )
+    record_analysis_request("ok")
+    observe_analysis_stage("total", request_started_at)
     return AnalysisResponse(
         face_count=face_count,
         detection_confidence=confidence,
@@ -302,25 +358,46 @@ def discard_session(enrollment_id: str) -> None:
 
 @app.post("/internal/face-embeddings", response_model=EmbeddingResponse)
 async def create_embedding(request: Request) -> EmbeddingResponse:
+    """등록 사진 한 장에서 embedding을 만든다. 거절 사유를 나눠 센다.
+
+    사유마다 다른 조치로 이어지기 때문이다 — 얼굴 수는 촬영 환경, 신뢰도는 조명과
+    거리, 벡터 무효는 모델 쪽 문제다. 하나로 묶으면 "등록이 안 된다"까지만 남는다.
+    """
+    started_at = time.perf_counter()
+    try:
+        return await _create_embedding(request, started_at=started_at)
+    except HTTPException:
+        raise
+    except Exception:
+        record_embedding_request("error", started_at)
+        raise
+
+
+async def _create_embedding(request: Request, *, started_at: float) -> EmbeddingResponse:
     content = await request.body()
     image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
+        record_embedding_request("bad_image", started_at)
         raise HTTPException(status_code=400, detail="JPEG 이미지를 해석할 수 없습니다.")
     detector: Any = request.app.state.detector
     detections, keypoints = detector.detect(image, max_num=0)
     if len(detections) != 1 or keypoints is None or len(keypoints) != 1:
+        record_embedding_request("not_single_face", started_at)
         raise HTTPException(status_code=422, detail="정확히 한 명의 얼굴이 필요합니다.")
     if float(detections[0][4]) < 0.6:
+        record_embedding_request("low_confidence", started_at)
         raise HTTPException(status_code=422, detail="얼굴 검출 신뢰도가 부족합니다.")
     aligned = face_align.norm_crop(image, landmark=keypoints[0], image_size=112)
     recognizer: Any = request.app.state.recognizer
     vector = np.asarray(recognizer.get_feat(aligned), dtype=np.float32).reshape(-1)
     norm = float(np.linalg.norm(vector))
     if vector.size != 512 or not np.isfinite(vector).all() or norm <= 1e-12:
+        record_embedding_request("invalid_vector", started_at)
         raise HTTPException(
             status_code=422, detail="유효한 얼굴 embedding을 생성하지 못했습니다."
         )
     normalized = vector / norm
+    record_embedding_request("ok", started_at)
     return EmbeddingResponse(
         vector=normalized.tolist(),
         dimension=int(normalized.size),
@@ -334,3 +411,13 @@ async def create_embedding(request: Request) -> EmbeddingResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# **끄면 라우트 자체를 만들지 않는다.** 404를 돌려주는 경로를 남기면 "지표가 있는데
+# 지금 실패한 것"과 "이 배포에는 없는 것"이 구분되지 않는다. 값은 기동 시점에 읽는다.
+if os.environ.get("METRICS_ENABLED", "true").strip().lower() != "false":
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        body, content_type = render_metrics()
+        return Response(content=body, media_type=content_type)

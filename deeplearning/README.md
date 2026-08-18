@@ -182,6 +182,37 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 학생 식별 신뢰도 임계값(`IDENTITY_CONFIDENCE_THRESHOLD`)은 판정 기준값이므로
 `webapps/fastapi` 쪽 설정이다. 두 값을 하나로 합치지 않는다.
 
+## 지표 노출
+
+`METRICS_ENABLED`가 켜져 있으면(기본) 앱과 같은 포트(8100)에 `/metrics`를 연다.
+**끄면 라우트 자체를 만들지 않는다** — 404를 돌려주는 경로를 남기면 "지표가 있는데
+지금 실패한 것"과 "이 배포에는 없는 것"이 구분되지 않는다. 값은 기동 시점에 읽는다.
+
+```bash
+curl -s http://127.0.0.1:8100/metrics | grep classroom_monitoring_
+```
+
+재는 것은 세 가지다.
+
+- **구간별 지연**(`detect`·`pose`·`quality`·`total`) — `/internal/face-analysis`는 등록
+  중 프레임마다 불리는 실시간 경로다. 느려지면 사용자는 가이드가 반응하지 않는다고
+  느끼는데, 느린 쪽이 SCRFD인지 MediaPipe인지 로그로는 알 수 없다.
+- **요청 결과**(`ok`·`no_face`·`bad_image`·`missing_session`·`error`) — `no_face`는
+  실패가 아니라 정상적인 결과라 나머지와 섞지 않는다.
+- **남아 있는 세션 수** — 등록 세션 이력은 `DELETE .../sessions/{id}`가 와야 비워진다.
+  브라우저가 화면을 그냥 닫으면 항목이 남고, 이 값이 단조 증가하면 그 상태다.
+
+**`enrollment_id`와 얼굴에서 나온 수치(신뢰도·blur·yaw)는 지표로 내보내지 않는다.**
+앞은 값이 무한히 늘어나면서 개인을 가리키고, 뒤는 개인의 촬영 상태가 집계 밖으로
+나가는 일이다. 정의는 [`metrics.py`](./metrics.py)에 있고, 무엇을 왜 재는지와 PromQL
+예시는
+[`monitoring/internal/README.md`](../monitoring/internal/README.md#지금-노출하는-지표--deeplearning)가
+정본이다.
+
+`metrics.py`는 **`metrics`라는 이름 하나로만 import한다.** 컨테이너는
+`uvicorn app:app`으로 뜨고 테스트는 `deeplearning.app`으로 부르는데, 두 이름을 섞으면
+모듈이 두 번 로드되어 같은 지표를 두 번 등록하려다 죽는다.
+
 ## 테스트 전략
 
 - 전처리·후처리 함수는 모델 없이 단위 테스트한다.
@@ -189,6 +220,19 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 - 갤러리 대조는 고정 벡터로 검증한다. 실제 얼굴을 쓰지 않는다.
 - 모델 자체를 요구하는 테스트는 별도로 표시해 기본 테스트에서 분리한다.
 - 성능 측정은 테스트가 아닌 별도 벤치마크로 다루고, 측정하지 않은 수치를 문서화하지 않는다.
+
+```bash
+# 저장소 최상위에서. mediapipe·insightface가 설치돼 있어야 한다.
+python -m pytest deeplearning/tests -q
+
+# 모델 의존성 없이 지표 정의만 확인할 때
+python -m pytest deeplearning/tests/test_metrics.py -q
+```
+
+**`app.py`를 import하는 테스트는 mediapipe·insightface를 요구한다.** `test_metrics.py`는
+`metrics.py`만 보므로 그 의존 없이 돌고, `test_metrics_endpoints.py`는 없으면 스스로
+건너뛴다. 다만 기존 `test_face_guide.py`·`test_face_quality.py`는 수집 단계에서 멈추므로
+의존성이 없는 환경에서는 디렉터리 전체가 아니라 파일을 지정해 실행한다.
 
 ## SCRFD local 실행
 
