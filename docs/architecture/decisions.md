@@ -1332,3 +1332,53 @@ ROI는 서버 재시작 뒤 재검토가 필요하며, in-memory SSE는 FastAPI 
   있다. Gemma 계열 채팅 템플릿에는 `system` 역할이 없어, 지금처럼 `system`/`user`를
   나눠 보내는 방식이 의도대로 전달되는지 첫 실측에서 확인해야 한다.
 - `compose.llm.dev.yml`에 healthcheck가 없어, 모델 로딩 중에 들어온 첫 질문은 실패한다.
+
+## 0022 · 얼굴 분석(deeplearning)을 별도 컨테이너로 붙이고 synthetic은 테스트 전용으로 못 박는다
+
+**상태**: 확정
+
+**배경**: `deeplearning/app.py`는 SCRFD 검출과 MediaPipe 자세·품질 분석을 갖춘 채
+구현되어 있었지만 **띄울 수단이 없었다.** `Dockerfile`이 없었고 어느 compose에도
+서비스가 없었다. 그래서 `fastapi`는 모든 환경에서 `FACE_ANALYZER_MODE=synthetic`으로
+돌았고, `FACE_ANALYZER_URL`은 붙을 곳이 없어 자기 자신(`127.0.0.1:8100`)을 가리켰다.
+
+`SyntheticFaceAnalyzer`는 **프레임 이미지를 읽지 않는다.** 앞 32바이트를 ASCII로
+디코드해 `FRONT`·`LEFT` 같은 마커를 찾고, 없으면 호출 횟수에 따라 정해진 순서대로
+자세를 돌려준다. 테스트가 원하는 자세를 만들어 내려고 그렇게 만든 것이다.
+
+그 결과가 GPU 서버에서 드러났다. **사람이 가만히 정면만 봐도 얼굴 등록이 완주된다.**
+좌우·상하를 실제로 돌렸는지와 무관하게 프레임 수만 채우면 통과한다. 등록 품질 검사가
+있는 것처럼 보이지만 아무것도 검사하지 않는 상태이며, 검사가 없는 것보다 나쁘다 —
+등록된 데이터가 기준을 통과했다고 믿게 만든다.
+
+**결정**:
+
+1. `deeplearning`에 `Dockerfile`을 두고 **compose의 서비스로 올린다.** 브라우저는
+   여전히 `fastapi`만 호출하고, `deeplearning`은 같은 network 안에서 `fastapi`만
+   부르는 내부 서비스로 남는다(호스트 포트를 열지 않는다).
+2. **GPU를 예약하지 않는다.** `app.py`가 `providers=["CPUExecutionProvider"]`를
+   고정하고 있어 GPU를 줘도 쓰지 않는다. `inference-worker`와 달리 드라이버 조건이
+   붙지 않으므로 GPU가 없는 호스트에서도 뜬다.
+3. 가중치는 이미지에 넣지 않고 `.docker/models/face`에 두어 읽기 전용으로 마운트한다.
+   `yolo11m.pt`·`gemma.gguf`와 같은 자리다. 경로는 `FACE_*_MODEL_PATH` 셋으로 주입하고,
+   **셋 다 기동 시점에 파일 존재를 확인한다** — 요청을 받다가 실패하지 않게 한다.
+4. **`synthetic`은 테스트와 화면 흐름 확인 전용이다.** 사람이 실제 얼굴을 등록하는
+   환경의 설정값으로 쓰지 않는다. dev는 `http`로 둔다.
+5. local은 `profiles: ["face"]`로 선택 기동한다. 가중치 346MB를 미리 받아야 하고,
+   얼굴 등록을 보지 않는 개발에는 필요 없기 때문이다.
+
+**대안**:
+
+- *`fastapi` 이미지 안에 얼굴 분석을 합친다* — 컨테이너가 하나 줄지만, `fastapi`가
+  onnxruntime·mediapipe·insightface를 끌어안게 되어 웹 요청 처리와 모델 추론의
+  배포 주기가 묶인다. 브라우저는 `fastapi`만 부른다는 규칙은 프로세스를 합치라는
+  뜻이 아니다.
+- *`synthetic`이 이미지를 실제로 분석하게 만든다* — 대역이 두 번째 구현이 되어
+  판정 규칙이 두 벌로 갈린다. 화면에서 본 결과가 어느 쪽에서 나온 것인지 알 수 없다.
+  결정 0021이 `stub`에 대해 내린 판단과 같다.
+- *`deeplearning`에 GPU를 예약한다* — 나중에 CUDAExecutionProvider로 바꿀 여지를
+  남긴다는 이점이 있으나, 지금 코드가 CPU를 고정하고 있어 GPU만 붙잡고 쓰지 않는다.
+  `inference-worker`가 쓸 GPU를 놓고 경쟁할 이유가 없다. 바꿀 때 이 항목을 갱신한다.
+
+**결과**: 얼굴 등록 품질 검사가 실제로 동작한다. 자세를 돌리지 않으면 등록이 진행되지
+않는다. `synthetic`은 테스트에 남아 외부 의존 없이 도는 이점을 그대로 유지한다.

@@ -55,6 +55,27 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
+  # 얼굴 분석 내부 서비스. **기본으로 뜨지 않는다** — 가중치 346MB를
+  # .docker/models/face에 미리 두어야 하고, 쓰지 않으면 fastapi가
+  # FACE_ANALYZER_MODE=synthetic으로 도는 데 지장이 없기 때문이다.
+  #   docker compose -f .docker/compose.main.local.yml --profile face up -d
+  # 띄운 뒤에는 env/fastapi.local.env의 FACE_ANALYZER_MODE를 http로 바꾼다.
+  deeplearning:
+    profiles: ["face"]
+    build:
+      context: ../deeplearning
+    image: classroom-monitoring-deeplearning:local
+    environment:
+      FACE_DETECTION_MODEL_PATH: /models/face/scrfd/scrfd_10g_bnkps.onnx
+      FACE_LANDMARKER_MODEL_PATH: /models/face/mediapipe/face_landmarker.task
+      FACE_RECOGNITION_MODEL_PATH: /models/face/buffalo_l/w600k_r50.onnx
+    volumes:
+      - ./models:/models:ro
+    networks:
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
   # **기본으로 뜨지 않는다.** GPU가 있는 PC에서만 `--profile worker`로 띄운다.
   # GPU 없이 올리면 컨테이너가 device 예약을 못 받아 기동에 실패한다.
   inference-worker:

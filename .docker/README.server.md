@@ -142,7 +142,7 @@ chmod 600 .docker/env/*.env
 
 ### 지금 이대로는 기동하지 않는 값
 
-- **`.docker/models/`에 가중치 파일이 없다.** `MODEL_PATH=/models/yolov8n.pt`와
+- **`.docker/models/`에 가중치 파일이 없다.** `MODEL_PATH=/models/yolo11m.pt`와
   `LLAMA_ARG_MODEL=/models/gemma.gguf`가 가리키는 파일을 호스트에 두어야 한다.
   읽기 전용 마운트라 ultralytics가 자동으로 내려받지 못한다. 의도한 것이다 —
   가중치는 이미지에도 저장소에도 넣지 않는다.

@@ -8,7 +8,7 @@
 | 커밋 안 됨 | 무엇 | 어떻게 채우나 |
 | --- | --- | --- |
 | `env/<서비스>.<환경>.env` | 컨테이너에 주입하는 실제 값·비밀값 | 변수 목록은 `<서비스>/.env.example`. 저장소 밖에서 전달받는다 |
-| `models/` | 모델 가중치(`yolov8n.pt`, `gemma.gguf`) | 각자 내려받아 둔다. `gemma.gguf`는 5.4GB다 |
+| `models/` | 모델 가중치(`yolo11m.pt`, `gemma.gguf`) | 각자 내려받아 둔다. `gemma.gguf`는 5.4GB다 |
 
 ## 파일
 

@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
     YOLO = None  # type: ignore[assignment]
 
 TARGET_CLASS_IDS: dict[int, str] = {0: "person", 67: "cell phone"}
-DEFAULT_MODEL_PATH = "yolov8n.pt"
+DEFAULT_MODEL_PATH = "yolo11m.pt"
 
 
 def _to_numpy(value: Any) -> NDArray[Any]:

@@ -50,7 +50,7 @@ class InferenceSettings(ObjectStorageSettings):
     # 뜨고, 조립 실행에서는 프로세스 환경변수의 APP_ENV가 그대로 들어온다.
     app_env: Literal["local", "dev", "prod"] = "local"
 
-    model_path: str = Field(default="yolov8n.pt")
+    model_path: str = Field(default="yolo11m.pt")
     inference_device: Literal["cpu", "cuda"] = Field(default="cpu")
     inference_confidence_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
 

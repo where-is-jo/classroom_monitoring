@@ -150,7 +150,7 @@ python -m pipeline.main
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
-| `MODEL_PATH` | 모델 가중치 경로 | 기본 `yolov8n.pt`. GPU 서버는 다른 경로를 쓸 수 있다 |
+| `MODEL_PATH` | 모델 가중치 경로 | 기본 `yolo11m.pt`. GPU 서버는 다른 경로를 쓸 수 있다 |
 | `INFERENCE_DEVICE` | 실행 장치 | `cpu` / `cuda`. local은 보통 cpu, dev는 cuda |
 | `OBJECT_STORAGE_BACKEND` | 객체 저장소 종류 | `local` / `minio`. local은 보통 `local` |
 | `OBJECT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필요. 비밀값 |
