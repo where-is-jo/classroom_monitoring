@@ -64,7 +64,7 @@ flowchart TB
 | 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
 | 탐지 시점 스냅샷 적재 | [`worker/inference`](../../worker/inference/README.md) | 동작. 탐지 개수가 바뀌면 JPEG를 MinIO에 올린다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)). 기본은 꺼짐 |
 | 스냅샷 조회 화면·API | `webapps/fastapi`의 `app/snapshots/` | 동작. MinIO 목록을 읽어 보여준다. 이미지는 fastapi가 프록시한다 |
-| 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)과 추론 파이프라인 지표 수집. **fastapi·deeplearning 지표와 알림 규칙은 `예정`** |
+| 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | Grafana 설정(데이터소스·대시보드 1개)과 추론 파이프라인·자연어 검색 지표 수집. **deeplearning 지표와 애플리케이션 대시보드·알림 규칙은 `예정`** |
 | 사용자용 실시간 영상 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. WebRTC로 확정. 코드 없음. 디렉터리 경계·접근 보호는 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
 

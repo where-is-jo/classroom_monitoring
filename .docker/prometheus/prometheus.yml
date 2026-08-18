@@ -9,6 +9,15 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
+  # 웹앱. 앱과 같은 포트(8001)에 /metrics를 연다. METRICS_ENABLED=true가 기본이다.
+  # 지금 나오는 것은 자연어 검색 지표뿐이다.
+  #
+  # **uvicorn을 워커 여러 개로 띄우면 값이 갈라진다.** 프로세스마다 레지스트리가
+  # 따로 생기고 스크랩은 그중 하나에만 닿는다. 배포 방식이 정해질 때 함께 본다.
+  - job_name: fastapi
+    static_configs:
+      - targets: ["fastapi:8001"]
+
   # 추론 파이프라인(stream + inference). METRICS_ENABLED=true(기본)일 때 9101을 연다.
   #
   # **이 컨테이너는 기본으로 뜨지 않는다.** GPU가 있는 PC에서 `--profile worker`로

@@ -6,9 +6,9 @@
 사용자에게 제품으로 제공하는 영상 실시간 모니터링은 이 디렉터리가 아니라
 [`monitoring/external`](../external/README.md)이다. 둘은 이름만 같고 목적·대상·수요자가 다르다.
 
-> 현재 상태: **추론 파이프라인 지표만 수집한다.** `worker`의 조립 실행
-> (`python -m pipeline.main`)이 `/metrics`를 노출하고, 로컬 docker 스택의 Prometheus가
-> 그 job 하나를 긁는다. `fastapi`와 `deeplearning`은 아직 노출하지 않는다.
+> 현재 상태: **추론 파이프라인과 자연어 검색 지표를 수집한다.** `worker`의 조립
+> 실행(`python -m pipeline.main`)과 `fastapi`가 각각 `/metrics`를 노출하고, 로컬
+> docker 스택의 Prometheus가 두 job을 긁는다. `deeplearning`은 아직 노출하지 않는다.
 > Grafana 데이터소스·대시보드 provisioning은 이 디렉터리에서 관리한다.
 > **알림 규칙은 아직 없다** — 알림 채널이 `결정 필요`이고, 임계값의 근거가 될
 > 정상 범위 데이터가 아직 쌓이지 않았다.
@@ -80,7 +80,7 @@ export해서 `grafana/dashboards/` 아래 파일을 갱신해야 한다.
   만든다. 지표는 접근 통제가 약한 경로로 노출되기 쉽다.
 - 지표 추가 절차는 `add-monitoring-metric` 스킬을 따른다.
 
-### 지금 노출하는 지표
+### 지금 노출하는 지표 — worker
 
 `worker`의 조립 실행(stream + inference)이 `METRICS_PORT`(기본 9101)에 노출한다.
 정의는 [`worker/inference/metrics.py`](../../worker/inference/metrics.py)와
@@ -127,13 +127,60 @@ rate(classroom_monitoring_frames_dropped_total[5m])
 classroom_monitoring_inference_consecutive_failures >= 3
 ```
 
+### 지금 노출하는 지표 — fastapi
+
+`fastapi`가 앱과 같은 포트의 `/metrics`에 노출한다. 정의는
+[`app/llm_search/metrics.py`](../../webapps/fastapi/app/llm_search/metrics.py)에 있다.
+
+| 지표 | 타입 | label | 무엇을 답하는가 |
+| --- | --- | --- | --- |
+| `classroom_monitoring_llm_plan_duration_seconds` | Histogram | `attempt`, `outcome` | 계획 생성이 얼마나 걸리고, **재시도가 얼마나 잦은가** |
+| `classroom_monitoring_llm_search_duration_seconds` | Histogram | `outcome` | 사용자가 실제로 기다린 시간(실패 포함) |
+| `classroom_monitoring_llm_schema_fallback_total` | Counter | 없음 | `json_schema` 폴백이 상시 발동 중인가 |
+| `classroom_monitoring_llm_search_truncated_total` | Counter | 없음 | `LLM_SEARCH_SCAN_LIMIT`이 적정한가 |
+
+`attempt`는 2(`first`·`retry`), `outcome`은 3(`success`·`invalid`·`unavailable`)이다.
+**재시도 횟수를 별도 Counter로 두지 않는다** — Histogram의 `_count`가 label 조합마다
+시도 횟수를 이미 내보낸다. 검색 한 건 기준으로 실측한 시계열 수는 26개다.
+
+`outcome` 세 값을 합치지 않는 이유는 사용자가 할 일이 다르기 때문이다. `invalid`는
+질문을 다시 쓰면 될 수 있고, `unavailable`은 질문을 고쳐도 소용없다.
+
+**질문 원문과 그 해시는 label로 쓰지 않는다.** 값이 무한히 늘어나고 질문에는 사람이
+찾는 대상이 담긴다. 개별 질문 추적이 필요하면 지표가 아니라 로그를 본다.
+
+**uvicorn을 워커 여러 개로 띄우면 값이 갈라진다.** 프로세스마다 레지스트리가 따로
+생기고 스크랩은 그중 하나에만 닿는다. 지금은 단일 프로세스로 실행하므로 문제가 없지만,
+배포 방식이 `결정 필요`라 워커를 늘릴 때 `prometheus_client`의 multiprocess 모드를
+켜야 한다.
+
+### PromQL 예시 — fastapi
+
+```promql
+# 계획 생성 지연 p95
+histogram_quantile(0.95, rate(classroom_monitoring_llm_plan_duration_seconds_bucket[5m]))
+
+# 첫 시도 규격 위반율 — 모델·프롬프트를 고칠지 판단하는 근거
+rate(classroom_monitoring_llm_plan_duration_seconds_count{attempt="first",outcome="invalid"}[30m])
+  / rate(classroom_monitoring_llm_plan_duration_seconds_count{attempt="first"}[30m])
+
+# 검색이 LLM 때문에 느린가, 저장소 때문에 느린가
+histogram_quantile(0.95, rate(classroom_monitoring_llm_search_duration_seconds_bucket[5m]))
+  - histogram_quantile(0.95, rate(classroom_monitoring_llm_plan_duration_seconds_bucket[5m]))
+
+# json_schema 폴백이 상시 발동 중인가
+rate(classroom_monitoring_llm_schema_fallback_total[30m]) > 0
+```
+
+**검색과 추론을 함께 봐야 하는 이유**는 llama-server와 inference-worker가 같은 GPU를
+나눠 쓰기 때문이다. 검색이 몰려 탐지가 느려지는지는 두 지연을 겹쳐 봐야 알 수 있다.
+
 ### 아직 노출하지 않는 것
 
 `예정`이며 코드가 없다. **없는 지표의 패널을 미리 만들지 않는다.**
 
 | 대상 | 담당 | 비고 |
 | --- | --- | --- |
-| 자연어 검색 계획 지연·재시도율 | `fastapi` | LLM 호출 경계 |
 | 얼굴 분석 단계별 지연·세션 수 | `deeplearning` | |
 | 탐지 결과 HTTP 전달 실패 건수 | `worker/inference` | 지금은 로그로만 남는다 |
 | 카메라 연결 상태·재연결 횟수 | `worker/stream` | |
@@ -150,7 +197,8 @@ classroom_monitoring_inference_consecutive_failures >= 3
 
 ## 다른 서비스와의 관계
 
-- `fastapi`, `deeplearning`, `worker`: 지표 노출 주체다. monitoring은 이를 수집만 한다.
+- `fastapi`, `worker`: 지표를 노출한다. monitoring은 이를 수집만 한다.
+- `deeplearning`: 지표 노출은 `예정`이다.
 - 브라우저: 지표를 직접 조회하지 않는다. 필요하면 `fastapi`를 통한다.
 - `RPAs`: 자동화 실행 결과를 지표로 다룰지는 **결정 필요**.
 
