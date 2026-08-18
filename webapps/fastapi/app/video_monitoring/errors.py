@@ -27,6 +27,20 @@ class VideoStreamNotFoundError(DomainError):
         super().__init__("Requested camera not found.")
 
 
+class VideoStreamAlreadyExistsError(DomainError):
+    """같은 camera_id의 source가 이미 등록되어 있음.
+
+    camera_id는 worker가 탐지 이벤트를 보낼 때 쓰는 식별자라 중복될 수 없다.
+    덮어쓰지 않고 거절해서, 이미 도는 카메라의 강의실 배정이 조용히 바뀌는 것을 막는다.
+    """
+
+    code = "VIDEO_STREAM_ALREADY_EXISTS"
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("이미 등록된 카메라 식별자입니다.")
+
+
 class VideoSearchInputError(DomainError):
     code = "VIDEO_SEARCH_INPUT_INVALID"
     status_code = 422

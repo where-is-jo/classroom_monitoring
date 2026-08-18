@@ -24,6 +24,7 @@ from .schemas import (
     StreamListResponse,
     VideoSearchRequest,
     VideoSearchResponse,
+    VideoStreamCreateRequest,
 )
 from .service import PlaybackSessionService, VideoDemoService, VideoStreamService
 
@@ -61,6 +62,26 @@ def list_video_streams(
         items.append(RealStreamResponse.from_domain(stream, status))
 
     return StreamListResponse(items=items, total=len(items))
+
+
+@api_router.post("/video-streams", response_model=RealStreamResponse, status_code=201)
+def create_video_stream(
+    request: VideoStreamCreateRequest,
+    stream_service: VideoStreamService = Depends(get_video_stream_service),
+) -> RealStreamResponse:
+    """실제 카메라 source를 등록한다 (201).
+
+    MongoDB mode에는 demo seed가 돌지 않으므로 이 경로로 camera_id를 원장에 넣어야
+    worker의 탐지 이벤트가 받아들여진다. 등록 직후에는 아직 프레임이 없으므로
+    상태는 UNKNOWN이다.
+    """
+    stream = stream_service.register_stream(
+        camera_id=request.camera_id,
+        classroom_id=request.classroom_id,
+        camera_label=request.camera_label,
+        enabled=request.enabled,
+    )
+    return RealStreamResponse.from_domain(stream, stream_service.get_source_status(stream))
 
 
 @api_router.get(

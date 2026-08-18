@@ -58,7 +58,13 @@ services:
   fastapi:
     # 서버에는 webapps/fastapi 소스를 옮기지 않으므로 build 블록을 두지 않는다.
     # `docker compose pull`로만 받는다. 로컬 빌드는 compose.main.local.yml이 한다.
-    image: ghcr.io/where-is-jo/classroom-monitoring-fastapi:latest
+    #
+    # **:latest가 아니라 :develop을 본다.** CI는 develop 병합마다 develop과 sha-* 태그로
+    # 올리고 latest는 붙이지 않는다(결정 0014). 여기서 latest를 보면 병합해도 서버가
+    # 갱신되지 않는다 — 실제로 2026-08-12에 손으로 올린 이미지가 그대로 돌아
+    # 그 뒤에 들어온 탐지 수신·ROI 매핑이 서버에 없었다.
+    # latest는 나중에 main 배포 시점의 태그로 남겨 둔다.
+    image: ghcr.io/where-is-jo/classroom-monitoring-fastapi:develop
     env_file:
       # 변수 이름의 기준은 webapps/fastapi/.env.example이다. 환경과 무관한 값은
       # 여기 없다 — 이미지 안의 config/settings.yml이 갖는다.

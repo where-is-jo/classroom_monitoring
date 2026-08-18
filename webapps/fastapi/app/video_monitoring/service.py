@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlparse
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from ..classrooms.errors import ClassroomNotFoundError
@@ -26,6 +27,7 @@ from .errors import (
     PlaybackSourceUnavailableError,
     PlaybackStreamNotFoundError,
     VideoSearchInputError,
+    VideoStreamAlreadyExistsError,
     VideoStreamNotFoundError,
     WhepTimeoutError,
     WhepUnavailableError,
@@ -311,6 +313,44 @@ class VideoStreamService:
         self._classroom_service = classroom_service
         self._stale_seconds = stale_seconds
         self._clock = clock
+
+    def register_stream(
+        self,
+        *,
+        camera_id: str,
+        classroom_id: str,
+        camera_label: str,
+        enabled: bool,
+    ) -> VideoStream:
+        """실제 카메라 source를 새로 등록한다.
+
+        MongoDB mode에는 시드가 돌지 않으므로(demo seed는 memory 전용) 이 경로가
+        camera_id를 원장에 넣는 유일한 수단이다. 등록되지 않은 camera_id로 탐지
+        이벤트가 오면 student_monitoring이 VideoStreamNotFoundError로 거절한다.
+
+        재생 경로는 camera_id로만 조립한다. 호출자가 준 문자열을 그대로 쓰면
+        WHEP proxy 대상이 외부 입력이 된다.
+        """
+        if self._repository.find_by_camera_id(camera_id) is not None:
+            raise VideoStreamAlreadyExistsError()
+
+        now = self._clock()
+        return self.save_stream(
+            VideoStream(
+                id=str(uuid4()),
+                camera_id=camera_id,
+                classroom_id=classroom_id,
+                camera_label=camera_label,
+                playback_kind=PlaybackKind.WEBRTC,
+                playback_path=f"/webrtc/{camera_id}",
+                enabled=enabled,
+                last_frame_at=None,
+                last_detection_at=None,
+                is_demo=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
     def save_stream(self, stream: VideoStream) -> VideoStream:
         """활성 실제 stream이 존재하는 활성 강의실만 참조하게 저장한다."""

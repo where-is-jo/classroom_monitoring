@@ -75,6 +75,24 @@ class RealStreamResponse(BaseModel):
         )
 
 
+class VideoStreamCreateRequest(BaseModel):
+    """실제 카메라 source 등록 요청.
+
+    playback_path·id·시각은 받지 않는다. 재생 경로는 camera_id로만 조립해야
+    임의 주소를 넣을 수 없고(결정 0014의 SSRF 차단과 같은 이유), 나머지는 서버가 만든다.
+    playback_kind도 WEBRTC로 고정한다 — 재생할 수 없는 source를 등록할 이유가 없다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # worker의 STREAM_SOURCES에 적는 식별자와 같아야 한다. 다르면 탐지 이벤트가
+    # 이 source를 찾지 못해 404로 거절된다.
+    camera_id: str = Field(..., min_length=1, max_length=64)
+    classroom_id: str = Field(..., min_length=1)
+    camera_label: str = Field(..., min_length=1, max_length=100)
+    enabled: bool = True
+
+
 class StreamListResponse(BaseModel):
     items: list[DemoStreamResponse | RealStreamResponse]
     total: int

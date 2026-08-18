@@ -14,7 +14,7 @@
 
 | 파일 | project name | 담는 것 |
 | --- | --- | --- |
-| `compose.main.dev.yml` | `classroom-monitoring-dev` | FastAPI, inference worker, MediaMTX, MinIO, n8n |
+| `compose.main.dev.yml` | `classroom-monitoring-dev` | FastAPI, inference worker, deeplearning, MediaMTX, MinIO, n8n |
 | `compose.llm.dev.yml` | `classroom-monitoring-dev-llm` | llama-server (Gemma GGUF) |
 | `compose.monitoring.dev.yml` | `classroom-monitoring-dev-observability` | Prometheus, Grafana, Loki, Alloy |
 | `alloy/config.dev.alloy` | — | 서버용 로그 수집 설정 |
@@ -159,11 +159,21 @@ local은 소스에서 빌드해 `:local` 태그를 붙인다 — 로컬 빌드�
 
 | 서비스 | dev 이미지 (pull) | local 이미지 (build) |
 | --- | --- | --- |
-| fastapi | `ghcr.io/where-is-jo/classroom-monitoring-fastapi:latest` | `classroom-monitoring-fastapi:local` |
+| fastapi | `ghcr.io/where-is-jo/classroom-monitoring-fastapi:develop` | `classroom-monitoring-fastapi:local` |
 | inference worker | `ghcr.io/where-is-jo/classroom-monitoring-worker:latest` | `classroom-monitoring-worker:local` |
+| deeplearning | `ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest` | `classroom-monitoring-deeplearning:local` |
 
-> GHCR org는 `whereisjo`가 아니라 `where-is-jo`(하이픈)다. 2026-08-12에 둘 다
-> `:latest`로 push했다.
+**fastapi만 `:develop`을 본다.** CI가 develop 병합마다 `develop`·`sha-*`로 올리고
+`latest`는 붙이지 않기 때문이다(결정 0014). `:latest`를 보면 병합해도 서버가 갱신되지
+않는다 — 실제로 2026-08-12에 손으로 올린 이미지가 계속 돌아 그 뒤에 들어온 탐지
+수신(`/internal/inference/events`)과 ROI 매핑이 서버에 없었다.
+
+**worker와 deeplearning은 CI가 만들지 않아 `:latest`가 곧 최신이다.** 사람이 빌드해
+push하므로, 코드를 고쳤으면 이미지도 다시 올려야 한다. 잊으면 fastapi와 달리
+아무 신호 없이 옛 코드가 계속 돈다.
+
+> GHCR org는 `whereisjo`가 아니라 `where-is-jo`(하이픈)다. 2026-08-12에 fastapi와
+> worker를 `:latest`로 push한 기록이 있다.
 
 서드파티 이미지는 두 환경이 같은 태그를 쓴다. 단 llama-server만 다르다 —
 dev는 CUDA 판(`server-cuda-b10362`), local은 CPU 판(`server`)이다. GPU 없는 PC에서
