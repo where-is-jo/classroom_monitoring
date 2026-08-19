@@ -9,7 +9,8 @@
 > 현재 상태: **세 서비스가 모두 지표를 노출한다.** `worker`의 조립 실행
 > (`python -m pipeline.main`)·`fastapi`·`deeplearning`이 각각 `/metrics`를 열고, 로컬
 > docker 스택의 Prometheus가 세 job을 긁는다.
-> Grafana 데이터소스·대시보드 provisioning은 이 디렉터리에서 관리한다.
+> Grafana 데이터소스·대시보드 provisioning은 이 디렉터리에서 관리하며,
+> 애플리케이션 지표 대시보드가 하나 있다.
 > **알림 규칙은 아직 없다** — 알림 채널이 `결정 필요`이고, 임계값의 근거가 될
 > 정상 범위 데이터가 아직 쌓이지 않았다.
 
@@ -24,20 +25,50 @@ monitoring/internal/grafana/
 
 **Prometheus 설정 파일(`prometheus.yml`)은 아직 여기 없다.** 로컬 docker 스택의
 개인용 최소 설정(`.docker/prometheus/prometheus.yml`)으로만 존재하며, 지금은 그 파일이
-`inference-worker` job 하나를 들고 있다. 통합 실행 수단이 공식화되면 이 디렉터리로
-옮긴다(`결정 필요`).
+`fastapi`·`deeplearning`·`inference-worker` job을 들고 있다. 통합 실행 수단이
+공식화되면 이 디렉터리로 옮긴다(`결정 필요`).
 
 ### 대시보드
 
 | 파일 | uid | 내용 |
 | --- | --- | --- |
 | `grafana/dashboards/stack-status.json` | `smart-office-stack` | 컨테이너 로그 발생량·오류 로그·로그 원문(Loki)과 스크랩 타겟 상태(Prometheus `up`) |
+| `grafana/dashboards/application-metrics.json` | `classroom-monitoring-app` | 세 서비스의 애플리케이션 지표(Prometheus). 서비스별 row 넷 |
 
-`uid`와 대시보드 안의 `project` label 값은 이전 주제 이름을 쓴다. 저장된 대시보드의
-`uid`를 바꾸면 기존 링크와 즐겨찾기가 끊기므로, 저장소 이름 변경과 함께 다룬다.
+**두 대시보드는 보는 대상이 다르다.** `stack-status`는 "스택이 살아 있는가"(컨테이너
+로그·스크랩)를 보고, `application-metrics`는 "서비스가 제 일을 하고 있는가"를 본다.
+로그 패널을 애플리케이션 대시보드에 복사하지 않는다.
 
-**지금 존재하는 데이터만 쓴다.** 애플리케이션 지표 패널은 `/metrics`가 생긴 뒤에
-별도 대시보드로 추가한다. 빈 패널을 미리 만들어 두지 않는다.
+`stack-status`의 `uid`와 그 안의 `project` label 값은 이전 주제 이름을 쓴다. 저장된
+대시보드의 `uid`를 바꾸면 기존 링크와 즐겨찾기가 끊기므로, 저장소 이름 변경과 함께
+다룬다. **새로 만드는 대시보드는 그 제약이 없으므로 현재 이름(`classroom-monitoring-`)을
+쓴다.**
+
+**지금 존재하는 데이터만 쓴다.** `application-metrics`의 모든 패널은 코드에 실제로
+정의된 지표만 참조한다 — 검증 절차는 [아래](#대시보드-검증)에 있다. 빈 패널을 미리
+만들어 두지 않는다.
+
+#### application-metrics 구성
+
+| row | 무엇을 보는가 |
+| --- | --- |
+| (맨 위) | `up` 세 job. **패널이 비어 있을 때 여기부터 본다** — 타겟이 죽은 것과 지표가 없는 것은 다르다 |
+| 추론 파이프라인 (worker) | 연속 실패, 추론 지연 p50/95/99, 처리량, 탐지 신뢰도, 버려진 프레임, 실패율·드롭률, 탐지 건수 |
+| 자연어 검색 (fastapi) | 첫 시도 규격 위반율, `json_schema` 폴백, 조회 상한 도달, 계획 지연, 결과 사유, 검색 지연과 LLM 구간의 차 |
+| 얼굴 분석 (deeplearning) | 남아 있는 등록 세션, 구간별 지연, 분석·embedding 결과, embedding 지연 |
+| GPU를 나눠 쓰는 두 경로 | 추론 지연과 LLM 계획 지연을 겹쳐 본다. **경합을 증명할 수 있는 유일한 패널** |
+
+`inference-worker`와 `deeplearning`은 compose profile로 gate되어 있어(`--profile worker`,
+`--profile face`) 띄우기 전에는 해당 row가 비어 있는 것이 정상이다.
+
+**패널을 만들지 않은 지표가 둘 있다.** `frame_buffer_depth`는 기본 설정
+(`frame_buffer_maxsize=1`)에서 0과 1 사이만 오가 그래프로 볼 값이 아니고,
+`frames_consumed_total`은 `frames_processed_total`과 거의 같은 값이다. 버퍼를 키운
+뒤에는 depth가 의미를 가지므로 그때 추가한다.
+
+**임계값은 전부 잠정이다.** 연속 실패 3/5는 코드의 정지 임계값(기본 5)에서 왔지만,
+규격 위반율 20/40%와 등록 세션 20/50은 근거 데이터 없이 잡은 값이다. 평소 분포를
+본 뒤 고친다.
 
 대시보드 JSON은 데이터소스를 `uid`(`prometheus`, `loki`)로 참조한다.
 데이터소스 provisioning 파일의 `uid`를 바꾸면 대시보드도 함께 고쳐야 한다.
@@ -283,6 +314,47 @@ curl -s -u "$GF_USER:$GF_PW" --get \
   'http://127.0.0.1:3000/api/datasources/proxy/uid/loki/loki/api/v1/query' \
   --data-urlencode 'query=sum by (container) (rate({project="smart-office-monitoring"}[5m]))'
 ```
+
+#### Grafana 없이 확인할 수 있는 것
+
+`application-metrics.json`은 Grafana를 띄우지 못한 상태에서 만들었다. 스택 없이도
+확인할 수 있는 것은 아래까지이며, **실제로 실행해 통과시킨 명령이다.**
+
+```bash
+# 1. JSON 문법
+python -c "import json;json.load(open('monitoring/internal/grafana/dashboards/application-metrics.json',encoding='utf-8'))"
+
+# 2. PromQL 문법 — 모든 패널의 식을 실제 파서에 넣는다 (pip install promql-parser)
+python - <<'PY'
+import json, promql_parser
+path = "monitoring/internal/grafana/dashboards/application-metrics.json"
+dashboard = json.load(open(path, encoding="utf-8"))
+count = 0
+for panel in dashboard["panels"]:
+    for target in panel.get("targets", []):
+        # Grafana 매크로는 PromQL이 아니라 값으로 바꿔 넣는다
+        expr = target["expr"].replace("$__rate_interval", "5m").replace("$__range", "1h")
+        promql_parser.parse(expr)
+        count += 1
+print(f"PromQL {count}개 파싱 성공")
+PY
+
+# 3. 코드에 실제로 정의된 지표 이름 — 빈 패널을 막는 대조표
+grep -rho 'f"{METRIC_PREFIX}[a-z0-9_]*"' \
+  worker/shared/metrics.py worker/inference/metrics.py \
+  webapps/fastapi/app/llm_search/metrics.py deeplearning/metrics.py \
+  | sed 's/f"{METRIC_PREFIX}/classroom_monitoring_/; s/"$//' | sort -u
+```
+
+3번은 이름을 **코드에서** 뽑는다. 소스에 `classroom_monitoring_`이 그대로 적혀 있지
+않고 `METRIC_PREFIX`와 합쳐지기 때문이다. 대시보드 식에 등장하는 이름에서
+`_bucket`·`_count`·`_sum`·`_total`을 뗀 값이 이 목록 안에 있어야 한다. 대시보드에만
+있고 코드에 없는 이름이 나오면 그 패널은 영원히 비어 있게 된다.
+
+**확인하지 못한 것**: 패널이 실제로 그려지는지, 값이 의도대로 나오는지, 임계값이
+적절한지. Grafana와 Prometheus를 띄워야 하고, 그러려면 `--profile worker`·
+`--profile face`까지 올려 지표가 쌓여 있어야 한다. 스택을 올릴 수 있는 환경에서
+확인한 뒤 이 문단을 갱신한다.
 
 ## 관련 문서
 
