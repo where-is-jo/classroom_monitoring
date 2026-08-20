@@ -22,7 +22,11 @@
 | `PRESENT` | 학생이 식별됐고 지정 좌석에 있다 | MVP |
 | `WRONG_SEAT` | 학생이 식별됐으나 지정 좌석이 아니다 | MVP |
 | `ABSENT` | 수업 시간 중 유예 시간을 넘겨 미식별 | MVP |
-| `IN_CLASSROOM` | 좌석에는 없지만 교실 안에 있다 | 최종 확장 |
+| `IN_CLASSROOM` | 신원 있는 track이 교실 안에 있으나 좌석 ROI 밖이다 | MVP([결정 0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
+
+**식별과 위치는 서로 다른 카메라가 담당한다.** 입구 카메라가 얼굴로 신원을 한 번 정하고,
+그 신원을 트래킹으로 이어 강의실 전체를 보는 어안 CCTV에서 좌석을 판정한다. 좌석 화각
+에서는 얼굴을 인식하지 않는다([결정 0024](./docs/architecture/decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다), [0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)).
 
 무엇을 만들 것인지는 [학생 모니터링 MVP 명세](./docs/specs/student-monitoring-mvp.md)에 있다.
 
@@ -43,10 +47,10 @@
 - **`worker`** — 카메라 영상을 받아(`stream`) 프레임을 골라 탐지하고(`inference`),
   탐지 인원 수가 바뀌면 스냅샷을 객체 저장소에 올린다.
   **영상 원본은 저장하지 않는다**
-  ([결정 0011](./docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+  ([결정 0028](./docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
   `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
-  전달한다. 실제 얼굴 식별 모델은 아직 연결되지 않아 기본 출력은 사람 탐지까지다.
+  전달한다. 실제 얼굴 식별 모델과 트래킹은 아직 연결되지 않아 기본 출력은 사람 탐지까지다.
 
 ```bash
 cd webapps/fastapi
@@ -60,12 +64,18 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 기준이고, 서비스를 실행하고 검증하는 명령은 [개발 가이드](./docs/guides/README.md)에
 모여 있다.
 
+**실행 호스트는 둘이다.** 개인 PC에 `fastapi`를, GPU 서버에 추론 worker·`deeplearning`·
+LLM과 MediaMTX·MinIO·모니터링을 두고 Tailscale로 잇는다. MongoDB는 Atlas라 호스트와
+무관하다([결정 0026](./docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)). **개발·검증용 구성이며 운영 배포가 아니다.**
+
 `deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석 내부 서비스와 모델 학습용
 Jupyter 노트북이 있다
-([결정 0012](./docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+([결정 0029](./docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 `monitoring`, `RPAs`에는 아직 실행 코드가 없다.
-실제 얼굴 식별 모델과 tracking·시간표 기반 `ABSENT`는 구현되지 않았다. 학생 식별 필드를
-받은 뒤 ROI와 좌석 지정으로 현재 상태를 판정하고 화면을 실시간 갱신하는 기반은 구현됐다.
+실제 얼굴 식별 모델, 트래킹, **입구 카메라와 CCTV 사이의 신원 인계**, 시간표 기반
+`ABSENT`는 구현되지 않았다. 셋째가 현재 가장 큰 미해결 항목이며 방법 자체가 아직
+`결정 필요`다([결정 0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 학생 식별 필드를 받은 뒤 ROI와 좌석 지정으로
+현재 상태를 판정하고 화면을 실시간 갱신하는 기반은 구현됐다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -185,21 +195,24 @@ README.md      이 문서
 - **운영 접근 통제 방식** — 정해지기 전까지 `APP_ENV=prod` 배포를 하지 않는다
 - 얼굴 탐지·인식 모델과 사람 탐지 모델 버전
 - 결석 유예 시간 값과 bbox 중심점 기반 좌석 판정의 조정 여부 — 실제 촬영이 선행되어야 한다
-- 카메라 배치(대수·높이·화각·거리)
+- **카메라 간 신원 인계 방법** — 입구 track과 CCTV track을 잇는 방법. 두 화각이 겹치지
+  않으므로 CCTV의 문 영역과 통과 시각이 유일한 단서다. 실제 촬영이 선행되어야 한다
+- 어안 왜곡 보정 수행 위치와 트래킹 구현 위치
+- 카메라 높이·화각·거리와 CCTV 화면상의 문 영역 (대수·역할과 겹침 없음은 결정 0024로 확정)
 - 수업 시간표의 원본 관리 주체
 - 일반 모니터링 SSE의 다중 프로세스 broker·replay와 브라우저 영상 재생 방식
   (학생 상태는 결정 0019에 따라 초기 REST + 이후 SSE, 얼굴 등록은 결정 0011에 따라
   WebSocket으로 확정)
-- Tracking 도입과 `IN_CLASSROOM` 지원
 - 업무 자동화 오케스트레이션(n8n / LangGraph), 캐시·큐 도입 여부, 알림 채널
   (자연어 검색 방식은 결정 0016으로 확정되었다)
-- 통합 실행 수단(docker compose) 공식화, 배포 환경과 방식
+- 개인 PC가 꺼져 있을 때 worker의 탐지 이벤트 처리, 호스트 경계를 넘는 얼굴 등록·스냅샷의 지연
+- **운영** 배포 환경과 방식 (개발·검증용 호스트 배치는 결정 0026으로 확정)
 
 확정된 결정은 [결정 기록](./docs/architecture/decisions.md)에 있다.
 fastapi 내부 구조, 설계 패턴 판단 기준, 메타데이터 저장소(MongoDB),
 영상·얼굴 이미지 저장소(MinIO), worker 분리와 프레임 전달, 상태 판정 소유 서비스,
 추론 책임 경계, MVP 제품 사용자 범위, 실시간 관제의 HTTP·WebRTC·SSE 구성,
-실시간 영상의 인증 최소화([0012](./docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다))가
+실시간 영상의 인증 최소화([0030](./docs/architecture/decisions.md#0030--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다))가
 여기에 해당한다. **운영 접근 통제는 MVP 동안 도입하지 않기로 했지만
-([0012](./docs/architecture/decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)),
+([0030](./docs/architecture/decisions.md#0030--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)),
 정해지기 전까지 `APP_ENV=prod` 배포는 하지 않는다.**
