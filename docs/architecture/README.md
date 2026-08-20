@@ -89,6 +89,7 @@ bbox의 정본이다.** 구성도에 단계를 그리지 않은 것은 어느 �
 flowchart LR
     subgraph PC["개인 PC"]
         FASTAPI["fastapi<br/>API · 관리자 화면"]
+        N8N["n8n"]
     end
     subgraph GPUSRV["GPU 서버"]
         WORKER["inference-worker"]
@@ -97,7 +98,6 @@ flowchart LR
         MTX["mediamtx"]
         MINIO["minio"]
         OBS["prometheus · grafana<br/>loki · alloy"]
-        N8N["n8n"]
     end
     CLOUD[("MongoDB Atlas")]
 
@@ -107,8 +107,8 @@ flowchart LR
 
 | 호스트 | 올라가는 것 |
 | --- | --- |
-| 개인 PC | `fastapi`(관리자 화면 포함) |
-| GPU 서버 | `inference-worker`, `deeplearning`, `llama-server`, `mediamtx`, `minio`, `n8n`, 모니터링 4종 |
+| 개인 PC | `fastapi`(관리자 화면 포함), `n8n` |
+| GPU 서버 | `inference-worker`, `deeplearning`, `llama-server`, `mediamtx`, `minio`, 모니터링 4종 |
 | 클라우드 | MongoDB Atlas |
 
 **두 호스트는 Tailscale로 잇는다.** GPU 서버는 공인 IP가 있지만 개인 PC는 없고,
