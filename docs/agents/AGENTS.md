@@ -124,7 +124,7 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 새 코드를 어디에 둘지, 의존 방향이 규칙에 맞는지 판단할 때는 `architecture-review` 스킬을 따른다.
 
 1. **브라우저의 제품 API와 탐지 SSE는 `fastapi`만 호출한다.** 실시간 영상은
-   [결정 0011](../architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)에
+   [결정 0027](../architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)에
    따라 fastapi가 허용한 WebRTC 세션에 한해 MediaMTX에 연결할 수 있다.
    `deeplearning`과 `worker`에는 직접 접근하지 않는다.
 2. **외부 클라이언트의 제품 요청은 `fastapi`를 통해 처리한다.** WebRTC 미디어 연결을

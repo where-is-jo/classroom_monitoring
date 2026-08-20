@@ -243,7 +243,7 @@ docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 
 ## 탐지 스냅샷 — 영상 원본은 저장하지 않는다
 
 가용 용량이 약 48 GB인데 1080p 카메라 한 대가 시간당 약 0.9 GB라 상시 녹화가
-성립하지 않는다. 그래서 [결정 0011](../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)로
+성립하지 않는다. 그래서 [결정 0028](../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)로
 **영상 원본 대신 탐지 시점의 정지 이미지만** 남긴다. `worker/recorder`는 이 스택에서
 실행하지 않는다.
 
