@@ -64,8 +64,8 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 기준이고, 서비스를 실행하고 검증하는 명령은 [개발 가이드](./docs/guides/README.md)에
 모여 있다.
 
-**실행 호스트는 둘이다.** 개인 PC에 `fastapi`를, GPU 서버에 추론 worker·`deeplearning`·
-LLM과 MediaMTX·MinIO·모니터링을 두고 Tailscale로 잇는다. MongoDB는 Atlas라 호스트와
+**실행 호스트는 둘이다.** 개인 PC에 `fastapi`와 `n8n`을, GPU 서버에 추론 worker·
+`deeplearning`·LLM과 MediaMTX·MinIO·모니터링을 두고 Tailscale로 잇는다. MongoDB는 Atlas라 호스트와
 무관하다([결정 0026](./docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)). **개발·검증용 구성이며 운영 배포가 아니다.**
 
 `deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석 내부 서비스와 모델 학습용
