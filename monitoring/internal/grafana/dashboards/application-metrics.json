@@ -648,7 +648,7 @@
       "id": 12,
       "type": "stat",
       "title": "json_schema 폴백",
-      "description": "llama-server가 json_schema 요청을 거절해 json_object로 낮춘 횟수. **0이 아니면 생성 단계에서 구조를 강제하지 못하고 있다는 뜻이다** — 저양자화 모델에서 규격 위반이 늘어난다. GPU 환경에서 처음 켤 때 가장 먼저 볼 값이다.",
+      "description": "llama-server가 json_schema 요청을 거절해 json_object로 낮춘 횟수. **dev 서버의 llama.cpp b10362는 이 요청을 200으로 받으므로 평소 0이다**(2026-08-19 실측). 0이 아니게 되면 서버 빌드가 바뀐 것이며, 생성 단계에서 구조를 강제하지 못해 저양자화 모델에서 규격 위반이 늘어난다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
