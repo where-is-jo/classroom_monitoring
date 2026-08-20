@@ -5,7 +5,7 @@
 
 > **범위**: 사람 탐지 모델의 수동 fine-tuning까지만 다룬다. 얼굴 탐지·인식 모델 학습,
 > 자동 재학습 파이프라인, 데이터셋 라벨링 도구는 범위 밖이다
-> ([결정 0012](../../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+> ([결정 0029](../../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 얼굴 데이터는 개인정보 합의 전까지 이 노트북에서도 다루지 않는다.
 
 ## 준비물
@@ -83,7 +83,7 @@
 - **공용 GPU를 여러 명이 나눠 쓴다.** 학습을 시작하기 전에 노트북의 GPU 확인 셀로
   `nvidia-smi` 결과를 보고, 이미 쓰는 사람이 있으면 팀 채널에 먼저 확인한다.
 - **디스크 여유가 크지 않다.** 공용 서버의 가용 용량이 약 17~20 GB뿐이다
-  ([결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+  ([결정 0028](../../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   학습이 끝나면 노트북의 정리 셀로 데이터셋과 `runs/`를 지운다. 큰 데이터셋을
   서버에 영구히 두지 않는다.
 - **데이터셋·가중치·`runs/`는 커밋하지 않는다.** 저장소의 `.gitignore`가 이 디렉터리
@@ -113,6 +113,6 @@ training/
 ## 관련 문서
 
 - [deeplearning README](../README.md)
-- [결정 0012](../../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)
-- [결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다) — 공용 서버 용량 제약의 근거
+- [결정 0029](../../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)
+- [결정 0028](../../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다) — 공용 서버 용량 제약의 근거
 - [환경변수 규칙](../../docs/conventions/environment-convention.md)
