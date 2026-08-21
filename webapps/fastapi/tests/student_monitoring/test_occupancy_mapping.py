@@ -117,7 +117,12 @@ class TestOccupancyDecision:
 
         assert all(o.occupied is False for o in observations)
 
-    def test_low_confidence_detection_is_not_evidence(self) -> None:
+    def test_low_confidence_detection_is_uncertain_not_vacant(self) -> None:
+        """임계값 미만 탐지가 잡힌 좌석을 "비었다"로 단정하지 않는다.
+
+        낮은 신뢰도를 그대로 넘겨 좌석 서비스가 `UNKNOWN`으로 해석하게 한다.
+        버리면 매칭 없음이 되어 `VACANT`로 기록되고, 그것은 조용한 오판이다.
+        """
         observations = map_detections_to_observations(
             [make_detection("d1", (100, 400, 200, 600), confidence=0.5)],
             [SEAT_A],
@@ -125,7 +130,20 @@ class TestOccupancyDecision:
             THRESHOLD,
         )
 
+        assert observations[0].occupied is True
+        assert observations[0].confidence == 0.5
+
+    def test_seat_without_any_detection_is_vacant(self) -> None:
+        """관측 대상 좌석에 아무 탐지도 없으면 "관측했고 비어 있음"이다."""
+        observations = map_detections_to_observations(
+            [],
+            [SEAT_A],
+            FRAME,
+            THRESHOLD,
+        )
+
         assert observations[0].occupied is False
+        assert observations[0].confidence == 0.0
 
     def test_overlapping_people_keep_the_highest_confidence(self) -> None:
         observations = map_detections_to_observations(

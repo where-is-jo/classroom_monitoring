@@ -62,9 +62,12 @@ def seed_demo_data(service: ClassroomService, *, now: datetime) -> None:
                 source=OccupancySource.MOCK,
                 observed_at=observed_at,
                 observations=tuple(
+                    # 6번 좌석은 "사람이 잡혔지만 임계값 미만" 표본이다. 화면에서
+                    # UNKNOWN을 확인하려면 점유 근거가 있으면서 신뢰도가 낮아야 한다
+                    # — 빈 관측은 이제 VACANT가 된다.
                     SeatObservation(
                         seat_id=seat.id,
-                        occupied=index % 3 != 0,
+                        occupied=index % 3 != 0 or index == 6,
                         confidence=0.35 if index == 6 else 0.95,
                     )
                     for index, seat in enumerate(seats, start=1)

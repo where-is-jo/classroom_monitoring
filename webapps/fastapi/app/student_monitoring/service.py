@@ -115,14 +115,22 @@ class StudentMonitoringService:
         observed_at: datetime,
         held: Mapping[str, float],
     ) -> None:
-        """이번 프레임에서 **실제로 탐지된** 좌석의 관측 시각을 남긴다.
+        """이번 프레임에서 **임계값 이상으로 실제 탐지된** 좌석의 관측 시각을 남긴다.
 
-        붙들려서 점유가 된 좌석은 제외한다. 그것까지 갱신하면 한 번 잡힌 좌석이 유지
-        시간을 계속 갱신받아 영영 점유로 남는다.
+        두 가지를 제외한다.
+
+        - 붙들려서 점유가 된 좌석. 그것까지 갱신하면 한 번 잡힌 좌석이 유지 시간을
+          계속 갱신받아 영영 점유로 남는다.
+        - 임계값 미만 탐지만 있던 좌석. 그 관측은 `UNKNOWN`으로 가는 약한 근거이고,
+          "방금 확실히 봤다"로 취급해 유지 시간을 늘려 줄 자격이 없다.
         """
         with self._last_seen_lock:
             for observation in observations:
-                if not observation.occupied or observation.seat_id in held:
+                if (
+                    not observation.occupied
+                    or observation.seat_id in held
+                    or observation.confidence < self._confidence_threshold
+                ):
                     continue
                 self._last_seen[(camera_id, observation.seat_id)] = (
                     observed_at,
@@ -193,7 +201,11 @@ class StudentMonitoringService:
             # 관측 범위는 이 카메라에 ROI가 등록된 좌석뿐이다(결정 0020). 강의실을
             # 나눠 보는 구성에서 다른 카메라 담당 좌석까지 "비어 있음"으로 덮어쓰지
             # 않게 하려는 것이다. ROI가 하나도 없으면 관측을 만들지 않는다.
-            if saved_event.detections and saved_event.classroom_id:
+            # 탐지가 0건이어도 관측을 만든다. 사람이 하나도 안 잡힌 프레임은 "볼 것이
+            # 없었다"가 아니라 "그 카메라가 보는 좌석이 전부 비어 있다"는 관측이다.
+            # 이것을 건너뛰면 마지막 사람이 나간 뒤 좌석이 점유인 채로 얼어붙고,
+            # 유지 시간(hold)도 다음 탐지가 올 때까지 만료되지 않는다.
+            if saved_event.classroom_id:
                 classroom_id = saved_event.classroom_id
                 try:
                     connections = self._roi_service.list_valid_connections(
