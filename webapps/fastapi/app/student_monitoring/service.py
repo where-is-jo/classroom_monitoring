@@ -147,6 +147,9 @@ class StudentMonitoringService:
           계속 갱신받아 영영 점유로 남는다.
         - 임계값 미만 탐지만 있던 좌석. 그 관측은 `UNKNOWN`으로 가는 약한 근거이고,
           "방금 확실히 봤다"로 취급해 유지 시간을 늘려 줄 자격이 없다.
+
+        늦게 도착한 오래된 프레임이 기록을 과거로 되돌리지 않는다. 되돌리면 유지 시간이
+        실제보다 일찍 만료돼 앉아 있는 사람의 좌석이 깜빡인다.
         """
         with self._last_seen_lock:
             for observation in observations:
@@ -156,10 +159,11 @@ class StudentMonitoringService:
                     or observation.confidence < self._confidence_threshold
                 ):
                     continue
-                self._last_seen[(camera_id, observation.seat_id)] = (
-                    observed_at,
-                    observation.confidence,
-                )
+                key = (camera_id, observation.seat_id)
+                previous = self._last_seen.get(key)
+                if previous is not None and previous[0] > observed_at:
+                    continue
+                self._last_seen[key] = (observed_at, observation.confidence)
 
     def receive_inference_event(self, event: DetectionEvent) -> InferenceEventResult:
         """Receive inference event."""

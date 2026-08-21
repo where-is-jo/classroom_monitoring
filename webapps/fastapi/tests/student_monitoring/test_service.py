@@ -650,3 +650,24 @@ def test_track_id는_저장되고_그대로_돌아온다() -> None:
     saved = detection_repo.find_by_event_id("e-track")
     assert saved is not None
     assert saved.detections[0].track_id == "camera-a-17"
+
+
+def test_늦게_도착한_프레임이_유지_시간을_되돌리지_않는다() -> None:
+    """순서가 뒤바뀌어 도착한 오래된 프레임이 점유 유지 구간을 앞당기면 안 된다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+    seated = (_person("d1", (150, 150, 250, 250)),)
+
+    service.receive_inference_event(
+        _event("e-new", seated, captured_at=base + timedelta(seconds=4))
+    )
+    # 4초 시점보다 오래된 프레임이 뒤늦게 도착한다.
+    service.receive_inference_event(_event("e-late", seated, captured_at=base))
+
+    # 마지막으로 본 시각은 4초 그대로여야 한다. 되돌아갔다면 6초에 이미 놓았을 것이다.
+    service.receive_inference_event(_event("e-empty", (), captured_at=base + timedelta(seconds=6)))
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.OCCUPIED
+
+    service.receive_inference_event(_event("e-gone", (), captured_at=base + timedelta(seconds=10)))
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
