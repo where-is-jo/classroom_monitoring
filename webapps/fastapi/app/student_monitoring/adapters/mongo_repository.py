@@ -180,6 +180,7 @@ class MongoDetectionEventRepository:
                     "student_id": d.student_id,
                     "identity_confidence": d.identity_confidence,
                     "face_bbox": list(d.face_bbox) if d.face_bbox else None,
+                    "track_id": d.track_id,
                 }
                 for d in event.detections
             ],
@@ -202,6 +203,7 @@ class MongoDetectionEventRepository:
                     student_id=d.get("student_id"),
                     identity_confidence=d.get("identity_confidence"),
                     face_bbox=_to_bbox(d["face_bbox"]) if d.get("face_bbox") else None,
+                    track_id=d.get("track_id"),
                 )
                 for d in detections_doc
             )

@@ -78,6 +78,7 @@ def receive_inference_event(
                 student_id=d.student_id,
                 identity_confidence=d.identity_confidence,
                 face_bbox=d.face_bbox,
+                track_id=d.track_id,
             )
             for d in request.detections
         ),

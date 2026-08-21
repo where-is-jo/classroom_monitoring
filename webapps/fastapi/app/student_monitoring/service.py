@@ -18,6 +18,7 @@ from ..roi_connections.service import RoiConnectionService
 from ..shared.broadcaster import InMemoryBroadcaster
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
 from ..video_monitoring.errors import VideoStreamNotFoundError
+from ..video_monitoring.models import CameraRole
 from ..video_monitoring.ports import VideoStreamRepository
 from .models import (
     Detection,
@@ -228,7 +229,12 @@ class StudentMonitoringService:
             # 없었다"가 아니라 "그 카메라가 보는 좌석이 전부 비어 있다"는 관측이다.
             # 이것을 건너뛰면 마지막 사람이 나간 뒤 좌석이 점유인 채로 얼어붙고,
             # 유지 시간(hold)도 다음 탐지가 올 때까지 만료되지 않는다.
-            if saved_event.classroom_id:
+            #
+            # 신원 전용 카메라(입구)는 좌석 판정에 참여하지 않는다(결정 0024의 3번).
+            # 좌석을 담지 않는 화각의 이벤트가 "최신"이라는 이유로 직전 판정을 UNKNOWN
+            # 으로 덮는 것을 막는다. 그 신원을 좌석까지 잇는 방법은 결정 0025의 3번에서
+            # 아직 정해지지 않았고, 정해지기 전에 추측으로 이어붙이지 않는다.
+            if saved_event.classroom_id and stream.role is CameraRole.SEAT_JUDGING:
                 classroom_id = saved_event.classroom_id
                 try:
                     connections = self._roi_service.list_valid_connections(

@@ -27,6 +27,9 @@ class Detection:
     student_id: str | None = None
     identity_confidence: float | None = None
     face_bbox: BBox | None = None
+    # 같은 카메라 안에서 같은 사람을 이어 보는 식별자 (결정 0025의 6번).
+    # 트래킹을 붙이면 여기에 채워 넣고, fastapi는 그대로 받아 저장한다.
+    track_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -31,7 +32,7 @@ from app.student_monitoring.adapters.memory_repository import (
 from app.student_monitoring.models import Detection, DetectionEvent, FrameInfo
 from app.student_monitoring.service import StudentMonitoringService
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
-from app.video_monitoring.models import PlaybackKind, VideoStream
+from app.video_monitoring.models import CameraRole, PlaybackKind, VideoStream
 
 _CLASSROOM_ID = "classroom-a101"
 
@@ -604,3 +605,48 @@ def test_임계값_미만_탐지는_유지_시간을_늘리지_못한다() -> No
         )
 
     assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+
+
+def _identity_only_service(
+    classroom_service: ClassroomService,
+    rois: tuple[RoiConnection, ...],
+) -> tuple[StudentMonitoringService, ClassroomService]:
+    """입구 카메라(신원 전용)로 등록된 스트림을 가진 서비스를 만든다."""
+    service, _, classrooms = _make_service(classroom_service, rois=rois)
+    stream = service._stream_repository.find_by_camera_id("camera-a")
+    assert stream is not None
+    service._stream_repository.save(replace(stream, role=CameraRole.IDENTITY_ONLY))
+    return service, classrooms
+
+
+def test_신원_전용_카메라는_좌석_판정에_참여하지_않는다() -> None:
+    """입구 카메라의 이벤트가 조망 카메라의 좌석 판정을 덮지 않는다(결정 0024의 3번).
+
+    좌석을 담지 않는 화각의 이벤트가 "최신"이라는 이유로 직전 판정을 UNKNOWN으로
+    되돌리는 것이 결정 0020이 남은 일로 적어 둔 문제였다.
+    """
+    classroom_service = _build_classroom_service(_two_seats())
+    service, classrooms = _identity_only_service(classroom_service, _two_seat_rois())
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    result = service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+
+    # 이벤트 자체는 정상 저장된다. 좌석 상태만 건드리지 않는다.
+    assert result.is_new is True
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+    assert classroom_service._repository.get_observation_batch("e1") is None
+
+
+def test_track_id는_저장되고_그대로_돌아온다() -> None:
+    """트래킹이 붙기 전에도 값을 잃지 않고 실어 나르는지 확인한다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, detection_repo, _ = _make_service(classroom_service, rois=_two_seat_rois())
+    detection = replace(_person("d1", (150, 150, 250, 250)), track_id="camera-a-17")
+
+    service.receive_inference_event(_event("e-track", (detection,)))
+
+    saved = detection_repo.find_by_event_id("e-track")
+    assert saved is not None
+    assert saved.detections[0].track_id == "camera-a-17"

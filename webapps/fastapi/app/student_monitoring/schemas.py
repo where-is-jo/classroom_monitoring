@@ -31,6 +31,8 @@ class DetectionSchema(BaseModel):
     student_id: str | None = None
     identity_confidence: float | None = Field(default=None, ge=0, le=1)
     face_bbox: tuple[int, int, int, int] | None = None
+    # 결정 0025의 6번이 정한 필드 추가. worker가 트래킹을 붙이면 그대로 채워 보낸다.
+    track_id: str | None = None
 
     @field_validator("bbox", "face_bbox")
     @classmethod
