@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from app.roi_connections.models import Point, RoiConnection
 from app.student_monitoring.models import Detection, FrameInfo
-from app.student_monitoring.occupancy_mapping import map_detections_to_evidence
+from app.student_monitoring.occupancy_mapping import (
+    map_detections_to_evidence,
+    unseated_identities,
+)
 
 NOW = datetime(2026, 8, 16, 3, 0, tzinfo=UTC)
 FRAME = FrameInfo(width_pixels=1000, height_pixels=1000)
@@ -171,3 +175,18 @@ class TestOccupancyDecision:
         )
 
         assert all(o.occupied is False for o in observations)
+
+
+def test_쓸_수_있는_ROI가_없으면_좌석_밖_식별을_만들지_않는다() -> None:
+    """좌석 지도가 없는 카메라에서 "좌석 밖에 있다"를 말할 수 없다.
+
+    ROI를 등록하지 않았거나 전부 `needs_review`로 떨어진 카메라에서는 모든 탐지가
+    NO_MATCH다. 그것을 좌석 밖으로 세면 ROI 미등록이 "자리에 없다"는 판정으로 둔갑해,
+    실제로 앉아 있는 학생이 IN_CLASSROOM으로 기록된다.
+    """
+    identified = make_detection("d1", (100, 400, 200, 600), confidence=0.9)
+    identified = replace(identified, student_id="student-1", identity_confidence=0.9)
+
+    assert unseated_identities([identified], [], FRAME, THRESHOLD) == {}
+    # 좌석 지도가 있으면 같은 탐지가 좌석 밖 식별로 잡힌다.
+    assert unseated_identities([identified], [SEAT_B], FRAME, THRESHOLD) == {"student-1": 0.9}
