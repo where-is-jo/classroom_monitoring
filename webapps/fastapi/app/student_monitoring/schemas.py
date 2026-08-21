@@ -221,14 +221,22 @@ class VideoSegmentListResponse(BaseModel):
 
 
 class StudentSeatStateResponse(BaseModel):
-    """학생 좌석 상태 응답."""
+    """학생 좌석 상태 응답.
+
+    `current_seat_id`·`current_seat_label`·`reason`은 필드 추가이며 기존 필드를
+    지우거나 바꾸지 않는다. `WRONG_SEAT`일 때 어디에 앉았는지, `UNKNOWN`일 때 왜
+    모르는지를 화면이 스스로 판단하지 않고 그대로 받게 하려는 것이다.
+    """
 
     student_id: str
     student_name: str
     student_no: str  # 학번
     assigned_seat_id: str | None
     assigned_seat_label: str | None
+    current_seat_id: str | None
+    current_seat_label: str | None
     current_state: str
+    reason: str
     confidence: float | None
     last_observed_at: datetime | None
 
@@ -238,3 +246,24 @@ class StudentStateListResponse(BaseModel):
 
     classroom_id: str
     states: list[StudentSeatStateResponse]
+
+
+class StudentStateHistoryItemResponse(BaseModel):
+    """학생 상태 전이 이력 한 건."""
+
+    event_id: str
+    from_state: str
+    to_state: str
+    reason: str
+    seat_id: str | None
+    confidence: float | None
+    observed_at: datetime
+
+
+class StudentStateHistoryResponse(BaseModel):
+    """학생 상태 전이 이력 목록 응답."""
+
+    classroom_id: str
+    student_id: str
+    items: list[StudentStateHistoryItemResponse]
+    total: int

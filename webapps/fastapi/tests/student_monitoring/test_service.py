@@ -25,6 +25,7 @@ from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
+    MemoryStudentStateRepository,
     MemoryVideoSegmentRepository,
 )
 from app.student_monitoring.models import Detection, DetectionEvent, FrameInfo
@@ -159,6 +160,7 @@ def _make_service(
         detection_repository=detection_repo,
         segment_repository=segment_repo,
         stream_repository=stream_repo,
+        state_repository=MemoryStudentStateRepository(),
         broadcaster=broadcaster or InMemoryBroadcaster(),
         classroom_service=classroom_service,
         roi_service=roi_service,
@@ -166,7 +168,9 @@ def _make_service(
         occupancy_hold_seconds=hold_seconds,
         identity_confidence_threshold=0.5,
         stale_seconds=300,
-        recent_event_limit=500,
+        identity_hold_seconds=0,
+        absent_grace_seconds=300,
+        history_limit=50,
         clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
         student_lookup=student_lookup,
     )

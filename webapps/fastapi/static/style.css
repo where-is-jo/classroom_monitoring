@@ -239,6 +239,8 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 700; }
 .state--present { color: #16a34a; }
 .state--wrong_seat { color: #ca8a04; }
+.state--in_classroom { color: #2563eb; }
+.state--absent { color: #dc2626; }
 .state--unknown { color: #6b7280; }
 
 .camera-monitoring-refresh-time { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }

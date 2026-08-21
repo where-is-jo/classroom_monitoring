@@ -86,6 +86,7 @@
       setText(element, "[data-student-name]", data.student_name || "-");
       setText(element, "[data-student-no]", data.student_no || "-");
       setText(element, "[data-assigned-seat-label]", data.assigned_seat_label || "-");
+      setText(element, "[data-current-seat-label]", data.current_seat_label || "-");
       setText(element, "[data-student-confidence]", formatConfidence(data.confidence));
       setText(
         element,
@@ -96,9 +97,12 @@
       const normalized = normalizeStudentState(data.current_state);
       const stateEl = element.querySelector("[data-student-state]");
       if (stateEl) {
-        stateEl.classList.remove("state--present", "state--wrong_seat", "state--unknown");
+        STUDENT_STATES.forEach(function (name) {
+          stateEl.classList.remove("state--" + name);
+        });
         stateEl.classList.add("state--" + normalized);
         stateEl.setAttribute("aria-label", "현재 상태 " + studentStateLabel(normalized));
+        if (data.reason) stateEl.setAttribute("title", "근거: " + data.reason);
       }
       setText(element, "[data-student-state-label]", studentStateLabel(normalized));
       setText(element, "[data-student-state-icon]", studentStateIcon(normalized));
@@ -111,23 +115,35 @@
     if (element) element.textContent = value;
   }
 
+  // 서버가 내려보내는 상태 어휘. 모르는 값이 오면 unknown으로 접는다 —
+  // 화면이 새 상태를 임의로 해석해 이름을 붙이는 것보다 모른다고 말하는 편이 낫다.
+  const STUDENT_STATES = ["present", "wrong_seat", "in_classroom", "absent", "unknown"];
+  const STUDENT_STATE_LABELS = {
+    present: "재석",
+    wrong_seat: "잘못된 자리",
+    in_classroom: "강의실 안",
+    absent: "결석",
+    unknown: "확인 필요",
+  };
+  const STUDENT_STATE_ICONS = {
+    present: "●",
+    wrong_seat: "▲",
+    in_classroom: "◆",
+    absent: "✕",
+    unknown: "?",
+  };
+
   function normalizeStudentState(value) {
-    const normalized = String(value || "UNKNOWN").toUpperCase();
-    return normalized === "PRESENT" || normalized === "WRONG_SEAT"
-      ? normalized.toLowerCase()
-      : "unknown";
+    const normalized = String(value || "UNKNOWN").toLowerCase();
+    return STUDENT_STATES.indexOf(normalized) === -1 ? "unknown" : normalized;
   }
 
   function studentStateLabel(value) {
-    if (value === "present") return "재석";
-    if (value === "wrong_seat") return "잘못된 자리";
-    return "확인 필요";
+    return STUDENT_STATE_LABELS[value] || STUDENT_STATE_LABELS.unknown;
   }
 
   function studentStateIcon(value) {
-    if (value === "present") return "●";
-    if (value === "wrong_seat") return "▲";
-    return "?";
+    return STUDENT_STATE_ICONS[value] || STUDENT_STATE_ICONS.unknown;
   }
 
   function formatConfidence(value) {

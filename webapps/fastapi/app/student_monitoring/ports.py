@@ -8,6 +8,8 @@ from typing import Protocol
 from .models import (
     DetectionEvent,
     DetectionEventPage,
+    StudentStateHistory,
+    StudentStateRecord,
     VideoSegment,
 )
 
@@ -66,4 +68,30 @@ class VideoSegmentRepository(Protocol):
         limit: int,
     ) -> list[VideoSegment]:
         """Find segments by camera and period."""
+        ...
+
+
+class StudentStateRepository(Protocol):
+    """학생 상태 저장소 포트.
+
+    판정 결과와 그 근거 이력을 담는다. 상태는 학생당 하나이므로 갱신은 덮어쓰기이고,
+    이력은 상태가 실제로 바뀐 순간에만 쌓인다.
+    """
+
+    def list_by_classroom(self, classroom_id: str) -> list[StudentStateRecord]:
+        """강의실의 학생별 최신 상태를 반환한다."""
+        ...
+
+    def save(self, record: StudentStateRecord) -> StudentStateRecord:
+        """학생 상태를 덮어쓴다."""
+        ...
+
+    def append_history(self, history: StudentStateHistory) -> StudentStateHistory:
+        """상태 전이 이력을 남긴다. 같은 id를 다시 넣어도 한 번만 쌓인다."""
+        ...
+
+    def list_history(
+        self, classroom_id: str, student_id: str, *, limit: int
+    ) -> list[StudentStateHistory]:
+        """학생의 상태 전이 이력을 최신순으로 반환한다."""
         ...

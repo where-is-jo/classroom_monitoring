@@ -34,6 +34,7 @@ from app.shared.dependencies import get_student_monitoring_service
 from app.shared.student_identity import StudentIdentity
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
+    MemoryStudentStateRepository,
     MemoryVideoSegmentRepository,
 )
 from app.student_monitoring.adapters.mongo_repository import MongoDetectionEventRepository
@@ -159,6 +160,7 @@ def _build_context(
     detection_repository: DetectionEventRepository,
     *,
     overlapping_rois: bool = False,
+    state_repository: MemoryStudentStateRepository | None = None,
 ) -> IntegrationContext:
     students = InMemoryStudentLookup(
         (
@@ -251,6 +253,7 @@ def _build_context(
             detection_repository=detection_repository,
             segment_repository=MemoryVideoSegmentRepository(),
             stream_repository=streams,
+            state_repository=state_repository or MemoryStudentStateRepository(),
             broadcaster=broadcaster,
             classroom_service=classroom_service,
             roi_service=roi_service,
@@ -258,7 +261,9 @@ def _build_context(
             occupancy_hold_seconds=0,
             identity_confidence_threshold=0.7,
             stale_seconds=300,
-            recent_event_limit=500,
+            identity_hold_seconds=0,
+            absent_grace_seconds=300,
+            history_limit=50,
             clock=lambda: NOW,
             student_lookup=students,
         ),
@@ -349,7 +354,6 @@ def test_same_student_in_other_roi_becomes_wrong_seat() -> None:
         ("unidentified", False),
         ("low-detection", False),
         ("low-identity", False),
-        ("outside-roi", False),
         ("overlapping-roi", True),
     ),
 )
@@ -365,8 +369,6 @@ def test_insufficient_or_ambiguous_evidence_stays_unknown(case: str, overlap: bo
         detection["confidence"] = 0.59
     elif case == "low-identity":
         detection["identity_confidence"] = 0.69
-    elif case == "outside-roi":
-        detection["bbox"] = [800, 800, 900, 900]
 
     status, states = _post_and_get_states(context, payload)
 
@@ -374,13 +376,41 @@ def test_insufficient_or_ambiguous_evidence_stays_unknown(case: str, overlap: bo
     assert states["states"][0]["current_state"] == "UNKNOWN"
 
 
-def test_new_service_restores_latest_state_from_persisted_mongo_event() -> None:
+def test_identified_outside_every_roi_is_in_classroom() -> None:
+    """좌석 ROI 밖에서 식별된 학생은 IN_CLASSROOM이다(결정 0025의 7번).
+
+    겹치는 ROI(`overlapping-roi`)는 여기 해당하지 않는다. 그것은 "좌석에 없다"가 아니라
+    "어느 좌석인지 못 정하겠다"이므로 계속 UNKNOWN이다.
+    """
+    context = _build_context(MemoryDetectionEventRepository())
+    payload = _fixture_payload()
+    payload["detections"][0]["bbox"] = [800, 800, 900, 900]
+
+    status, states = _post_and_get_states(context, payload)
+
+    assert status == 201
+    assert states["states"][0]["current_state"] == "IN_CLASSROOM"
+    assert states["states"][0]["reason"] == "IDENTIFIED_OUTSIDE_SEATS"
+    assert states["states"][0]["current_seat_id"] is None
+
+
+def test_new_service_restores_latest_state_from_persisted_store() -> None:
+    """프로세스를 다시 띄워도 마지막 판정이 남아 있다.
+
+    판정이 조회 시점 재계산에서 수신 시점 저장으로 바뀌었으므로, 복원의 근거는 탐지
+    이벤트가 아니라 저장된 학생 상태다. 저장소는 그대로 두고 서비스만 다시 조립한다.
+    """
     collection = PersistentMongoCollection()
     database = cast(MongoDatabase, PersistentMongoDatabase(collection))
-    first_context = _build_context(MongoDetectionEventRepository(database))
+    state_repository = MemoryStudentStateRepository()
+    first_context = _build_context(
+        MongoDetectionEventRepository(database), state_repository=state_repository
+    )
 
     first_status, first_states = _post_and_get_states(first_context, _fixture_payload())
-    restarted_context = _build_context(MongoDetectionEventRepository(database))
+    restarted_context = _build_context(
+        MongoDetectionEventRepository(database), state_repository=state_repository
+    )
     app.dependency_overrides[get_student_monitoring_service] = lambda: restarted_context.service
     try:
         restored_response = TestClient(app).get(f"/api/v1/classrooms/{CLASSROOM_ID}/student-states")

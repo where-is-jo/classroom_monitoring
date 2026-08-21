@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.classrooms.models import SeatObservation
 from app.roi_connections.models import Point, RoiConnection
-from app.student_monitoring.models import Detection, FrameInfo
-from app.student_monitoring.occupancy_mapping import map_detections_to_observations
+from app.student_monitoring.models import Detection, FrameInfo, SeatEvidence
+from app.student_monitoring.occupancy_mapping import map_detections_to_evidence
 
 NOW = datetime(2026, 8, 21, 9, 0, tzinfo=UTC)
 FRAME = FrameInfo(width_pixels=1000, height_pixels=1000)
@@ -43,19 +42,19 @@ def _person(bbox: tuple[int, int, int, int], confidence: float = 0.8) -> Detecti
     )
 
 
-def _states(observations: tuple[SeatObservation, ...]) -> dict[str, bool]:
-    return {o.seat_id: o.occupied for o in observations}
+def _states(evidence: tuple[SeatEvidence, ...]) -> dict[str, bool]:
+    return {item.seat_id: item.occupied for item in evidence}
 
 
 def test_seat_is_vacant_without_hold() -> None:
     """붙들 근거가 없으면 이전과 같이 비어 있음으로 본다."""
-    observations = map_detections_to_observations([], [_roi("a", 0.1, 0.3)], FRAME, 0.3)
+    observations = map_detections_to_evidence([], [_roi("a", 0.1, 0.3)], FRAME, 0.3)
 
     assert _states(observations) == {"a": False}
 
 
 def test_held_seat_stays_occupied_when_the_frame_misses_it() -> None:
-    observations = map_detections_to_observations(
+    observations = map_detections_to_evidence(
         [], [_roi("a", 0.1, 0.3)], FRAME, 0.3, held={"a": 0.72}
     )
 
@@ -64,7 +63,7 @@ def test_held_seat_stays_occupied_when_the_frame_misses_it() -> None:
 
 def test_held_seat_keeps_the_confidence_it_was_last_seen_with() -> None:
     """새로 본 것이 아니므로 신뢰도를 올리지 않는다."""
-    observations = map_detections_to_observations(
+    observations = map_detections_to_evidence(
         [], [_roi("a", 0.1, 0.3)], FRAME, 0.3, held={"a": 0.42}
     )
 
@@ -72,7 +71,7 @@ def test_held_seat_keeps_the_confidence_it_was_last_seen_with() -> None:
 
 
 def test_a_seat_detected_now_uses_the_fresh_confidence_not_the_held_one() -> None:
-    observations = map_detections_to_observations(
+    observations = map_detections_to_evidence(
         [_person((150, 450, 250, 550), confidence=0.9)],
         [_roi("a", 0.1, 0.3)],
         FRAME,
@@ -86,7 +85,7 @@ def test_a_seat_detected_now_uses_the_fresh_confidence_not_the_held_one() -> Non
 
 def test_hold_does_not_leak_to_other_seats() -> None:
     """붙드는 것은 그 좌석에 한정된다. 옆자리까지 점유로 만들지 않는다."""
-    observations = map_detections_to_observations(
+    observations = map_detections_to_evidence(
         [], [_roi("a", 0.1, 0.3), _roi("b", 0.5, 0.7)], FRAME, 0.3, held={"a": 0.6}
     )
 

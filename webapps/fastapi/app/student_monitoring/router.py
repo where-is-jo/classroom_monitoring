@@ -37,6 +37,8 @@ from .schemas import (
     InferenceEventRequest,
     InferenceEventResponse,
     StudentSeatStateResponse,
+    StudentStateHistoryItemResponse,
+    StudentStateHistoryResponse,
     StudentStateListResponse,
     VideoSegmentDetailResponse,
     VideoSegmentListResponse,
@@ -250,12 +252,48 @@ def list_student_states(
                 student_no=s.student_no,
                 assigned_seat_id=s.assigned_seat_id,
                 assigned_seat_label=s.assigned_seat_label,
+                current_seat_id=s.current_seat_id,
+                current_seat_label=s.current_seat_label,
                 current_state=s.current_state.value,
+                reason=s.reason.value,
                 confidence=s.confidence,
                 last_observed_at=s.last_observed_at,
             )
             for s in states
         ],
+    )
+
+
+@api_router.get(
+    "/classrooms/{classroom_id}/students/{student_id}/state-history",
+    response_model=StudentStateHistoryResponse,
+)
+def list_student_state_history(
+    classroom_id: str,
+    student_id: str,
+    service: StudentMonitoringService = Depends(get_student_monitoring_service),
+) -> StudentStateHistoryResponse:
+    """학생 상태가 바뀐 순간의 근거를 최신순으로 반환한다.
+
+    출결은 사람에게 불이익을 줄 수 있는 판정이라 되짚을 수 있어야 한다(결정 0008).
+    """
+    items = service.list_student_state_history(classroom_id, student_id)
+    return StudentStateHistoryResponse(
+        classroom_id=classroom_id,
+        student_id=student_id,
+        items=[
+            StudentStateHistoryItemResponse(
+                event_id=item.event_id,
+                from_state=item.from_state.value,
+                to_state=item.to_state.value,
+                reason=item.reason.value,
+                seat_id=item.seat_id,
+                confidence=item.confidence,
+                observed_at=item.observed_at,
+            )
+            for item in items
+        ],
+        total=len(items),
     )
 
 

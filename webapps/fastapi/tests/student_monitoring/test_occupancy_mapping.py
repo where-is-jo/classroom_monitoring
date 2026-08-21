@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from app.roi_connections.models import Point, RoiConnection
 from app.student_monitoring.models import Detection, FrameInfo
-from app.student_monitoring.occupancy_mapping import map_detections_to_observations
+from app.student_monitoring.occupancy_mapping import map_detections_to_evidence
 
 NOW = datetime(2026, 8, 16, 3, 0, tzinfo=UTC)
 FRAME = FrameInfo(width_pixels=1000, height_pixels=1000)
@@ -59,7 +59,7 @@ SEAT_B = make_connection("seat-b", 0.35, 0.65)
 class TestObservationScope:
     def test_only_seats_registered_for_this_camera_are_observed(self) -> None:
         """ROI가 등록된 좌석만 관측한다. 담당 밖 좌석은 결과에 없다."""
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [make_detection("d1", (100, 400, 200, 600))],  # 중심 (0.15, 0.5) = seat-a
             [SEAT_A, SEAT_B],
             FRAME,
@@ -70,7 +70,7 @@ class TestObservationScope:
 
     def test_no_connections_produces_no_observations(self) -> None:
         """ROI가 없으면 좌석을 추정하지 않고 아무 관측도 만들지 않는다."""
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [make_detection("d1", (100, 400, 200, 600))],
             [],
             FRAME,
@@ -81,7 +81,7 @@ class TestObservationScope:
 
     def test_duplicate_seat_connections_yield_one_observation(self) -> None:
         """같은 좌석 ROI가 둘이어도 관측은 좌석당 하나다."""
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [],
             [SEAT_A, make_connection("seat-a", 0.7, 0.9)],
             FRAME,
@@ -94,7 +94,7 @@ class TestObservationScope:
 
 class TestOccupancyDecision:
     def test_detection_inside_roi_marks_seat_occupied(self) -> None:
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [make_detection("d1", (100, 400, 200, 600))],  # 중심 (0.15, 0.5)
             [SEAT_A, SEAT_B],
             FRAME,
@@ -108,7 +108,7 @@ class TestOccupancyDecision:
 
     def test_detection_outside_every_roi_marks_all_vacant(self) -> None:
         """어느 ROI에도 없는 bbox는 점유 증거가 되지 않는다."""
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [make_detection("d1", (800, 400, 900, 600))],  # 중심 (0.85, 0.5)
             [SEAT_A, SEAT_B],
             FRAME,
@@ -123,7 +123,7 @@ class TestOccupancyDecision:
         낮은 신뢰도를 그대로 넘겨 좌석 서비스가 `UNKNOWN`으로 해석하게 한다.
         버리면 매칭 없음이 되어 `VACANT`로 기록되고, 그것은 조용한 오판이다.
         """
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [make_detection("d1", (100, 400, 200, 600), confidence=0.5)],
             [SEAT_A],
             FRAME,
@@ -135,7 +135,7 @@ class TestOccupancyDecision:
 
     def test_seat_without_any_detection_is_vacant(self) -> None:
         """관측 대상 좌석에 아무 탐지도 없으면 "관측했고 비어 있음"이다."""
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [],
             [SEAT_A],
             FRAME,
@@ -146,7 +146,7 @@ class TestOccupancyDecision:
         assert observations[0].confidence == 0.0
 
     def test_overlapping_people_keep_the_highest_confidence(self) -> None:
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [
                 make_detection("d1", (100, 400, 200, 600), confidence=0.7),
                 make_detection("d2", (110, 410, 210, 610), confidence=0.95),
@@ -163,7 +163,7 @@ class TestOccupancyDecision:
         """겹치는 ROI 두 곳에 걸린 bbox로는 좌석을 정하지 않는다."""
         overlapping = make_connection("seat-b", 0.0, 0.3)
 
-        observations = map_detections_to_observations(
+        observations = map_detections_to_evidence(
             [make_detection("d1", (100, 400, 200, 600))],
             [SEAT_A, overlapping],
             FRAME,

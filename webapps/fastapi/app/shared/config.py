@@ -120,7 +120,16 @@ class Settings(BaseSettings):
     detection_event_max_detections_per_event: int = Field(default=100, ge=1)
     detection_event_stale_seconds: int = Field(default=300, ge=1)
     student_identity_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
-    student_state_recent_event_limit: int = Field(default=500, ge=1, le=10_000)
+    # --- 학생 상태 판정 시간 정책 (결정 0008) ---
+    # 마지막으로 학생을 식별한 뒤 이 시간 동안은 직전 판정을 이어받는다. 앉은 사람도
+    # 프레임마다 잡히지는 않으므로, 한 프레임 놓쳤다고 상태가 튀면 안 된다. 좌석이
+    # 비어 있는 것을 실제로 보면 이 시간이 남아 있어도 붙들지 않는다.
+    student_identity_hold_seconds: float = Field(default=15.0, ge=0, le=600)
+    # 지정 좌석이 비어 있는 것을 이 시간 동안 **계속 본** 뒤에야 ABSENT로 판정한다.
+    # 실제 값은 수업 운영 합의가 필요하며 아직 확정값이 아니다.
+    student_absent_grace_seconds: float = Field(default=300.0, ge=0, le=7200)
+    # 학생 상태 이력 조회 기본 개수.
+    student_state_history_limit: int = Field(default=50, ge=1, le=200)
     # --- 탐지 스냅샷 저장소 (결정 0011) ---
     # worker가 적재한 스냅샷을 읽기만 한다. fastapi는 만들지도 지우지도 않는다.
     # memory는 MinIO 없이 화면을 띄우기 위한 개발용이며 빈 목록을 돌려준다.
