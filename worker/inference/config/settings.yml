@@ -3,7 +3,14 @@
 # 규칙: docs/conventions/environment-convention.md
 
 # 탐지 신뢰도 임계값. 이 값 미만은 결과에서 제외한다.
+# 좌석 점유로 인정할지는 fastapi가 다시 판단한다(SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD).
 inference_confidence_threshold: 0.25
+
+# 추론 입력 크기. 지정하지 않으면 ultralytics가 640으로 줄인다.
+# 실측(3A컴퓨터실 CCTV 1280x1944): 640은 신뢰도 0.6 이상이 프레임당 4.4명,
+# 1280은 7.6명이었다. 1920까지 올려도 탐지 수는 늘지 않고 처리 시간만 배가 됐다.
+# **가까운 사람은 오히려 640이 유리하다** — 전체 재현율을 기준으로 1280을 골랐다.
+inference_image_size: 1280
 
 # --- 탐지 스냅샷 (결정 0011) ---
 # 영상 원본은 저장하지 않는다. 탐지 개수가 직전 적재와 달라질 때만 정지 이미지를 남긴다.

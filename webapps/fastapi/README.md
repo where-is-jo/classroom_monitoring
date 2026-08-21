@@ -241,7 +241,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `DATABASE_URL`, `DATABASE_NAME` | MongoDB 접속 정보 | mongodb mode에서 필수. URL은 비밀값 |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
 | `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
-| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
+| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.3(실측으로 정했다). `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
 | `ROI_REFERENCE_IMAGE_MAX_BYTES` | ROI 임시 기준 이미지 업로드 제한 | 기본 5MB, 최대 20MB |
 | `CAMERA_RTSP_SOURCES` | ROI 기준 화면을 캡처할 카메라 접속 정보 | `<카메라 식별자>=<RTSP URL>`을 쉼표로 잇는다. worker의 `STREAM_SOURCES`와 같은 형식. **비밀값이다.** 비우면 캡처만 꺼진다 |
@@ -277,7 +277,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | --- | --- | --- |
 | `database_connect_timeout_seconds` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
 | `demo_mode_enabled` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
-| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측·학생 사람 탐지는 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
+| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측·학생 사람 탐지는 `UNKNOWN` | **기본 0.3.** 3A컴퓨터실 CCTV 실측으로 정했다 — 이전 0.6은 실제 6명 중 1명만 통과시켰다. 근거는 `config/settings.yml` 주석에 있다 |
 | `page_size_default`, `page_size_max` | 목록 페이지 크기 | 최대 200 |
 | `face_enrollment_required_samples` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `face_enrollment_augmented_samples` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |

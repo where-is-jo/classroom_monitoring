@@ -53,6 +53,13 @@ class InferenceSettings(ObjectStorageSettings):
     model_path: str = Field(default="yolo11m.pt")
     inference_device: Literal["cpu", "cuda"] = Field(default="cpu")
     inference_confidence_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    # 모델에 넣기 전에 프레임의 긴 변을 이 크기로 맞춘다.
+    #
+    # **지정하지 않으면 ultralytics가 640으로 줄인다.** 3A컴퓨터실 CCTV는 1280x1944라
+    # 3분의 1로 축소되고, 뒤쪽에 앉은 사람이 뭉개져 탐지에서 빠진다. 실측에서 640과
+    # 1280의 차이는 신뢰도 0.6 이상 탐지가 프레임당 4.4명과 7.6명이었다.
+    # 1280을 넘기면 탐지 수는 더 늘지 않고 처리 시간만 배로 늘었다.
+    inference_image_size: int = Field(default=1280, ge=320, le=4096)
 
     # --- 탐지 스냅샷 (결정 0011) ---
     # 영상 원본을 저장하지 않는 대신 탐지 시점 정지 이미지를 남긴다.

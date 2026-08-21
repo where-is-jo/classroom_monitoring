@@ -8,7 +8,19 @@ database_connect_timeout_seconds: 5.0
 demo_mode_enabled: false
 
 # 신뢰도가 이 값 미만인 좌석 관측은 UNKNOWN으로 취급한다.
-seat_occupancy_confidence_threshold: 0.6
+#
+# **실측으로 정한 값이다.** 3A컴퓨터실 CCTV(1280x1944 HEVC)를 20프레임 샘플링해 재었다.
+# 이전 값 0.6은 근거 없이 높았다 — 실제 6명이 앉아 있는 라이브 프레임에서 1명만 통과했다.
+# 앉은 사람은 하반신이 책상에 가리고 뒤쪽일수록 작게 잡혀 신뢰도가 낮게 나온다.
+#
+# 놓침을 오탐보다 위험하게 본다. 앉아 있는데 "빈 자리"로 기록되면 ABSENT 오판으로
+# 이어지는데, 이는 "미관측을 부재로 바꾸지 않는다"(AGENTS.md)가 막으려는 상황이다.
+# 반대로 오탐은 두 겹으로 걸러진다 — 오탐 bbox의 중심이 좌석 ROI 안에 정확히 들어갈
+# 확률이 낮고, occupancy_mapping이 좌석당 최고 신뢰도 하나만 채택한다.
+#
+# 0.3이 프레임 간 변동도 가장 작았다(표준편차 1.04). 임계값이 신뢰도가 몰린 구간에
+# 걸리면 같은 사람이 프레임마다 나타났다 사라진다.
+seat_occupancy_confidence_threshold: 0.3
 
 # 페이지 크기
 page_size_default: 50

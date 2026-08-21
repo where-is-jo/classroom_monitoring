@@ -42,6 +42,7 @@ def main() -> int:
         model_path=settings.model_path,
         device=settings.inference_device,
         confidence_threshold=settings.inference_confidence_threshold,
+        image_size=settings.inference_image_size,
     )
     processor = InferenceProcessor(detector)
 
