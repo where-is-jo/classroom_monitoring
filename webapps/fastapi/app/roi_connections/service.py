@@ -232,6 +232,17 @@ class RoiConnectionService:
             if not view.needs_review
         ]
 
+    def delete_connection(self, classroom_id: str, camera_id: str, seat_id: str) -> None:
+        """좌석 하나의 ROI를 지운다.
+
+        잘못 그린 ROI를 고칠 방법이 없으면 관리자가 손댈 수 없는 데이터가 남는다.
+        지운 좌석은 그 카메라의 관측 대상에서 빠진다 — 좌석이 사라지는 것이 아니라
+        "이 카메라로는 보지 않는다"가 된다(결정 0020).
+        """
+        self._required_camera(classroom_id, camera_id)
+        if not self._repository.delete(classroom_id, camera_id, seat_id):
+            raise RoiConnectionNotFoundError("삭제할 ROI 연결이 없습니다.")
+
     def save_connection(self, command: SaveRoiConnectionCommand) -> RoiConnectionView:
         self._required_camera(command.classroom_id, command.camera_id)
         seats = self.list_seats(command.classroom_id)

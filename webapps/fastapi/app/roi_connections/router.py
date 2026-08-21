@@ -135,6 +135,25 @@ def save_roi_connection(
     )
 
 
+@api_router.delete(
+    "/classrooms/{classroom_id}/seats/{seat_id}/roi-connection",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_roi_connection(
+    classroom_id: str,
+    seat_id: str,
+    camera_id: Annotated[str, Query(min_length=1, max_length=128)],
+    service: RoiConnectionService = Depends(get_roi_connection_service),
+) -> Response:
+    """좌석 하나의 ROI를 지운다.
+
+    camera_id를 query로 받는 이유는 DELETE에 본문을 싣지 않기 위해서다. 같은 좌석이라도
+    카메라마다 다른 ROI를 가지므로(결정 0019) 어느 화각의 것을 지울지 지정해야 한다.
+    """
+    service.delete_connection(classroom_id, camera_id, seat_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @api_router.put(
     "/classrooms/{classroom_id}/roi-connection",
     response_model=RoiConnectionResponse,

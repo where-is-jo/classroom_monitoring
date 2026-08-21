@@ -16,6 +16,10 @@ class RoiConnectionRepository(Protocol):
 
     def save(self, connection: RoiConnection) -> RoiConnection: ...
 
+    def delete(self, classroom_id: str, camera_id: str, seat_id: str) -> bool:
+        """지웠으면 True, 지울 것이 없었으면 False. 없는 것을 지우는 것은 오류가 아니다."""
+        ...
+
 
 class CameraFrameGrabber(Protocol):
     """카메라에서 현재 프레임 한 장을 JPEG로 받아 오는 포트.

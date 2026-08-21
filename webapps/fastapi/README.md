@@ -88,7 +88,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
-| `/roi-connections` | 강의실 카메라의 **현재 화면을 캡처**해 그 위에 좌석별 다각형 ROI를 그리고 MongoDB에 저장. 캡처에는 `CAMERA_RTSP_SOURCES`가 필요하다([결정 0031](../../docs/architecture/decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)) |
+| `/roi-connections` | 강의실 카메라의 **현재 화면을 캡처**해 그 위에 좌석별 다각형 ROI를 그리고 MongoDB에 저장. 이미 등록된 ROI를 좌석 이름과 함께 겹쳐 보여주고, 클릭해서 다시 그리거나 지울 수 있다. 캡처에는 `CAMERA_RTSP_SOURCES`가 필요하다([결정 0031](../../docs/architecture/decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)) |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
@@ -119,6 +119,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 현재 ROI 기준 이미지 조회 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections?camera_id=...` | 카메라·좌석별 ROI 조회. query를 생략하면 legacy 포함 전체 조회 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection?camera_id=...` | 좌석 하나의 ROI를 삭제. 그 카메라는 해당 좌석을 관측하지 않게 된다. 지울 것이 없으면 404 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | `camera_id`·좌석·legacy 학생 연결과 ROI를 기준 이미지 없이 저장(`revision=0`). **화면은 더 이상 이 경로를 쓰지 않는다** |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `POST` | `/api/v1/video-streams` | 실제 카메라 source 등록. MongoDB mode에는 seed가 없어 이 경로로 넣는다 |

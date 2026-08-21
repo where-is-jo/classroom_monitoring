@@ -375,3 +375,33 @@ def test_camera_options_tell_the_page_which_camera_can_be_captured() -> None:
     }
 
     assert options == {"camera-a": True, "camera-b": False}
+
+
+def test_deleting_a_roi_removes_the_seat_from_that_camera_only() -> None:
+    """지운 좌석은 그 카메라의 관측에서만 빠진다. 다른 카메라의 ROI는 남는다."""
+    service = make_service()
+    revision_a = service.capture_reference_image("room", "camera-a").revision
+    revision_b = service.capture_reference_image("room", "camera-b").revision
+    service.save_connection(_save_command(revision=revision_a, camera_id="camera-a"))
+    service.save_connection(
+        _save_command(revision=revision_b, camera_id="camera-b", student_id=None)
+    )
+
+    service.delete_connection("room", "camera-a", "seat-a")
+
+    assert service.list_connections("room", "camera-a") == []
+    assert len(service.list_connections("room", "camera-b")) == 1
+
+
+def test_deleting_a_missing_roi_raises() -> None:
+    service = make_service()
+
+    with pytest.raises(RoiConnectionNotFoundError):
+        service.delete_connection("room", "camera-a", "seat-a")
+
+
+def test_deleting_from_an_unknown_camera_raises() -> None:
+    service = make_service()
+
+    with pytest.raises(RoiConnectionNotFoundError):
+        service.delete_connection("room", "camera-unknown", "seat-a")

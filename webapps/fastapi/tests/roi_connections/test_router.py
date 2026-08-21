@@ -294,3 +294,39 @@ def test_invalid_upload_and_stale_revision_errors(client: TestClient) -> None:
     )
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "ROI_CONNECTION_CONFLICT"
+
+
+def test_saved_roi_can_be_deleted(client: TestClient) -> None:
+    revision = client.post(
+        "/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a"
+    ).json()["revision"]
+    client.put(
+        "/api/v1/classrooms/room/seats/seat/roi-connection",
+        json={
+            "camera_id": "camera-a",
+            "student_id": "student",
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": revision,
+        },
+    )
+
+    deleted = client.delete("/api/v1/classrooms/room/seats/seat/roi-connection?camera_id=camera-a")
+
+    assert deleted.status_code == 204
+    listed = client.get("/api/v1/classrooms/room/roi-connections?camera_id=camera-a")
+    assert listed.json()["items"] == []
+
+
+def test_deleting_a_missing_roi_is_reported_not_silently_ignored(client: TestClient) -> None:
+    """지울 것이 없었다는 사실을 알려야 관리자가 화면을 새로고침할 수 있다."""
+    response = client.delete("/api/v1/classrooms/room/seats/seat/roi-connection?camera_id=camera-a")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ROI_CONNECTION_NOT_FOUND"
+
+
+def test_delete_requires_camera_scope(client: TestClient) -> None:
+    """같은 좌석이라도 카메라마다 다른 ROI를 갖는다. 어느 화각인지 지정해야 한다."""
+    missing_camera = client.delete("/api/v1/classrooms/room/seats/seat/roi-connection")
+
+    assert missing_camera.status_code == 422
