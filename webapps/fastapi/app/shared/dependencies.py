@@ -53,9 +53,14 @@ from ..llm_search.adapters.llama_planner import LlamaQueryPlanner
 from ..llm_search.adapters.stub_planner import StubQueryPlanner
 from ..llm_search.ports import QueryPlanner
 from ..llm_search.service import LlmSearchService
+from ..roi_connections.adapters.ffmpeg_camera import (
+    FfmpegCameraFrameGrabber,
+    UnavailableCameraFrameGrabber,
+    parse_camera_sources,
+)
 from ..roi_connections.adapters.memory import InMemoryRoiConnectionRepository
 from ..roi_connections.adapters.mongo import MongoRoiConnectionRepository
-from ..roi_connections.ports import RoiConnectionRepository
+from ..roi_connections.ports import CameraFrameGrabber, RoiConnectionRepository
 from ..roi_connections.service import RoiConnectionService
 from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
 from ..snapshots.ports import SnapshotStorage
@@ -468,6 +473,25 @@ def _roi_classroom_service() -> ClassroomService:
 
 
 @lru_cache
+def get_camera_frame_grabber() -> CameraFrameGrabber:
+    """카메라 캡처 어댑터를 고른다.
+
+    접속 정보가 없으면 대역을 끼워 캡처만 막는다. 앱 기동을 막지 않는 이유는 ROI
+    화면의 나머지 기능과 다른 화면이 카메라 없이도 동작해야 하기 때문이다.
+    """
+    settings = get_settings()
+    if settings.camera_rtsp_sources is None:
+        return UnavailableCameraFrameGrabber()
+    raw = settings.camera_rtsp_sources.get_secret_value().strip()
+    if not raw:
+        return UnavailableCameraFrameGrabber()
+    return FfmpegCameraFrameGrabber(
+        parse_camera_sources(raw),
+        timeout_seconds=settings.camera_frame_capture_timeout_seconds,
+    )
+
+
+@lru_cache
 def _roi_connection_service() -> RoiConnectionService:
     settings = get_settings()
     return RoiConnectionService(
@@ -481,6 +505,7 @@ def _roi_connection_service() -> RoiConnectionService:
         get_student_lookup(),
         get_roi_connection_repository(),
         get_video_stream_repository(settings),
+        get_camera_frame_grabber(),
         max_upload_bytes=settings.roi_reference_image_max_bytes,
         page_size_max=settings.page_size_max,
         clock=utc_now,
@@ -718,6 +743,7 @@ def get_student_monitoring_service(
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
+        occupancy_hold_seconds=settings.seat_occupancy_hold_seconds,
         identity_confidence_threshold=settings.student_identity_confidence_threshold,
         stale_seconds=settings.detection_event_stale_seconds,
         recent_event_limit=settings.student_state_recent_event_limit,

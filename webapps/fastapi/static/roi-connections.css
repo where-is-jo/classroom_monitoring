@@ -7,16 +7,36 @@
 #roi-finish:not(:disabled) { color: #fff; background: #087f6d; border-color: #087f6d; }
 #roi-reset:not(:disabled) { color: #fff; background: #596865; border-color: #596865; }
 #roi-cancel:not(:disabled) { color: #fff; background: #a33d3d; border-color: #a33d3d; }
-#roi-start:disabled:not(.is-registering), #roi-finish:disabled, #roi-reset:disabled, #roi-cancel:disabled { cursor: not-allowed; opacity: .45; }
-.roi-media-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
-.roi-media-stage video, .roi-media-stage img, .roi-media-placeholder, #roi-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+#roi-capture:not(:disabled) { color: #fff; background: #1f6f8b; border-color: #1f6f8b; }
+#roi-capture:disabled, #roi-start:disabled:not(.is-registering), #roi-finish:disabled, #roi-reset:disabled, #roi-cancel:disabled, #roi-redraw:disabled { cursor: not-allowed; opacity: .45; }
+/* 캡처 화면의 가로세로비는 카메라마다 다르다(현재 CCTV는 1280x1944로 세로가 길다).
+   고정 비율을 두고 object-fit: contain으로 맞추면 이미지 둘레에 여백이 생기고, 클릭
+   좌표를 stage 기준으로 계산하는 ROI 좌표가 그 여백만큼 어긋난다. 그래서 이미지를
+   흐름 안에 두어 stage의 크기를 이미지가 정하게 한다. */
+.roi-media-stage { position: relative; width: 100%; min-height: 320px; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
+#roi-reference-image { display: block; width: 100%; height: auto; background: #111817; }
+.roi-media-placeholder, #roi-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .roi-media-stage [hidden] { display: none !important; }
-.roi-media-stage video, .roi-media-stage img { display: block; object-fit: contain; background: #111817; }
 .roi-media-placeholder { display: grid; align-content: center; justify-items: center; gap: 8px; padding: 30px; color: #53605e; text-align: center; background: #d8dddc; }
 .roi-media-placeholder strong { color: #263330; font-size: 1.2rem; }
 #roi-live-overlay { z-index: 3; pointer-events: none; }
 .roi-media-stage.is-registering #roi-live-overlay { pointer-events: auto; cursor: crosshair; }
 #roi-live-polygon { fill: rgba(25, 170, 142, .24); stroke: #00d4aa; stroke-width: .004; vector-effect: non-scaling-stroke; }
+/* 저장된 ROI. 그리는 중인 폴리곤과 구분되게 실선 대신 채도를 낮춘다. */
+#roi-saved-shapes polygon { fill: rgba(56, 132, 255, .18); stroke: #4c9aff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; pointer-events: auto; }
+#roi-saved-shapes polygon:hover { fill: rgba(56, 132, 255, .3); }
+/* 재검토 대상은 색만이 아니라 점선으로도 구분한다 — 색각 차이와 흑백 출력에서도 보여야 한다. */
+#roi-saved-shapes polygon.needs-review { fill: rgba(214, 138, 8, .18); stroke: #d68a08; stroke-dasharray: 8 5; }
+#roi-saved-shapes polygon.is-selected { fill: rgba(56, 132, 255, .42); stroke-width: 4; }
+#roi-saved-shapes polygon.needs-review.is-selected { fill: rgba(214, 138, 8, .42); }
+.roi-saved-labels { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.roi-saved-label { position: absolute; transform: translate(-50%, -50%); padding: 3px 8px; font-size: .78rem; font-weight: 600; line-height: 1.3; color: #fff; white-space: nowrap; background: rgba(23, 43, 77, .82); border-radius: 6px; }
+.roi-saved-label .review-mark { margin-left: 5px; padding: 0 4px; color: #2a1c00; background: #f5b731; border-radius: 3px; }
+.roi-saved-summary { min-height: 22px; margin: -8px 0 0; font-size: .9rem; color: var(--muted); }
+/* ROI를 새로 그리는 동안에는 저장된 폴리곤이 클릭을 가로채지 않게 한다. */
+.roi-media-stage.is-registering #roi-saved-shapes polygon { pointer-events: none; }
+button.danger:not(:disabled) { color: #fff; background: #a33d3d; border-color: #a33d3d; }
+button.danger:disabled { cursor: not-allowed; opacity: .45; }
 #roi-live-points circle { fill: #fff; stroke: #008b73; stroke-width: .003; vector-effect: non-scaling-stroke; }
 .roi-live-status { min-height: 24px; margin: 0; color: var(--muted); }
 .roi-student-dialog { width: min(90vw, 520px); max-width: none; padding: 26px; color: var(--text); background: var(--surface); border: 0; border-radius: 18px; box-shadow: 0 28px 80px rgba(0,0,0,.42); }

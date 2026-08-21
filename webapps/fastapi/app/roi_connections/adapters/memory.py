@@ -43,3 +43,7 @@ class InMemoryRoiConnectionRepository:
                 connection
             )
         return connection
+
+    def delete(self, classroom_id: str, camera_id: str, seat_id: str) -> bool:
+        with self._lock:
+            return self._items.pop((classroom_id, camera_id, seat_id), None) is not None

@@ -69,7 +69,7 @@ reader.read() ─▶ video_recorder (모든 프레임)
 | 스트림 서버 | MediaMTX | 같은 결정 |
 | 프레임 처리 | OpenCV | 같은 결정 |
 | 다중 카메라 | 스레드 | 같은 결정 |
-| 탐지 결과 전달 | HTTP | `worker/inference` → `fastapi`, `예정`([결정 0011](../../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
+| 탐지 결과 전달 | HTTP | `worker/inference` → `fastapi`, `예정`([결정 0027](../../docs/architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
 
 ## 실행 방법
 

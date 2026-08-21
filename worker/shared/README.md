@@ -37,7 +37,7 @@ recorder ─┘
 
 ## object_storage
 
-원래 `recorder` 안에 있었다. [결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)로
+원래 `recorder` 안에 있었다. [결정 0028](../../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)로
 적재 주체가 `inference`(탐지 스냅샷)로 옮겨가면서 두 워커가 함께 쓰게 되어 여기로 옮겼다.
 
 | 파일 | 역할 |

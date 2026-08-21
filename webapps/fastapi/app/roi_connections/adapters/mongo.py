@@ -108,6 +108,19 @@ class MongoRoiConnectionRepository:
             raise RepositoryUnavailableError()
         return _to_domain(document)
 
+    def delete(self, classroom_id: str, camera_id: str, seat_id: str) -> bool:
+        try:
+            result = self._collection.delete_one(
+                {
+                    "classroom_id": classroom_id,
+                    "camera_id": camera_id,
+                    "seat_id": seat_id,
+                }
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return result.deleted_count > 0
+
 
 def _to_document(connection: RoiConnection) -> MongoDocument:
     return {

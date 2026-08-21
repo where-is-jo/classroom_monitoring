@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from threading import RLock
 
 from ..classrooms.errors import ClassroomNotFoundError
 from ..classrooms.models import Seat, SeatAssignment, SeatObservation
@@ -58,6 +59,7 @@ class StudentMonitoringService:
         roi_service: RoiConnectionService,
         *,
         occupancy_confidence_threshold: float,
+        occupancy_hold_seconds: float,
         identity_confidence_threshold: float,
         stale_seconds: int,
         recent_event_limit: int,
@@ -71,11 +73,61 @@ class StudentMonitoringService:
         self._classroom_service = classroom_service
         self._roi_service = roi_service
         self._confidence_threshold = occupancy_confidence_threshold
+        self._hold_seconds = occupancy_hold_seconds
+        # (camera_id, seat_id) -> 마지막으로 점유를 관측한 시각과 그때의 신뢰도.
+        #
+        # 저장소가 아니라 메모리에 두는 이유는 이것이 수 초짜리 판정 보조 상태이기
+        # 때문이다. 프로세스를 다시 띄우면 사라지고, 다음 탐지 이벤트에서 곧바로
+        # 다시 쌓인다. 다만 fastapi를 여러 프로세스로 늘리면 프로세스마다 따로
+        # 쌓이므로 붙드는 구간이 갈릴 수 있다 — SSE broadcaster와 같은 제약이다.
+        self._last_seen: dict[tuple[str, str], tuple[datetime, float]] = {}
+        self._last_seen_lock = RLock()
         self._identity_confidence_threshold = identity_confidence_threshold
         self._stale_seconds = stale_seconds
         self._recent_event_limit = recent_event_limit
         self._clock = clock
         self._student_lookup = student_lookup
+
+    def _held_seats(
+        self, camera_id: str, seat_ids: list[str], observed_at: datetime
+    ) -> dict[str, float]:
+        """아직 붙들어 둘 좌석과 그때의 신뢰도를 돌려준다.
+
+        붙드는 것은 "최근에 실제로 봤다"는 근거가 있을 때뿐이다. 유지 시간이 지나면
+        더 이상 붙들지 않고 비어 있음으로 넘어간다 — 자리를 뜬 사람을 계속 앉아 있다고
+        기록하지 않기 위해서다.
+        """
+        if self._hold_seconds <= 0:
+            return {}
+        deadline = observed_at - timedelta(seconds=self._hold_seconds)
+        held: dict[str, float] = {}
+        with self._last_seen_lock:
+            for seat_id in seat_ids:
+                entry = self._last_seen.get((camera_id, seat_id))
+                if entry is not None and entry[0] >= deadline:
+                    held[seat_id] = entry[1]
+        return held
+
+    def _remember_seen(
+        self,
+        camera_id: str,
+        observations: tuple[SeatObservation, ...],
+        observed_at: datetime,
+        held: Mapping[str, float],
+    ) -> None:
+        """이번 프레임에서 **실제로 탐지된** 좌석의 관측 시각을 남긴다.
+
+        붙들려서 점유가 된 좌석은 제외한다. 그것까지 갱신하면 한 번 잡힌 좌석이 유지
+        시간을 계속 갱신받아 영영 점유로 남는다.
+        """
+        with self._last_seen_lock:
+            for observation in observations:
+                if not observation.occupied or observation.seat_id in held:
+                    continue
+                self._last_seen[(camera_id, observation.seat_id)] = (
+                    observed_at,
+                    observation.confidence,
+                )
 
     def receive_inference_event(self, event: DetectionEvent) -> InferenceEventResult:
         """Receive inference event."""
@@ -147,11 +199,20 @@ class StudentMonitoringService:
                     connections = self._roi_service.list_valid_connections(
                         classroom_id, saved_event.camera_id
                     )
+                    held = self._held_seats(
+                        saved_event.camera_id,
+                        [connection.seat_id for connection in connections],
+                        saved_event.captured_at,
+                    )
                     observations = map_detections_to_observations(
                         saved_event.detections,
                         connections,
                         saved_event.frame,
                         self._confidence_threshold,
+                        held=held,
+                    )
+                    self._remember_seen(
+                        saved_event.camera_id, observations, saved_event.captured_at, held
                     )
                     if observations:
                         self._classroom_service.record_seat_observation_batch(

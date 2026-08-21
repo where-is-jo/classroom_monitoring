@@ -37,11 +37,12 @@ class StubDetector:
     """모델 로딩이 없는 Yolo8nDetector 대역. 빌드 인자만 기록한다."""
 
     def __init__(
-        self, *, model_path: str, device: str, confidence_threshold: float
+        self, *, model_path: str, device: str, confidence_threshold: float, image_size: int
     ) -> None:
         self.model_path = model_path
         self.device = device
         self.confidence_threshold = confidence_threshold
+        self.image_size = image_size
 
 
 class StubStreamWorker:

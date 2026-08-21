@@ -17,35 +17,52 @@
 
 얼굴 인식은 학생을 식별하는 수단이고, 제품이 최종적으로 내놓는 것은 **학생 상태**다.
 
+**식별과 위치는 서로 다른 카메라가 담당한다.** 입구 카메라가 지나가는 학생의 얼굴로
+신원을 한 번 정하고, 그 신원을 트래킹으로 이어 강의실 전체를 보는 어안 CCTV에서 좌석을
+판정한다. 좌석 화각에서는 얼굴을 인식하지 않는다
+([결정 0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다),
+[0025](./decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)).
+
 | 상태 | 의미 | 범위 |
 | --- | --- | --- |
 | `PRESENT` | 학생이 식별됐고 지정 좌석에 있다 | MVP |
 | `WRONG_SEAT` | 학생이 식별됐으나 지정 좌석이 아니다 | MVP |
 | `ABSENT` | 수업 시간 중 지정 좌석에서 유예 시간을 넘겨 미식별 | MVP |
-| `IN_CLASSROOM` | 좌석에는 없지만 교실 안에 있다 | 최종 확장. 지속적 위치 추적이 필요하다 |
+| `IN_CLASSROOM` | 신원 있는 track이 교실 안에 있으나 어느 좌석 ROI에도 없다 | MVP. 트래킹이 핵심 경로가 되면서 편입됐다([0025](./decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
 
 ## 시스템 구성
 
 ```mermaid
 flowchart TB
-    CAMERA["강의실 카메라<br/>좌석 라인 A · B"]
+    ENTRY["입구 카메라<br/>라즈베리파이 + 웹캠 · 신원을 만든다"]
+    CCTV["어안 CCTV<br/>강의실 전체 조망 · 좌석을 판정한다"]
     STREAM["worker<br/>RTSP 수신 → 프레임 샘플링 → 추론 실행"]
-    MODEL["deeplearning<br/>사람 탐지 → 얼굴 탐지 → 얼굴 인식"]
+    MODEL["deeplearning<br/>사람 탐지 · 트래킹 → 얼굴 탐지 → 얼굴 인식"]
     BROWSER(["브라우저<br/>관리자 화면"])
     API["FastAPI 백엔드<br/>학생·좌석·얼굴 등록·상태 판정·조회 API"]
     MONGO[("MongoDB<br/>학생 · 좌석 · 얼굴 프로필 · 이벤트 · 상태 이력")]
     MINIO[("MinIO<br/>영상 · 얼굴 등록 이미지")]
 
-    CAMERA -->|"RTSP"| STREAM
+    ENTRY -->|"RTSP"| STREAM
+    CCTV -->|"RTSP"| STREAM
     BROWSER -->|"HTTP"| API
     API <--> MONGO
     STREAM -.->|"프레임"| MODEL
-    MODEL -.->|"student_id · bbox · 신뢰도"| API
+    MODEL -.->|"track_id · student_id · bbox · 신뢰도"| API
     STREAM -.-> MINIO
     API -.-> MINIO
 ```
 
 실선은 현재 동작하는 경로다. 점선은 서비스 또는 계약이 아직 없는 `예정` 경로다.
+
+**어안 CCTV의 왜곡 보정은 사람 탐지 이전에 한 번만 수행하고, 보정된 좌표계가 ROI와
+bbox의 정본이다.** 구성도에 단계를 그리지 않은 것은 어느 서비스가 수행할지가 아직
+`결정 필요`이기 때문이다(0024의 4번).
+
+**다만 실제로 연결한 CCTV는 어안이 아니라 일반 광각이었다**(HEVC 1280×1944 15fps,
+[0031](./decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)의 배경).
+이 카메라를 쓰는 한 왜곡 보정 단계는 해당하지 않는다. 카메라를 바꿀지 전제를 고칠지는
+`결정 필요`다.
 
 **관리자 화면은 별도 서비스가 아니다.** FastAPI가 Jinja2로 직접 렌더링하는 같은
 프로세스 안의 화면이다. 프론트엔드 서비스를 따로 두지 않는다.
@@ -61,33 +78,82 @@ flowchart TB
 | 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | SCRFD 검출·MediaPipe 자세 내부 HTTP 서비스 구현. 나머지 품질·인식은 `예정` |
 | 학생 상태 판정 | `webapps/fastapi` | API·판정 함수 골격 구현. 카메라별 ROI와 최근 탐지 연결은 `예정`([결정 0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)) |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 강의실·좌석·관측 컬렉션만 구현됨 |
-| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
-| 탐지 시점 스냅샷 적재 | [`worker/inference`](../../worker/inference/README.md) | 동작. 탐지 개수가 바뀌면 JPEG를 MinIO에 올린다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)). 기본은 꺼짐 |
+| 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0028](./decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
+| 탐지 시점 스냅샷 적재 | [`worker/inference`](../../worker/inference/README.md) | 동작. 탐지 개수가 바뀌면 JPEG를 MinIO에 올린다([결정 0028](./decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)). 기본은 꺼짐 |
 | 스냅샷 조회 화면·API | `webapps/fastapi`의 `app/snapshots/` | 동작. MinIO 목록을 읽어 보여준다. 이미지는 fastapi가 프록시한다 |
 | 지표·대시보드 | [`monitoring/internal`](../../monitoring/internal/README.md) | fastapi·worker·deeplearning 지표 수집과 Grafana 대시보드 2개(스택 상태·애플리케이션 지표). **알림 규칙은 `예정`** |
 | 사용자용 실시간 영상 | [`monitoring/external`](../../monitoring/external/README.md) | `예정`. WebRTC로 확정. 코드 없음. 디렉터리 경계·접근 보호는 `결정 필요` |
 | 업무 자동화 | [`RPAs`](../../RPAs/README.md) | `예정`. 코드 없음 |
+
+## 실행 호스트 배치
+
+**블록이 어느 디렉터리에 있는가와 어느 기계에서 도는가는 다른 문제다.** 위 표가 전자를,
+아래가 후자를 말한다. 배치의 근거는 [결정 0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)에 있다.
+
+```mermaid
+flowchart LR
+    subgraph PC["개인 PC"]
+        FASTAPI["fastapi<br/>API · 관리자 화면"]
+        N8N["n8n"]
+    end
+    subgraph GPUSRV["GPU 서버"]
+        WORKER["inference-worker"]
+        DL["deeplearning"]
+        LLM["llama-server"]
+        MTX["mediamtx"]
+        MINIO["minio"]
+        OBS["prometheus · grafana<br/>loki · alloy"]
+    end
+    CLOUD[("MongoDB Atlas")]
+
+    PC <-->|"Tailscale"| GPUSRV
+    FASTAPI --> CLOUD
+```
+
+| 호스트 | 올라가는 것 |
+| --- | --- |
+| 개인 PC | `fastapi`(관리자 화면 포함), `n8n` |
+| GPU 서버 | `inference-worker`, `deeplearning`, `llama-server`, `mediamtx`, `minio`, 모니터링 4종 |
+| 클라우드 | MongoDB Atlas |
+
+**두 호스트는 Tailscale로 잇는다.** GPU 서버는 공인 IP가 있지만 개인 PC는 없고,
+worker가 탐지 이벤트를 fastapi로 보내는 GPU 서버 → 개인 PC 방향이 반드시 필요하다.
+
+**이 분리로 fastapi의 거의 모든 프로세스 밖 호출이 네트워크 경계를 넘는다.** 어떤 호출이
+넘고 어떤 호출이 넘지 않는지는 [0026의 3번 표](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)가 정본이다. 특히 얼굴 등록의
+실시간 가이드와 스냅샷 이미지 프록시가 이 경계 위에 놓인다.
+
+**이 구성은 개발·검증용이며 운영 배포가 아니다.** 개인 PC는 운영 환경이 될 수 없다.
 
 ## 지금 동작하는 것과 목표의 거리
 
 ```text
 현재                          목표
 
-카메라                        카메라
-  ↓                             ↓
-worker/stream                 worker/stream
+카메라 1대                    입구 카메라        어안 CCTV
+  ↓                             ↓                  ↓ (왜곡 보정)
+worker/stream                 worker/stream ───────┘
   ↓                             ↓
 worker/inference              worker/inference → deeplearning
-  ↓                             ↓
-(로그 출력)                   탐지 결과(student_id · bbox)
+  ↓                             ↓                  (사람 탐지 · 트래킹 · 얼굴 인식)
+(로그 출력)                   탐지 결과(track_id · student_id · bbox)
   ✕                             ↓
-FastAPI                       FastAPI (좌석 대조 + 시간 정책)
+FastAPI                       FastAPI (카메라 간 신원 인계 ← 결정 필요)
+                                ↓
+                              좌석 대조 + 시간 정책
                                 ↓
                               MongoDB → 관리자 화면
 ```
 
-**끊긴 지점은 `worker/inference`와 `fastapi` 사이 하나다.** 전달 방식이
-`결정 필요`이며, 이것이 정해지기 전에는 화면의 좌석 상태가 자동으로 갱신되지 않는다.
+**끊긴 지점은 셋이다.**
+
+1. `worker/inference`가 실제 얼굴 식별 결과를 채우지 못한다 — 얼굴 인식 모델이 없다.
+2. 트래킹(ByteTrack)이 구현되어 있지 않다. 구현 위치도 `결정 필요`다(0025).
+3. **입구 카메라의 track과 CCTV의 track을 잇는 방법이 정해지지 않았다**(0025의 3번).
+   이것이 정해지기 전에는 CCTV의 모든 track에 신원이 없고, 좌석 판정은 "자리가 찼는지"
+   수준에 머문다.
+
+worker → fastapi 전달 경로와 ROI 기반 좌석 판정 자체는 구현되어 있다.
 
 현재 fastapi가 보여 주는 좌석 상태(`OCCUPIED` / `VACANT` / `UNKNOWN`)는 **자리가
 찼는지**를 뜻할 뿐 **누가 앉았는지**를 뜻하지 않는다. 학생 식별과 지정 좌석 대조는
@@ -118,7 +184,7 @@ FastAPI                       FastAPI (좌석 대조 + 시간 정책)
 접근 통제를 한 곳에서 하고, 추론 결과 형식이 바뀌어도 영향 범위를
 `fastapi` 안에 가두기 위해서다.
 
-실시간 영상은 예외다. [결정 0011](./decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)에
+실시간 영상은 예외다. [결정 0027](./decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)에
 따라 fastapi가 재생 가능한 source를 판단하고, 브라우저는 허용된 WebRTC 세션에 한해
 MediaMTX와 signaling·미디어 연결을 맺는다. 제품 API와 탐지 SSE는 계속 fastapi만
 호출한다.
@@ -154,7 +220,7 @@ MediaMTX와 signaling·미디어 연결을 맺는다. 제품 API와 탐지 SSE�
 
 - 업무 메타데이터: `fastapi`가 MongoDB에 기록한다.
 - **영상 원본: 저장하지 않는다.** 탐지 시점의 스냅샷만 MinIO에 남기고 메타데이터에는
-  참조만 둔다([결정 0011](./decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+  참조만 둔다([결정 0028](./decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   `worker/recorder`는 코드가 남아 있으나 공용 서버 스택에서 실행하지 않는다.
 - 얼굴 등록 이미지: `fastapi`가 MinIO의 별도 버킷에 넣는다(`예정`). 영상과 버킷을
   나누는 이유는 보존 기간과 열람 주체가 다르고, 학생 요청으로 삭제할 수 있어야
@@ -177,7 +243,7 @@ MediaMTX와 signaling·미디어 연결을 맺는다. 제품 API와 탐지 SSE�
 
 각 서비스는 상대의 내부 구조를 모른 채 동작해야 한다.
 현재 실행 중인 서비스 사이에 구현된 계약은 없다. 첫 계약인 탐지 결과 전달은
-[결정 0011](./decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)에 따라
+[결정 0027](./decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)에 따라
 worker가 fastapi의 내부 HTTP API를 호출하며, 구체 스키마는
 [API 규칙](../conventions/api-convention.md)을 따른다.
 
@@ -202,7 +268,7 @@ worker가 fastapi의 내부 HTTP API를 호출하며, 구체 스키마는
                                     fastapi ───목록·이미지 읽기───┘
 ```
 
-**영상 원본은 저장하지 않는다**(결정 0011). `worker/recorder`의 세그먼트 녹화 경로는
+**영상 원본은 저장하지 않는다**(결정 0028). `worker/recorder`의 세그먼트 녹화 경로는
 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
 
 fastapi는 스냅샷을 **저장소에서 직접 읽는다.** 객체 키에 카메라와 시각이 담겨 있어
@@ -215,18 +281,22 @@ fastapi는 스냅샷을 **저장소에서 직접 읽는다.** 객체 키에 카�
 | 단계 | 입력 | 출력 | 담당 | 상태 |
 | --- | --- | --- | --- | --- |
 | 1. 수집 | 카메라 영상 | 연속 프레임 | worker/stream | 구현됨 |
+| 1-1. 어안 보정 | CCTV 프레임 | 평탄화된 프레임 | 수행 위치 `결정 필요` | `예정`([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)) |
 | 2. 샘플링 | 연속 프레임 | 추론 대상 프레임 | worker/stream | 구현됨 |
 | 3. 사람 탐지 | 프레임 | 사람 ROI·좌표·신뢰도 | deeplearning | `예정`(현재 worker/inference가 대신함) |
-| 4. 얼굴 탐지·인식 | 사람 ROI | `student_id` 또는 `UNKNOWN`·신뢰도 | deeplearning | `예정` |
-| 5. 전달 | 탐지 결과 | 수신된 이벤트 | worker → fastapi HTTP | `예정`([결정 0011](./decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
-| 6. 좌석 대조 | 위치 + 좌석 ROI | 현재 좌석 / 지정 좌석 일치 여부 | fastapi | `예정` |
+| 3-1. 트래킹 | 프레임별 사람 bbox | 카메라별 `track_id` | 구현 위치 `결정 필요` | `예정`([0025](./decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
+| 4. 얼굴 탐지·인식 | **입구 카메라의** 사람 ROI | `student_id` 또는 `UNKNOWN`·신뢰도 | deeplearning | `예정`. CCTV에서는 하지 않는다 |
+| 4-1. 카메라 간 신원 인계 | 입구 track(신원 있음) + CCTV track | 신원이 붙은 CCTV track | `결정 필요` | **미해결. 0025의 최우선 남은 일** |
+| 5. 전달 | 탐지 결과 | 수신된 이벤트 | worker → fastapi HTTP | `예정`([결정 0027](./decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
+| 6. 좌석 대조 | CCTV track 위치 + 좌석 ROI | 현재 좌석 / 지정 좌석 일치 여부 | fastapi | 구현됨 |
 | 7. 상태 판정 | 좌석 대조 + 수업 시간 + 유예 시간 | 학생 상태 | fastapi | `예정` |
 | 8. 저장·표시 | 상태·이벤트 | 이력과 화면 | fastapi | 화면 골격만 구현됨 |
 
 - **2단계에서 모든 프레임을 추론에 보내지 않는다.** 샘플링 주기는 설정값으로 둔다.
-- **4단계까지는 의미를 부여하지 않는다.** `student_001, conf 0.87`까지가 출력이다.
-- **6~7단계에서 처음으로 업무 의미가 생긴다.** 3~4단계 결과가 아직 여기 닿지 않아
-  현재는 로그로만 나간다.
+- **4단계까지는 의미를 부여하지 않는다.** `student_001, track_7, conf 0.87`까지가 출력이다.
+- **4-1단계가 이 파이프라인의 병목이자 가장 큰 위험이다.** 여기서 신원을 잘못 이으면
+  다른 학생의 출결이 바뀐다. 이어붙일 근거가 부족하면 잇지 않고 `UNKNOWN`으로 둔다.
+- **6~7단계에서 처음으로 업무 의미가 생긴다.**
 
 각 단계는 다음 단계가 멈춰도 전체가 무너지지 않게 만든다.
 **2→3단계에서 추론이 밀리면 프레임을 버린다.** 쌓아두면 결과가 가리키는 시점이
@@ -264,7 +334,9 @@ MVP의 제품 사용자는 관리자 한 종류다
 
 | 외부 시스템 | 관계 | 상태 |
 | --- | --- | --- |
-| 강의실 카메라 / Jetson | 영상 스트림 공급 | USB 카메라 1대로 확인됨. 강의실 2대 구성과 Jetson은 `예정` |
+| 어안 CCTV | 강의실 전체 조망 영상 공급 | RTSP 수신 가능함이 확인됨. 왜곡 보정 전에는 좌석 판정에 쓸 수 없다 |
+| 라즈베리파이 + 웹캠 | 입구 영상 공급과 얼굴 학습 데이터 수집 | 기기 확보됨. RTSP 송출 구성은 `예정` |
+| Jetson | 엣지 추론 | `예정`. 적용 범위 `결정 필요` |
 | MongoDB | 운영 메타데이터 보관 | 구현됨 |
 | MinIO | 영상·얼굴 이미지 보관 | `worker/recorder`가 영상을 적재·삭제한다. 얼굴 이미지는 `예정` |
 | 기존 학사·출결 시스템 | RPA가 접근해 업무 대행 | 대상 미확정 |
@@ -302,35 +374,53 @@ MVP의 제품 사용자는 관리자 한 종류다
 | --- | --- | --- |
 | 얼굴 데이터 운영 접근 권한과 재학 종료 자동 삭제 실행 주체 | 결정 필요 | local 구현은 가능하지만 **실제 얼굴의 prod 처리를 막는다**. 동의·보관·중단 삭제 정책은 [0011](./decisions.md#0011--얼굴-등록-실시간-경계와-데이터-수명)로 확정 |
 | 영상 저장 범위·보존 기간·접근 권한 | 결정 필요 | 개인정보 합의 사항. **코드가 먼저 만들어져 기본값으로 동작 중**([0007](./decisions.md#0007--recorder-worker의-저장-구조와-보존-정책)) |
-| 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | MVP 동안 미도입([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | **prod 배포를 계속 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
+| 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | MVP 동안 미도입([0030](./decisions.md#0030--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | **prod 배포를 계속 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
 | 스냅샷 버킷의 접근 권한과 전용 자격 증명 | 결정 필요 | 지금은 root 키로 붙는다. worker(쓰기)·fastapi(읽기)를 나눠야 한다 |
 | 영상·스냅샷 접근 권한 | 결정 필요 | 개인정보 합의 사항. 스냅샷에도 얼굴이 담긴다 |
 | 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | 결정 필요 | **prod 배포를 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
 | 얼굴 탐지 모델 | 후보: SCRFD | deeplearning |
 | 얼굴 인식 모델 | 후보: AdaFace R50, ArcFace (비교 후 결정) | deeplearning |
 | 사람 탐지 모델 버전 | 후보: YOLO 계열 (현재 코드는 YOLOv8n) | deeplearning, worker |
-| 학습 데이터셋 확보·라벨링 정책 | 결정 필요 | deeplearning |
+| 학습 데이터셋 확보·라벨링 정책 | 결정 필요. 입구 카메라가 수집을 겸하지만, 동의·보존·삭제 합의 전에는 실제 학생 얼굴을 수집하지 않는다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 5번) | deeplearning |
 | 학습 가중치를 `worker/inference` 실행 환경까지 전달하는 방식 | 후보: MinIO | deeplearning, worker |
 | `deeplearning` 호출 방식(라이브러리 import / 별도 프로세스) | 결정 필요 | worker, deeplearning |
 | 결석 유예 시간 값 | 후보: 5 / 10 / 20 / 30분 | fastapi. 실제 촬영과 운영 요구 필요 |
-| 좌석 판정 방식 | bbox 중심점과 카메라별 ROI로 확정([0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)). 학생 상태와 좌석 점유 모두 ROI 하나만 쓴다([0020](./decisions.md#0020--좌석-위치-판정의-정본을-roi-하나로-통일한다)). 실제 촬영 뒤 기준점 변경 여부는 결정 필요 | fastapi |
-| 전체 조망 카메라가 좌석 판정을 덮어쓰는 문제 | 결정 필요. ROI 매칭 성공 우선 규칙 / 카메라 역할 구분 중 택일([0020](./decisions.md#0020--좌석-위치-판정의-정본을-roi-하나로-통일한다)의 남은 일) | fastapi |
+| 좌석 판정 방식 | bbox 중심점과 카메라별 ROI로 확정([0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)). 학생 상태와 좌석 점유 모두 ROI 하나만 쓴다([0020](./decisions.md#0020--좌석-위치-판정의-정본을-roi-하나로-통일한다)). **실측 결과 중심점 유지가 맞다** — 앉은 사람은 하반신이 책상에 가려 bbox 하단이 발이 아니라 책상 모서리에서 끊긴다 | fastapi |
+| 좌석 ROI를 그리는 위치 | **실측으로 확정.** 책상이나 의자가 아니라 "그 자리에 앉았을 때 상체가 있는 공간"에 그린다. 앉은 사람 5명 전원의 bbox 중심이 상체 영역에는 들어가고 책상 영역에는 하나도 들어가지 않았다 | fastapi |
+| 좌석 점유 판정의 시간 규칙 | **실측으로 확정.** 마지막 점유 관측 뒤 5초간 붙들어 둔다(`SEAT_OCCUPANCY_HOLD_SECONDS`). 앉은 사람도 프레임마다 잡히지 않아 붙들지 않으면 좌석이 몇 초마다 깜빡인다. **다수결 투표는 이 문제에 맞지 않는다** — 탐지 노이즈가 놓침 한 방향으로만 생겨 과반 요구가 놓침을 키운다(실측 오류 46 vs 붙들지 않음 27 vs 5초 유지 14) | fastapi |
+| 사람 탐지 임계값과 추론 입력 크기 | **실측으로 확정.** `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD=0.3`, `INFERENCE_IMAGE_SIZE=1280`. 이전 값(0.6 / ultralytics 기본 640)은 실제 6명 중 1명만 통과시켰다. 근거는 각 `config/settings.yml` 주석에 있다 | fastapi, worker |
+| 서 있는 사람과 앉은 사람의 구분 | **결정 필요.** 지나가는 사람의 bbox 중심이 옆자리 앉은 사람과 같은 높이라 좌석 ROI에 들어갈 수 있다. 현재 구분 수단이 없다 | fastapi, worker |
+| 전체 조망 카메라가 좌석 판정을 덮어쓰는 문제 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 카메라 역할 구분으로 해소했다 — 입구 카메라는 좌석을 판정하지 않고 CCTV는 신원을 만들지 않는다. 역할을 데이터 모델에 넣는 방식은 구현 계약에서 정한다 | fastapi |
+| ROI를 그릴 기준 화면 확보 방법 | 확정([0031](./decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)). fastapi가 RTSP에서 정지 프레임 한 장을 캡처한다. 실시간 영상 위에 그리지 않는다 | fastapi |
+| **GPU 서버가 카메라 사설망에 닿는가** | **결정 필요.** 카메라는 개인 PC와 같은 192.168.0.x에 있는 것이 실측으로 확인됐다. 닿지 않으면 [0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)의 MediaMTX·worker 배치를 다시 정해야 한다 | worker, monitoring |
+| 실제 CCTV의 화각과 코덱 | 실측: HEVC(H.265) 1280×1944 15fps, **어안이 아닌 일반 광각**. 0024의 어안 전제와 다르다 — 카메라를 바꿀지 전제를 고칠지 `결정 필요` | worker, deeplearning |
 | 고정 화각 기반 ROI 자동 생성 | 후보: 배치도 `seat.geometry` + 카메라 기준점 호모그래피. 판정 기준점 변경 여부와 함께 결정 | fastapi |
 | 수업 시간표의 원본 관리 주체 | 결정 필요 | fastapi |
-| 카메라 배치(대수·높이·화각·거리) | 결정 필요 | 실제 촬영으로 확정한다 |
-| 작은 얼굴 대응 — Super Resolution 도입 여부 | 후보. 카메라 배치·렌즈·crop 개선을 먼저 시도한다 | deeplearning |
-| Tracking(ByteTrack 등) 도입과 `IN_CLASSROOM` | 결정 필요 | MVP 범위 밖 |
+| 카메라 대수와 역할 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 어안 CCTV 1대 + 입구 카메라 1대. 좌우 좌석 라인 2대 구성은 폐기했다 | worker, fastapi |
+| 두 화각의 겹침 | 겹치지 않는다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 7번). 입구 카메라를 문쪽만 보게 두기 때문이며, 이 때문에 겹침 기반 신원 인계를 쓸 수 없다 | worker, deeplearning |
+| 카메라 높이·화각·거리와 CCTV 화면상의 문 영역 | 결정 필요. 실제 촬영으로 확정한다. **문 영역이 신원 인계의 유일한 공간적 단서다** | worker, deeplearning |
+| 입구 차폐 구간의 좌석 처리 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 6번). ROI를 등록하지 않아 `UNKNOWN`으로 둔다. 차폐 범위는 실제 촬영으로 확인한다 | fastapi |
+| 작은 얼굴 대응 — Super Resolution 도입 여부 | 핵심 경로에서 빠졌다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 얼굴 인식을 얼굴이 크게 잡히는 입구에서만 한다 | deeplearning |
+| **카메라 간 신원 인계 방법**(입구 track → CCTV track) | **결정 필요. 0025의 최우선 항목.** 겹침 기반 인계는 배치로 배제됐다. 남은 후보: CCTV 문 영역 + 입구 통과 시각 기반 인계 / 여기에 복장·외형 re-ID를 보태 모호성 축소. 통과 순서만으로 잇는 규칙은 단독 채택하지 않는다 | worker, deeplearning, fastapi |
+| 어안 왜곡 보정 수행 위치와 캘리브레이션 파라미터 확보 절차 | 결정 필요. 후보: `worker/stream` / `worker/inference` / 카메라·미디어 서버([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 4번) | worker |
+| 트래킹(ByteTrack) 구현 위치 | 결정 필요. 후보: `worker/inference` / `deeplearning` | worker, deeplearning |
+| 입구에서 식별에 실패한 학생의 관리자 수동 지정 경로 | 결정 필요. 없으면 그날의 오판을 되돌릴 방법이 없다 | fastapi |
+| 좌석을 비운 학생을 `ABSENT`로 볼지 `IN_CLASSROOM`으로 볼지 | 결정 필요. 유예 시간 정책과 함께 정한다 | fastapi |
+| Tracking 도입과 `IN_CLASSROOM` | 확정([0025](./decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 트래킹이 신원 유지의 핵심 경로가 되어 MVP로 편입됐다 | worker, deeplearning, fastapi |
 | 일반 모니터링 화면 갱신 방식 | 초기 REST + 이후 SSE로 확정([0019](./decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)). 다중 프로세스 broker·replay는 결정 필요 | fastapi |
 | 브라우저 영상 재생 방식(WebRTC 중계 / HLS) | 결정 필요 | fastapi, worker, monitoring |
-| `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 설정·문서만([0012](./decisions.md#0012--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | monitoring, fastapi |
+| `monitoring/external`의 경계(설정·문서만 / 서비스 코드 포함) | 설정·문서만([0030](./decisions.md#0030--실시간-영상-접근-제어와-운영-배포를-mvp-동안-인증-최소화로-정한다)) | monitoring, fastapi |
 | 자연어 검색 방식 | 확정([0016](./decisions.md#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다)). LLM은 검색 계획 JSON만 만들고 검증·조회는 fastapi가 한다. 조회 Tool을 모델에게 주지 않는다 | fastapi |
 | 자연어 검색을 켜는 환경 | 확정([0021](./decisions.md#0021--자연어-검색을-gpu-서버에서만-켜고-그-밖의-환경에서는-기능을-끈다)). GPU 서버에서만 `llama`로 켜고 그 밖의 환경은 `disabled`. `stub`은 테스트 전용이다 | fastapi |
 | 업무 자동화 오케스트레이션(n8n / LangGraph) | 결정 필요. 고도화 단계 | fastapi, RPAs |
 | 캐시·큐 도입 여부 | 후보: Redis | fastapi |
-| Jetson 적용 범위 | 결정 필요 | worker |
+| Jetson 적용 범위 | 결정 필요. 입구 카메라 노드는 라즈베리파이로 확정됐고([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)) Jetson은 별개 항목이다 | worker |
 | 알림 채널과 RPA 대상 시스템 | 결정 필요 | RPAs, fastapi |
-| 통합 실행 수단(docker compose)의 공식화 | 결정 필요 | 전체 |
-| 배포 환경과 방식 | 결정 필요 | 전체 |
+| 통합 실행 수단(docker compose)의 공식화 | 확정([0018](./decisions.md#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다)). `.docker/`를 커밋하고 스택×환경으로 나눈다. 호스트 축 분할은 [0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)의 남은 일 | 전체 |
+| 실행 호스트 배치 | 확정([0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)). 개인 PC에 fastapi, GPU 서버에 나머지, Tailscale로 연결. **개발·검증용이며 운영 배포가 아니다** | 전체 |
+| 개인 PC가 꺼져 있을 때 worker의 탐지 이벤트 처리 | 결정 필요. 지금은 제한 재시도 후 버린다. 버퍼링 여부·보관 기간·복구 시 재전송이 정해지지 않았다 | worker |
+| 얼굴 등록 실시간 가이드와 스냅샷 프록시의 경계 통과 지연 | 결정 필요. 측정 후 견딜 수 없으면 얼굴 분석만 개인 PC로 되돌리는 것을 검토한다([0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) | fastapi, deeplearning |
+| 운영 배포 환경과 방식 | 결정 필요. 0026은 개발·검증 구성이고 운영 배포는 여전히 미정이다 | 전체 |
 
 이 중 하나를 확정하면 [결정 기록](./decisions.md)에 한 항목을 추가하고,
 이 표와 [루트 README의 미결정 항목](../../README.md#아직-결정되지-않은-항목)을 함께 갱신한다.

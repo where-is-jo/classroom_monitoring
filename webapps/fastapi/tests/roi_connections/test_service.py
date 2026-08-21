@@ -11,6 +11,7 @@ from app.classrooms.models import CreateClassroomCommand, CreateSeatCommand
 from app.classrooms.service import ClassroomService
 from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
 from app.roi_connections.errors import (
+    CameraFrameUnavailableError,
     RoiConnectionConflictError,
     RoiConnectionInputError,
     RoiConnectionNotFoundError,
@@ -26,6 +27,8 @@ from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.student_identity import StudentIdentity
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
+
+from .fakes import JPEG_BYTES, FakeCameraFrameGrabber
 
 NOW = datetime(2026, 8, 14, 9, 0, tzinfo=UTC)
 
@@ -49,6 +52,7 @@ def _stream(camera_id: str, classroom_id: str = "room") -> VideoStream:
 
 def make_service(
     repository: InMemoryRoiConnectionRepository | None = None,
+    grabber: FakeCameraFrameGrabber | None = None,
 ) -> RoiConnectionService:
     classroom_service = ClassroomService(
         InMemoryClassroomRepository(),
@@ -81,6 +85,7 @@ def make_service(
         students,
         repository or InMemoryRoiConnectionRepository(),
         streams,
+        grabber or FakeCameraFrameGrabber({"camera-a", "camera-b"}),
         max_upload_bytes=1024,
         page_size_max=20,
         clock=lambda: NOW,
@@ -302,3 +307,101 @@ def test_legacy_connection_is_visible_but_never_valid_for_camera() -> None:
     assert all_connections[0].needs_review is True
     assert service.list_connections("room", "camera-a") == []
     assert service.list_valid_connections("room", "camera-a") == []
+
+
+def test_capture_makes_a_reference_image_and_bumps_revision() -> None:
+    grabber = FakeCameraFrameGrabber({"camera-a"})
+    service = make_service(grabber=grabber)
+
+    first = service.capture_reference_image("room", "camera-a")
+    second = service.capture_reference_image("room", "camera-a")
+
+    assert first.revision == 1
+    assert second.revision == 2
+    assert second.content_type == "image/jpeg"
+    # 캡처할 때마다 카메라에 새로 붙는다. 연결을 붙들고 있지 않다.
+    assert grabber.calls == ["camera-a", "camera-a"]
+
+
+def test_capture_names_the_image_by_camera_and_time() -> None:
+    """어느 카메라의 언제 화면인지 화면에서 알아볼 수 있어야 한다."""
+    image = make_service().capture_reference_image("room", "camera-a")
+
+    assert "camera-a 카메라" in image.display_name
+    assert "20260814-090000" in image.display_name
+
+
+def test_capture_rejects_a_camera_from_another_classroom() -> None:
+    service = make_service()
+
+    with pytest.raises(RoiConnectionNotFoundError):
+        service.capture_reference_image("room", "camera-unknown")
+
+
+def test_capture_rejects_a_frame_that_is_not_jpeg() -> None:
+    """카메라가 이상한 것을 돌려줘도 기준 이미지로 삼지 않는다."""
+    service = make_service(grabber=FakeCameraFrameGrabber({"camera-a"}, frame=b"not-an-image"))
+
+    with pytest.raises(CameraFrameUnavailableError):
+        service.capture_reference_image("room", "camera-a")
+
+
+def test_capture_rejects_an_oversized_frame() -> None:
+    oversized = JPEG_BYTES + b"x" * 4096
+    service = make_service(grabber=FakeCameraFrameGrabber({"camera-a"}, frame=oversized))
+
+    with pytest.raises(CameraFrameUnavailableError):
+        service.capture_reference_image("room", "camera-a")
+
+
+def test_recapture_marks_connections_drawn_on_the_old_frame_for_review() -> None:
+    """다시 캡처하면 이전 화면 위의 ROI는 다른 화각일 수 있어 판정에서 빠진다."""
+    service = make_service()
+    revision = service.capture_reference_image("room", "camera-a").revision
+    service.save_connection(_save_command(revision=revision))
+
+    service.capture_reference_image("room", "camera-a")
+
+    views = service.list_connections("room", "camera-a")
+    assert [view.needs_review for view in views] == [True]
+    assert service.list_valid_connections("room", "camera-a") == []
+
+
+def test_camera_options_tell_the_page_which_camera_can_be_captured() -> None:
+    service = make_service(grabber=FakeCameraFrameGrabber({"camera-a"}))
+
+    options = {
+        option.camera_id: option.capture_available for option in service.list_camera_options("room")
+    }
+
+    assert options == {"camera-a": True, "camera-b": False}
+
+
+def test_deleting_a_roi_removes_the_seat_from_that_camera_only() -> None:
+    """지운 좌석은 그 카메라의 관측에서만 빠진다. 다른 카메라의 ROI는 남는다."""
+    service = make_service()
+    revision_a = service.capture_reference_image("room", "camera-a").revision
+    revision_b = service.capture_reference_image("room", "camera-b").revision
+    service.save_connection(_save_command(revision=revision_a, camera_id="camera-a"))
+    service.save_connection(
+        _save_command(revision=revision_b, camera_id="camera-b", student_id=None)
+    )
+
+    service.delete_connection("room", "camera-a", "seat-a")
+
+    assert service.list_connections("room", "camera-a") == []
+    assert len(service.list_connections("room", "camera-b")) == 1
+
+
+def test_deleting_a_missing_roi_raises() -> None:
+    service = make_service()
+
+    with pytest.raises(RoiConnectionNotFoundError):
+        service.delete_connection("room", "camera-a", "seat-a")
+
+
+def test_deleting_from_an_unknown_camera_raises() -> None:
+    service = make_service()
+
+    with pytest.raises(RoiConnectionNotFoundError):
+        service.delete_connection("room", "camera-unknown", "seat-a")

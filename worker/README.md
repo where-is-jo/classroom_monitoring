@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | [`stream`](./stream/README.md) | RTSP 영상 수집, 연결 유지·재연결, 프레임 샘플링 | 동작 |
 | [`inference`](./inference/README.md) | 프레임을 꺼내 모델을 호출하는 실행 단계 | 동작. `FASTAPI_URL` 설정 시 결과를 HTTP로 전달 |
-| [`recorder`](./recorder/README.md) | 영상 세그먼트를 객체 저장소에 적재 | 동작하나 **공용 서버에서 실행하지 않는다**([결정 0011](../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
+| [`recorder`](./recorder/README.md) | 영상 세그먼트를 객체 저장소에 적재 | 동작하나 **공용 서버에서 실행하지 않는다**([결정 0028](../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
 
 워커가 아닌 디렉터리가 둘 있다.
 
@@ -67,7 +67,7 @@
 
 **아직 없는 것**: 실시간 얼굴 식별 모델 연결, 적재한 객체의 참조를 `fastapi`에 알리는
 경로. 탐지 HTTP 전달은 구현되어 `FASTAPI_URL`로 켠다
-([결정 0011](../docs/architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
+([결정 0027](../docs/architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
 
 ## 워커 사이의 경계
 
@@ -126,7 +126,7 @@
 [0004](../docs/architecture/decisions.md#0004--영상과-얼굴-이미지-저장소로-minio-채택)).
 
 **영상 원본은 저장하지 않는다.** 탐지 시점의 스냅샷만 남긴다
-([결정 0011](../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+([결정 0028](../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
 공용 GPU 서버의 가용 용량이 약 48 GB인데 1080p 카메라 한 대가 시간당 약 0.9 GB라
 상시 녹화가 성립하지 않는다. `recorder`는 코드가 남아 있으나 공용 서버에서 돌리지 않는다.
 0007의 상시 녹화와 보존 기간 30일 기본값은 0011로 대체됐다.

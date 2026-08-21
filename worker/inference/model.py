@@ -15,6 +15,8 @@ except ImportError:  # pragma: no cover
 
 TARGET_CLASS_IDS: dict[int, str] = {0: "person", 67: "cell phone"}
 DEFAULT_MODEL_PATH = "yolo11m.pt"
+# ultralytics 기본값 640이 아니라 1280이다. 근거는 config/settings.yml에 있다.
+DEFAULT_IMAGE_SIZE = 1280
 
 
 def _to_numpy(value: Any) -> NDArray[Any]:
@@ -50,11 +52,13 @@ class Yolo8nDetector:
         model_path: str = DEFAULT_MODEL_PATH,
         device: str = "cpu",
         confidence_threshold: float = 0.25,
+        image_size: int = DEFAULT_IMAGE_SIZE,
         model: Any | None = None,
         target_class_ids: dict[int, str] | None = None,
     ) -> None:
         self._device = device
         self._confidence_threshold = confidence_threshold
+        self._image_size = image_size
         self._target_class_ids = target_class_ids or TARGET_CLASS_IDS
 
         if model is not None:
@@ -81,6 +85,9 @@ class Yolo8nDetector:
             frame,
             device=self._device,
             conf=self._confidence_threshold,
+            # 명시하지 않으면 ultralytics가 640으로 줄인다. CCTV 원본이 그보다 크면
+            # 뒤쪽에 앉은 사람이 뭉개져 탐지에서 빠진다.
+            imgsz=self._image_size,
             classes=list(self._target_class_ids),
         )
 

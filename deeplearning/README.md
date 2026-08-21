@@ -6,7 +6,7 @@
 > 현재 상태: SCRFD 얼굴 검출과 MediaPipe 자세 분석 내부 HTTP 서비스가 구현됐다.
 > 기본 속도·특징점 안정성·흐림·밝기·중복 품질 수치는 구현되었다. 전용 가림 모델과 AdaFace 인식은 아직 구현되지 않았다.
 > 모델 학습용 Jupyter 노트북은 [`training/`](./training/README.md)에 있다
-> ([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+> ([결정 0029](../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 성능 수치나 정확도를 측정 없이 이 문서에 기록하지 않는다.
 
 ## 서비스 목적
@@ -78,7 +78,7 @@ student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 - 모델 가중치 파일의 저장소 커밋
 - 자동 재학습 파이프라인, 데이터셋 라벨링 도구, 얼굴 데이터를 다루는 학습 — 여전히
   이 프로젝트 범위 밖이다. `training/`의 수동 Jupyter 노트북만 예외이며, 사람 탐지
-  모델 fine-tuning까지만 다룬다([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다))
+  모델 fine-tuning까지만 다룬다([결정 0029](../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다))
 
 ## 모델 선정
 
@@ -91,8 +91,9 @@ student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 | Face Detection | SCRFD | `후보` |
 | Face Recognition | AdaFace R50, ArcFace | 비교 후 결정 |
 | Head Pose | Landmark/Pose 모델 | `후보`. 얼굴 등록 시점의 각도 보정용 |
-| Tracking | ByteTrack 등 | MVP 범위 밖 |
-| Super Resolution | 별도 모델 | **먼저 시도하지 않는다.** 아래 참고 |
+| Tracking | ByteTrack | **MVP 핵심 경로.** 신원 유지가 여기에 걸린다([결정 0025](../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 구현 위치가 `deeplearning`인지 `worker/inference`인지는 `결정 필요` |
+| 카메라 간 신원 인계 | CCTV 문 영역 + 통과 시각 기반 인계 / 복장·외형 re-ID | **방법 `결정 필요`.** 0025의 최우선 항목. 두 화각이 겹치지 않아 겹침 기반 인계는 배제됐다 |
+| Super Resolution | 별도 모델 | **핵심 경로에서 빠졌다.** 얼굴 인식을 입구에서만 한다([결정 0024](../docs/architecture/decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 아래 참고 |
 
 ### 작은 얼굴 문제를 Super Resolution으로 먼저 풀지 않는다
 
@@ -109,12 +110,12 @@ student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 ## 모델 학습
 
 공용 GPU 서버에서 팀원이 Jupyter 노트북으로 셀 단위로 실행하며 모델을 학습하는 절차는
-[`training/`](./training/README.md)에 있다([결정 0012](../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+[`training/`](./training/README.md)에 있다([결정 0029](../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 
 - **범위는 사람 탐지(Person Detection) 모델의 수동 fine-tuning까지다.** 얼굴 탐지·인식
   모델 학습은 아직 없다 — 개인정보 합의가 먼저 필요하다([얼굴 데이터 취급](#얼굴-데이터-취급)).
 - **학습 데이터셋과 산출물(가중치, `runs/`)은 저장소에 커밋하지 않는다.** 공용 서버
-  디스크 여유가 약 17~20 GB뿐이라([결정 0011](../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다))
+  디스크 여유가 약 17~20 GB뿐이라([결정 0028](../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다))
   로컬에도 오래 남기지 않는다.
 - **학습된 가중치를 `worker/inference`가 쓰는 실행 환경까지 전달하는 방식은 아직
   정해지지 않았다.** [모델 파일 취급](#모델-파일-취급)의 미결정 사항이 그대로 적용된다.

@@ -20,8 +20,12 @@ from app.shared.student_identity import StudentIdentity
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
+from .fakes import FakeCameraFrameGrabber
 
-def make_service(*, seeded: bool = True) -> RoiConnectionService:
+
+def make_service(
+    *, seeded: bool = True, grabber: FakeCameraFrameGrabber | None = None
+) -> RoiConnectionService:
     classroom_service = ClassroomService(
         InMemoryClassroomRepository(),
         occupancy_confidence_threshold=0.5,
@@ -60,6 +64,7 @@ def make_service(*, seeded: bool = True) -> RoiConnectionService:
         students,
         InMemoryRoiConnectionRepository(),
         streams,
+        grabber or FakeCameraFrameGrabber(),
         max_upload_bytes=1024,
         page_size_max=20,
         clock=lambda: datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
@@ -102,15 +107,91 @@ def test_page_does_not_add_hardcoded_test_classroom() -> None:
         app.dependency_overrides.clear()
     assert response.status_code == 200
     assert "테스트 강의실" not in response.text
-    assert 'src="/roi-connections/fallback-image"' in response.text
 
 
-def test_fallback_image_is_available(client: TestClient) -> None:
-    response = client.get("/roi-connections/fallback-image")
+def test_page_marks_camera_without_connection_details() -> None:
+    """접속 정보가 없는 카메라를 캡처할 수 있는 것처럼 보이지 않게 한다."""
+    service = make_service(grabber=FakeCameraFrameGrabber(set()))
+    app.dependency_overrides[get_roi_connection_service] = lambda: service
+    try:
+        with TestClient(app) as test_client:
+            response = test_client.get("/roi-connections?classroom_id=room")
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.headers["content-type"] == "image/jpeg"
-    assert response.content
+    assert 'data-capture-available="false"' in response.text
+    assert "접속 정보 없음" in response.text
+
+
+def test_capture_creates_reference_image_and_serves_it(client: TestClient) -> None:
+    captured = client.post("/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a")
+
+    assert captured.status_code == 201
+    body = captured.json()
+    assert body["camera_id"] == "camera-a"
+    assert body["revision"] == 1
+    assert body["image_url"] == "/api/v1/classrooms/room/roi-reference-image?camera_id=camera-a"
+
+    served = client.get(body["image_url"])
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/jpeg"
+    assert served.headers["cache-control"] == "no-store"
+
+
+def test_capture_failure_is_reported_as_upstream_error() -> None:
+    """캡처 실패는 502다. 이 앱이 아니라 카메라 쪽 문제이기 때문이다."""
+    service = make_service(grabber=FakeCameraFrameGrabber(fail=True))
+    app.dependency_overrides[get_roi_connection_service] = lambda: service
+    try:
+        with TestClient(app) as test_client:
+            response = test_client.post(
+                "/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "CAMERA_FRAME_UNAVAILABLE"
+
+
+def test_capture_then_save_roi_on_that_frame(client: TestClient) -> None:
+    revision = client.post(
+        "/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a"
+    ).json()["revision"]
+
+    saved = client.put(
+        "/api/v1/classrooms/room/seats/seat/roi-connection",
+        json={
+            "camera_id": "camera-a",
+            "student_id": "student",
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": revision,
+        },
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["needs_review"] is False
+
+
+def test_roi_saved_on_an_older_frame_is_rejected(client: TestClient) -> None:
+    """다시 캡처하면 이전 화면 위의 좌표는 다른 화각일 수 있으므로 거절한다."""
+    stale = client.post(
+        "/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a"
+    ).json()["revision"]
+    client.post("/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a")
+
+    rejected = client.put(
+        "/api/v1/classrooms/room/seats/seat/roi-connection",
+        json={
+            "camera_id": "camera-a",
+            "student_id": "student",
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": stale,
+        },
+    )
+
+    assert rejected.status_code == 409
 
 
 def test_live_roi_connection_saves_classroom_student_and_polygon(client: TestClient) -> None:
@@ -213,3 +294,39 @@ def test_invalid_upload_and_stale_revision_errors(client: TestClient) -> None:
     )
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "ROI_CONNECTION_CONFLICT"
+
+
+def test_saved_roi_can_be_deleted(client: TestClient) -> None:
+    revision = client.post(
+        "/api/v1/classrooms/room/roi-reference-image/capture?camera_id=camera-a"
+    ).json()["revision"]
+    client.put(
+        "/api/v1/classrooms/room/seats/seat/roi-connection",
+        json={
+            "camera_id": "camera-a",
+            "student_id": "student",
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": revision,
+        },
+    )
+
+    deleted = client.delete("/api/v1/classrooms/room/seats/seat/roi-connection?camera_id=camera-a")
+
+    assert deleted.status_code == 204
+    listed = client.get("/api/v1/classrooms/room/roi-connections?camera_id=camera-a")
+    assert listed.json()["items"] == []
+
+
+def test_deleting_a_missing_roi_is_reported_not_silently_ignored(client: TestClient) -> None:
+    """지울 것이 없었다는 사실을 알려야 관리자가 화면을 새로고침할 수 있다."""
+    response = client.delete("/api/v1/classrooms/room/seats/seat/roi-connection?camera_id=camera-a")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ROI_CONNECTION_NOT_FOUND"
+
+
+def test_delete_requires_camera_scope(client: TestClient) -> None:
+    """같은 좌석이라도 카메라마다 다른 ROI를 갖는다. 어느 화각인지 지정해야 한다."""
+    missing_camera = client.delete("/api/v1/classrooms/room/seats/seat/roi-connection")
+
+    assert missing_camera.status_code == 422

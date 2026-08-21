@@ -82,7 +82,7 @@
 - **얼굴 이미지와 embedding이 로그·테스트 자산·저장소에 남지 않게 한다.**
   테스트에는 실제 사람의 얼굴을 쓰지 않는다.
 - 탐지 결과는 HTTP로 fastapi에 전달한다
-  ([결정 0011](../architecture/decisions.md#0011--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
+  ([결정 0027](../architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
   모델 종류·버전, `deeplearning` 호출 방식, 실행 장치는 **결정 필요** 항목이다.
   확정 전이면 특정 선택에 강하게 결합된 구조를 굳히지 않고, 확정 시
   [결정 기록](../architecture/decisions.md)에 남긴다.

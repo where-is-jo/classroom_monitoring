@@ -8,6 +8,7 @@ from app.classrooms.adapters.memory_repository import InMemoryClassroomRepositor
 from app.classrooms.models import CreateClassroomCommand
 from app.classrooms.service import ClassroomService
 from app.main import app
+from app.roi_connections.adapters.ffmpeg_camera import UnavailableCameraFrameGrabber
 from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
 from app.roi_connections.service import RoiConnectionService
 from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
@@ -63,6 +64,7 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         student_lookup,
         InMemoryRoiConnectionRepository(),
         stream_repo,
+        UnavailableCameraFrameGrabber(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
@@ -75,6 +77,7 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=0.5,
+        occupancy_hold_seconds=0,
         identity_confidence_threshold=0.5,
         stale_seconds=300,
         recent_event_limit=500,
