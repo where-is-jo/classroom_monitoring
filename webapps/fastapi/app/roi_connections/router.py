@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 
 from ..shared.dependencies import get_roi_connection_service
 from ..shared.templating import templates
@@ -33,7 +32,7 @@ def roi_connections_page(
     selected = classroom_id or (classrooms[0].id if classrooms else None)
     classroom = service.get_classroom(selected) if selected else None
     seats = service.list_seats(selected) if selected else []
-    streams = service.list_streams(selected) if selected else []
+    cameras = service.list_camera_options(selected) if selected else []
     students = service.list_students()
     return templates.TemplateResponse(
         request=request,
@@ -42,25 +41,9 @@ def roi_connections_page(
             "classrooms": classrooms,
             "classroom": classroom,
             "seats": seats,
-            "streams": streams,
+            "cameras": cameras,
             "students": students,
         },
-    )
-
-
-# 실시간 영상 연결이 실패했을 때 ROI 화면이 대신 보여줄 이미지.
-# 서비스 디렉터리 안(static/)에 둔다 — 이전에는 저장소 루트의 individual_tasks/를
-# parents[4]로 거슬러 올라가 읽었는데, 그 디렉터리는 .gitignore 대상이고 컨테이너
-# 이미지에도 들어가지 않아 clone·배포 어느 쪽에서도 파일이 없었다.
-_FALLBACK_IMAGE_PATH = Path(__file__).resolve().parents[2] / "static" / "roi-fallback.jpg"
-
-
-@page_router.get("/roi-connections/fallback-image", include_in_schema=False)
-def roi_fallback_image() -> FileResponse:
-    return FileResponse(
-        _FALLBACK_IMAGE_PATH,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -84,6 +67,26 @@ async def upload_reference_image(
         filename=image.filename,
     )
     return ReferenceImageResponse.from_domain(saved)
+
+
+@api_router.post(
+    "/classrooms/{classroom_id}/roi-reference-image/capture",
+    response_model=ReferenceImageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def capture_reference_image(
+    classroom_id: str,
+    camera_id: Annotated[str, Query(min_length=1, max_length=128)],
+    service: RoiConnectionService = Depends(get_roi_connection_service),
+) -> ReferenceImageResponse:
+    """카메라의 현재 화면을 잡아 ROI 기준 이미지로 저장한다.
+
+    RTSP 연결과 디코딩이 있어 실측 4초대가 걸린다. 동기 endpoint라 FastAPI가
+    threadpool에서 실행하므로 다른 요청을 막지는 않는다.
+    """
+    return ReferenceImageResponse.from_domain(
+        service.capture_reference_image(classroom_id, camera_id)
+    )
 
 
 @api_router.get("/classrooms/{classroom_id}/roi-reference-image")

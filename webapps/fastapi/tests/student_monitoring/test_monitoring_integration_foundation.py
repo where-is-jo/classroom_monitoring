@@ -23,6 +23,7 @@ from app.classrooms.adapters.memory_repository import (
 from app.classrooms.models import CreateClassroomCommand, CreateSeatCommand, SeatGeometry
 from app.classrooms.service import ClassroomService
 from app.main import app
+from app.roi_connections.adapters.ffmpeg_camera import UnavailableCameraFrameGrabber
 from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
 from app.roi_connections.models import Point, RoiConnection
 from app.roi_connections.service import RoiConnectionService
@@ -239,6 +240,7 @@ def _build_context(
         students,
         roi_repository,
         streams,
+        UnavailableCameraFrameGrabber(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: NOW,

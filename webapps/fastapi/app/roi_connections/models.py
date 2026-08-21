@@ -23,6 +23,19 @@ class ReferenceImage:
 
 
 @dataclass(frozen=True)
+class RoiCameraOption:
+    """ROI 화면의 카메라 선택 항목.
+
+    "이 카메라의 현재 화면을 캡처할 수 있는가"는 접속 정보 설정 여부를 보고 정하는
+    판단이므로 템플릿이 아니라 서비스가 계산해 넘긴다.
+    """
+
+    camera_id: str
+    camera_label: str
+    capture_available: bool
+
+
+@dataclass(frozen=True)
 class RoiConnection:
     classroom_id: str
     camera_id: str | None

@@ -88,7 +88,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
-| `/roi-connections` | 강의실 카메라를 선택해 좌석별 다각형 ROI를 등록하고 MongoDB에 저장 |
+| `/roi-connections` | 강의실 카메라의 **현재 화면을 캡처**해 그 위에 좌석별 다각형 ROI를 그리고 MongoDB에 저장. 캡처에는 `CAMERA_RTSP_SOURCES`가 필요하다([결정 0031](../../docs/architecture/decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)) |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
@@ -115,10 +115,11 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
 | `POST` | `/api/v1/students` | 학생 인적사항 저장. 생성 리소스는 `Location` 헤더로 반환 |
 | `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image/capture?camera_id=...` | **카메라의 현재 화면을 RTSP로 잡아 ROI 기준 이미지로 저장.** 실측 1.5~4.2초가 걸리고, 실패는 502 `CAMERA_FRAME_UNAVAILABLE`이다 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 현재 ROI 기준 이미지 조회 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections?camera_id=...` | 카메라·좌석별 ROI 조회. query를 생략하면 legacy 포함 전체 조회 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
-| `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | 실시간 영상에서 선택한 `camera_id`·좌석·legacy 학생 연결과 ROI 저장 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | `camera_id`·좌석·legacy 학생 연결과 ROI를 기준 이미지 없이 저장(`revision=0`). **화면은 더 이상 이 경로를 쓰지 않는다** |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `POST` | `/api/v1/video-streams` | 실제 카메라 source 등록. MongoDB mode에는 seed가 없어 이 경로로 넣는다 |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태. 목록의 `id`로 조회하며 `camera_id`도 받는다 |
@@ -243,6 +244,8 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.6. `0 <= x <= 1` |
 | `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
 | `ROI_REFERENCE_IMAGE_MAX_BYTES` | ROI 임시 기준 이미지 업로드 제한 | 기본 5MB, 최대 20MB |
+| `CAMERA_RTSP_SOURCES` | ROI 기준 화면을 캡처할 카메라 접속 정보 | `<카메라 식별자>=<RTSP URL>`을 쉼표로 잇는다. worker의 `STREAM_SOURCES`와 같은 형식. **비밀값이다.** 비우면 캡처만 꺼진다 |
+| `CAMERA_FRAME_CAPTURE_TIMEOUT_SECONDS` | 캡처 한 번의 제한 시간 | 기본 15초 |
 | `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
 | `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
 | `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |

@@ -7,11 +7,16 @@
 #roi-finish:not(:disabled) { color: #fff; background: #087f6d; border-color: #087f6d; }
 #roi-reset:not(:disabled) { color: #fff; background: #596865; border-color: #596865; }
 #roi-cancel:not(:disabled) { color: #fff; background: #a33d3d; border-color: #a33d3d; }
-#roi-start:disabled:not(.is-registering), #roi-finish:disabled, #roi-reset:disabled, #roi-cancel:disabled { cursor: not-allowed; opacity: .45; }
-.roi-media-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
-.roi-media-stage video, .roi-media-stage img, .roi-media-placeholder, #roi-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+#roi-capture:not(:disabled) { color: #fff; background: #1f6f8b; border-color: #1f6f8b; }
+#roi-capture:disabled, #roi-start:disabled:not(.is-registering), #roi-finish:disabled, #roi-reset:disabled, #roi-cancel:disabled { cursor: not-allowed; opacity: .45; }
+/* 캡처 화면의 가로세로비는 카메라마다 다르다(현재 CCTV는 1280x1944로 세로가 길다).
+   고정 비율을 두고 object-fit: contain으로 맞추면 이미지 둘레에 여백이 생기고, 클릭
+   좌표를 stage 기준으로 계산하는 ROI 좌표가 그 여백만큼 어긋난다. 그래서 이미지를
+   흐름 안에 두어 stage의 크기를 이미지가 정하게 한다. */
+.roi-media-stage { position: relative; width: 100%; min-height: 320px; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
+#roi-reference-image { display: block; width: 100%; height: auto; background: #111817; }
+.roi-media-placeholder, #roi-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .roi-media-stage [hidden] { display: none !important; }
-.roi-media-stage video, .roi-media-stage img { display: block; object-fit: contain; background: #111817; }
 .roi-media-placeholder { display: grid; align-content: center; justify-items: center; gap: 8px; padding: 30px; color: #53605e; text-align: center; background: #d8dddc; }
 .roi-media-placeholder strong { color: #263330; font-size: 1.2rem; }
 #roi-live-overlay { z-index: 3; pointer-events: none; }
