@@ -273,10 +273,13 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
     모델별로 바꿔서 실행한다.
     """
     import cv2
-    from insightface.model_zoo import get_model
     from insightface.utils import face_align
     from pymongo import MongoClient
     from pymongo.errors import PyMongoError
+
+    recognizer_kind = os.environ.get("FACE_RECOGNIZER", "arcface")
+    if recognizer_kind not in ("arcface", "adaface"):
+        raise ValueError(f"알 수 없는 FACE_RECOGNIZER={recognizer_kind!r} (arcface 또는 adaface만 지원)")
 
     model_root = Path(__file__).resolve().parents[1] / ".models"
     detector_path = Path(
@@ -290,7 +293,9 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
     mongodb_uri = os.environ.get("MONGODB_URI") or os.environ.get("DATABASE_URL", "")
     mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get("DATABASE_NAME", "")
     collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
-    expected_model_name = os.environ.get("FACE_EMBEDDING_MODEL_NAME", "arcface")
+    # ArcFace/AdaFace는 임베딩 공간이 다르므로 gallery 조회 시 반드시 모델별로
+    # 분리한다 — FACE_EMBEDDING_MODEL_NAME을 안 주면 FACE_RECOGNIZER를 그대로 쓴다.
+    expected_model_name = os.environ.get("FACE_EMBEDDING_MODEL_NAME", recognizer_kind)
 
     entries: list[GalleryEntry] = []
     client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000)
@@ -321,6 +326,9 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
 
     if "CUDAExecutionProvider" not in ort.get_available_providers():
         active_providers = ["CPUExecutionProvider"]
+
+    from insightface.model_zoo import get_model
+
     detector = get_model(str(detector_path), providers=active_providers)
     input_size = int(os.environ.get("FACE_DETECTION_INPUT_SIZE", "1280"))
     detector.prepare(
@@ -328,7 +336,16 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
         input_size=(input_size, input_size),
         det_thresh=float(os.environ.get("FACE_DETECTION_THRESHOLD", "0.6")),
     )
-    recognizer = get_model(str(recognizer_path), providers=active_providers)
+
+    if recognizer_kind == "adaface":
+        # InsightFace의 get_model()은 ONNX metadata로 모델 종류를 자동판별한다.
+        # InsightFace가 만들지 않은 AdaFace ONNX를 넣으면 잘못 판별될 수 있어
+        # 여기서는 직접 onnxruntime 세션을 여는 전용 어댑터를 쓴다.
+        from deeplearning.training.adaface_recognizer import AdaFaceOnnxRecognizer
+
+        recognizer = AdaFaceOnnxRecognizer(recognizer_path, providers=active_providers)
+    else:
+        recognizer = get_model(str(recognizer_path), providers=active_providers)
     recognizer.prepare(ctx_id=0 if active_providers[0].startswith("CUDA") else -1)
 
     def embedder(image_path: Path) -> tuple[np.ndarray | None, float]:
