@@ -77,6 +77,7 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=0.5,
+        occupancy_hold_seconds=0,
         identity_confidence_threshold=0.5,
         stale_seconds=300,
         recent_event_limit=500,

@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     demo_mode_enabled: bool = False
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
+    # 마지막으로 점유를 관측한 뒤 이 시간 동안은 좌석을 점유로 붙들어 둔다.
+    # 0이면 붙들지 않고 매 프레임의 관측을 그대로 쓴다(이전 동작).
+    seat_occupancy_hold_seconds: float = Field(default=5.0, ge=0, le=300)
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
     # 오프라인 migration cutover 게이트. 승인된 암호화 target/KMS가 준비된

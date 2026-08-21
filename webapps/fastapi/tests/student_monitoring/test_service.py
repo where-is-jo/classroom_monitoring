@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -136,6 +136,7 @@ def _make_service(
     stream_classroom_id: str = _CLASSROOM_ID,
     broadcaster: InMemoryBroadcaster | None = None,
     rois: tuple[RoiConnection, ...] = (),
+    hold_seconds: float = 0,
 ) -> tuple[StudentMonitoringService, MemoryDetectionEventRepository, ClassroomService]:
     detection_repo = MemoryDetectionEventRepository()
     segment_repo = MemoryVideoSegmentRepository()
@@ -162,6 +163,7 @@ def _make_service(
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=0.5,
+        occupancy_hold_seconds=hold_seconds,
         identity_confidence_threshold=0.5,
         stale_seconds=300,
         recent_event_limit=500,
@@ -442,3 +444,91 @@ class TestAutomaticSeatMapping:
         queue.get_nowait()
         queue.get_nowait()
         assert queue.empty()
+
+
+def _seat_state(classroom_service: ClassroomService, seat_id: str) -> SeatOccupancy:
+    seat = classroom_service._repository.get_seat(seat_id)
+    assert seat is not None
+    return seat.current_occupancy.state
+
+
+def test_점유가_한_프레임_끊겨도_유지_시간_안이면_점유로_남는다() -> None:
+    """앉은 사람도 프레임마다 잡히지는 않는다. 그 틈에 좌석이 깜빡이면 안 된다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.OCCUPIED
+
+    # 다음 프레임에서 아무도 잡히지 않았다.
+    service.receive_inference_event(
+        _event(
+            "e2", (_person("d2", (900, 900, 950, 950)),), captured_at=base + timedelta(seconds=2)
+        )
+    )
+
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.OCCUPIED
+
+
+def test_유지_시간이_지나면_점유를_놓는다() -> None:
+    """자리를 뜬 사람을 계속 앉아 있다고 기록하지 않는다.
+
+    놓은 뒤는 VACANT가 아니라 UNKNOWN이다. 사람을 못 봤다는 것이 없다는 뜻은 아니므로
+    빈 관측에는 신뢰도를 주지 않고, 임계값 미달은 UNKNOWN이 된다.
+    """
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+    service.receive_inference_event(
+        _event(
+            "e2", (_person("d2", (900, 900, 950, 950)),), captured_at=base + timedelta(seconds=9)
+        )
+    )
+
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+
+
+def test_붙들린_좌석은_유지_구간을_다시_늘리지_못한다() -> None:
+    """한 번 잡힌 좌석이 영영 점유로 남지 않아야 한다.
+
+    붙들려서 점유가 된 관측까지 "방금 봤다"로 기록하면 유지 시간이 계속 갱신된다.
+    """
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+    elsewhere = (_person("dx", (900, 900, 950, 950)),)
+
+    service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+    # 3초 간격으로 계속 비어 있는 관측이 온다. 매번 유지 시간이 갱신되면 영원히 점유다.
+    for i, seconds in enumerate((3, 6, 9), start=2):
+        service.receive_inference_event(
+            _event(f"e{i}", elsewhere, captured_at=base + timedelta(seconds=seconds))
+        )
+
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+
+
+def test_유지_시간이_0이면_이전과_같이_곧바로_놓는다() -> None:
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=0)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+    service.receive_inference_event(
+        _event(
+            "e2", (_person("d2", (900, 900, 950, 950)),), captured_at=base + timedelta(seconds=1)
+        )
+    )
+
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN

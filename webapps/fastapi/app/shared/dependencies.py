@@ -743,6 +743,7 @@ def get_student_monitoring_service(
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
+        occupancy_hold_seconds=settings.seat_occupancy_hold_seconds,
         identity_confidence_threshold=settings.student_identity_confidence_threshold,
         stale_seconds=settings.detection_event_stale_seconds,
         recent_event_limit=settings.student_state_recent_event_limit,

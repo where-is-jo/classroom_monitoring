@@ -144,6 +144,7 @@ def _build_context(*, assign_two_students: bool = True) -> StateContext:
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=0.6,
+        occupancy_hold_seconds=0,
         identity_confidence_threshold=0.7,
         stale_seconds=300,
         recent_event_limit=500,
