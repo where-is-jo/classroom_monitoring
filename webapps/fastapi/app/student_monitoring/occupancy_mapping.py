@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from ..classrooms.models import SeatObservation
 from ..roi_connections.mapping import map_bbox_to_roi
@@ -22,6 +22,8 @@ def map_detections_to_observations(
     connections: Sequence[RoiConnection],
     frame: FrameInfo,
     confidence_threshold: float,
+    *,
+    held: Mapping[str, float] | None = None,
 ) -> tuple[SeatObservation, ...]:
     """탐지 결과를 좌석별 점유 관측으로 변환한다.
 
@@ -31,6 +33,12 @@ def map_detections_to_observations(
     - 여러 사람이 같은 좌석에 겹치면 신뢰도가 높은 사람만 채택한다.
     - 반환 대상은 `connections`에 있는 좌석뿐이다. 매칭되지 않은 좌석은
       "관측했으나 비어 있음"으로 남는다 — 그 카메라가 실제로 보는 자리이기 때문이다.
+    - `held`에 있는 좌석은 이번 프레임에서 잡히지 않아도 점유로 본다. 값은 직전에
+      관측한 신뢰도다. 어느 좌석을 얼마나 오래 붙들지는 호출자가 정한다.
+
+    **왜 붙들어 주는가**: 앉아 있는 사람도 프레임마다 꾸준히 잡히지는 않는다. 실측에서
+    좌석 13곳의 미탐 구간 24개 중 14개가 1프레임(1.3초)짜리였다. 이것을 그대로
+    "비어 있음"으로 기록하면 좌석 상태가 몇 초마다 깜빡이고, 학생 상태도 함께 흔들린다.
     """
     best_by_seat: dict[str, Detection] = {}
     for detection in detections:
@@ -57,6 +65,17 @@ def map_detections_to_observations(
         seen.add(connection.seat_id)
         matched_detection = best_by_seat.get(connection.seat_id)
         if matched_detection is None:
+            held_confidence = None if held is None else held.get(connection.seat_id)
+            if held_confidence is not None:
+                # 직전 관측을 그대로 잇는다. 새로 본 것이 아니므로 신뢰도를 올리지 않는다.
+                observations.append(
+                    SeatObservation(
+                        seat_id=connection.seat_id,
+                        occupied=True,
+                        confidence=held_confidence,
+                    )
+                )
+                continue
             observations.append(
                 SeatObservation(seat_id=connection.seat_id, occupied=False, confidence=0.0)
             )

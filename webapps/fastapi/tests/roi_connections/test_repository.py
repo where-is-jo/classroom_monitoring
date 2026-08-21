@@ -65,6 +65,18 @@ class FakeCollection:
         self.documents.append(document)
         return document
 
+    def delete_one(self, query: dict[str, object]) -> FakeDeleteResult:
+        existing = self.find_one(query)
+        if existing is None:
+            return FakeDeleteResult(0)
+        self.documents.remove(existing)
+        return FakeDeleteResult(1)
+
+
+class FakeDeleteResult:
+    def __init__(self, deleted_count: int) -> None:
+        self.deleted_count = deleted_count
+
 
 class FakeDatabase:
     def __init__(self) -> None:
@@ -141,3 +153,22 @@ def test_legacy_document_without_camera_id_remains_readable() -> None:
     assert len(restored) == 1
     assert restored[0].camera_id is None
     assert _repository(database).list_by_camera("room", "camera-a") == []
+
+
+def test_delete_removes_only_the_matching_camera_scope() -> None:
+    """같은 좌석이라도 카메라가 다르면 다른 ROI다. 하나를 지워도 나머지는 남는다."""
+    database = FakeDatabase()
+    repository = _repository(database)
+    repository.save(_connection("camera-a"))
+    repository.save(_connection("camera-b"))
+
+    deleted = repository.delete("room", "camera-a", "seat-a")
+
+    assert deleted is True
+    assert [document["camera_id"] for document in database.collection.documents] == ["camera-b"]
+
+
+def test_delete_reports_when_there_was_nothing_to_remove() -> None:
+    repository = _repository(FakeDatabase())
+
+    assert repository.delete("room", "camera-a", "seat-a") is False

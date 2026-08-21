@@ -13,6 +13,7 @@ from ..shared.student_identity import StudentIdentity, StudentLookupPort
 from ..video_monitoring.models import VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
 from .errors import (
+    CameraFrameUnavailableError,
     RoiConnectionConflictError,
     RoiConnectionInputError,
     RoiConnectionNotFoundError,
@@ -20,12 +21,13 @@ from .errors import (
 from .models import (
     Point,
     ReferenceImage,
+    RoiCameraOption,
     RoiConnection,
     RoiConnectionView,
     SaveLiveRoiConnectionCommand,
     SaveRoiConnectionCommand,
 )
-from .ports import RoiConnectionRepository
+from .ports import CameraFrameGrabber, RoiConnectionRepository
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png"}
 
@@ -39,6 +41,7 @@ class RoiConnectionService:
         student_lookup: StudentLookupPort,
         repository: RoiConnectionRepository,
         stream_repository: VideoStreamRepository,
+        frame_grabber: CameraFrameGrabber,
         *,
         max_upload_bytes: int,
         page_size_max: int,
@@ -48,6 +51,7 @@ class RoiConnectionService:
         self._students = student_lookup
         self._repository = repository
         self._streams = stream_repository
+        self._frames = frame_grabber
         self._max_upload_bytes = max_upload_bytes
         self._page_size_max = page_size_max
         self._clock = clock
@@ -78,6 +82,17 @@ class RoiConnectionService:
             if stream.classroom_id == classroom_id
         ]
 
+    def list_camera_options(self, classroom_id: str) -> list[RoiCameraOption]:
+        """화면이 그대로 그릴 수 있는 카메라 선택 항목을 만든다."""
+        return [
+            RoiCameraOption(
+                camera_id=stream.camera_id,
+                camera_label=stream.camera_label,
+                capture_available=self._frames.is_available(stream.camera_id),
+            )
+            for stream in self.list_streams(classroom_id)
+        ]
+
     def save_reference_image(
         self,
         classroom_id: str,
@@ -99,6 +114,58 @@ class RoiConnectionService:
         if not _has_valid_image_signature(content_type, content):
             raise RoiConnectionInputError("이미지 파일 형식이 올바르지 않습니다.")
         display_name = Path(filename or "reference-image").name
+        return self._store_image(
+            classroom_id,
+            camera_id,
+            content_type=content_type,
+            content=content,
+            display_name=display_name,
+        )
+
+    def capture_reference_image(self, classroom_id: str, camera_id: str) -> ReferenceImage:
+        """카메라의 현재 화면을 잡아 ROI 기준 이미지로 삼는다.
+
+        ROI는 좌석이라는 움직이지 않는 영역을 그리는 일이라 정지 화면이면 충분하고,
+        오히려 흔들리지 않는 편이 정확하다. 실시간 영상 재생은 모니터링 화면이 맡는다
+        (결정 0031).
+
+        캡처한 프레임에는 강의실에 있는 사람이 그대로 담긴다. 그래서 파일로 쓰지 않고
+        메모리에만 두며, 다음 캡처가 이전 것을 덮어쓴다.
+        """
+        stream = self._required_camera(classroom_id, camera_id)
+        content = self._frames.capture_jpeg(camera_id)
+        if not content:
+            raise CameraFrameUnavailableError("카메라에서 빈 화면을 받았습니다.")
+        if len(content) > self._max_upload_bytes:
+            raise CameraFrameUnavailableError(
+                "카메라 화면이 허용 크기를 넘어 기준 이미지로 쓸 수 없습니다."
+            )
+        if not _has_valid_image_signature("image/jpeg", content):
+            raise CameraFrameUnavailableError("카메라에서 받은 화면이 JPEG 형식이 아닙니다.")
+        captured_at = self._clock().strftime("%Y%m%d-%H%M%S")
+        return self._store_image(
+            classroom_id,
+            camera_id,
+            content_type="image/jpeg",
+            content=content,
+            display_name=f"{stream.camera_label} {captured_at} 캡처",
+        )
+
+    def _store_image(
+        self,
+        classroom_id: str,
+        camera_id: str,
+        *,
+        content_type: str,
+        content: bytes,
+        display_name: str,
+    ) -> ReferenceImage:
+        """기준 이미지를 바꾸고 revision을 올린다.
+
+        revision은 "이 ROI가 어느 화면 위에서 그려졌는가"를 가리킨다. 화면이 바뀌면
+        전에 그린 ROI는 다른 화각의 좌표일 수 있으므로 needs_review로 떨어져야 한다
+        (결정 0019).
+        """
         with self._lock:
             key = (classroom_id, camera_id)
             previous = self._images.get(key)
@@ -164,6 +231,17 @@ class RoiConnectionService:
             for view in self.list_connections(classroom_id, camera_id)
             if not view.needs_review
         ]
+
+    def delete_connection(self, classroom_id: str, camera_id: str, seat_id: str) -> None:
+        """좌석 하나의 ROI를 지운다.
+
+        잘못 그린 ROI를 고칠 방법이 없으면 관리자가 손댈 수 없는 데이터가 남는다.
+        지운 좌석은 그 카메라의 관측 대상에서 빠진다 — 좌석이 사라지는 것이 아니라
+        "이 카메라로는 보지 않는다"가 된다(결정 0020).
+        """
+        self._required_camera(classroom_id, camera_id)
+        if not self._repository.delete(classroom_id, camera_id, seat_id):
+            raise RoiConnectionNotFoundError("삭제할 ROI 연결이 없습니다.")
 
     def save_connection(self, command: SaveRoiConnectionCommand) -> RoiConnectionView:
         self._required_camera(command.classroom_id, command.camera_id)

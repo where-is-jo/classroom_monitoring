@@ -1,5 +1,11 @@
 FROM python:3.12-slim
 
+# ROI 기준 화면 캡처가 RTSP 프레임을 디코딩하는 데 쓴다(결정 0031). CCTV가 HEVC를
+# 내보내서 순수 파이썬으로는 읽을 수 없다. 없어도 앱은 뜨지만 캡처만 실패한다.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt ./

@@ -162,7 +162,8 @@ python -m pipeline.main
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
-| `inference_confidence_threshold` | 탐지 신뢰도 임계값 | 기본 0.25 |
+| `inference_confidence_threshold` | 탐지 신뢰도 임계값 | 기본 0.25. 좌석 점유로 인정할지는 fastapi가 다시 판단한다 |
+| `inference_image_size` | 추론 입력 크기(긴 변) | **기본 1280.** 지정하지 않으면 ultralytics가 640으로 줄여 뒤쪽에 앉은 사람을 놓친다. 실측 근거는 `config/settings.yml` 주석에 있다 |
 | `snapshot_enabled` | 탐지 스냅샷 적재 | 기본 `false`. 저장은 명시적으로 켠다 |
 | `snapshot_max_long_side_px` | 긴 변 상한 | 기본 1280(720p). 확대하지 않는다 |
 | `snapshot_jpeg_quality` | JPEG 품질 | 기본 80 |

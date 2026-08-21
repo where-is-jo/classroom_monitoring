@@ -21,6 +21,7 @@ from app.classrooms.models import (
 )
 from app.classrooms.service import ClassroomService
 from app.main import app
+from app.roi_connections.adapters.ffmpeg_camera import UnavailableCameraFrameGrabber
 from app.roi_connections.adapters.memory import InMemoryRoiConnectionRepository
 from app.roi_connections.models import Point, RoiConnection
 from app.roi_connections.service import RoiConnectionService
@@ -128,6 +129,7 @@ def _build_context(*, assign_two_students: bool = True) -> StateContext:
         student_lookup,
         roi_repository,
         stream_repository,
+        UnavailableCameraFrameGrabber(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: NOW,
@@ -142,6 +144,7 @@ def _build_context(*, assign_two_students: bool = True) -> StateContext:
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=0.6,
+        occupancy_hold_seconds=0,
         identity_confidence_threshold=0.7,
         stale_seconds=300,
         recent_event_limit=500,

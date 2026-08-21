@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     demo_mode_enabled: bool = False
     seat_occupancy_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
+    # 마지막으로 점유를 관측한 뒤 이 시간 동안은 좌석을 점유로 붙들어 둔다.
+    # 0이면 붙들지 않고 매 프레임의 관측을 그대로 쓴다(이전 동작).
+    seat_occupancy_hold_seconds: float = Field(default=5.0, ge=0, le=300)
     page_size_default: int = Field(default=50, ge=1)
     page_size_max: int = Field(default=200, ge=1, le=200)
     # 오프라인 migration cutover 게이트. 승인된 암호화 target/KMS가 준비된
@@ -61,6 +64,17 @@ class Settings(BaseSettings):
     roi_reference_image_max_bytes: int = Field(
         default=5 * 1024 * 1024, ge=1024, le=20 * 1024 * 1024
     )
+    # --- ROI 기준 프레임 캡처 (결정 0031) ---
+    # `<카메라 식별자>=<RTSP URL>` 항목을 쉼표로 이은 목록이며 worker의 STREAM_SOURCES와
+    # 같은 형식이다. 형식이 갈리면 같은 카메라가 서비스마다 다른 이름을 갖게 된다.
+    #
+    # **URL에 카메라 계정과 비밀번호가 들어 있으므로 비밀값이다.** 그래서 저장소가 아니라
+    # 환경변수로만 받는다 — MongoDB에 두면 카메라 목록 API 응답과 화면에 새어 나갈 수 있다.
+    # 비워 두면 캡처 기능만 꺼지고 ROI 화면의 나머지는 그대로 동작한다.
+    camera_rtsp_sources: SecretStr | None = None
+    # 캡처는 RTSP 연결·키프레임 대기를 포함해 실측 4초대가 나온다. 다른 외부 호출(5초)과
+    # 같은 값을 쓰면 정상 캡처가 타임아웃으로 잘린다.
+    camera_frame_capture_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
     face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
     face_pose_front_quota: int = Field(default=32, ge=1)
