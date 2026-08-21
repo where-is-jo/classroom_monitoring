@@ -5,9 +5,10 @@ from __future__ import annotations
 import math
 import time
 from collections import Counter, deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
 
 import cv2
 import numpy as np
@@ -34,12 +35,14 @@ class FaceGallery:
     matrix: np.ndarray
 
     @classmethod
-    def from_entries(cls, entries: Sequence[GalleryEntry]) -> "FaceGallery":
+    def from_entries(cls, entries: Sequence[GalleryEntry]) -> FaceGallery:
         if not entries:
             raise ValueError("gallery가 비어 있습니다.")
 
         student_ids = [entry.student_id for entry in entries]
-        if any(not value for value in student_ids) or len(student_ids) != len(set(student_ids)):
+        if any(not value for value in student_ids) or len(student_ids) != len(
+            set(student_ids)
+        ):
             raise ValueError("student_id는 비어 있거나 중복될 수 없습니다.")
 
         normalized = tuple(
@@ -175,6 +178,7 @@ class FaceIdentityEngine:
         gallery: FaceGallery,
         thresholds: IdentityThresholds,
         detection_threshold: float = 0.6,
+        identity_min_detection_confidence: float | None = None,
         minimum_face_size: int = 40,
         preferred_face_size: int = 112,
         minimum_blur_score: float = 20.0,
@@ -186,6 +190,12 @@ class FaceIdentityEngine:
     ) -> None:
         if not 0.0 <= detection_threshold <= 1.0:
             raise ValueError("detection threshold는 0과 1 사이여야 합니다.")
+        if identity_min_detection_confidence is None:
+            identity_min_detection_confidence = detection_threshold
+        if not detection_threshold <= identity_min_detection_confidence <= 1.0:
+            raise ValueError(
+                "식별 최소 검출 신뢰도는 detection threshold 이상 1 이하여야 합니다."
+            )
         if not 0.0 <= uncertain_quality_threshold <= 1.0:
             raise ValueError("품질 임계값은 0과 1 사이여야 합니다.")
         if minimum_face_size < 1 or preferred_face_size <= minimum_face_size:
@@ -198,6 +208,7 @@ class FaceIdentityEngine:
         self._gallery = gallery
         self._thresholds = thresholds
         self._detection_threshold = detection_threshold
+        self._identity_min_detection_confidence = identity_min_detection_confidence
         self._minimum_face_size = minimum_face_size
         self._preferred_face_size = preferred_face_size
         self._minimum_blur_score = minimum_blur_score
@@ -259,7 +270,9 @@ class FaceIdentityEngine:
         return top_index, similarity, similarity - second
 
     def _needs_tta(self, similarity: float, margin: float) -> bool:
-        similarity_near = abs(similarity - self._thresholds.similarity) <= self._tta_similarity_band
+        similarity_near = (
+            abs(similarity - self._thresholds.similarity) <= self._tta_similarity_band
+        )
         margin_near = abs(margin - self._thresholds.margin) <= self._tta_margin_band
         return self._use_flip_tta and (similarity_near or margin_near)
 
@@ -314,7 +327,7 @@ class FaceIdentityEngine:
             if confidence < self._detection_threshold:
                 continue
 
-            left, top, right, bottom = (int(round(value)) for value in detection[:4])
+            left, top, right, bottom = (round(value) for value in detection[:4])
             bbox = (
                 max(0, left),
                 max(0, top),
@@ -328,6 +341,23 @@ class FaceIdentityEngine:
             )
             face_size = min(bbox[2] - bbox[0], bbox[3] - bbox[1])
             face_quality = self._quality(aligned, face_size, confidence)
+
+            if confidence < self._identity_min_detection_confidence:
+                results.append(
+                    FaceIdentityDetection(
+                        bbox=bbox,
+                        detection_confidence=confidence,
+                        student_id=None,
+                        similarity=-1.0,
+                        margin=-1.0,
+                        quality=face_quality.score,
+                        rejected_reason="low_detection_confidence",
+                        status=IdentityStatus.UNCERTAIN,
+                        embedding=None,
+                        tta_used=False,
+                    )
+                )
+                continue
 
             if not extract_embeddings:
                 results.append(
@@ -421,8 +451,8 @@ class FaceIdentityEngine:
             candidates = []
         tile_height = math.ceil(height / rows)
         tile_width = math.ceil(width / columns)
-        y_padding = int(round(tile_height * overlap))
-        x_padding = int(round(tile_width * overlap))
+        y_padding = round(tile_height * overlap)
+        x_padding = round(tile_width * overlap)
 
         for row in range(rows):
             for column in range(columns):
@@ -470,7 +500,8 @@ class FaceIdentityEngine:
                 or _bbox_intersection_over_smaller(
                     candidate.bbox,
                     existing.bbox,
-                ) >= containment_threshold
+                )
+                >= containment_threshold
                 for existing in selected
             )
             if not is_duplicate:
@@ -525,7 +556,10 @@ class MultiFaceIdentityTracker:
                 continue
             distance = math.dist(center, _bbox_center(track.bbox))
             overlap = _bbox_iou(detection.bbox, track.bbox)
-            if distance <= self._maximum_center_distance or overlap >= self._minimum_iou:
+            if (
+                distance <= self._maximum_center_distance
+                or overlap >= self._minimum_iou
+            ):
                 candidates.append((distance - 50.0 * overlap, track_id))
 
         if candidates:
@@ -572,11 +606,15 @@ class MultiFaceIdentityTracker:
                     [max(item[1], 1e-3) for item in track.embeddings],
                     dtype=np.float32,
                 )
-                averaged = normalize_embedding(np.average(vectors, axis=0, weights=weights))
+                averaged = normalize_embedding(
+                    np.average(vectors, axis=0, weights=weights)
+                )
                 aggregate_quality = float(np.average(weights, weights=weights))
-                status, student_id, similarity, margin, _ = self._engine.match_embedding(
-                    averaged,
-                    quality=aggregate_quality,
+                status, student_id, similarity, margin, _ = (
+                    self._engine.match_embedding(
+                        averaged,
+                        quality=aggregate_quality,
+                    )
                 )
 
             results.append(

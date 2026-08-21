@@ -22,9 +22,16 @@ def _vector(index: int) -> np.ndarray:
 
 
 class _Detector:
-    def detect(self, image: np.ndarray, *, max_num: int) -> tuple[np.ndarray, np.ndarray]:
+    def __init__(self, confidence: float = 0.95) -> None:
+        self._confidence = confidence
+
+    def detect(
+        self, image: np.ndarray, *, max_num: int
+    ) -> tuple[np.ndarray, np.ndarray]:
         del image, max_num
-        detections = np.asarray([[1.2, 2.2, 20.8, 22.8, 0.95]], dtype=np.float32)
+        detections = np.asarray(
+            [[1.2, 2.2, 20.8, 22.8, self._confidence]], dtype=np.float32
+        )
         landmarks = np.asarray(
             [[[5, 7], [15, 7], [10, 12], [6, 18], [14, 18]]], dtype=np.float32
         )
@@ -40,7 +47,9 @@ class _Recognizer:
         return self._vector.reshape(1, -1)
 
 
-def _engine(vector: np.ndarray, *, similarity: float, margin: float) -> FaceIdentityEngine:
+def _engine(
+    vector: np.ndarray, *, similarity: float, margin: float
+) -> FaceIdentityEngine:
     gallery = FaceGallery.from_entries(
         [GalleryEntry("student-a", _vector(0)), GalleryEntry("student-b", _vector(1))]
     )
@@ -113,11 +122,41 @@ def test_detection_only_skips_embedding_but_keeps_face_box() -> None:
     assert engine.last_timings_ms["recognizer"] == 0.0
 
 
+def test_낮은_confidence_얼굴은_bbox만_유지하고_식별하지_않는다() -> None:
+    gallery = FaceGallery.from_entries(
+        [GalleryEntry("student-a", _vector(0)), GalleryEntry("student-b", _vector(1))]
+    )
+    engine = FaceIdentityEngine(
+        detector=_Detector(confidence=0.45),
+        recognizer=_Recognizer(_vector(0)),
+        gallery=gallery,
+        thresholds=IdentityThresholds(0.3, 0.1),
+        detection_threshold=0.4,
+        identity_min_detection_confidence=0.6,
+        minimum_face_size=1,
+        preferred_face_size=2,
+        minimum_blur_score=0.0,
+        preferred_blur_score=1.0,
+        uncertain_quality_threshold=0.0,
+    )
+
+    result = engine.identify(np.zeros((30, 30, 3), dtype=np.uint8))[0]
+
+    assert result.bbox == (1, 2, 21, 23)
+    assert result.status is IdentityStatus.UNCERTAIN
+    assert result.student_id is None
+    assert result.embedding is None
+    assert result.rejected_reason == "low_detection_confidence"
+    assert engine.last_timings_ms["recognizer"] == 0.0
+
+
 def test_temporal_consensus_requires_four_matching_votes_in_five_frames() -> None:
     consensus = TemporalIdentityConsensus(window_size=5, consensus_count=4)
 
-    outputs = [consensus.update("track-1", value) for value in
-               ("student-a", "student-a", None, "student-a", "student-a")]
+    outputs = [
+        consensus.update("track-1", value)
+        for value in ("student-a", "student-a", None, "student-a", "student-a")
+    ]
 
     assert outputs[:4] == [None, None, None, None]
     assert outputs[4] == "student-a"
