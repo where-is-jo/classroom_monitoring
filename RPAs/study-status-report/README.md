@@ -15,7 +15,7 @@
 | 유의미한 상태 변화 기록 | 자동화 가능, 단 관리자 확인 결과만 사용 | 상태가 `PRESENT`에서 `ABSENT`, `WRONG_SEAT`, `IN_CLASSROOM`, `UNKNOWN`으로 바뀌거나 반대로 복귀한 경우만 기록한다. |
 | 관리 문서 생성/갱신 | 자동화 가능 | `scripts/create_management_workbook.py`가 `.xlsx`를 생성한다. |
 | 공부 시간 종료 시 Slack 전송 | 자동화 가능 | Slack Bot 토큰으로 관리 문서를 파일 업로드한다. |
-| 하루 종료 리포트 작성 및 Slack 전송 | 자동화 가능 | 자리 이탈률, 미착석 건수, 오착석 건수, 알 수 없음 건수, 학생별 이벤트 수를 `일일 리포트` 시트에 작성해 전송한다. |
+| 하루 종료 리포트 작성 및 Slack 전송 | 자동화 가능 | 미착석, 오착석, 좌석 외 위치, 판단 보류, 정상 착석 복귀 건수를 종합하고 학생별 자리 이탈 정도를 차트로 시각화해 전송한다. |
 
 ## 시간표 기준
 
@@ -70,9 +70,10 @@ Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` �
 | 좌석번호 | 학생에게 배정된 좌석 라벨 또는 현재 좌석 라벨 |
 | 학생명 | API 응답의 `student_name` |
 | 학생 상태 | `PRESENT`, `ABSENT`, `WRONG_SEAT`, `IN_CLASSROOM`, `UNKNOWN` |
-| 상태 판단 근거 | API 응답의 `reason`을 사람이 읽을 수 있게 요약 |
 
-추가로 `상태 변화 기록` 시트와 `일일 리포트` 시트를 포함한다.
+`상태 판단 근거`와 `원본 근거 코드`는 수집 안정성이 낮아 관리 문서 컬럼에서 제외한다.
+
+추가로 `상태 변화 기록` 시트와 `일일 리포트` 시트를 포함한다. `일일 리포트`는 셀 표가 아니라 상태별 종합 차트와 학생별 자리 이탈 정도 차트로 보여준다. 차트 원본 데이터는 숨김 시트인 `리포트 데이터`에 저장한다.
 
 ## 성공 조건
 
@@ -80,7 +81,7 @@ Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` �
 - 같은 학생의 같은 상태를 반복 실행해도 중복 기록하지 않는다.
 - 공부 시간 종료 시점마다 `.xlsx` 파일이 생성 또는 갱신된다.
 - Slack 업로드 요청이 성공 응답을 반환한다.
-- 하루 종료 후 `일일 리포트` 시트에 자리 이탈률과 상태별 통계가 작성된다.
+- 하루 종료 후 `일일 리포트` 시트에 상태별 종합 그래프와 학생별 자리 이탈 정도 그래프가 작성된다.
 
 ## 실패 조건과 처리
 
@@ -94,7 +95,7 @@ Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` �
 
 ## 중복 실행 방지
 
-n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|state|reason|observed_at` 키를 저장한다. 동일 키는 다시 기록하지 않는다.
+n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|state|observed_at` 키를 저장한다. 동일 키는 다시 기록하지 않는다.
 
 ## 파일
 
