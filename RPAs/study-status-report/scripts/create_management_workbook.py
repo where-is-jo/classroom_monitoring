@@ -20,21 +20,11 @@ STATE_LABELS = {
     "PRESENT": "착석",
     "ABSENT": "미착석",
     "WRONG_SEAT": "오착석",
-    "IN_CLASSROOM": "강의실 내 좌석 외 위치",
+    "IN_CLASSROOM": "좌석 외 위치",
     "UNKNOWN": "판단 보류",
 }
 
-REASON_LABELS = {
-    "IDENTIFIED_AT_ASSIGNED_SEAT": "배정 좌석에서 학생 식별",
-    "IDENTIFIED_AT_OTHER_SEAT": "다른 좌석에서 학생 식별",
-    "IDENTIFIED_OUTSIDE_SEATS": "좌석 외 위치에서 학생 식별",
-    "IDENTITY_HELD": "직전 식별 결과 유지",
-    "SEAT_OCCUPIED_BY_UNKNOWN": "배정 좌석에 미식별 인원 감지",
-    "SEAT_VACANT_WITHIN_GRACE": "배정 좌석 비어 있음, 유예 시간 이내",
-    "SEAT_VACANT_BEYOND_GRACE": "배정 좌석 비어 있음, 유예 시간 초과",
-    "SEAT_NOT_OBSERVED": "좌석 관측 근거 부족",
-    "NO_ASSIGNED_SEAT": "배정 좌석 없음",
-}
+LEAVE_STATES = {"ABSENT", "WRONG_SEAT", "IN_CLASSROOM"}
 
 
 @dataclass(frozen=True)
@@ -45,15 +35,11 @@ class Event:
     student_id: str
     student_name: str
     student_state: str
-    reason: str
-    note: str
 
 
 def parse_events(data: list[dict[str, Any]]) -> list[Event]:
     events: list[Event] = []
     for raw in data:
-        state = str(raw.get("student_state", "UNKNOWN"))
-        reason = str(raw.get("reason", "SEAT_NOT_OBSERVED"))
         events.append(
             Event(
                 period=str(raw.get("period", "")),
@@ -61,9 +47,7 @@ def parse_events(data: list[dict[str, Any]]) -> list[Event]:
                 seat_number=str(raw.get("seat_number", "")),
                 student_id=str(raw.get("student_id", "")),
                 student_name=str(raw.get("student_name", "")),
-                student_state=state,
-                reason=reason,
-                note=str(raw.get("note") or REASON_LABELS.get(reason, reason)),
+                student_state=str(raw.get("student_state", "UNKNOWN")),
             )
         )
     return events
@@ -90,7 +74,16 @@ def col_name(index: int) -> str:
     return name
 
 
-def sheet_xml(rows: list[list[Any]], merge_refs: list[str] | None = None) -> str:
+def sheet_ref(sheet_name: str, cell_range: str) -> str:
+    return "'" + sheet_name.replace("'", "''") + "'!$" + cell_range
+
+
+def sheet_xml(
+    rows: list[list[Any]],
+    merge_refs: list[str] | None = None,
+    drawing_rel_id: str | None = None,
+    column_count: int = 8,
+) -> str:
     row_xml: list[str] = []
     for row_index, row in enumerate(rows, start=1):
         cells: list[str] = []
@@ -107,17 +100,51 @@ def sheet_xml(rows: list[list[Any]], merge_refs: list[str] | None = None) -> str
         items = "".join(f'<mergeCell ref="{escape(ref)}"/>' for ref in merge_refs)
         merge_xml = f'<mergeCells count="{len(merge_refs)}">{items}</mergeCells>'
 
+    drawing_xml = f'<drawing r:id="{drawing_rel_id}"/>' if drawing_rel_id else ""
+
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        "<sheetViews><sheetView workbookViewId=\"0\"/></sheetViews>"
-        "<sheetFormatPr defaultRowHeight=\"18\"/>"
-        "<cols><col min=\"1\" max=\"8\" width=\"22\" customWidth=\"1\"/></cols>"
+        '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+        '<sheetFormatPr defaultRowHeight="18"/>'
+        f'<cols><col min="1" max="{column_count}" width="22" customWidth="1"/></cols>'
         f"<sheetData>{''.join(row_xml)}</sheetData>"
         f"{merge_xml}"
+        f"{drawing_xml}"
         "</worksheet>"
     )
+
+
+def report_data_rows(events: list[Event]) -> list[list[Any]]:
+    state_counts = Counter(event.student_state for event in events)
+    student_total_counts: defaultdict[str, int] = defaultdict(int)
+    student_leave_counts: defaultdict[str, int] = defaultdict(int)
+
+    for event in events:
+        student_name = event.student_name or event.student_id or "미확인"
+        student_total_counts[student_name] += 1
+        if event.student_state in LEAVE_STATES:
+            student_leave_counts[student_name] += 1
+
+    rows: list[list[Any]] = [
+        ["상태", "건수"],
+        ["미착석 건수", state_counts["ABSENT"]],
+        ["오착석 건수", state_counts["WRONG_SEAT"]],
+        ["좌석 외 위치 건수", state_counts["IN_CLASSROOM"]],
+        ["판단 보류 건수", state_counts["UNKNOWN"]],
+        ["정상 착석 복귀 건수", state_counts["PRESENT"]],
+        [],
+        ["학생명", "자리 이탈 건수", "자리 이탈률(%)"],
+    ]
+
+    for student_name in sorted(student_total_counts):
+        total = student_total_counts[student_name]
+        leave_count = student_leave_counts[student_name]
+        leave_rate = round(leave_count / total * 100, 2) if total else 0
+        rows.append([student_name, leave_count, leave_rate])
+
+    return rows
 
 
 def build_rows(report_date: str, classroom: str, events: list[Event]) -> dict[str, list[list[Any]]]:
@@ -126,8 +153,8 @@ def build_rows(report_date: str, classroom: str, events: list[Event]) -> dict[st
         latest_by_student[event.student_id or event.student_name] = event
 
     status_rows: list[list[Any]] = [
-        [f"학생 관리 문서 - 날짜: {report_date} / 강의실: {classroom}", "", "", ""],
-        ["좌석번호", "학생명", "학생 상태", "상태 판단 근거"],
+        [f"학생 관리 문서 - 날짜: {report_date} / 강의실: {classroom}", "", ""],
+        ["좌석번호", "학생명", "학생 상태"],
     ]
     for event in sorted(latest_by_student.values(), key=lambda item: item.seat_number):
         status_rows.append(
@@ -135,13 +162,12 @@ def build_rows(report_date: str, classroom: str, events: list[Event]) -> dict[st
                 event.seat_number,
                 event.student_name,
                 STATE_LABELS.get(event.student_state, event.student_state),
-                event.note or REASON_LABELS.get(event.reason, event.reason),
             ]
         )
 
     event_rows: list[list[Any]] = [
-        [f"상태 변화 기록 - 날짜: {report_date} / 강의실: {classroom}", "", "", "", "", "", ""],
-        ["관측시각", "구간", "좌석번호", "학생명", "학생 상태", "상태 판단 근거", "원본 근거 코드"],
+        [f"상태 변화 기록 - 날짜: {report_date} / 강의실: {classroom}", "", "", "", ""],
+        ["관측시각", "구간", "좌석번호", "학생명", "학생 상태"],
     ]
     for event in events:
         event_rows.append(
@@ -151,92 +177,80 @@ def build_rows(report_date: str, classroom: str, events: list[Event]) -> dict[st
                 event.seat_number,
                 event.student_name,
                 STATE_LABELS.get(event.student_state, event.student_state),
-                event.note or REASON_LABELS.get(event.reason, event.reason),
-                event.reason,
             ]
         )
 
-    state_counts = Counter(event.student_state for event in events)
-    event_students = {event.student_id or event.student_name for event in events}
-    absent_like = state_counts["ABSENT"] + state_counts["WRONG_SEAT"] + state_counts["IN_CLASSROOM"]
-    total_events = max(len(events), 1)
-    leave_rate = round(absent_like / total_events * 100, 2)
-    per_student = Counter(event.student_name for event in events)
-
     report_rows: list[list[Any]] = [
-        [f"일일 리포트 - 날짜: {report_date} / 강의실: {classroom}", "", ""],
-        ["지표", "값", "비고"],
-        ["총 상태 변화 건수", len(events), "중복 제거 후 기록 기준"],
-        ["영향 학생 수", len(event_students), "상태 변화가 1회 이상 기록된 학생"],
-        ["자리 이탈률", f"{leave_rate}%", "ABSENT + WRONG_SEAT + IN_CLASSROOM / 전체 상태 변화"],
-        ["미착석 건수", state_counts["ABSENT"], "배정 좌석 미착석"],
-        ["오착석 건수", state_counts["WRONG_SEAT"], "다른 좌석 착석"],
-        ["좌석 외 위치 건수", state_counts["IN_CLASSROOM"], "강의실 안이지만 좌석 외 위치"],
-        ["판단 보류 건수", state_counts["UNKNOWN"], "근거 부족"],
-        ["정상 착석 복귀 건수", state_counts["PRESENT"], "배정 좌석 확인"],
-        [],
-        ["학생별 상태 변화 건수", "", ""],
-        ["학생명", "건수", "비고"],
+        [f"일일 리포트 - 날짜: {report_date} / 강의실: {classroom}", "", "", "", "", "", "", ""],
+        ["상태별 종합과 학생별 자리 이탈 정도를 그래프로 표시합니다.", "", "", "", "", "", "", ""],
+        ["상태별 종합", "", "", "", "학생별 자리 이탈 정도", "", "", ""],
     ]
-    for student_name, count in sorted(per_student.items()):
-        report_rows.append([student_name, count, ""])
 
     return {
         "학생 현황": status_rows,
         "상태 변화 기록": event_rows,
         "일일 리포트": report_rows,
+        "리포트 데이터": report_data_rows(events),
     }
 
 
-def write_xlsx(path: Path, sheets: dict[str, list[list[Any]]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sheet_names = list(sheets)
-
-    content_types = [
+def content_types_xml(sheet_count: int) -> str:
+    parts = [
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
         '<Default Extension="xml" ContentType="application/xml"/>',
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
+        '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>',
+        '<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>',
+        '<Override PartName="/xl/charts/chart2.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>',
     ]
-    for idx in range(1, len(sheet_names) + 1):
-        content_types.append(
+    for idx in range(1, sheet_count + 1):
+        parts.append(
             f'<Override PartName="/xl/worksheets/sheet{idx}.xml" '
             'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
         )
-    content_types.append("</Types>")
+    parts.append("</Types>")
+    return "".join(parts)
 
-    workbook_sheets = "".join(
-        f'<sheet name="{escape(name)}" sheetId="{idx}" r:id="rId{idx}"/>'
-        for idx, name in enumerate(sheet_names, start=1)
-    )
-    workbook_xml = (
+
+def workbook_xml(sheet_names: list[str]) -> str:
+    sheets = []
+    for idx, name in enumerate(sheet_names, start=1):
+        state = ' state="hidden"' if name == "리포트 데이터" else ""
+        sheets.append(f'<sheet name="{escape(name)}" sheetId="{idx}"{state} r:id="rId{idx}"/>')
+    return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        f"<sheets>{workbook_sheets}</sheets>"
+        f"<sheets>{''.join(sheets)}</sheets>"
         "</workbook>"
     )
 
-    workbook_rels = [
+
+def workbook_rels_xml(sheet_count: int) -> str:
+    rels = [
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
     ]
-    for idx in range(1, len(sheet_names) + 1):
-        workbook_rels.append(
+    for idx in range(1, sheet_count + 1):
+        rels.append(
             f'<Relationship Id="rId{idx}" '
             'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
             f'Target="worksheets/sheet{idx}.xml"/>'
         )
-    workbook_rels.append(
-        f'<Relationship Id="rId{len(sheet_names) + 1}" '
+    rels.append(
+        f'<Relationship Id="rId{sheet_count + 1}" '
         'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
         'Target="styles.xml"/>'
     )
-    workbook_rels.append("</Relationships>")
+    rels.append("</Relationships>")
+    return "".join(rels)
 
-    root_rels = (
+
+def root_rels_xml() -> str:
+    return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         '<Relationship Id="rId1" '
@@ -244,7 +258,10 @@ def write_xlsx(path: Path, sheets: dict[str, list[list[Any]]]) -> None:
         'Target="xl/workbook.xml"/>'
         "</Relationships>"
     )
-    styles_xml = (
+
+
+def styles_xml() -> str:
+    return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
         '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
@@ -255,19 +272,136 @@ def write_xlsx(path: Path, sheets: dict[str, list[list[Any]]]) -> None:
         "</styleSheet>"
     )
 
+
+def worksheet_rels_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" '
+        'Target="../drawings/drawing1.xml"/>'
+        "</Relationships>"
+    )
+
+
+def drawing_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        f"{two_cell_anchor('B', 4, 'G', 19, 'rId1')}"
+        f"{two_cell_anchor('B', 22, 'G', 38, 'rId2')}"
+        "</xdr:wsDr>"
+    )
+
+
+def two_cell_anchor(from_col: str, from_row: int, to_col: str, to_row: int, rel_id: str) -> str:
+    return (
+        "<xdr:twoCellAnchor>"
+        f"<xdr:from><xdr:col>{ord(from_col) - 65}</xdr:col><xdr:colOff>0</xdr:colOff>"
+        f"<xdr:row>{from_row - 1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+        f"<xdr:to><xdr:col>{ord(to_col) - 65}</xdr:col><xdr:colOff>0</xdr:colOff>"
+        f"<xdr:row>{to_row - 1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+        '<xdr:graphicFrame macro="">'
+        '<xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart"/>'
+        "<xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>"
+        "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>"
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+        f'<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        f'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="{rel_id}"/>'
+        "</a:graphicData></a:graphic>"
+        "</xdr:graphicFrame>"
+        "<xdr:clientData/>"
+        "</xdr:twoCellAnchor>"
+    )
+
+
+def drawing_rels_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" '
+        'Target="../charts/chart1.xml"/>'
+        '<Relationship Id="rId2" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" '
+        'Target="../charts/chart2.xml"/>'
+        "</Relationships>"
+    )
+
+
+def bar_chart_xml(title: str, category_ref: str, value_ref: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        "<c:chart>"
+        f"<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>{escape(title)}</a:t></a:r></a:p></c:rich></c:tx></c:title>"
+        "<c:plotArea><c:layout/>"
+        '<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>'
+        '<c:ser><c:idx val="0"/><c:order val="0"/>'
+        f'<c:cat><c:strRef><c:f>{escape(category_ref)}</c:f></c:strRef></c:cat>'
+        f'<c:val><c:numRef><c:f>{escape(value_ref)}</c:f></c:numRef></c:val>'
+        "</c:ser><c:axId val=\"123456\"/><c:axId val=\"654321\"/></c:barChart>"
+        '<c:catAx><c:axId val="123456"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="654321"/></c:catAx>'
+        '<c:valAx><c:axId val="654321"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/><c:crossAx val="123456"/></c:valAx>'
+        "</c:plotArea><c:legend><c:legendPos val=\"r\"/></c:legend><c:plotVisOnly val=\"1\"/>"
+        "</c:chart>"
+        "</c:chartSpace>"
+    )
+
+
+def write_xlsx(path: Path, sheets: dict[str, list[list[Any]]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sheet_names = list(sheets)
+    report_sheet_index = sheet_names.index("일일 리포트") + 1
+
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", "".join(content_types))
-        archive.writestr("_rels/.rels", root_rels)
-        archive.writestr("xl/workbook.xml", workbook_xml)
-        archive.writestr("xl/_rels/workbook.xml.rels", "".join(workbook_rels))
-        archive.writestr("xl/styles.xml", styles_xml)
+        archive.writestr("[Content_Types].xml", content_types_xml(len(sheet_names)))
+        archive.writestr("_rels/.rels", root_rels_xml())
+        archive.writestr("xl/workbook.xml", workbook_xml(sheet_names))
+        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml(len(sheet_names)))
+        archive.writestr("xl/styles.xml", styles_xml())
+        archive.writestr(f"xl/worksheets/_rels/sheet{report_sheet_index}.xml.rels", worksheet_rels_xml())
+        archive.writestr("xl/drawings/drawing1.xml", drawing_xml())
+        archive.writestr("xl/drawings/_rels/drawing1.xml.rels", drawing_rels_xml())
+        archive.writestr(
+            "xl/charts/chart1.xml",
+            bar_chart_xml(
+                "상태별 종합",
+                sheet_ref("리포트 데이터", "A$2:$A$6"),
+                sheet_ref("리포트 데이터", "B$2:$B$6"),
+            ),
+        )
+        student_rows = max(len(sheets["리포트 데이터"]) - 8, 1)
+        last_student_row = 8 + student_rows
+        archive.writestr(
+            "xl/charts/chart2.xml",
+            bar_chart_xml(
+                "학생별 자리 이탈 정도",
+                sheet_ref("리포트 데이터", f"A$9:$A${last_student_row}"),
+                sheet_ref("리포트 데이터", f"B$9:$B${last_student_row}"),
+            ),
+        )
+
         for idx, name in enumerate(sheet_names, start=1):
-            merge_ref = "A1:D1" if name == "학생 현황" else "A1:G1"
+            merge_ref = "A1:C1" if name == "학생 현황" else "A1:E1"
+            drawing_rel_id = None
+            column_count = 8
             if name == "일일 리포트":
-                merge_ref = "A1:C1"
+                merge_ref = "A1:H1"
+                drawing_rel_id = "rId1"
             archive.writestr(
                 posixpath.join("xl", "worksheets", f"sheet{idx}.xml"),
-                sheet_xml(sheets[name], merge_refs=[merge_ref]),
+                sheet_xml(
+                    sheets[name],
+                    merge_refs=[merge_ref],
+                    drawing_rel_id=drawing_rel_id,
+                    column_count=column_count,
+                ),
             )
 
 
