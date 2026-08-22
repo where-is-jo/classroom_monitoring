@@ -262,20 +262,36 @@ def write_csv(rows: list[EvalRow], path: Path) -> None:
             )
 
 
-def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[Embedder, FaceGallery]:
-    """실제 SCRFD 검출 + 지정된 인식 모델로 임베딩을 계산하는 embedder와 Mongo gallery를 만든다.
+def build_gallery_from_directory(directory: Path, embedder: Embedder) -> FaceGallery:
+    """MongoDB 없이 로컬 등록 사진 폴더(`<student_id>/*.jpg`)로 gallery를 만든다.
+
+    한 사람의 여러 등록 사진 embedding을 평균해 한 학생당 벡터 하나를 쓴다.
+    MongoDB에 실제 등록 데이터가 아직 없을 때(dry-run, LFW 검증 등) 쓴다 —
+    공용 MongoDB에 테스트용 문서를 써 넣지 않기 위한 용도다.
+    """
+    entries: list[GalleryEntry] = []
+    for student_dir in sorted(path for path in directory.iterdir() if path.is_dir()):
+        vectors: list[np.ndarray] = []
+        for image_path in sorted(_iter_images(student_dir)):
+            embedding, _ = embedder(image_path)
+            if embedding is not None:
+                vectors.append(normalize_embedding(embedding))
+        if not vectors:
+            continue
+        averaged = normalize_embedding(np.mean(vectors, axis=0))
+        entries.append(GalleryEntry(student_dir.name, averaged))
+    return FaceGallery.from_entries(entries)
+
+
+def build_embedder(*, providers: list[str] | None = None) -> Embedder:
+    """실제 SCRFD 검출 + `FACE_RECOGNIZER`(arcface|adaface)로 임베딩을 계산하는 embedder를 만든다.
 
     `cross_camera_demo.build_face_engine()`과 같은 환경변수 관례를 따르지만,
     이 하네스는 자체 threshold를 validation에서 새로 고르기 위해
     `FaceIdentityEngine`을 거치지 않고 detector/recognizer를 직접 호출한다.
-    ArcFace와 AdaFace를 같은 조건에서 비교하려면 `FACE_RECOGNITION_MODEL_PATH`,
-    `FACE_EMBEDDING_MODEL_NAME`(gallery 조회용 model_name 필터), `FACE_EMBEDDING_COLLECTION`을
-    모델별로 바꿔서 실행한다.
     """
     import cv2
     from insightface.utils import face_align
-    from pymongo import MongoClient
-    from pymongo.errors import PyMongoError
 
     recognizer_kind = os.environ.get("FACE_RECOGNIZER", "arcface")
     if recognizer_kind not in ("arcface", "adaface"):
@@ -289,37 +305,6 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
     for path in (detector_path, recognizer_path):
         if not path.is_file():
             raise FileNotFoundError(path)
-
-    mongodb_uri = os.environ.get("MONGODB_URI") or os.environ.get("DATABASE_URL", "")
-    mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get("DATABASE_NAME", "")
-    collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
-    # ArcFace/AdaFace는 임베딩 공간이 다르므로 gallery 조회 시 반드시 모델별로
-    # 분리한다 — FACE_EMBEDDING_MODEL_NAME을 안 주면 FACE_RECOGNIZER를 그대로 쓴다.
-    expected_model_name = os.environ.get("FACE_EMBEDDING_MODEL_NAME", recognizer_kind)
-
-    entries: list[GalleryEntry] = []
-    client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000)
-    try:
-        client.admin.command("ping")
-        projection = {"_id": 0, "student_id": 1, "vector": 1, "dimension": 1, "normalized": 1, "model_name": 1}
-        for document in client[mongodb_database][collection_name].find({}, projection):
-            student_id = document.get("student_id")
-            if (
-                not isinstance(student_id, str)
-                or not student_id
-                or document.get("dimension") != 512
-                or document.get("normalized") is not True
-                or document.get("model_name") != expected_model_name
-            ):
-                raise RuntimeError(f"{student_id!r} 얼굴 벡터가 {expected_model_name} gallery 조건과 다릅니다.")
-            entries.append(GalleryEntry(student_id, np.asarray(document.get("vector"), dtype=np.float32)))
-    except PyMongoError as exc:
-        raise RuntimeError("MongoDB 연결/조회에 실패했습니다.") from exc
-    finally:
-        client.close()
-    if not entries:
-        raise RuntimeError(f"{expected_model_name} 등록 얼굴 gallery가 비어 있습니다.")
-    gallery = FaceGallery.from_entries(entries)
 
     active_providers = providers or ["CUDAExecutionProvider", "CPUExecutionProvider"]
     import onnxruntime as ort
@@ -362,6 +347,54 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
         recognition_ms = (time.perf_counter() - started) * 1000.0
         return normalize_embedding(raw_embedding), recognition_ms
 
+    return embedder
+
+
+def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGallery:
+    """MongoDB `FACE_EMBEDDING_COLLECTION`에서 등록 학생 gallery를 읽는다.
+
+    ArcFace/AdaFace는 임베딩 공간이 다르므로 gallery 조회 시 반드시 모델별로
+    분리한다 — `expected_model_name`을 안 주면 `FACE_RECOGNIZER`(기본 arcface)를 쓴다.
+    """
+    from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
+
+    if expected_model_name is None:
+        expected_model_name = os.environ.get("FACE_EMBEDDING_MODEL_NAME", os.environ.get("FACE_RECOGNIZER", "arcface"))
+
+    mongodb_uri = os.environ.get("MONGODB_URI") or os.environ.get("DATABASE_URL", "")
+    mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get("DATABASE_NAME", "")
+    collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
+
+    entries: list[GalleryEntry] = []
+    client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000)
+    try:
+        client.admin.command("ping")
+        projection = {"_id": 0, "student_id": 1, "vector": 1, "dimension": 1, "normalized": 1, "model_name": 1}
+        for document in client[mongodb_database][collection_name].find({}, projection):
+            student_id = document.get("student_id")
+            if (
+                not isinstance(student_id, str)
+                or not student_id
+                or document.get("dimension") != 512
+                or document.get("normalized") is not True
+                or document.get("model_name") != expected_model_name
+            ):
+                raise RuntimeError(f"{student_id!r} 얼굴 벡터가 {expected_model_name} gallery 조건과 다릅니다.")
+            entries.append(GalleryEntry(student_id, np.asarray(document.get("vector"), dtype=np.float32)))
+    except PyMongoError as exc:
+        raise RuntimeError("MongoDB 연결/조회에 실패했습니다.") from exc
+    finally:
+        client.close()
+    if not entries:
+        raise RuntimeError(f"{expected_model_name} 등록 얼굴 gallery가 비어 있습니다.")
+    return FaceGallery.from_entries(entries)
+
+
+def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[Embedder, FaceGallery]:
+    """`build_embedder()` + `build_mongo_gallery()`를 함께 만든다 (기존 호출부 호환용)."""
+    embedder = build_embedder(providers=providers)
+    gallery = build_mongo_gallery()
     return embedder, gallery
 
 
@@ -376,7 +409,15 @@ def main() -> None:
         or Path(__file__).resolve().parents[1] / "training/runs/face_identification/eval.csv"
     )
 
-    embedder, gallery = build_embedder_and_gallery()
+    embedder = build_embedder()
+    gallery_source = os.environ.get("FACE_EVAL_GALLERY_SOURCE", "mongodb")
+    if gallery_source == "directory":
+        # MongoDB에 실제 등록 데이터가 없을 때(dry-run) 로컬 등록 사진 폴더로 gallery를 만든다.
+        gallery = build_gallery_from_directory(Path(os.environ["FACE_EVAL_GALLERY_DIR"]), embedder)
+    elif gallery_source == "mongodb":
+        gallery = build_mongo_gallery()
+    else:
+        raise ValueError(f"알 수 없는 FACE_EVAL_GALLERY_SOURCE={gallery_source!r} (mongodb 또는 directory만 지원)")
 
     known_validation = load_split(known_validation_dir, labeled=True)
     unknown_validation = load_split(unknown_validation_dir, labeled=False)
