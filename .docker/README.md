@@ -138,6 +138,20 @@ docker compose -f .docker/compose.main.dev.pc.yml down
 `classroom-monitoring-dev`에서 `classroom-monitoring-dev-pc`로 바뀌었다. 옮기려면 서버
 쪽 편집기에서 워크플로와 자격 증명을 export한 뒤 여기서 import한다.
 
+#### Docker Desktop이 자동 시작되어야 한다
+
+**노트북이라 절전·재부팅이 잦은데, Docker Desktop이 내려가면 스택도 함께 내려간다.**
+실제로 배포 중에 두 컨테이너가 같은 시각에 조용히 종료된 적이 있다 — 앱 오류가 아니라
+(`exit 0`, 로그 마지막이 정상 shutdown) 데몬이 내려간 것이었다.
+
+compose에 `restart: unless-stopped`가 걸려 있지만 **데몬 자체가 안 뜨면 소용이 없다.**
+Docker Desktop 설정의 **"Start Docker Desktop when you log in"을 켜 둔다.**
+
+꺼져 있으면 노트북을 켜도 스택이 죽어 있고, 증상은 GPU 서버 쪽에서 이렇게 보인다.
+
+- worker의 탐지 이벤트가 갈 곳을 잃는다(제한 재시도 뒤 버려진다)
+- Prometheus의 fastapi target이 `up=0`이 된다
+
 #### 개인 PC 스택에서 확인한 것
 
 노트북(Windows, Docker Desktop)에서 실제로 띄워 확인했다.
@@ -149,12 +163,20 @@ docker compose -f .docker/compose.main.dev.pc.yml down
 - `GET /health/ready` → 200 `{"status":"ready"}` — MongoDB Atlas 연결까지 성공했다는 뜻이다.
 - n8n `GET /healthz` → 200 (양쪽 주소 모두)
 
-**확인하지 못한 것: 호스트를 넘는 경로 전부.** GPU 서버(`100.85.0.72`)가 오프라인이라
-`deeplearning`·`minio`·`mediamtx`·`llama-server` 넷 모두 컨테이너에서 timeout이었다.
-서버를 올린 뒤 다시 확인해야 하는 것은
-[README.server.md의 "안 한 것"](./README.server.md#검증한-것--못-한-것)에 있다.
-그래서 지금 이 노트북에서 뜨는 것은 **화면·API·MongoDB까지**이고, 얼굴 등록·스냅샷
-목록·자연어 검색·실시간 영상 넷은 GPU 서버가 올라와야 동작한다.
+**호스트를 넘는 네 경로를 기능 레벨까지 확인했다.** GPU 서버 스택을 함께 올린 상태다.
+
+| 기능 | 경유 | 결과 |
+| --- | --- | --- |
+| 스냅샷 목록 | fastapi → MinIO | 200 |
+| 스냅샷 이미지 프록시 | MinIO → fastapi → 브라우저 | 200, 31,927 B JPEG, **25ms** |
+| 자연어 검색 | fastapi → llama-server | 200, **1.1초**. 계획(intent·기간·limit)까지 생성됨 |
+| 얼굴 분석 | fastapi → deeplearning | `/health` 200, 19ms |
+
+**GPU 서버 스택이 내려가 있어도 화면과 API는 뜬다.** 대신 위 넷이 각각 실패한다 —
+서로 다른 실패이며 한 번에 다 죽지 않는다.
+
+**아직 확인하지 못한 것**은 실시간 영상(WebRTC 미디어가 실제로 흐르는 것, 브라우저가
+필요하다)과 worker → fastapi 탐지 이벤트(카메라가 붙지 않아 보낼 것이 없다)다.
 
 ### dev 스택 — 공용 GPU 서버
 
