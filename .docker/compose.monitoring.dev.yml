@@ -1,16 +1,15 @@
 name: classroom-monitoring-dev-observability
 
-# 공용 GPU 서버(dev)의 모니터링 스택. **로컬용은 compose.monitoring.local.yml이다.**
+# 공용 GPU 서버(dev)의 모니터링 스택. **local 판본은 없다**(결정 0034).
 #
-# 실행 (저장소 루트에서, compose.main.dev.yml을 먼저 올린 뒤):
+# 실행 (저장소 루트에서, compose.main.dev.gpu.yml을 먼저 올린 뒤):
 #   docker compose -f .docker/compose.monitoring.dev.yml up -d
 #
 # 도커구조_공용서버.md는 **MVP에서 제외**한다고 적었다. 파일을 따로 둔 것이 그 제외를
 # 구현한 것이다 — 메인 스택을 올려도 이 스택은 안 뜬다.
 #
-# 지금 Prometheus는 자기 자신만 스크랩한다. 어떤 서비스도 /metrics를 노출하지 않는다
-# (monitoring/internal/README.md "구현 전"). 수집할 지표가 정해지면
-# .docker/prometheus/prometheus.yml에 job을 추가한다.
+# 수집 대상은 .docker/prometheus/prometheus.dev.yml에 있다. **local과 파일이 다르다** —
+# 결정 0026으로 fastapi가 개인 PC로 가면서 dev에서만 그 target이 Tailscale 주소가 됐다.
 
 networks:
   backend:
@@ -27,7 +26,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.13.2
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     # 호스트에 포트를 열지 않는다. Grafana가 backend network로 접근하고,
     # 사람이 직접 볼 때는 SSH 터널을 쓴다.

@@ -76,9 +76,14 @@ compose 파일을 커밋하면서 그 안에 직접 적기로 했다. `${...}` �
 그래서 `--env-file`도 쓰지 않는다. **환경을 고르는 것은 파일 이름이다.**
 
 ```bash
-docker compose -f .docker/compose.main.dev.yml   up -d
-docker compose -f .docker/compose.main.local.yml up -d
+docker compose -f .docker/compose.main.dev.pc.yml  up -d   # dev · 개인 PC
+docker compose -f .docker/compose.main.dev.gpu.yml up -d   # dev · GPU 서버
 ```
+
+**dev는 이름에 호스트가 하나 더 붙는다.**
+[결정 0026](../architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)으로
+dev 환경이 기계 두 대에 걸치기 때문이다. 자세한 것은
+[`.docker/README.md`](../../.docker/README.md)에 있다.
 
 ### 어떤 파일을 읽는지는 실제 OS 환경변수 `APP_ENV`가 정한다
 

@@ -1,0 +1,150 @@
+name: classroom-monitoring-dev-pc
+
+# 개인 PC(노트북)의 메인 스택. **GPU 서버용은 compose.main.dev.gpu.yml이다.**
+#
+# 실행 (저장소 루트에서):
+#   docker compose -f .docker/compose.main.dev.pc.yml pull
+#   docker compose -f .docker/compose.main.dev.pc.yml up -d
+#   docker compose -f .docker/compose.main.dev.pc.yml config    # 문법 검증
+#
+# **이 파일은 compose.main.dev.yml을 호스트 축으로 쪼갠 나머지 절반이다**
+# (결정 0026의 4번). GPU가 필요 없는 둘만 여기 있다.
+#
+# | 여기(개인 PC) | 저기(GPU 서버, compose.main.dev.gpu.yml) |
+# | --- | --- |
+# | fastapi, n8n | deeplearning, inference-worker, mediamtx, minio |
+#
+# **이것은 개발·검증용이며 운영 배포가 아니다**(결정 0026의 5번).
+# 개인 PC는 운영 환경이 될 수 없고, APP_ENV=prod 배포는 계속 금지다(결정 0010).
+#
+# **--env-file을 주지 않는다**(결정 0018). 이 파일이 커밋되므로 실행에 필요한 값을
+# 파일 안에 직접 적었다. 비밀값만 env_file로 주입하고 그 파일들은 커밋하지 않는다.
+#
+# **컨테이너로 띄우는 스택은 이제 dev뿐이다**(결정 0034). 개발자 PC 한 대에서 전부
+# 돌리던 compose.main.local.yml은 없앴다 — 백엔드가 노트북으로 오면서 그 스택과 이
+# 파일이 같은 기계·같은 포트를 다투게 됐기 때문이다.
+#
+# **소스를 고쳐 가며 볼 때는 컨테이너를 쓰지 않는다.** webapps/fastapi에서 직접 띄운다:
+#   cp .env.example .env.local && python -m uvicorn app.main:app --reload --port 8000
+# --reload가 붙어 이쪽이 더 빠르다. 이 파일은 CI가 만든 이미지를 받아 도는 쪽이다.
+
+networks:
+  backend:
+    # **GPU 서버의 network(classroom-monitoring-dev-backend)와 이름이 다르다.**
+    # 다른 기계의 bridge network라 이어 붙일 수 없다 — 호스트를 넘는 호출은
+    # 전부 Tailscale 주소를 쓴다. 여기 network는 fastapi <-> n8n 사이에만 쓰인다.
+    name: classroom-monitoring-dev-pc-backend
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+volumes:
+  n8n-data:
+
+# 포트 방침
+#
+# **두 주소에 묶는다.** 127.0.0.1은 이 노트북의 브라우저용이고, Tailscale 주소는
+# GPU 서버에서 넘어오는 것용이다. 결정 0026의 3번 표에서 "GPU 서버 -> 개인 PC"
+# 방향이 둘 있다.
+#
+#   1. inference-worker -> fastapi 탐지 이벤트 (env/worker.dev.env의 FASTAPI_URL)
+#   2. prometheus -> fastapi 지표 (.docker/prometheus/prometheus.dev.yml)
+#
+# **0.0.0.0에 묶지 않는다.** 이 노트북은 강의실 CCTV와 같은 192.168.0.x 사설망에
+# 있어서, 0.0.0.0은 그 망의 모든 기기에 화면과 API를 여는 것이 된다. 앱에 인증이
+# 없으므로(결정 0030) 그만큼 그대로 노출된다.
+#
+# | 호스트 | -> 컨테이너 | 누가 부르나 |
+# | --- | --- | --- |
+# | 127.0.0.1:8076 | fastapi:8001 | 이 노트북의 브라우저 |
+# | 100.119.241.93:8076 | fastapi:8001 | GPU 서버의 worker·prometheus, 팀원 브라우저 |
+# | 127.0.0.1:15678 | n8n:5678 | 이 노트북의 브라우저 |
+# | 100.119.241.93:15678 | n8n:5678 | 팀원 브라우저 |
+#
+# **Tailscale이 내려가 있으면 이 스택은 기동에 실패한다.** 없는 주소에는 bind할 수
+# 없기 때문이다. 결정 0026이 적어 둔 "Tailscale이 단일 실패 지점이 된다"가 여기서
+# 가장 먼저 드러난다.
+#   확인: tailscale status
+#
+# **노트북의 Tailscale 주소가 바뀌면 이 파일과 아래 넷을 함께 고쳐야 한다.**
+#   - env/worker.dev.env의 FASTAPI_URL          (GPU 서버)
+#   - prometheus/prometheus.dev.yml의 fastapi target (GPU 서버)
+#   - 아래 n8n의 N8N_EDITOR_BASE_URL·WEBHOOK_URL
+# 주소는 tailnet 노드에 고정되므로 기기를 바꾸지 않는 한 바뀌지 않는다.
+
+services:
+  fastapi:
+    # **build 블록을 두지 않는다.** dev 스택은 CI가 만든 이미지를 받아서 돈다.
+    # 소스를 고쳐 가며 볼 때는 위 주석의 직접 구동을 쓴다.
+    #
+    # **:latest가 아니라 :develop을 본다.** CI는 develop 병합마다 develop과 sha-* 태그로
+    # 올리고 latest는 붙이지 않는다(결정 0014). 여기서 latest를 보면 병합해도
+    # 갱신되지 않는다. latest는 나중에 main 배포 시점의 태그로 남겨 둔다.
+    image: ghcr.io/where-is-jo/classroom-monitoring-fastapi:develop
+    env_file:
+      # 변수 이름의 기준은 webapps/fastapi/.env.example이다. 환경과 무관한 값은
+      # 여기 없다 — 이미지 안의 config/settings.yml이 갖는다.
+      #
+      # **호스트 분할로 주소 네 개가 Tailscale 기준으로 바뀐다**(결정 0026의 3번).
+      #   FACE_ANALYZER_URL        -> http://100.85.0.72:18100
+      #   SNAPSHOT_STORAGE_ENDPOINT -> 100.85.0.72:19000
+      #   LLM_SEARCH_URL           -> http://100.85.0.72:18008
+      #   WHEP_BASE_URL            -> http://100.85.0.72:18889
+      # 컨테이너 이름(deeplearning:8100 등)은 이제 닿지 않는다. 다른 기계다.
+      - ./env/fastapi.dev.env
+    environment:
+      # env_file보다 여기 값이 우선한다. 이 파일은 dev 전용이므로 고정한다.
+      APP_ENV: dev
+      # **카메라 RTSP를 이 노트북이 직접 잡는다**(결정 0031). CCTV가 노트북과 같은
+      # 192.168.0.x 사설망에 있어서 호스트 분할 뒤에는 오히려 이쪽이 가깝다.
+      # 값은 카메라 계정·비밀번호가 든 비밀값이라 env/fastapi.dev.env에 둔다.
+      #
+      # **컨테이너에서 사설망 IP로 나갈 수 있어야 한다.** Docker Desktop의 기본
+      # bridge는 호스트를 통해 NAT로 나가므로 그대로 닿는다. 안 되면 ROI 화면의
+      # 캡처 버튼만 실패하고 나머지 기능은 정상이다.
+      #
+      # **앞단에 reverse proxy를 두지 않는다.** 인터넷에 공개하지 않는 프로젝트라
+      # 경로를 나눌 이유도 TLS를 끝낼 이유도 없다. 붙이게 되면 uvicorn에
+      # FORWARDED_ALLOW_IPS를 함께 줘야 한다 — 기본값이 127.0.0.1이라 컨테이너
+      # network를 타고 온 X-Forwarded-* 는 그냥 무시된다.
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:8076:8001"
+      - "100.119.241.93:8076:8001"
+    networks:
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:2.33.5
+    env_file:
+      - ./env/n8n.dev.env
+    environment:
+      # **경로 접두사가 없다.** 앞단에 경로를 나눠 줄 proxy를 두지 않기로 했으므로
+      # (인터넷에 공개하지 않는 프로젝트다) 포트로 직접 붙는다. 전에 GPU 서버에
+      # 있을 때 쓰던 N8N_PATH=/n8n/ 은 다른 팀 nginx 전제였고, 그 전제가 사라졌다.
+      N8N_PATH: /
+      # **브라우저가 보는 주소**여야 한다. 편집기가 자기 자산과 리다이렉트, webhook
+      # 주소를 이 값으로 만든다. 팀원이 tailnet으로 붙을 수 있게 Tailscale 주소를 쓴다.
+      # localhost로 두면 이 노트북에서만 편집기가 정상 동작한다.
+      N8N_EDITOR_BASE_URL: http://100.119.241.93:15678/
+      WEBHOOK_URL: http://100.119.241.93:15678/
+    volumes:
+      # **GPU 서버에 있던 워크플로는 따라오지 않는다.** 볼륨은 기계에 묶여 있고
+      # project name도 달라졌다(classroom-monitoring-dev_n8n-data ->
+      # classroom-monitoring-dev-pc_n8n-data). 옮기려면 편집기에서 워크플로와
+      # 자격 증명을 export/import 하거나, 서버의 볼륨을 tar로 떠서 옮긴다.
+      - n8n-data:/home/node/.n8n
+    ports:
+      - "127.0.0.1:15678:5678"
+      - "100.119.241.93:15678:5678"
+    networks:
+      # fastapi와 같은 network에 둔다. n8n -> fastapi 호출은 경계를 넘지 않으므로
+      # (결정 0026의 3번) 워크플로 안에서는 http://fastapi:8001 로 부르면 된다.
+      - backend
+    logging: *default-logging
+    restart: unless-stopped

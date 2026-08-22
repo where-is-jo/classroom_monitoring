@@ -31,20 +31,26 @@ python -m uvicorn app.main:app --reload --port 8001
 
 ### 얼굴 등록을 확인할 때
 
-SCRFD·MediaPipe 분석을 담당하는 `deeplearning`이 함께 떠 있어야 한다.
+SCRFD·MediaPipe 분석을 담당하는 `deeplearning`이 떠 있어야 한다.
 **컨테이너로 띄운다**([결정 0022](../../docs/architecture/decisions.md)).
-가중치 346MB를 미리 `.docker/models/face`에 두어야 하므로 기본으로는 뜨지 않는다.
+
+**그 컨테이너는 GPU 서버에 있다**([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)).
+가중치 346MB가 거기 있고, 개인 PC에서 따로 띄우지 않는다. 소스로 fastapi를 돌릴 때도
+Tailscale 주소로 부른다.
 
 ```bash
-docker compose -f .docker/compose.main.local.yml --profile face up -d
+# GPU 서버에서 (이미 떠 있으면 생략)
+docker compose -f .docker/compose.main.dev.gpu.yml up -d deeplearning
 ```
 
-그리고 `.docker/env/fastapi.local.env`에서 분석기를 실제 서비스로 돌린다.
+그리고 `webapps/fastapi/.env.local`에서 분석기를 실제 서비스로 돌린다.
 
 ```
 FACE_ANALYZER_MODE=http
-FACE_ANALYZER_URL=http://deeplearning:8100
+FACE_ANALYZER_URL=http://100.85.0.72:18100
 ```
+
+**`http://deeplearning:8100`은 이제 닿지 않는다.** 같은 compose network가 아니다.
 
 **`synthetic`으로 두면 안 된다.** 대역 분석기는 이미지를 읽지 않고 호출 횟수에 따라
 정해진 순서대로 자세를 돌려주므로, 가만히 정면만 봐도 등록이 완주된다. 검사가 있는
