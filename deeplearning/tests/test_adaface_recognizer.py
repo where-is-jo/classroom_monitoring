@@ -19,7 +19,8 @@ def test_preprocess_maps_pixel_range_to_minus_one_to_one() -> None:
     # 채널 0(B)=0 -> -1.0, 채널1(G)=255 -> 1.0, 채널2(R)=128 -> 128/255*2-1 근사
     assert tensor[0, 0, 0, 0] == pytest.approx(-1.0)
     assert tensor[0, 1, 0, 0] == pytest.approx(1.0)
-    assert tensor[0, 2, 0, 0] == pytest.approx((128 / 255.0 - 0.5) / 0.5)
+    # float32 정밀도라 기본 rel=1e-6로는 너무 빡빡함 - abs 오차를 명시적으로 허용한다.
+    assert tensor[0, 2, 0, 0] == pytest.approx((128 / 255.0 - 0.5) / 0.5, abs=1e-6)
 
 
 def test_preprocess_transposes_hwc_to_chw() -> None:
