@@ -277,8 +277,14 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .camera-monitoring-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .camera-monitoring-grid--single { grid-template-columns: minmax(0, 1fr); }
 .camera-monitoring-card { overflow: hidden; }
-.camera-monitoring-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #142220; }
-.camera-monitoring-frame video { width: 100%; height: 100%; object-fit: cover; }
+/* 비율을 코드에 박지 않는다. 강의실 CCTV는 어안 세로형(1280x1944)이라 16:9로 두면
+   위아래가 잘려 앞뒷줄 좌석이 화면에서 사라진다. monitoring.js가 영상 메타데이터를
+   받는 즉시 --frame-aspect를 실제 값으로 덮어쓴다. 기본값은 메타데이터가 오기 전의
+   잠깐을 위한 것이다. */
+.camera-monitoring-frame { position: relative; aspect-ratio: var(--frame-aspect, 16 / 9); overflow: hidden; background: #142220; }
+/* cover가 아니라 contain이다. cover는 상자에 맞추려고 영상을 잘라내는데, 잘려 나간
+   자리에 앉은 사람은 탐지돼도 화면에서 볼 수 없다. */
+.camera-monitoring-frame video { width: 100%; height: 100%; object-fit: contain; }
 .camera-monitoring-error { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; color: #fff; background: rgb(20 34 32 / 88%); text-align: center; }
 .camera-monitoring-error[hidden] { display: none; }
 .camera-monitoring-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px 8px; }

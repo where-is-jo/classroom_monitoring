@@ -56,6 +56,14 @@
     pc.addEventListener("track", function (event) {
       if (event.streams && event.streams[0]) {
         ctx.videoEl.srcObject = event.streams[0];
+        // 해상도는 메타데이터가 도착해야 알 수 있다. resize도 함께 듣는다 —
+        // 카메라를 바꾸거나 스트림이 재협상되면 비율이 달라진다.
+        ctx.videoEl.addEventListener("loadedmetadata", function () {
+          applyVideoAspect(ctx.videoEl);
+        });
+        ctx.videoEl.addEventListener("resize", function () {
+          applyVideoAspect(ctx.videoEl);
+        });
       }
     });
     ctx.pc = pc;
@@ -92,6 +100,21 @@
 
   /* ── bbox overlay ─────────────────────────────────────────────────────── */
 
+  /** 영상의 실제 비율을 프레임 상자에 알린다.
+   *
+   * 카메라마다 비율이 다르다 — 강의실 CCTV는 세로가 긴 어안(1280x1944)이고 입구
+   * 카메라는 가로형이다. CSS에 16:9를 박아 두면 세로형이 잘리므로, 메타데이터가
+   * 오는 즉시 실제 값으로 바꾼다.
+   */
+  function applyVideoAspect(videoEl) {
+    const frame = videoEl.closest(".camera-monitoring-frame");
+    if (!frame || !videoEl.videoWidth || !videoEl.videoHeight) return;
+    frame.style.setProperty(
+      "--frame-aspect",
+      videoEl.videoWidth + " / " + videoEl.videoHeight
+    );
+  }
+
   function createOverlayContainer(videoEl) {
     let container = videoEl.parentElement.querySelector(".bbox-overlay");
     if (!container) {
@@ -110,9 +133,16 @@
     if (!detections || detections.length === 0) return;
 
     const rect = overlay.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const scaleX = rect.width / frameWidth;
-    const scaleY = rect.height / frameHeight;
+    if (!rect.width || !rect.height || !frameWidth || !frameHeight) return;
+
+    // 영상은 object-fit:contain으로 그려진다. 상자와 영상의 비율이 다르면 위아래나
+    // 좌우에 여백이 생기고, 그 여백을 무시하고 상자 크기로 환산하면 bbox가 사람에서
+    // 어긋난다. 실제로 영상이 차지하는 사각형을 구해 거기에 맞춘다.
+    const scale = Math.min(rect.width / frameWidth, rect.height / frameHeight);
+    const drawnWidth = frameWidth * scale;
+    const drawnHeight = frameHeight * scale;
+    const offsetX = (rect.width - drawnWidth) / 2;
+    const offsetY = (rect.height - drawnHeight) / 2;
 
     detections.forEach(function (det) {
       if (!det.bbox || det.bbox.length < 4) return;
@@ -125,10 +155,10 @@
       box.className = "bbox-box";
       box.style.cssText =
         "position:absolute;border:2px solid #00ff88;background:rgba(0,255,136,0.1);";
-      box.style.left = x1 * scaleX + "px";
-      box.style.top = y1 * scaleY + "px";
-      box.style.width = (x2 - x1) * scaleX + "px";
-      box.style.height = (y2 - y1) * scaleY + "px";
+      box.style.left = offsetX + x1 * scale + "px";
+      box.style.top = offsetY + y1 * scale + "px";
+      box.style.width = (x2 - x1) * scale + "px";
+      box.style.height = (y2 - y1) * scale + "px";
 
       const label = document.createElement("span");
       label.className = "bbox-label";
