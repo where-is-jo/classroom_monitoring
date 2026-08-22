@@ -786,9 +786,22 @@ class ClassroomService:
         return seat
 
     def _occupancy(self, observation: SeatObservation) -> SeatOccupancy:
+        """관측을 좌석 상태로 해석한다.
+
+        신뢰도 임계값은 **점유 근거에만** 적용한다. 사람을 봤다고 하는데 확신이 없으면
+        `UNKNOWN`이지만, 비어 있다는 관측에는 임계값을 적용할 대상이 없다.
+
+        예전에는 임계값을 양쪽에 적용해 `occupied=False`(신뢰도 0.0)가 항상 `UNKNOWN`이
+        됐다. 그래서 `VACANT`가 한 번도 만들어지지 않았고, 화면에서 "빈 자리"와
+        "관측하지 못한 자리"가 구분되지 않았다. 관측 범위는 이미 ROI가 등록된 좌석으로
+        제한돼 있으므로(결정 0020), 여기서 온 `occupied=False`는 "그 카메라가 보는
+        자리인데 아무도 없다"는 뜻이다. 그것이 `VACANT`다.
+        """
+        if not observation.occupied:
+            return SeatOccupancy.VACANT
         if observation.confidence < self._threshold:
             return SeatOccupancy.UNKNOWN
-        return SeatOccupancy.OCCUPIED if observation.occupied else SeatOccupancy.VACANT
+        return SeatOccupancy.OCCUPIED
 
     @staticmethod
     def _observations(values: tuple[SeatObservation, ...]) -> tuple[SeatObservation, ...]:

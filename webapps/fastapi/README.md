@@ -114,7 +114,8 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 삭제 (비활성화) |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/occupancy-events` | SSE 좌석 점유 실시간 구독 |
-| `GET` | `/api/v1/classrooms/{classroom_id}/student-states` | 지정 학생 전체의 최근 탐지·ROI 기반 상태 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-states` | 지정 학생 전체의 저장된 상태 조회. 여기서 판정하지 않는다([결정 0032](../../docs/architecture/decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)) |
+| `GET` | `/api/v1/classrooms/{classroom_id}/students/{student_id}/state-history` | 한 학생의 상태 전이 이력을 최신순으로 조회 |
 | `GET` | `/api/v1/classrooms/{classroom_id}/student-state-events` | 강의실별 학생 상태 SSE 변경분 구독 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
@@ -217,11 +218,35 @@ tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스�
 
 `face_enrollment`는 memory
 저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다.
-`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장, 최근 이벤트 기반
-학생 상태 REST와 SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인한 활성 학생
-이름만 사용하고 그 외에는 `사람`으로 표시한다. 학생 상태 SSE는 현재 in-memory broadcaster를
+`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장, 학생 상태 판정과
+REST·SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인한 활성 학생 이름만
+사용하고 그 외에는 `사람`으로 표시한다. 학생 상태 SSE는 현재 in-memory broadcaster를
 사용하므로 단일 FastAPI 프로세스에서만 전달되며 replay와 다중 프로세스 fan-out은 지원하지
 않는다.
+
+**판정 구조는 [결정 0032](../../docs/architecture/decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)를
+따른다.** 요약하면 이렇다.
+
+```text
+탐지 이벤트 → SeatEvidence(좌석별 근거) ┬→ 좌석 점유 (classrooms)
+                                        └→ 학생 상태 (state_rules) → 저장 + 이력 + SSE
+```
+
+- 좌석 점유와 학생 상태가 **같은 근거**에서 갈라진다. 두 화면이 어긋날 수 없다.
+- 판정 규칙은 `app/student_monitoring/state_rules.py`의 **순수 함수**다. 저장소·HTTP·
+  시계에 의존하지 않으므로 입력만 놓고 판정을 재현할 수 있다.
+- **판정은 탐지 이벤트를 받을 때만 한다.** 조회는 저장된 값을 읽기만 하고, 근거가 오래된
+  판정은 화면에서 `UNKNOWN`으로 가릴 뿐 저장된 값을 바꾸지 않는다.
+- 상태는 `PRESENT` / `WRONG_SEAT` / `IN_CLASSROOM` / `ABSENT` / `UNKNOWN` 다섯이고,
+  모든 판정에 근거 코드(`StudentStateReason`)가 붙는다. `UNKNOWN` 하나로는 "좌석을 못
+  봤다"와 "누군가 있는데 누군지 모른다"가 구분되지 않기 때문이다.
+- **`ABSENT`는 지정 좌석이 비어 있는 것을 유예 시간 동안 계속 본 경우에만 나온다.**
+  카메라가 죽거나 ROI가 없어 관측이 끊기면 `UNKNOWN`이다 — 미관측은 부재가 아니다.
+
+**얼굴 인식 모델은 아직 없다.** worker가 `student_id`·`identity_confidence`를 채우지
+않으므로 지금은 모든 학생이 `UNKNOWN`이고 좌석 점유만 판정된다. 모델이 나와 worker가
+그 값을 보내기 시작하면 fastapi 쪽에 고칠 것 없이 상태가 흐른다 —
+[worker/inference/MODEL_INTEGRATION.md](../../worker/inference/MODEL_INTEGRATION.md)를 본다.
 `students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
 `/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
 등록된 학생을 선택한 뒤 `PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`로
@@ -300,7 +325,9 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
 | `student_identity_confidence_threshold` | 학생 상태 판정에 사용할 최소 식별 신뢰도 | 기본 0.5. `0 <= x <= 1` |
-| `student_state_recent_event_limit` | 학생 상태 조회가 확인할 최근 이벤트 상한 | 기본 500. 최대 10,000 |
+| `student_identity_hold_seconds` | 마지막 식별 뒤 직전 판정을 이어받는 시간 | 기본 15. **실측 근거 없는 기본값이다** |
+| `student_absent_grace_seconds` | 지정 좌석이 비어 있는 것을 이만큼 계속 본 뒤 `ABSENT` | 기본 300. **팀 합의값이 아니다** |
+| `student_state_history_limit` | 상태 전이 이력 조회 개수 | 기본 50. 최대 200 |
 | `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
 | `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다. **호출 한 번의 상한이다** — 모델이 규격을 벗어나면 한 번 더 물으므로 최악의 경우 두 배까지 걸린다 |
 | `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |

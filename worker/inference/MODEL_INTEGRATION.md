@@ -26,11 +26,37 @@
 | `student_id` | 아니요 | FastAPI 학생 원장의 내부 ID. 이름이나 학번을 대신 보내지 않음 |
 | `identity_confidence` | 아니요 | 얼굴 식별 신뢰도, `0.0 <= value <= 1.0` |
 | `face_bbox` | 아니요 | 얼굴 영역의 같은 픽셀 좌표계 bbox. 이미지나 embedding은 보내지 않음 |
+| `track_id` | 아니요 | 같은 카메라 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). 트래킹 미구현이라 지금은 항상 생략된다. 신원과 달리 단독으로도 뜻이 있으므로 식별 여부와 무관하게 보낸다 |
 
 식별 성공이면 `student_id`와 `identity_confidence`를 함께 채우고 `face_bbox`는 선택으로
 채운다. 미식별이거나 모델 기준 미달이면 세 필드를 모두 `null`로 두거나 생략한다. 가장
 가까운 학생을 억지로 고르지 않는다. worker handler는 불완전한 신원 조합을 미식별로 낮춰
 전송하며, FastAPI는 외부 필드와 불완전한 조합을 422로 거부한다.
+
+## 모델을 붙였을 때 어디까지 자동으로 흐르는가
+
+FastAPI 쪽 판정은 이미 구현돼 있다([결정 0032](../../docs/architecture/decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)).
+**`student_id`와 `identity_confidence`를 채워 보내기 시작하면 그것만으로 학생 상태가
+흐른다.** FastAPI에 고칠 것이 없다.
+
+```text
+탐지(+신원) → 좌석 ROI 대조 → SeatEvidence ┬→ 좌석 점유
+                                           └→ 학생 상태 → 저장 + 이력 + SSE + 화면
+```
+
+붙이기 전에 확인할 것은 셋이다.
+
+1. **`student_id`는 FastAPI 학생 원장의 내부 ID여야 한다.** 모델이 자체 라벨 인덱스를
+   보내면 어느 학생과도 이어지지 않고 조용히 `UNKNOWN`으로 남는다.
+2. **`identity_confidence`가 `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`(기본 0.5) 이상
+   이어야 이름이 붙는다.** 미달은 `UNKNOWN`이다 — 오인식은 다른 학생의 출결을 바꾸는
+   사고라 억지로 고르지 않는다.
+3. **그 카메라에 좌석 ROI가 등록돼 있어야 좌석까지 이어진다.** ROI가 없으면 좌석 판정에
+   참여하지 않는다. 입구 카메라처럼 신원만 만드는 카메라는 `role=IDENTITY_ONLY`로
+   등록하며, 그 신원을 좌석까지 잇는 방법은 결정 0025의 3번에서 아직 `결정 필요`다.
+
+판정이 왜 그렇게 나왔는지는 상태와 함께 저장되는 근거 코드(`reason`)와
+`GET /api/v1/classrooms/{classroom_id}/students/{student_id}/state-history`로 확인한다.
 
 `captured_at`은 실제 프레임 캡처 시각을 ISO 8601 timezone 포함 값으로 보낸다. UTC
 `+00:00`을 권장한다. 처리·전송 시각으로 덮어쓰지 않는다. worker의 `event_id`는

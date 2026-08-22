@@ -8,6 +8,8 @@ from ..errors import InferenceEventConflictError
 from ..models import (
     DetectionEvent,
     DetectionEventPage,
+    StudentStateHistory,
+    StudentStateRecord,
     VideoSegment,
 )
 
@@ -127,3 +129,35 @@ class MemoryVideoSegmentRepository:
         ]
         segments.sort(key=lambda s: s.recorded_from, reverse=True)
         return segments[:limit]
+
+
+class MemoryStudentStateRepository:
+    """In-memory student state repository."""
+
+    def __init__(self) -> None:
+        self._records: dict[tuple[str, str], StudentStateRecord] = {}
+        self._history: dict[str, StudentStateHistory] = {}
+
+    def list_by_classroom(self, classroom_id: str) -> list[StudentStateRecord]:
+        return [record for key, record in self._records.items() if key[0] == classroom_id]
+
+    def save(self, record: StudentStateRecord) -> StudentStateRecord:
+        self._records[(record.classroom_id, record.student_id)] = record
+        return record
+
+    def append_history(self, history: StudentStateHistory) -> StudentStateHistory:
+        # 같은 id를 다시 넣어도 한 번만 쌓인다 — 같은 event_id 재수신에서 이력이
+        # 두 번 생기지 않게 하는 멱등 장치다.
+        return self._history.setdefault(history.id, history)
+
+    def list_history(
+        self, classroom_id: str, student_id: str, *, limit: int
+    ) -> list[StudentStateHistory]:
+        items = [
+            item
+            for item in self._history.values()
+            if item.classroom_id == classroom_id and item.student_id == student_id
+        ]
+        items.sort(key=lambda item: item.id)
+        items.sort(key=lambda item: item.observed_at, reverse=True)
+        return items[:limit]

@@ -16,6 +16,10 @@ from ..models import (
     DetectionEvent,
     DetectionEventPage,
     FrameInfo,
+    StudentState,
+    StudentStateHistory,
+    StudentStateReason,
+    StudentStateRecord,
     VideoSegment,
 )
 
@@ -176,6 +180,7 @@ class MongoDetectionEventRepository:
                     "student_id": d.student_id,
                     "identity_confidence": d.identity_confidence,
                     "face_bbox": list(d.face_bbox) if d.face_bbox else None,
+                    "track_id": d.track_id,
                 }
                 for d in event.detections
             ],
@@ -198,6 +203,7 @@ class MongoDetectionEventRepository:
                     student_id=d.get("student_id"),
                     identity_confidence=d.get("identity_confidence"),
                     face_bbox=_to_bbox(d["face_bbox"]) if d.get("face_bbox") else None,
+                    track_id=d.get("track_id"),
                 )
                 for d in detections_doc
             )
@@ -312,6 +318,154 @@ class MongoVideoSegmentRepository:
                 size_bytes=int(document["size_bytes"]),
                 received_at=document["received_at"],
                 schema_version=int(document["schema_version"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RepositoryDataError() from None
+
+
+class MongoStudentStateRepository:
+    """MongoDB student state repository.
+
+    상태는 학생당 하나이므로 `(classroom_id, student_id)`를 문서 키로 쓰고 upsert한다.
+    이력은 별도 collection에 쌓으며 `_id`를 event 기반으로 만들어 재수신에서 두 번
+    쌓이지 않게 한다.
+    """
+
+    collection_name = "student_states"
+    history_collection_name = "student_state_history"
+
+    def __init__(self, database: MongoDatabase) -> None:
+        self._collection = database[self.collection_name]
+        self._history = database[self.history_collection_name]
+
+    @classmethod
+    def ensure_indexes(cls, database: MongoDatabase) -> None:
+        """Create indexes."""
+        database[cls.collection_name].create_index(
+            [("classroom_id", ASCENDING)],
+            name="student_states_classroom",
+        )
+        database[cls.history_collection_name].create_index(
+            [
+                ("classroom_id", ASCENDING),
+                ("student_id", ASCENDING),
+                ("observed_at", DESCENDING),
+            ],
+            name="student_state_history_classroom_student_time",
+        )
+
+    def list_by_classroom(self, classroom_id: str) -> list[StudentStateRecord]:
+        try:
+            documents = list(self._collection.find({"classroom_id": classroom_id}))
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return [self._to_domain(document) for document in documents]
+
+    def save(self, record: StudentStateRecord) -> StudentStateRecord:
+        try:
+            self._collection.replace_one(
+                {"_id": self._key(record.classroom_id, record.student_id)},
+                self._to_document(record),
+                upsert=True,
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return record
+
+    def append_history(self, history: StudentStateHistory) -> StudentStateHistory:
+        try:
+            self._history.insert_one(self._history_document(history))
+        except DuplicateKeyError:
+            # 같은 event_id 재수신. 이력은 이미 있으므로 그대로 둔다.
+            return history
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return history
+
+    def list_history(
+        self, classroom_id: str, student_id: str, *, limit: int
+    ) -> list[StudentStateHistory]:
+        try:
+            documents = list(
+                self._history.find({"classroom_id": classroom_id, "student_id": student_id})
+                .sort([("observed_at", DESCENDING), ("_id", ASCENDING)])
+                .limit(limit)
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return [self._history_to_domain(document) for document in documents]
+
+    @staticmethod
+    def _key(classroom_id: str, student_id: str) -> str:
+        return f"{classroom_id}:{student_id}"
+
+    @classmethod
+    def _to_document(cls, record: StudentStateRecord) -> MongoDocument:
+        return {
+            "_id": cls._key(record.classroom_id, record.student_id),
+            "classroom_id": record.classroom_id,
+            "student_id": record.student_id,
+            "state": record.state.value,
+            "reason": record.reason.value,
+            "seat_id": record.seat_id,
+            "assigned_seat_id": record.assigned_seat_id,
+            "confidence": record.confidence,
+            "observed_at": record.observed_at,
+            "event_id": record.event_id,
+            "identified_at": record.identified_at,
+            "vacant_since": record.vacant_since,
+        }
+
+    @staticmethod
+    def _to_domain(document: MongoDocument) -> StudentStateRecord:
+        try:
+            return StudentStateRecord(
+                student_id=str(document["student_id"]),
+                classroom_id=str(document["classroom_id"]),
+                state=StudentState(document["state"]),
+                reason=StudentStateReason(document["reason"]),
+                seat_id=document.get("seat_id"),
+                assigned_seat_id=document.get("assigned_seat_id"),
+                confidence=document.get("confidence"),
+                observed_at=document["observed_at"],
+                event_id=str(document["event_id"]),
+                identified_at=document.get("identified_at"),
+                vacant_since=document.get("vacant_since"),
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RepositoryDataError() from None
+
+    @staticmethod
+    def _history_document(history: StudentStateHistory) -> MongoDocument:
+        return {
+            "_id": history.id,
+            "classroom_id": history.classroom_id,
+            "student_id": history.student_id,
+            "event_id": history.event_id,
+            "from_state": history.from_state.value,
+            "to_state": history.to_state.value,
+            "reason": history.reason.value,
+            "seat_id": history.seat_id,
+            "confidence": history.confidence,
+            "observed_at": history.observed_at,
+            "recorded_at": history.recorded_at,
+        }
+
+    @staticmethod
+    def _history_to_domain(document: MongoDocument) -> StudentStateHistory:
+        try:
+            return StudentStateHistory(
+                id=str(document["_id"]),
+                student_id=str(document["student_id"]),
+                classroom_id=str(document["classroom_id"]),
+                event_id=str(document["event_id"]),
+                from_state=StudentState(document["from_state"]),
+                to_state=StudentState(document["to_state"]),
+                reason=StudentStateReason(document["reason"]),
+                seat_id=document.get("seat_id"),
+                confidence=document.get("confidence"),
+                observed_at=document["observed_at"],
+                recorded_at=document["recorded_at"],
             )
         except (KeyError, TypeError, ValueError):
             raise RepositoryDataError() from None

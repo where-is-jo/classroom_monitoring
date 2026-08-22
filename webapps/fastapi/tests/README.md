@@ -6,12 +6,30 @@
 실행 명령은 [개발 가이드](../../../docs/guides/README.md#fastapi-검증)에 있다.
 여기서 반복하지 않는다.
 
-> **현재 `python -m pytest -q`가 수집 단계에서 실패한다.**
-> `tests/auth/test_password_change_v2.py`가 제거된 `app.auth`를 import한다.
-> 이전 제품 범위 축소에서 남은 파일이며, `tests/admin`, `tests/employees`,
-> `tests/events`, `tests/interview_waits`, `tests/notifications`, `tests/users`,
-> `tests/helpers`도 `__init__.py`만 남은 빈 디렉터리다.
-> 정리는 코드 변경이므로 별도 작업으로 처리한다.
+> `tests/admin`, `tests/auth`, `tests/employees`, `tests/events`,
+> `tests/interview_waits`, `tests/notifications`, `tests/users`, `tests/helpers`는
+> 이전 제품 범위 축소에서 남은 빈 디렉터리다(`__init__.py`만 있다).
+> 정리는 별도 작업으로 처리한다.
+
+## MongoDB 통합 테스트
+
+`tests/integration`은 **실제 MongoDB에 붙는다.** 대역 저장소는 dict 하나라
+직렬화·역직렬화가 없고 index도 없어서, 문서 모양이 틀렸거나 새 필드를 저장에서
+빠뜨린 실수를 잡지 못한다. 저장소를 건드리는 변경은 여기서 확인한다.
+
+접속 정보는 환경변수 `TEST_DATABASE_URL`, 없으면 `webapps/fastapi/.env.local`에서
+읽는다(둘 다 저장소에 커밋하지 않는다). 어느 쪽도 없으면 skip된다.
+
+```bash
+# .env.local에 TEST_DATABASE_URL이 있으면 그냥 전체 실행에 포함된다
+python -m pytest -q
+python -m pytest -q -m mongodb        # 통합 테스트만
+```
+
+**database 이름은 `test_`로 시작해야 한다**(`validate_test_database_name`).
+개발·운영 database를 향한 실행을 막는 장치이며, 기본값은
+`test_classroom_monitoring`이다. 테스트마다 대상 collection을 비우지만
+database 자체를 drop하지는 않는다.
 
 ## 배치 기준
 
@@ -47,9 +65,12 @@ tests/
 
 ## 규칙
 
-- **기본 테스트는 외부 서비스를 요구하지 않는다.** memory mode와 대역 저장소를 쓴다.
-  실제 MongoDB가 필요한 테스트는 `integration/`에 두고 `mongodb` marker를 붙인다.
-  marker가 붙은 테스트는 `TEST_DATABASE_URL`이 없으면 skip한다.
+- **저장소 어댑터·문서 모양·index를 건드렸으면 `integration/`에 실제 MongoDB 테스트를
+  둔다.** 대역 저장소만으로는 직렬화 누락과 index 오류를 잡을 수 없다.
+  `integration/conftest.py`가 `mongodb` marker를 자동으로 붙이고,
+  `TEST_DATABASE_URL`이 없으면 skip한다.
+- 순수 규칙과 서비스 조립처럼 저장소와 무관한 것은 기능 디렉터리에 두고 대역을 쓴다.
+  외부 서비스 없이 빠르게 도는 것이 그 테스트들의 값어치다.
 - **성공 경로만 검증하는 테스트는 절반이다.** 실패 케이스를 함께 둔다.
   대상 없음, 잘못된 입력, 저장소 실패, 미관측이 여기 해당한다.
 - **테스트를 통과시키려고 테스트를 약화시키지 않는다.** 실패는 실패로 보고한다.

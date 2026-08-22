@@ -16,6 +16,7 @@ from app.shared.broadcaster import InMemoryBroadcaster
 from app.shared.dependencies import get_student_monitoring_service
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
+    MemoryStudentStateRepository,
     MemoryVideoSegmentRepository,
 )
 from app.student_monitoring.service import StudentMonitoringService
@@ -73,6 +74,7 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         detection_repository=detection_repo,
         segment_repository=segment_repo,
         stream_repository=stream_repo,
+        state_repository=MemoryStudentStateRepository(),
         broadcaster=broadcaster,
         classroom_service=classroom_service,
         roi_service=roi_service,
@@ -80,7 +82,9 @@ def _make_service() -> tuple[StudentMonitoringService, MemoryDetectionEventRepos
         occupancy_hold_seconds=0,
         identity_confidence_threshold=0.5,
         stale_seconds=300,
-        recent_event_limit=500,
+        identity_hold_seconds=0,
+        absent_grace_seconds=300,
+        history_limit=50,
         clock=lambda: datetime(2026, 8, 12, 0, 0, 0, tzinfo=UTC),
         student_lookup=student_lookup,
     )

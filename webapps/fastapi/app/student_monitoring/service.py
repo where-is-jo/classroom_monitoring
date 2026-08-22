@@ -3,31 +3,50 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from threading import RLock
+from uuid import NAMESPACE_URL, uuid5
 
 from ..classrooms.errors import ClassroomNotFoundError
 from ..classrooms.models import Seat, SeatAssignment, SeatObservation
 from ..classrooms.service import ClassroomService
 from ..roi_connections.errors import RoiConnectionNotFoundError
-from ..roi_connections.mapping import RoiMappingReason, map_bbox_to_roi
 from ..roi_connections.models import RoiConnection
 from ..roi_connections.service import RoiConnectionService
 from ..shared.broadcaster import InMemoryBroadcaster
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
 from ..video_monitoring.errors import VideoStreamNotFoundError
+from ..video_monitoring.models import CameraRole
 from ..video_monitoring.ports import VideoStreamRepository
 from .models import (
     Detection,
     DetectionEvent,
+    SeatEvidence,
     StudentSeatState,
     StudentState,
+    StudentStateHistory,
+    StudentStateReason,
+    StudentStateRecord,
     VideoSegment,
 )
-from .occupancy_mapping import map_detections_to_observations
-from .ports import DetectionEventRepository, VideoSegmentRepository
+from .occupancy_mapping import (
+    map_detections_to_evidence,
+    to_seat_observations,
+    unseated_identities,
+)
+from .ports import (
+    DetectionEventRepository,
+    StudentStateRepository,
+    VideoSegmentRepository,
+)
+from .state_rules import (
+    StatePolicy,
+    StudentAssignment,
+    decide_student_states,
+    project_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +59,6 @@ class InferenceEventResult:
     is_new: bool
 
 
-@dataclass(frozen=True)
-class _IdentifiedDetection:
-    event: DetectionEvent
-    detection: Detection
-
-
 class StudentMonitoringService:
     """Student monitoring service."""
 
@@ -54,6 +67,7 @@ class StudentMonitoringService:
         detection_repository: DetectionEventRepository,
         segment_repository: VideoSegmentRepository,
         stream_repository: VideoStreamRepository,
+        state_repository: StudentStateRepository,
         broadcaster: InMemoryBroadcaster,
         classroom_service: ClassroomService,
         roi_service: RoiConnectionService,
@@ -61,14 +75,17 @@ class StudentMonitoringService:
         occupancy_confidence_threshold: float,
         occupancy_hold_seconds: float,
         identity_confidence_threshold: float,
+        identity_hold_seconds: float,
+        absent_grace_seconds: float,
         stale_seconds: int,
-        recent_event_limit: int,
+        history_limit: int,
         clock: Callable[[], datetime],
         student_lookup: StudentLookupPort,
     ) -> None:
         self._detection_repository = detection_repository
         self._segment_repository = segment_repository
         self._stream_repository = stream_repository
+        self._state_repository = state_repository
         self._broadcaster = broadcaster
         self._classroom_service = classroom_service
         self._roi_service = roi_service
@@ -84,9 +101,16 @@ class StudentMonitoringService:
         self._last_seen_lock = RLock()
         self._identity_confidence_threshold = identity_confidence_threshold
         self._stale_seconds = stale_seconds
-        self._recent_event_limit = recent_event_limit
+        self._history_limit = history_limit
         self._clock = clock
         self._student_lookup = student_lookup
+        self._policy = StatePolicy(
+            occupancy_confidence_threshold=occupancy_confidence_threshold,
+            identity_confidence_threshold=identity_confidence_threshold,
+            identity_hold_seconds=identity_hold_seconds,
+            absent_grace_seconds=absent_grace_seconds,
+            stale_seconds=stale_seconds,
+        )
 
     def _held_seats(
         self, camera_id: str, seat_ids: list[str], observed_at: datetime
@@ -115,19 +139,31 @@ class StudentMonitoringService:
         observed_at: datetime,
         held: Mapping[str, float],
     ) -> None:
-        """이번 프레임에서 **실제로 탐지된** 좌석의 관측 시각을 남긴다.
+        """이번 프레임에서 **임계값 이상으로 실제 탐지된** 좌석의 관측 시각을 남긴다.
 
-        붙들려서 점유가 된 좌석은 제외한다. 그것까지 갱신하면 한 번 잡힌 좌석이 유지
-        시간을 계속 갱신받아 영영 점유로 남는다.
+        두 가지를 제외한다.
+
+        - 붙들려서 점유가 된 좌석. 그것까지 갱신하면 한 번 잡힌 좌석이 유지 시간을
+          계속 갱신받아 영영 점유로 남는다.
+        - 임계값 미만 탐지만 있던 좌석. 그 관측은 `UNKNOWN`으로 가는 약한 근거이고,
+          "방금 확실히 봤다"로 취급해 유지 시간을 늘려 줄 자격이 없다.
+
+        늦게 도착한 오래된 프레임이 기록을 과거로 되돌리지 않는다. 되돌리면 유지 시간이
+        실제보다 일찍 만료돼 앉아 있는 사람의 좌석이 깜빡인다.
         """
         with self._last_seen_lock:
             for observation in observations:
-                if not observation.occupied or observation.seat_id in held:
+                if (
+                    not observation.occupied
+                    or observation.seat_id in held
+                    or observation.confidence < self._confidence_threshold
+                ):
                     continue
-                self._last_seen[(camera_id, observation.seat_id)] = (
-                    observed_at,
-                    observation.confidence,
-                )
+                key = (camera_id, observation.seat_id)
+                previous = self._last_seen.get(key)
+                if previous is not None and previous[0] > observed_at:
+                    continue
+                self._last_seen[key] = (observed_at, observation.confidence)
 
     def receive_inference_event(self, event: DetectionEvent) -> InferenceEventResult:
         """Receive inference event."""
@@ -193,7 +229,16 @@ class StudentMonitoringService:
             # 관측 범위는 이 카메라에 ROI가 등록된 좌석뿐이다(결정 0020). 강의실을
             # 나눠 보는 구성에서 다른 카메라 담당 좌석까지 "비어 있음"으로 덮어쓰지
             # 않게 하려는 것이다. ROI가 하나도 없으면 관측을 만들지 않는다.
-            if saved_event.detections and saved_event.classroom_id:
+            # 탐지가 0건이어도 관측을 만든다. 사람이 하나도 안 잡힌 프레임은 "볼 것이
+            # 없었다"가 아니라 "그 카메라가 보는 좌석이 전부 비어 있다"는 관측이다.
+            # 이것을 건너뛰면 마지막 사람이 나간 뒤 좌석이 점유인 채로 얼어붙고,
+            # 유지 시간(hold)도 다음 탐지가 올 때까지 만료되지 않는다.
+            #
+            # 신원 전용 카메라(입구)는 좌석 판정에 참여하지 않는다(결정 0024의 3번).
+            # 좌석을 담지 않는 화각의 이벤트가 "최신"이라는 이유로 직전 판정을 UNKNOWN
+            # 으로 덮는 것을 막는다. 그 신원을 좌석까지 잇는 방법은 결정 0025의 3번에서
+            # 아직 정해지지 않았고, 정해지기 전에 추측으로 이어붙이지 않는다.
+            if saved_event.classroom_id and stream.role is CameraRole.SEAT_JUDGING:
                 classroom_id = saved_event.classroom_id
                 try:
                     connections = self._roi_service.list_valid_connections(
@@ -204,13 +249,14 @@ class StudentMonitoringService:
                         [connection.seat_id for connection in connections],
                         saved_event.captured_at,
                     )
-                    observations = map_detections_to_observations(
+                    evidence = map_detections_to_evidence(
                         saved_event.detections,
                         connections,
                         saved_event.frame,
                         self._confidence_threshold,
                         held=held,
                     )
+                    observations = to_seat_observations(evidence)
                     self._remember_seen(
                         saved_event.camera_id, observations, saved_event.captured_at, held
                     )
@@ -226,6 +272,14 @@ class StudentMonitoringService:
                             classroom_id=classroom_id,
                             observations=observations,
                         )
+                    # 좌석 근거 하나로 학생 상태까지 판정한다. 같은 값에서 갈라지므로
+                    # 좌석 화면과 학생 화면이 서로 어긋날 수 없다.
+                    self._evaluate_student_states(
+                        classroom_id=classroom_id,
+                        event=saved_event,
+                        evidence=evidence,
+                        connections=connections,
+                    )
                 except ClassroomNotFoundError:
                     logger.warning(
                         "event_id=%s camera_id=%s classroom_id=%s "
@@ -253,18 +307,6 @@ class StudentMonitoringService:
                         classroom_id,
                     )
 
-            if saved_event.classroom_id:
-                try:
-                    self._publish_student_state_events(saved_event)
-                except Exception:
-                    logger.exception(
-                        "event_id=%s camera_id=%s classroom_id=%s "
-                        "학생 상태 SSE 계산·발행 중 오류가 발생해 건너뜁니다.",
-                        saved_event.event_id,
-                        saved_event.camera_id,
-                        saved_event.classroom_id,
-                    )
-
         return InferenceEventResult(event=saved_event, is_new=is_new)
 
     def _safe_detection_label(self, detection: Detection) -> str:
@@ -286,39 +328,6 @@ class StudentMonitoringService:
             )
             return "사람"
         return student.name if student is not None and student.is_active else "사람"
-
-    def _publish_student_state_events(self, event: DetectionEvent) -> None:
-        """신규 이벤트에서 식별 후보가 있었던 학생의 최신 상태를 발행한다."""
-        target_student_ids = {
-            detection.student_id
-            for detection in event.detections
-            if detection.student_id is not None
-        }
-        if not target_student_ids:
-            return
-        for state in self.list_student_states(event.classroom_id):
-            if state.student_id not in target_student_ids:
-                continue
-            self._broadcaster.publish(
-                {
-                    "type": "student-state",
-                    "event_id": event.event_id,
-                    "classroom_id": event.classroom_id,
-                    "student_id": state.student_id,
-                    "student_name": state.student_name,
-                    "student_no": state.student_no,
-                    "assigned_seat_id": state.assigned_seat_id,
-                    "assigned_seat_label": state.assigned_seat_label,
-                    "current_seat_id": state.current_seat_id,
-                    "current_state": state.current_state.value,
-                    "confidence": state.confidence,
-                    "observed_at": (
-                        state.last_observed_at.isoformat()
-                        if state.last_observed_at is not None
-                        else None
-                    ),
-                }
-            )
 
     def _publish_occupancy_events(
         self,
@@ -365,79 +374,163 @@ class StudentMonitoringService:
         # Save segment (idempotent)
         return self._segment_repository.save(segment)
 
+    def _evaluate_student_states(
+        self,
+        *,
+        classroom_id: str,
+        event: DetectionEvent,
+        evidence: tuple[SeatEvidence, ...],
+        connections: Sequence[RoiConnection],
+    ) -> None:
+        """좌석 근거로 학생 상태를 판정해 저장하고, 바뀐 것만 이력·SSE로 남긴다.
+
+        판정은 **탐지 이벤트를 받을 때만** 한다. 조회는 저장된 결과를 읽기만 하므로
+        화면을 두 번 연 것과 한 번 연 것의 결과가 다르지 않다(결정 0008).
+        """
+        seats = self._classroom_service.list_all_seats(classroom_id)
+        raw_assignments = self._classroom_service.list_assignments_raw(classroom_id)
+        active = self._active_assignments(classroom_id, seats, raw_assignments)
+        if not active:
+            return
+
+        previous = {
+            record.student_id: record
+            for record in self._state_repository.list_by_classroom(classroom_id)
+        }
+        unseated = unseated_identities(
+            event.detections,
+            connections,
+            event.frame,
+            self._confidence_threshold,
+        )
+        decided = decide_student_states(
+            assignments=[
+                StudentAssignment(student_id=student.id, seat_id=assignment.seat_id)
+                for assignment, _, student in active
+            ],
+            evidence=evidence,
+            unseated=unseated,
+            previous=previous,
+            classroom_id=classroom_id,
+            event_id=event.event_id,
+            observed_at=event.captured_at,
+            policy=self._policy,
+        )
+
+        seats_by_id = {seat.id: seat for seat in seats}
+        students = {student.id: student for _, _, student in active}
+        recorded_at = self._clock()
+        for record in decided:
+            before = previous.get(record.student_id)
+            if before is not None and before.observed_at > record.observed_at:
+                # 늦게 도착한 오래된 프레임이 최신 판정을 되돌리지 않는다.
+                continue
+            self._state_repository.save(record)
+            # 판정한 적 없는 학생의 기본값은 UNKNOWN이다. 첫 판정이 UNKNOWN이면 바뀐
+            # 것이 없으므로 이력도 SSE도 만들지 않는다 — 아무 일도 없었다는 사실을
+            # 전이로 기록하면 이력이 잡음으로 찬다.
+            previous_state = StudentState.UNKNOWN if before is None else before.state
+            if previous_state == record.state:
+                continue
+            self._state_repository.append_history(
+                StudentStateHistory(
+                    id=str(
+                        uuid5(
+                            NAMESPACE_URL,
+                            f"student-state-history:{record.event_id}:{record.student_id}",
+                        )
+                    ),
+                    student_id=record.student_id,
+                    classroom_id=classroom_id,
+                    event_id=record.event_id,
+                    from_state=previous_state,
+                    to_state=record.state,
+                    reason=record.reason,
+                    seat_id=record.seat_id,
+                    confidence=record.confidence,
+                    observed_at=record.observed_at,
+                    recorded_at=recorded_at,
+                )
+            )
+            student = students.get(record.student_id)
+            if student is None:
+                continue
+            self._publish_student_state(record, student=student, seats_by_id=seats_by_id)
+
+    def _publish_student_state(
+        self,
+        record: StudentStateRecord,
+        *,
+        student: StudentIdentity,
+        seats_by_id: Mapping[str, Seat],
+    ) -> None:
+        """상태가 바뀐 학생만 SSE로 발행한다."""
+        assigned_seat = (
+            None if record.assigned_seat_id is None else seats_by_id.get(record.assigned_seat_id)
+        )
+        current_seat = None if record.seat_id is None else seats_by_id.get(record.seat_id)
+        self._broadcaster.publish(
+            {
+                "type": "student-state",
+                "event_id": record.event_id,
+                "classroom_id": record.classroom_id,
+                "student_id": record.student_id,
+                "student_name": student.name,
+                "student_no": student.student_no,
+                "assigned_seat_id": record.assigned_seat_id,
+                "assigned_seat_label": (None if assigned_seat is None else assigned_seat.label),
+                "current_seat_id": record.seat_id,
+                "current_seat_label": None if current_seat is None else current_seat.label,
+                "current_state": record.state.value,
+                "reason": record.reason.value,
+                "confidence": record.confidence,
+                "observed_at": record.observed_at.isoformat(),
+            }
+        )
+
     def list_student_states(self, classroom_id: str) -> list[StudentSeatState]:
-        """최근 식별과 카메라 ROI를 좌석 지정에 대조한 읽기 모델을 반환한다."""
+        """저장된 판정 결과를 화면·API가 쓸 읽기 모델로 옮긴다.
+
+        **여기서 판정하지 않는다.** 좌석 지정과 학생 원장을 붙여 표시용 값을 만들 뿐이고,
+        근거가 오래된 판정은 `project_for_display`가 `UNKNOWN`으로 가린다. 가리기만
+        하고 저장된 값을 바꾸지 않는다.
+        """
         seats = self._classroom_service.list_all_seats(classroom_id)
         assignments = self._classroom_service.list_assignments_raw(classroom_id)
-        active_assignments = self._active_assignments(classroom_id, seats, assignments)
-        if not active_assignments:
+        active = self._active_assignments(classroom_id, seats, assignments)
+        if not active:
             return []
 
-        since = self._clock() - timedelta(seconds=self._stale_seconds)
-        events = self._detection_repository.find_recent_by_classroom(
-            classroom_id,
-            since,
-            limit=self._recent_event_limit,
-        )
-        identified = self._select_recent_identifications(
-            events,
-            {student.id for _, _, student in active_assignments},
-            classroom_id=classroom_id,
-            since=since,
-        )
-        connections_by_camera: dict[str, list[RoiConnection]] = {}
+        seats_by_id = {seat.id: seat for seat in seats}
+        records = {
+            record.student_id: record
+            for record in self._state_repository.list_by_classroom(classroom_id)
+        }
+        now = self._clock()
+
         result: list[StudentSeatState] = []
-
-        for assignment, seat, student in active_assignments:
-            selected = identified.get(student.id)
-            current_seat_id: str | None = None
-            state = StudentState.UNKNOWN
-            confidence: float | None = None
-            observed_at: datetime | None = None
-            if selected is not None:
-                event = selected.event
-                detection = selected.detection
-                confidence = detection.identity_confidence
-                observed_at = event.captured_at
-                connections = connections_by_camera.get(event.camera_id)
-                if connections is None:
-                    try:
-                        connections = self._roi_service.list_valid_connections(
-                            classroom_id, event.camera_id
-                        )
-                    except RoiConnectionNotFoundError:
-                        logger.warning(
-                            "classroom_id=%s camera_id=%s 유효한 카메라 참조가 없어 "
-                            "학생 상태 ROI 매핑을 건너뜁니다.",
-                            classroom_id,
-                            event.camera_id,
-                        )
-                        connections = []
-                    connections_by_camera[event.camera_id] = connections
-
-                mapping = map_bbox_to_roi(
-                    detection.bbox,
-                    frame_width_pixels=event.frame.width_pixels,
-                    frame_height_pixels=event.frame.height_pixels,
-                    connections=connections,
+        for assignment, seat, student in active:
+            record = records.get(student.id)
+            if record is None:
+                # 아직 이 학생을 두고 판정한 적이 없다.
+                result.append(
+                    StudentSeatState(
+                        student_id=student.id,
+                        student_name=student.name,
+                        student_no=student.student_no,
+                        assigned_seat_id=assignment.seat_id,
+                        assigned_seat_label=seat.label,
+                        current_seat_id=None,
+                        current_seat_label=None,
+                        current_state=StudentState.UNKNOWN,
+                        reason=StudentStateReason.SEAT_NOT_OBSERVED,
+                        confidence=None,
+                        last_observed_at=None,
+                    )
                 )
-                if mapping.reason == RoiMappingReason.AMBIGUOUS:
-                    logger.warning(
-                        "event_id=%s camera_id=%s detection_id=%s student_id=%s "
-                        "겹치는 좌석 ROI로 상태를 판정할 수 없습니다.",
-                        event.event_id,
-                        event.camera_id,
-                        detection.detection_id,
-                        student.id,
-                    )
-                if mapping.connection is not None:
-                    current_seat_id = mapping.connection.seat_id
-                    state = (
-                        StudentState.PRESENT
-                        if current_seat_id == assignment.seat_id
-                        else StudentState.WRONG_SEAT
-                    )
-
+                continue
+            display = project_for_display(record, now, self._policy)
+            current_seat = None if display.seat_id is None else seats_by_id.get(display.seat_id)
             result.append(
                 StudentSeatState(
                     student_id=student.id,
@@ -445,13 +538,26 @@ class StudentMonitoringService:
                     student_no=student.student_no,
                     assigned_seat_id=assignment.seat_id,
                     assigned_seat_label=seat.label,
-                    current_seat_id=current_seat_id,
-                    current_state=state,
-                    confidence=confidence,
-                    last_observed_at=observed_at,
+                    current_seat_id=display.seat_id,
+                    current_seat_label=None if current_seat is None else current_seat.label,
+                    current_state=display.state,
+                    reason=display.reason,
+                    confidence=display.confidence,
+                    last_observed_at=record.observed_at,
                 )
             )
         return result
+
+    def list_student_state_history(
+        self, classroom_id: str, student_id: str
+    ) -> list[StudentStateHistory]:
+        """학생의 상태 전이 이력을 최신순으로 반환한다.
+
+        출결 판정의 근거를 되짚기 위한 경로다(결정 0008).
+        """
+        return self._state_repository.list_history(
+            classroom_id, student_id, limit=self._history_limit
+        )
 
     def _active_assignments(
         self,
@@ -495,44 +601,3 @@ class StudentMonitoringService:
             seen_students.add(student_id)
             result.append(candidate)
         return result
-
-    def _select_recent_identifications(
-        self,
-        events: list[DetectionEvent],
-        student_ids: set[str],
-        *,
-        classroom_id: str,
-        since: datetime,
-    ) -> dict[str, _IdentifiedDetection]:
-        eligible_events = [
-            event
-            for event in events
-            if event.classroom_id == classroom_id and event.captured_at >= since
-        ]
-        eligible_events.sort(key=lambda event: event.event_id)
-        eligible_events.sort(key=lambda event: event.captured_at, reverse=True)
-        selected: dict[str, _IdentifiedDetection] = {}
-        for event in eligible_events:
-            detections = [
-                detection
-                for detection in event.detections
-                if detection.student_id in student_ids
-                and detection.class_name.casefold() == "person"
-                and detection.confidence >= self._confidence_threshold
-                and detection.identity_confidence is not None
-                and detection.identity_confidence >= self._identity_confidence_threshold
-            ]
-            detections.sort(
-                key=lambda detection: (
-                    -float(detection.identity_confidence or 0),
-                    -detection.confidence,
-                    detection.detection_id,
-                )
-            )
-            for detection in detections:
-                assert detection.student_id is not None
-                selected.setdefault(
-                    detection.student_id,
-                    _IdentifiedDetection(event=event, detection=detection),
-                )
-        return selected

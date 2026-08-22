@@ -75,6 +75,10 @@ def build_event_payload(
             item["identity_confidence"] = detection.identity_confidence
         if is_identified and detection.face_bbox is not None:
             item["face_bbox"] = list(detection.face_bbox)
+        # 신원과 달리 track_id는 단독으로도 뜻이 있다. 신원이 없는 track도 같은 사람을
+        # 이어 본 결과이므로 식별 여부와 무관하게 보낸다.
+        if detection.track_id is not None:
+            item["track_id"] = detection.track_id
         if not is_identified and any(
             value is not None
             for value in (
