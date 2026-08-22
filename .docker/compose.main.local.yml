@@ -1,6 +1,10 @@
 name: classroom-monitoring-local
 
-# 개발자 PC(local)의 메인 스택. **서버용은 compose.main.dev.yml이다.**
+# 개발자 PC(local)의 메인 스택. **한 대에서 전부 돈다.**
+#
+# dev 환경은 호스트가 둘로 나뉜다(결정 0026) — compose.main.dev.pc.yml(개인 PC:
+# fastapi·n8n)과 compose.main.dev.gpu.yml(GPU 서버: 나머지)이다. 이 파일은 그 분할과
+# 무관하게 **외부 의존 없이 소스를 고쳐 가며 확인하는 용도**로 남는다.
 #
 # 실행 (저장소 루트에서):
 #   docker compose -f .docker/compose.main.local.yml up -d

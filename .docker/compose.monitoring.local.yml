@@ -30,7 +30,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.13.2
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
       - "127.0.0.1:19090:9090"

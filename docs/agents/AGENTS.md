@@ -72,6 +72,10 @@ GPT 프롬프트처럼 복사가 불가피한 경우에는 어디서 뽑아온 �
 새로운 인프라 디렉터리를 최상위에 추가하려면 같은 절차(ADR + 이 문서 갱신)를 밟는다.
 
 - 파일은 `compose.<스택>.<환경>.yml`이다(`main`·`llm`·`monitoring` × `local`·`dev`).
+  **dev의 `main` 스택만 호스트 축이 하나 더 붙는다** — `compose.main.dev.pc.yml`(개인 PC)과
+  `compose.main.dev.gpu.yml`(GPU 서버). 백엔드를 개인 PC로 옮기면서 dev 환경이 기계 두
+  대에 걸치기 때문이다([결정 0026](../architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)).
+  **나뉘지 않는 스택에는 축을 붙이지 않는다.**
 - **커밋되는 compose는 `${...}` 치환과 `--env-file`을 쓰지 않는다.** 저장소에서 받은
   파일만으로 실행되어야 하기 때문이다.
 - **`.docker/env/`(비밀값)와 `.docker/models/`(가중치)는 커밋하지 않는다.**

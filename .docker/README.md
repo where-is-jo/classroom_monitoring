@@ -15,14 +15,75 @@
 환경마다 다른 것이 값이 아니라 **구조**(이미지를 빌드하나 받나, GPU를 예약하나, 포트를
 어디까지 여나)라서 파일 자체를 나눴다.
 
-| 스택 | local (개발자 PC) | dev (공용 GPU 서버) |
-| --- | --- | --- |
-| 메인 | `compose.main.local.yml` | `compose.main.dev.yml` |
-| LLM | `compose.llm.local.yml` | `compose.llm.dev.yml` |
-| 모니터링 | `compose.monitoring.local.yml` | `compose.monitoring.dev.yml` |
+**dev는 여기에 호스트 축이 하나 더 붙는다.**
+[결정 0026](../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)이
+백엔드를 개인 PC로 옮기면서 dev 환경이 기계 두 대에 걸치게 됐고, 그 4번이 "compose
+파일을 호스트 축으로 나눈다"를 남은 일로 적었다. 아래가 그 구현이다.
+
+| 스택 | local (개발자 PC 한 대) | dev · 개인 PC | dev · 공용 GPU 서버 |
+| --- | --- | --- | --- |
+| 메인 | `compose.main.local.yml` | `compose.main.dev.pc.yml` | `compose.main.dev.gpu.yml` |
+| LLM | `compose.llm.local.yml` | — | `compose.llm.dev.yml` |
+| 모니터링 | `compose.monitoring.local.yml` | — | `compose.monitoring.dev.yml` |
+
+`compose.main.dev.yml` 하나였던 것이 `.pc`와 `.gpu` 둘로 갈렸다. **이름에 환경 다음
+호스트를 붙인다**(`compose.<스택>.<환경>.<호스트>.yml`). 호스트가 하나뿐인 스택은
+그대로 두 마디를 쓴다 — 나뉘지 않는 것에 축을 붙이면 이름만 길어진다.
+
+**local은 그대로 남는다.** 한 대에서 전부 도는 구성이라 호스트 축이 없고, 소스를
+고쳐 가며 확인하는 용도로 계속 쓴다.
+
+| 어느 스택에 무엇이 있나 | 서비스 |
+| --- | --- |
+| 개인 PC (`compose.main.dev.pc.yml`) | `fastapi`, `n8n` |
+| GPU 서버 (`compose.main.dev.gpu.yml`) | `deeplearning`, `inference-worker`, `mediamtx`, `minio`, `minio-init` |
+| GPU 서버 (`compose.llm.dev.yml`) | `llama-server` |
+| GPU 서버 (`compose.monitoring.dev.yml`) | `prometheus`, `grafana`, `loki`, `alloy` |
 
 **`--env-file`을 주지 않는다.** 커밋되는 파일이므로 실행에 필요한 값을 파일 안에 직접
 적었다. `${...}` 치환에 의존하면 저장소에서 받은 파일만으로 실행할 수 없기 때문이다.
+
+### 두 호스트는 Tailscale로 잇는다
+
+같은 compose network가 아니므로 **호스트를 넘는 호출은 컨테이너 이름이 아니라 Tailscale
+주소를 쓴다.** 무엇이 넘고 무엇이 넘지 않는지는 결정 0026의 3번 표가 정본이고, 여기서는
+그 결과로 실제로 열린 포트만 적는다.
+
+| 부르는 쪽 | 주소 | 무엇 |
+| --- | --- | --- |
+| 개인 PC의 `fastapi` | `100.85.0.72:18100` | `deeplearning` 얼굴 분석 |
+| 개인 PC의 `fastapi` | `100.85.0.72:19000` | `minio` 스냅샷 읽기 |
+| 개인 PC의 `fastapi` | `100.85.0.72:18889` | `mediamtx` WHEP 시그널링 중계 |
+| 개인 PC의 `fastapi` | `100.85.0.72:18008` | `llama-server` 검색 계획 |
+| GPU 서버의 `inference-worker` | `100.119.241.93:8076` | `fastapi` 탐지 이벤트 전송 |
+| GPU 서버의 `prometheus` | `100.119.241.93:8076` | `fastapi` 지표 스크랩 |
+| 브라우저 | GPU 서버 `18189` (UDP·TCP) | WebRTC 미디어. **직통** |
+
+**GPU 서버에서 새로 연 넷은 전부 Tailscale 주소(`100.85.0.72`)에만 묶었다.** 그 서버는
+공인 IP를 가진 공용 장비라 `0.0.0.0`은 곧 인터넷 공개이고, MinIO는 root 키 하나로
+스냅샷 전체(학생 얼굴이 담긴다)가 열린다. `llama-server`도 인증이 없다.
+
+**Tailscale이 내려가 있으면 양쪽 스택 모두 기동에 실패한다.** 없는 주소에는 bind할 수
+없어서다. 조용히 뜨는 것보다 낫다 — 떠 있어도 서로 닿지 못한다.
+
+**노트북의 Tailscale 주소가 바뀌면 세 곳을 함께 고친다**: `compose.main.dev.pc.yml`의
+`ports`와 n8n 진입 주소, `env/worker.dev.env`의 `FASTAPI_URL`,
+`prometheus/prometheus.dev.yml`의 fastapi target.
+
+### 앞단에 reverse proxy를 두지 않는다
+
+**인터넷에 공개하지 않는 프로젝트라 도메인·TLS·경로 분기가 필요 없다.** 브라우저는
+tailnet 안에서 `http://100.119.241.93:8076`(화면·API)과 `:15678`(n8n)에 직접 붙는다.
+
+이 때문에 두 값이 평문 http 전제로 고정되어 있다. 붙이는 날 함께 되돌린다.
+
+| 값 | 지금 | 왜 |
+| --- | --- | --- |
+| `PLAYBACK_SESSION_COOKIE_SECURE` | `false` | true면 평문 http에서 브라우저가 세션 cookie를 보내지 않아 영상 재생이 조용히 실패한다 |
+| `N8N_SECURE_COOKIE` | `false` | 같은 이유로 n8n 로그인 세션이 깨진다 |
+
+reverse proxy를 붙이게 되면 uvicorn에 `FORWARDED_ALLOW_IPS`를 함께 줘야 한다 —
+기본값이 `127.0.0.1`이라 컨테이너 network를 타고 온 `X-Forwarded-*`는 무시된다.
 
 ## 실행 방법
 
@@ -39,7 +100,7 @@ docker compose -f .docker/compose.main.local.yml --profile worker up -d
 ```
 
 메인 스택이 network를 만드므로 **먼저 올린다.** LLM·모니터링은 그 network를
-`external`로 참조한다. 서버(dev) 절차는 [README.server.md](./README.server.md)에 있다.
+`external`로 참조한다.
 
 로컬 진입 주소는 이렇다. 모두 `127.0.0.1`에 묶여 다른 PC에서는 보이지 않는다.
 
@@ -50,10 +111,66 @@ docker compose -f .docker/compose.main.local.yml --profile worker up -d
 | `http://localhost:19001` | MinIO 콘솔 |
 | `http://localhost:13000` | Grafana (모니터링 스택을 올렸을 때) |
 
-**로컬에는 경로를 나눠 줄 nginx가 없다.** 그래서 서버와 달리 각 포트에 직접 붙는다.
-다만 **실시간 영상은 서버와 같은 경로를 탄다** — fastapi가 WHEP 시그널링을 중계하므로
-(결정 0014) 앞단 proxy 없이도 확인된다. 대신 `PLAYBACK_SESSION_COOKIE_SECURE=false`가
-필요하다. 로컬은 평문 http라 true면 브라우저가 세션 cookie를 보내지 않는다.
+**실시간 영상은 앞단 proxy 없이도 확인된다** — fastapi가 WHEP 시그널링을 중계하기
+때문이다(결정 0014). 대신 `PLAYBACK_SESSION_COOKIE_SECURE=false`가 필요하다.
+평문 http라 true면 브라우저가 세션 cookie를 보내지 않는다.
+
+### dev 스택 — 개인 PC(노트북)
+
+이 노트북에 백엔드와 n8n을 올린다.
+
+```bash
+docker compose -f .docker/compose.main.dev.pc.yml pull
+docker compose -f .docker/compose.main.dev.pc.yml up -d
+docker compose -f .docker/compose.main.dev.pc.yml config    # 문법 검증
+docker compose -f .docker/compose.main.dev.pc.yml down
+```
+
+**먼저 `tailscale status`로 노트북이 tailnet에 붙어 있는지 확인한다.** 붙어 있지 않으면
+`100.119.241.93`에 bind하지 못해 기동에 실패한다.
+
+| 주소 | 무엇 | 누가 |
+| --- | --- | --- |
+| `http://localhost:8076` | 웹 화면·API | 이 노트북 |
+| `http://100.119.241.93:8076` | 같은 것 | 팀원, GPU 서버의 worker·prometheus |
+| `http://localhost:15678` | n8n 편집기 | 이 노트북 |
+| `http://100.119.241.93:15678` | 같은 것 | 팀원 |
+
+**GPU 서버 스택이 떠 있지 않아도 화면과 API는 뜬다.** 대신 그쪽을 부르는 기능이 각각
+실패한다 — 얼굴 등록(deeplearning), 스냅샷 목록(minio), 자연어 검색(llama-server),
+실시간 영상(mediamtx). 서로 다른 실패이며 한 번에 다 죽지 않는다.
+
+**n8n 워크플로는 GPU 서버에서 따라오지 않는다.** 볼륨이 기계에 묶여 있고 project name도
+`classroom-monitoring-dev`에서 `classroom-monitoring-dev-pc`로 바뀌었다. 옮기려면 서버
+쪽 편집기에서 워크플로와 자격 증명을 export한 뒤 여기서 import한다.
+
+#### 개인 PC 스택에서 확인한 것
+
+노트북(Windows, Docker Desktop)에서 실제로 띄워 확인했다.
+
+- 두 컨테이너 기동, fastapi `healthy`.
+- **`127.0.0.1`과 `100.119.241.93` 두 주소 모두에 bind가 실제로 먹는다.**
+  Windows Docker Desktop에서 특정 IP bind가 되는지가 이 구성의 전제였다.
+- `GET /health` → 200 `{"status":"ok"}` (양쪽 주소 모두)
+- `GET /health/ready` → 200 `{"status":"ready"}` — MongoDB Atlas 연결까지 성공했다는 뜻이다.
+- n8n `GET /healthz` → 200 (양쪽 주소 모두)
+
+**확인하지 못한 것: 호스트를 넘는 경로 전부.** GPU 서버(`100.85.0.72`)가 오프라인이라
+`deeplearning`·`minio`·`mediamtx`·`llama-server` 넷 모두 컨테이너에서 timeout이었다.
+서버를 올린 뒤 다시 확인해야 하는 것은
+[README.server.md의 "안 한 것"](./README.server.md#검증한-것--못-한-것)에 있다.
+그래서 지금 이 노트북에서 뜨는 것은 **화면·API·MongoDB까지**이고, 얼굴 등록·스냅샷
+목록·자연어 검색·실시간 영상 넷은 GPU 서버가 올라와야 동작한다.
+
+### dev 스택 — 공용 GPU 서버
+
+```bash
+docker compose -f .docker/compose.main.dev.gpu.yml up -d    # 먼저 (network를 만든다)
+docker compose -f .docker/compose.llm.dev.yml up -d
+docker compose -f .docker/compose.monitoring.dev.yml up -d
+```
+
+자세한 절차는 [README.server.md](./README.server.md)에 있다.
 
 
 ---
@@ -71,13 +188,16 @@ docker compose -f .docker/compose.main.local.yml --profile worker up -d
 
 ## 포트 정리
 
-> **지금은 이렇지 않다.** 공용 서버에서 다른 팀과 포트가 부딪히기 때문에 호스트에 여는
-> 포트를 넷으로 줄이고, 그중 셋은 루프백에만 묶었다
-> (`127.0.0.1:8076` fastapi, `127.0.0.1:15678` n8n, 외부에 열리는 것은 미디어용
-> `18189` 하나). 나머지는 `ports`를 두지 않고 SSH 터널로 본다.
-> **reverse proxy(Caddy)도 쓰지 않기로 했다** — 앞단의 다른 팀 nginx가 경로를 나눈다.
-> 현재 표는 [README.server.md의 포트 절](./README.server.md#포트)에 있다.
-> 아래는 그때의 기록이다.
+> **지금은 이렇지 않다.** 두 번 바뀌었다.
+>
+> 1. 공용 서버에서 다른 팀과 포트가 부딪혀 여는 포트를 줄이고 루프백에 묶었다.
+>    **reverse proxy(Caddy)도 쓰지 않기로 했다.**
+> 2. 결정 0026으로 fastapi·n8n이 개인 PC로 가면서, GPU 서버에서 그 둘이 부르던 것들
+>    (`deeplearning`·`minio`·`mediamtx`·`llama-server`)을 **Tailscale 주소에만** 새로
+>    열었다. 앞단의 다른 팀 nginx도 더 이상 전제하지 않는다 — 인터넷에 공개하지 않는다.
+>
+> 현재 표는 위 [두 호스트는 Tailscale로 잇는다](#두-호스트는-tailscale로-잇는다)와
+> [README.server.md의 포트 절](./README.server.md#포트)에 있다. 아래는 그때의 기록이다.
 
 | 서비스 | 포트 | 용도 |
 | --- | --- | --- |

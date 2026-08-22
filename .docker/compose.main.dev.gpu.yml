@@ -1,10 +1,20 @@
 name: classroom-monitoring-dev
 
-# 공용 GPU 서버(dev)의 메인 스택. **로컬용은 compose.main.local.yml이다.**
+# 공용 GPU 서버(dev)의 메인 스택. **개인 PC용은 compose.main.dev.pc.yml이다.**
 #
 # 실행 (저장소 루트에서):
-#   docker compose -f .docker/compose.main.dev.yml up -d
-#   docker compose -f .docker/compose.main.dev.yml config    # 문법 검증
+#   docker compose -f .docker/compose.main.dev.gpu.yml up -d
+#   docker compose -f .docker/compose.main.dev.gpu.yml config    # 문법 검증
+#
+# **이 파일은 compose.main.dev.yml을 호스트 축으로 쪼갠 절반이다**
+# (결정 0026의 4번). fastapi와 n8n은 여기서 빠져 compose.main.dev.pc.yml로 갔다.
+# 남은 것은 GPU가 필요한 셋(inference-worker·deeplearning·llama-server)과,
+# 그 셋이 쓰는 영상·저장소(mediamtx·minio)다.
+#
+# **project name(classroom-monitoring-dev)과 network 이름을 그대로 뒀다.**
+# 바꾸면 minio-data 볼륨 이름(classroom-monitoring-dev_minio-data)이 달라져
+# 지금까지 쌓인 스냅샷을 잃고, compose.llm.dev.yml과 compose.monitoring.dev.yml이
+# external로 참조하는 network도 함께 고쳐야 한다.
 #
 # **--env-file을 주지 않는다**(결정 0018). 이 파일이 커밋되므로 실행에 필요한 값을
 # 파일 안에 직접 적었다. 비밀값만 env_file로 주입하고 그 파일들은 커밋하지 않는다
@@ -13,10 +23,8 @@ name: classroom-monitoring-dev
 # 이 파일이 backend network를 만든다. compose.llm.dev.yml과 compose.monitoring.dev.yml은
 # 그 network를 external로 참조하므로 **이 스택을 먼저 올려야 한다.**
 #
-# MongoDB Atlas는 외부 서비스라 컨테이너로 두지 않는다. fastapi가
-# .docker/env/fastapi.dev.env의 DATABASE_URL로 직접 접속한다.
 # worker/recorder는 이 스택에 넣지 않는다. **영상 원본을 저장하지 않기로 했다**
-# (결정 0011). 탐지 시점 스냅샷은 inference-worker가 MinIO에 올린다.
+# (결정 0028). 탐지 시점 스냅샷은 inference-worker가 MinIO에 올린다.
 
 networks:
   backend:
@@ -32,58 +40,40 @@ x-logging: &default-logging
 
 volumes:
   minio-data:
-  n8n-data:
 
 # 포트 방침
 #
-#   외부 --- 다른 팀 nginx --- 우리 서비스들
+# **fastapi가 개인 PC로 가면서 포트의 성격이 바뀌었다.** 전에는 호스트에 여는 것이
+# "앞단 nginx에 보여 줄 것" 하나였는데, 이제는 **개인 PC의 fastapi가 Tailscale로
+# 넘어와 부를 것**이 더해졌다. 무엇이 경계를 넘는지는 결정 0026의 3번 표가 정본이다.
 #
-# 1. **경로 분기는 nginx가 한다.** 우리 쪽 reverse proxy를 두지 않는다.
-#    요청서: individual_tasks/도커구성/nginx_연동_요청.md
-# 2. **꼭 필요한 것만 연다.** 서비스끼리는 backend network에서 컨테이너 이름으로 부른다.
-# 3. **여는 것도 기본은 127.0.0.1이다.** nginx만 닿으면 되는 것은 루프백에 묶는다.
-#    외부에 실제로 노출되는 것은 WebRTC 미디어(18189) 하나뿐이다.
-# 4. **호스트 쪽 번호는 5자리로 준다.** 공용 서버라 4자리 기본값은 다른 팀과 겹치기 쉽다.
-#    fastapi의 8076만 예외 — nginx 연동 요청서로 이미 알린 번호다.
+# 그래서 여는 방식이 셋으로 갈린다.
 #
-# | 호스트 | → 컨테이너 | 외부 노출 |
+# 1. **Tailscale 주소에만 묶는다**(100.85.0.72). 개인 PC만 닿으면 되는 것들이다.
+#    **0.0.0.0에 묶으면 안 된다** — 이 서버는 공인 IP(116.42.115.24)를 가진 공용
+#    장비라서, 0.0.0.0은 곧 인터넷 공개다. MinIO는 root 자격 증명 하나로 스냅샷
+#    전체(학생 얼굴이 담긴다)가 열리므로 특히 그렇다.
+# 2. **0.0.0.0에 연다.** WebRTC 미디어(18189) 하나뿐이다. 브라우저가 프록시 없이
+#    직접 붙어야 해서 다른 방법이 없다.
+# 3. **아예 열지 않는다.** 같은 network 안에서만 쓰는 것(MinIO 콘솔 9001 등).
+#
+# **호스트 쪽 번호는 5자리로 준다.** 공용 서버라 4자리 기본값은 다른 팀과 겹치기 쉽다.
+#
+# | 호스트 | -> 컨테이너 | 누가 부르나 |
 # | --- | --- | --- |
-# | 127.0.0.1:8076 | fastapi:8001 | nginx 경유 |
-# | 127.0.0.1:15678 | n8n:5678 | nginx 경유(/n8n/) |
-# | 18189 (UDP·TCP) | mediamtx:18189 | **직통.** 프록시 불가 |
+# | 100.85.0.72:18100 | deeplearning:8100 | 개인 PC의 fastapi (얼굴 분석) |
+# | 100.85.0.72:19000 | minio:9000 | 개인 PC의 fastapi (스냅샷 읽기) |
+# | 100.85.0.72:18889 | mediamtx:8889 | 개인 PC의 fastapi (WHEP 시그널링 중계) |
+# | 18189 (UDP·TCP) | mediamtx:18189 | 브라우저. **직통.** 프록시 불가 |
 #
-# WHEP 시그널링은 fastapi가 프록시하므로(결정 0014) mediamtx 포트를 열지 않는다.
+# llama-server(18008)도 개인 PC가 부르지만 compose.llm.dev.yml 소관이라 그쪽에서 연다.
+#
+# **Tailscale이 내려가 있으면 이 스택은 기동에 실패한다.** 없는 주소에는 bind할 수
+# 없기 때문이다. 조용히 도는 것보다 낫다 — 떠 있어도 개인 PC가 닿지 못한다.
+#   확인: tailscale status / ip addr show tailscale0
 
 services:
-  fastapi:
-    # 서버에는 webapps/fastapi 소스를 옮기지 않으므로 build 블록을 두지 않는다.
-    # `docker compose pull`로만 받는다. 로컬 빌드는 compose.main.local.yml이 한다.
-    #
-    # **:latest가 아니라 :develop을 본다.** CI는 develop 병합마다 develop과 sha-* 태그로
-    # 올리고 latest는 붙이지 않는다(결정 0014). 여기서 latest를 보면 병합해도 서버가
-    # 갱신되지 않는다 — 실제로 2026-08-12에 손으로 올린 이미지가 그대로 돌아
-    # 그 뒤에 들어온 탐지 수신·ROI 매핑이 서버에 없었다.
-    # latest는 나중에 main 배포 시점의 태그로 남겨 둔다.
-    image: ghcr.io/where-is-jo/classroom-monitoring-fastapi:develop
-    env_file:
-      # 변수 이름의 기준은 webapps/fastapi/.env.example이다. 환경과 무관한 값은
-      # 여기 없다 — 이미지 안의 config/settings.yml이 갖는다.
-      - ./env/fastapi.dev.env
-    environment:
-      # env_file보다 여기 값이 우선한다. 이 파일은 dev 전용이므로 고정한다.
-      APP_ENV: dev
-    # 브라우저 진입점. nginx가 여기로 넘긴다(location /).
-    # 그 팀 nginx가 컨테이너로 돈다면 루프백에 닿지 못하므로 그때는 "8076:8001"로
-    # 바꾸고 방화벽으로 막아야 한다.
-    ports:
-      - "127.0.0.1:8076:8001"
-    networks:
-      - backend
-    logging: *default-logging
-    restart: unless-stopped
-
-  # stream + inference 조립 실행(python -m pipeline.main). GPU를 쓴다.
-  # 얼굴 분석 내부 서비스(SCRFD + MediaPipe + ArcFace). fastapi만 호출한다.
+  # 얼굴 분석 내부 서비스(SCRFD + MediaPipe). **fastapi만 호출한다.**
   # **GPU를 예약하지 않는다** — app.py가 onnxruntime의 CPUExecutionProvider를
   # 고정하고 있어 GPU를 줘도 쓰지 않는다. 그래서 inference-worker와 달리
   # 드라이버 조건이 없고 GPU가 없는 호스트에서도 뜬다.
@@ -97,16 +87,25 @@ services:
       FACE_RECOGNITION_MODEL_PATH: /models/face/buffalo_l/w600k_r50.onnx
     volumes:
       - ./models:/models:ro
+    # **호스트 분할로 새로 열게 된 포트다.** 전에는 fastapi가 같은 network 안에서
+    # deeplearning:8100으로 불렀다. 이제 fastapi가 개인 PC에 있어 경계를 넘는다.
+    # 얼굴 등록의 실시간 가이드가 매 프레임 이 경로를 왕복한다(결정 0026의 결과 항목).
+    ports:
+      - "100.85.0.72:18100:8100"
     networks:
       - backend
     logging: *default-logging
     restart: unless-stopped
 
+  # stream + inference 조립 실행(python -m pipeline.main). GPU를 쓴다.
   inference-worker:
     image: ghcr.io/where-is-jo/classroom-monitoring-worker:latest
     env_file:
       # 변수 목록의 기준은 worker/pipeline/.env.example이다(조립 실행이라 pipeline 것을 쓴다).
       # STREAM_SOURCES에 카메라 자격 증명이 들어가므로 이 파일 전체가 비밀값이다.
+      #
+      # **호스트 분할로 FASTAPI_URL이 바뀐다.** fastapi:8001이 아니라 개인 PC의
+      # Tailscale 주소(http://100.119.241.93:8076)를 가리켜야 탐지 이벤트가 도달한다.
       - ./env/worker.dev.env
     environment:
       APP_ENV: dev
@@ -137,9 +136,9 @@ services:
       # 사용자용 실시간 영상은 WebRTC로 간다. 설정은 MTX_<파라미터명 대문자> 환경변수로
       # 준다 — 커스텀 mediamtx.yml을 마운트하지 않아도 되고 바꾼 값이 여기 다 보인다.
       #
-      # ICE 후보로 알릴 주소. 미디어는 nginx를 타지 않고 직통하므로 nginx 주소가 아니라
-      # **서버 자신의 주소**여야 한다. 공인 IP가 아직 일부 포트만 열려 Tailscale IP와
-      # 함께 둘 다 후보로 넣는다.
+      # ICE 후보로 알릴 주소. 미디어는 프록시를 타지 않고 직통하므로 **서버 자신의
+      # 주소**여야 한다. 공인 IP가 아직 일부 포트만 열려 Tailscale IP와 함께 둘 다
+      # 후보로 넣는다.
       MTX_WEBRTCADDITIONALHOSTS: 100.85.0.72,116.42.115.24
       # 인터페이스에서 주소를 긁는 기본 동작을 끈다. 켜 두면 컨테이너 사설 IP가
       # ICE 후보로 나가는데, 브라우저는 닿지 못하면서 내부 주소만 드러난다.
@@ -148,16 +147,20 @@ services:
       # 외부에 직접 열리는 유일한 포트라 다른 팀과 겹칠 여지를 줄인다.
       MTX_WEBRTCLOCALUDPADDRESS: ":18189"
       MTX_WEBRTCLOCALTCPADDRESS: ":18189"
-    # HLS(8888)와 RTSP(8554)는 열지 않는다. 화면은 WebRTC로 보고, 워커가 외부 카메라에서
-    # 당겨오므로(STREAM_SOURCES) 우리 mediamtx로 밀어 넣는 경로가 없다.
-    # **카메라가 서버로 직접 송출하는 방식으로 바꾸면 8554를 다시 열어야 한다.**
+    # HLS(8888)는 열지 않는다. 화면은 WebRTC로만 본다.
+    #
+    # **RTSP publish(8554)도 열지 않는다.** worker가 STREAM_SOURCES로 외부에서
+    # 당겨오는 구조라 여기로 밀어 넣는 경로가 없다. 카메라가 서버로 직접 송출하는
+    # 방식으로 바꾸면 그때 되살린다.
     ports:
-      # **WHEP 시그널링(8889)은 호스트에 열지 않는다.** fastapi가 프록시하고
-      # (WHEP_BASE_URL=http://mediamtx:8889) 브라우저는 fastapi 경로로만 붙는다
-      # (결정 0014). 같은 network 안이라 호스트를 거칠 이유가 없다.
-      #
+      # **WHEP 시그널링(8889)을 Tailscale 주소에 연다.** 전에는 fastapi가 같은
+      # network 안에 있어 아예 열지 않았지만(결정 0014), 이제 fastapi가 개인 PC에
+      # 있어 경계를 넘는다. 브라우저는 여전히 fastapi에만 붙는다 — fastapi가
+      # WHEP_BASE_URL=http://100.85.0.72:18889로 중계한다.
+      - "100.85.0.72:18889:8889"
       # WebRTC 미디어(ICE). **호스트와 컨테이너 번호가 같아야 한다** — MediaMTX가 위
       # MTX_WEBRTCLOCAL*ADDRESS의 번호를 ICE 후보로 알리기 때문이다.
+      # 브라우저가 직접 붙으므로 여기만 0.0.0.0이다.
       - "18189:18189/udp"
       - "18189:18189/tcp" # UDP가 막힌 망에서의 폴백
     networks:
@@ -170,9 +173,17 @@ services:
     command: server /data --console-address ":9001"
     env_file:
       - ./env/minio.dev.env
-    # 호스트에 포트를 열지 않는다. S3 API(9000)는 같은 network의 fastapi·worker가
-    # minio:9000으로 부르고, 콘솔(9001)은 운영자 도구라 SSH 터널로 본다:
-    #   ssh -L 9001:localhost:9001 <서버>   ← 아래에 ports를 임시로 되살린 뒤
+    ports:
+      # **S3 API(9000)를 Tailscale 주소에 연다.** 전에는 아무것도 열지 않았지만,
+      # 스냅샷을 읽는 fastapi가 개인 PC로 가면서 경계를 넘게 됐다.
+      # 쓰는 쪽(inference-worker)은 여전히 같은 network 안이라 minio:9000을 쓴다.
+      #
+      # **0.0.0.0에 열면 안 된다.** 지금은 worker와 fastapi가 모두 root 키로 붙어서
+      # 이 포트 하나에 스냅샷 전체가 걸린다(스냅샷에는 학생 얼굴이 담긴다).
+      # 전용 키로 나누는 것은 아직 결정 필요 항목이다.
+      - "100.85.0.72:19000:9000"
+      # 콘솔(9001)은 열지 않는다. 운영자 도구라 SSH 터널로 본다:
+      #   ssh -L 9001:localhost:9001 <서버>
     volumes:
       - minio-data:/data
     networks:
@@ -185,7 +196,7 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # 스냅샷 버킷과 보존 규칙을 한 번 만들고 끝난다(결정 0011).
+  # 스냅샷 버킷과 보존 규칙을 한 번 만들고 끝난다(결정 0028).
   # **삭제를 저장소가 하게 한다.** 앱이 지우면 워커가 죽어 있는 동안 삭제도 멈춘다.
   minio-init:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
@@ -213,26 +224,3 @@ services:
       - backend
     logging: *default-logging
     restart: "no"
-
-  n8n:
-    image: n8nio/n8n:2.33.5
-    env_file:
-      - ./env/n8n.dev.env
-    environment:
-      # nginx가 /n8n/ 접두사를 떼지 않고 넘긴다. n8n이 자기 자산·리다이렉트 경로를
-      # 같은 접두사로 만들게 해야 편집기가 뜬다.
-      N8N_PATH: /n8n/
-      # **브라우저가 보는 주소**여야 한다 — 우리 포트가 아니라 nginx가 여는 주소다.
-      # TODO: 그 팀이 열어 줄 포트가 정해지면 8080을 그 번호로 바꾼다
-      #       (individual_tasks/도커구성/nginx_연동_요청.md로 요청해 둔 값).
-      N8N_EDITOR_BASE_URL: http://116.42.115.24:8080/n8n/
-      WEBHOOK_URL: http://116.42.115.24:8080/n8n/
-    volumes:
-      - n8n-data:/home/node/.n8n
-    # nginx가 /n8n/을 여기로 넘긴다. fastapi와 같은 이유로 루프백에만 바인딩한다.
-    ports:
-      - "127.0.0.1:15678:5678"
-    networks:
-      - backend
-    logging: *default-logging
-    restart: unless-stopped

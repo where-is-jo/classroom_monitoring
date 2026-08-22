@@ -23,10 +23,30 @@ monitoring/internal/grafana/
   dashboards/                 대시보드 정의 JSON
 ```
 
-**Prometheus 설정 파일(`prometheus.yml`)은 아직 여기 없다.** 로컬 docker 스택의
-개인용 최소 설정(`.docker/prometheus/prometheus.yml`)으로만 존재하며, 지금은 그 파일이
-`fastapi`·`deeplearning`·`inference-worker` job을 들고 있다. 통합 실행 수단이
-공식화되면 이 디렉터리로 옮긴다(`결정 필요`).
+**Prometheus 설정 파일은 아직 여기 없다.** `.docker/prometheus/` 아래에 **환경별로 두
+벌** 있으며, 둘 다 `fastapi`·`deeplearning`·`inference-worker` job을 들고 있다.
+통합 실행 수단이 공식화되면 이 디렉터리로 옮긴다(`결정 필요`).
+
+| 파일 | fastapi target | 왜 다른가 |
+| --- | --- | --- |
+| `.docker/prometheus/prometheus.local.yml` | `fastapi:8001` | local은 한 대에서 전부 돈다 |
+| `.docker/prometheus/prometheus.dev.yml` | `100.119.241.93:8076` | dev는 fastapi가 개인 PC에 있어 스크랩이 호스트 경계를 넘는다([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) |
+
+**dev에서 fastapi target이 `up=0`인 것은 장애가 아닐 수 있다.** 개인 PC가 노트북이라
+꺼져 있을 수 있다. 이 구분을 어떻게 다룰지는 `결정 필요`다.
+
+### dev 서버의 `deeplearning`·`inference-worker` target은 지금 `down`이다
+
+2026-08-22 실측이다. **코드는 맞는데 서버에 올라간 이미지가 낡았다.**
+
+| target | 증상 | 서버 이미지 빌드 | 지표가 들어온 커밋 |
+| --- | --- | --- | --- |
+| `deeplearning:8100` | `/metrics` 404 (OpenAPI에 경로 없음) | 2026-08-18 05:06 | `748ca7f` (2026-08-18) |
+| `inference-worker:9101` | connection refused (listen 안 함) | 2026-08-12 | `34c5d98` (2026-08-18) |
+
+**이미지를 다시 빌드해 올려야 해소된다.** worker는 크기 때문에 CI가 자동 빌드하지
+않으므로([결정 0014](../../docs/architecture/decisions.md#0014--github-actions로-develop-병합-시-ci-검증과-ghcr-이미지-자동-빌드))
+손으로 밀어야 한다.
 
 ### 대시보드
 

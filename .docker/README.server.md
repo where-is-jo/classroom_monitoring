@@ -14,19 +14,30 @@
 
 | 파일 | project name | 담는 것 |
 | --- | --- | --- |
-| `compose.main.dev.yml` | `classroom-monitoring-dev` | FastAPI, inference worker, deeplearning, MediaMTX, MinIO, n8n |
+| `compose.main.dev.gpu.yml` | `classroom-monitoring-dev` | inference worker, deeplearning, MediaMTX, MinIO |
 | `compose.llm.dev.yml` | `classroom-monitoring-dev-llm` | llama-server (Gemma GGUF) |
 | `compose.monitoring.dev.yml` | `classroom-monitoring-dev-observability` | Prometheus, Grafana, Loki, Alloy |
 | `alloy/config.dev.alloy` | — | 서버용 로그 수집 설정 |
+| `prometheus/prometheus.dev.yml` | — | 서버용 수집 대상 |
 | `env/<서비스>.dev.env` | — | `env_file`로 컨테이너에 주입하는 값. **커밋되지 않는다** |
 | `models/` | — | 모델 가중치. **커밋되지 않는다** |
+
+**FastAPI와 n8n은 이 서버에 없다.**
+[결정 0026](../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)으로
+개인 PC(노트북, `100.119.241.93`)로 옮겼고, 그 파일은 `compose.main.dev.pc.yml`이다.
+그래서 `compose.main.dev.yml`이 `.gpu`와 `.pc` 둘로 갈렸다. 이 서버에 남은 것은 GPU가
+필요한 셋과, 그 셋이 쓰는 영상·저장소다.
 
 같은 이름의 `.local.yml` 짝이 개발자 PC용으로 따로 있다. 환경마다 다른 것이 값이 아니라
 구조(이미지를 빌드하나 받나, GPU 예약, 포트 노출 범위)라서 파일을 나눴다.
 
 세 스택은 project name이 달라 서로 독립적으로 올리고 내릴 수 있다.
-network만 공유한다: `compose.main.dev.yml`이 `classroom-monitoring-dev-backend`를 만들고,
-나머지 둘은 `external: true`로 참조한다. **따라서 메인 스택을 먼저 올려야 한다.**
+network만 공유한다: `compose.main.dev.gpu.yml`이 `classroom-monitoring-dev-backend`를
+만들고, 나머지 둘은 `external: true`로 참조한다. **따라서 메인 스택을 먼저 올려야 한다.**
+
+**project name과 network 이름은 분할 전 그대로 뒀다.** 바꾸면 `minio-data` 볼륨 이름이
+달라져 쌓인 스냅샷을 잃는다. 대신 `n8n-data`는 개인 PC로 따라가지 않는다 — 볼륨은
+기계에 묶여 있어서, 워크플로는 편집기에서 export/import로 옮긴다.
 
 문서가 "Prometheus / Grafana → MVP에서는 제외"라고 적은 것을 파일 분리로 구현했다.
 메인 스택을 올려도 모니터링 스택은 뜨지 않는다.
@@ -39,18 +50,22 @@ network만 공유한다: `compose.main.dev.yml`이 `classroom-monitoring-dev-bac
 적었다(결정 0018). 환경을 고르는 것은 **파일 이름**이다.
 
 ```bash
-docker compose -f .docker/compose.main.dev.yml up -d        # 먼저 (network를 만든다)
+docker compose -f .docker/compose.main.dev.gpu.yml up -d    # 먼저 (network를 만든다)
 docker compose -f .docker/compose.llm.dev.yml up -d
 docker compose -f .docker/compose.monitoring.dev.yml up -d  # MVP에서는 생략
 
-docker compose -f .docker/compose.main.dev.yml config       # 문법 검증
+docker compose -f .docker/compose.main.dev.gpu.yml config   # 문법 검증
 docker compose -f .docker/compose.llm.dev.yml down
 ```
 
 내릴 때는 역순이다. 메인 스택을 먼저 내리면 network가 사라져 나머지 스택이 깨진다.
 
 **`.local.yml`을 서버에서 실행하지 않는다.** 로컬 파일은 소스에서 이미지를 빌드하는데
-서버에는 소스가 없다.
+서버에는 소스가 없다. **`.pc.yml`도 여기서 실행하지 않는다** — 개인 PC 쪽 절반이다.
+
+**먼저 `tailscale status`로 tailnet 연결을 확인한다.** 이 스택은 포트 넷을 Tailscale
+주소(`100.85.0.72`)에 bind하므로, 인터페이스가 없으면 기동에 실패한다. 조용히 뜨는
+것보다 낫다 — 떠 있어도 개인 PC가 닿지 못한다.
 
 ## 포트
 
@@ -58,35 +73,47 @@ docker compose -f .docker/compose.llm.dev.yml down
 n8n 5678, llama-server 8008). **그 방식을 쓰지 않는다** — 공용 서버라 호스트 포트를
 점유할수록 다른 팀과 부딪히고, 방화벽도 그 포트들을 열어 주지 않았다.
 
-구성은 **외부 --- 다른 팀 nginx --- 우리 서비스들**이다.
-호스트 80·443은 그 nginx가 쓰고 있다.
+**다른 팀 nginx 뒤에 들어가는 구성도 더 이상 쓰지 않는다.** 브라우저가 붙던 둘
+(fastapi·n8n)이 결정 0026으로 개인 PC로 갔고, 인터넷에 공개하지 않기로 하면서 도메인도
+경로 분기도 필요가 없어졌다. `individual_tasks/도커구성/nginx_연동_요청.md`로 보낸
+요청은 **철회 대상이다.**
 
-**우리 쪽 reverse proxy(Caddy)는 두지 않는다.** 앞단에 nginx가 이미 있는데 같은 일을
-두 겹으로 할 이유가 없어서다. 컨테이너가 하나 줄고, 경로가 안 맞을 때 들여다볼 곳도
-한 군데로 준다. nginx가 나눠야 하는 것은 `/n8n/` 하나뿐이다 — 나머지는 전부 fastapi로
-가고, 실시간 영상 시그널링도 fastapi가 중계한다(결정 0014).
+대신 열어야 할 것이 새로 생겼다. **개인 PC의 fastapi가 이 서버의 넷을 부른다.**
+전에는 같은 `backend` network 안이라 컨테이너 이름으로 불렀지만 이제 다른 기계다.
 
-포트를 정한 원칙은 셋이다.
+포트를 정한 원칙은 넷이다.
 
-1. **꼭 필요한 것만 연다.** 서비스끼리는 `backend` network에서 컨테이너 이름으로 부르므로
-   (`minio:9000`, `fastapi:8001`) 호스트에 열 이유가 없다.
-2. **여는 것도 기본은 `127.0.0.1`이다.** nginx만 닿으면 되는 것은 루프백에 묶는다.
-   외부에 실제로 노출되는 것은 WebRTC 미디어 하나뿐이다.
-3. **호스트 쪽 번호는 5자리로 준다.** 공용 서버라 4자리 기본값(5678·8888·8889 …)은
+1. **꼭 필요한 것만 연다.** 이 서버 안의 서비스끼리는 `backend` network에서 컨테이너
+   이름으로 부르므로(`minio:9000`) 호스트에 열 이유가 없다.
+2. **개인 PC가 부르는 것은 Tailscale 주소(`100.85.0.72`)에만 묶는다.**
+   **`0.0.0.0`에 열면 안 된다** — 이 서버는 공인 IP(`116.42.115.24`)를 가진 공용
+   장비라서 그것은 곧 인터넷 공개다. MinIO는 root 키 하나로 스냅샷 전체(학생 얼굴이
+   담긴다)가 열리고, llama-server에는 인증이 아예 없다.
+3. **`0.0.0.0`은 하나뿐이다.** WebRTC 미디어(`18189`)는 브라우저가 프록시 없이 직접
+   붙어야 해서 다른 방법이 없다.
+4. **호스트 쪽 번호는 5자리로 준다.** 공용 서버라 4자리 기본값(5678·8888·8889 …)은
    다른 팀과 겹치기 쉽다. 컨테이너 안 번호는 기본값 그대로 둔다.
-   fastapi의 `8076`만 예외 — 이미 nginx 연동 요청서로 알린 번호라 그대로 쓴다.
 
-| 호스트 바인딩 | → 컨테이너 | 서비스 | 왜 필요한가 |
-| --- | --- | --- | --- |
-| **127.0.0.1:8076** | `fastapi:8001` | fastapi | 웹 화면·API. nginx `location /`이 넘긴다 |
-| **127.0.0.1:15678** | `n8n:5678` | n8n | 편집기·webhook. nginx `location /n8n/`이 넘긴다 |
-| **18189** (UDP·TCP) | `mediamtx:18189` | mediamtx | **WebRTC 미디어.** UDP 기반 ICE라 프록시할 수 없어 직통한다. **외부에 열리는 유일한 포트다** |
+| 호스트 바인딩 | → 컨테이너 | 누가 부르나 |
+| --- | --- | --- |
+| **100.85.0.72:18100** | `deeplearning:8100` | 개인 PC의 fastapi — 얼굴 분석 |
+| **100.85.0.72:19000** | `minio:9000` | 개인 PC의 fastapi — 스냅샷 읽기 |
+| **100.85.0.72:18889** | `mediamtx:8889` | 개인 PC의 fastapi — WHEP 시그널링 중계 |
+| **100.85.0.72:18008** | `llama-server:8008` | 개인 PC의 fastapi — 검색 계획 |
+| **18189** (UDP·TCP) | `mediamtx:18189` | 브라우저. **WebRTC 미디어.** UDP 기반 ICE라 프록시할 수 없어 직통한다. **외부에 열리는 유일한 포트다** |
 
-nginx 쪽에 넣을 설정과 방화벽 요청은
-`individual_tasks/도커구성/nginx_연동_요청.md`에 정리해 두었다(저장소에 없다).
-그 팀이 열어 줄 포트가 정해지면 `compose.main.dev.yml`의
-`N8N_EDITOR_BASE_URL`·`WEBHOOK_URL`을 그 주소로 바꿔야 한다 — n8n이 자기 편집기와
-webhook 주소를 그 값으로 만들기 때문이다.
+**Tailscale이 내려가 있으면 기동에 실패한다.** 없는 주소에는 bind할 수 없다.
+
+이 서버에서 개인 PC로 나가는 방향도 둘 있다. 그쪽은 `100.119.241.93:8076`이다.
+
+| 어디서 | 무엇 | 설정 위치 |
+| --- | --- | --- |
+| `inference-worker` | 탐지 이벤트 전송 | `env/worker.dev.env`의 `FASTAPI_URL` |
+| `prometheus` | 지표 스크랩 | `prometheus/prometheus.dev.yml`의 fastapi target |
+
+**개인 PC는 노트북이라 꺼져 있을 수 있다.** 그때 worker의 탐지 이벤트는 제한 재시도
+뒤 버려지고 Prometheus의 fastapi target은 `up=0`이 된다. 둘 다 장애가 아니라 정상
+상태이며, 버퍼링·알림 정책은 아직 정해지지 않았다(결정 0026의 남은 일).
 
 `18189`는 **호스트와 컨테이너 번호가 같아야 한다.** MediaMTX가 `MTX_WEBRTCLOCAL*ADDRESS`의
 번호를 ICE 후보로 브라우저에 알리므로, 매핑을 어긋나게 하면 브라우저가 닿지 못한다.
@@ -96,10 +123,10 @@ webhook 주소를 그 값으로 만들기 때문이다.
 
 | 서비스 | 컨테이너 안 포트 | 사람이 보려면 |
 | --- | --- | --- |
-| mediamtx HLS | 8888 | **닫혀 있다.** 화면은 WebRTC로 본다. 필요해지면 nginx에 `/stream/`을 추가하고 `127.0.0.1:18888:8888`을 연다 |
+| mediamtx HLS | 8888 | **닫혀 있다.** 화면은 WebRTC로 본다 |
 | mediamtx RTSP | 8554 | **닫혀 있다.** 지금은 워커가 외부 카메라에서 당겨온다. 카메라가 서버로 직접 송출하는 방식이 되면 다시 열어야 한다 |
-| minio | 9000 / 9001 | 콘솔은 SSH 터널 |
-| llama-server | 8008 | 내부 호출 전용 |
+| minio | 9000 / 9001 | S3 API는 Tailscale 주소에 열려 있다(`100.85.0.72:19000`). 콘솔(9001)은 SSH 터널 |
+| llama-server | 8008 | **Tailscale 주소에 열려 있다**(`100.85.0.72:18008`). 개인 PC의 fastapi가 부른다 |
 | prometheus / grafana / loki / alloy | 9090 / 3000 / 3100 / 12345 | SSH 터널 |
 
 운영자 도구를 볼 때는 해당 서비스의 `ports`를 임시로 되살리고 터널을 판다:
@@ -110,6 +137,46 @@ ssh -L 9001:localhost:9001 <서버>   # MinIO 콘솔
 ```
 
 inference worker는 원래 포트를 열지 않는다. 결과가 아직 로그로만 나간다.
+
+## CCTV에는 subnet router를 거쳐 닿는다
+
+**worker가 강의실 CCTV를 직접 당긴다.** RTSP는 push가 아니라 pull이라, 카메라가 서버로
+쏘는 것이 아니라 worker가 카메라에 TCP로 접속해서 가져온다. **그래서 필요한 방향은
+GPU 서버 → CCTV다.**
+
+문제는 CCTV(`192.168.0.63`)가 개인 PC와 같은 사설망에 있는 임베디드 장치라
+**Tailscale 클라이언트를 설치할 수 없다는 것**이다. 100.x 주소를 받지 못하므로 tailnet
+안에서 이름을 가질 수 없다.
+
+**입구 카메라용 라즈베리파이가 그 망에서 subnet router 역할을 한다.** 파이는 Linux라
+Tailscale에 직접 붙고, 어차피 입구 카메라로 상주해야 하는 장비다.
+
+```text
+GPU 서버 ──Tailscale──▶ 라즈베리파이 ──192.168.0.x──▶ CCTV(192.168.0.63:80)
+```
+
+```bash
+# 라즈베리파이에서
+sudo tailscale up --advertise-routes=192.168.0.63/32
+# GPU 서버에서
+sudo tailscale up --accept-routes
+```
+
+그 뒤 **Tailscale 관리 콘솔에서 라우트를 승인해야 실제로 열린다.** 기본은 대기 상태다.
+
+**`192.168.0.0/24`가 아니라 `/32`로 CCTV 한 대만 광고한다.** 대역을 통째로 열면 GPU
+서버가 그 사설망의 모든 기기에 접근할 수 있게 된다. 공용 서버라 더 그렇다.
+
+**개인 PC를 subnet router로 쓰지 않는다.** 노트북이 꺼지면 GPU 서버가 CCTV를 못 봐
+탐지 자체가 멈춘다 — 결정 0026이 적어 둔 "개인 PC가 꺼지면 탐지 이벤트가 갈 곳을
+잃는다"보다 무거운 실패다. 파이는 상시 가동이다.
+
+**GPU 서버 자신의 LAN이 `192.168.0.x`를 쓴다면 확인이 필요하다.** `/32`는 그 서버의
+`/24` local route보다 더 구체적이라 우선하고, 같은 주소를 쓰는 그쪽 기기가 있으면
+가로챈다. `ip route get 192.168.0.63`으로 어디로 나가는지 본다.
+
+**fastapi는 이 경로를 쓰지 않는다.** 개인 PC가 CCTV와 같은 망이라 ROI 기준 화면 캡처
+(결정 0031)는 그냥 닿는다. subnet router가 필요한 것은 GPU 서버뿐이다.
 
 ## 환경변수
 
@@ -146,7 +213,7 @@ chmod 600 .docker/env/*.env
   `LLAMA_ARG_MODEL=/models/gemma.gguf`가 가리키는 파일을 호스트에 두어야 한다.
   읽기 전용 마운트라 ultralytics가 자동으로 내려받지 못한다. 의도한 것이다 —
   가중치는 이미지에도 저장소에도 넣지 않는다.
-- **`compose.main.dev.yml`의 `MTX_WEBRTCADDITIONALHOSTS`가 서버에서 닿는 주소여야 한다.**
+- **`compose.main.dev.gpu.yml`의 `MTX_WEBRTCADDITIONALHOSTS`가 서버에서 닿는 주소여야 한다.**
   아니면 실시간 영상이 브라우저에 뜨지 않는다. 위 WebRTC 절 참고.
 - **MinIO root 키를 worker와 fastapi가 공용으로 쓴다.** Grafana admin 비밀번호와 함께
   **운영 전환 전에 재발급이 필요하다.**
@@ -252,13 +319,13 @@ docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 
 | 해상도 / 품질 | 720p / JPEG 80 | 이미지 안의 `inference/config/settings.yml` |
 | 카메라당 최소 적재 간격 | 60초 | 이미지 안의 `inference/config/settings.yml` |
 | 적재 켜기 | `SNAPSHOT_ENABLED=true` | `.docker/env/worker.dev.env` (yml 기본값은 false) |
-| 보존 기간 | 30일 | `compose.main.dev.yml`의 `SNAPSHOT_RETENTION_DAYS` |
+| 보존 기간 | 30일 | `compose.main.dev.gpu.yml`의 `SNAPSHOT_RETENTION_DAYS` |
 | 버킷 | `classroom-snapshots` | 두 곳이 같은 값이어야 한다(아래) |
 
 최악의 경우(간격 캡이 계속 걸릴 때) 카메라 3대 × 12시간 기준 하루 약 259 MB,
 30일 약 7.8 GB다.
 
-**버킷 이름이 두 곳에 있다.** `compose.main.dev.yml`의 `SNAPSHOT_BUCKET`(minio-init이 만들
+**버킷 이름이 두 곳에 있다.** `compose.main.dev.gpu.yml`의 `SNAPSHOT_BUCKET`(minio-init이 만들
 버킷)과 이미지 안의 `config/settings.yml`(worker의 `object_storage_bucket`, fastapi의
 `snapshot_storage_bucket`). 갈리면 워커는 올리는데 화면에는 안 보인다. 이전에는 세
 곳이었는데, 앱 쪽 두 값이 커밋되는 yml로 옮겨가 한 곳으로 줄었다 — 버킷 이름을 바꾸려면
@@ -270,39 +337,44 @@ yml을 고치고 이미지를 다시 빌드해야 한다.
 **컨테이너 로그 회전을 걸었다**(`max-size: 10m`, `max-file: 3`). Docker `json-file`
 기본값이 무제한이라 48 GB 환경에서 조용히 쌓인다. worker가 프레임 샘플마다 로그를 남긴다.
 
-## 경로 라우팅은 nginx가 한다
+## 앞단에 reverse proxy를 두지 않는다
 
-**우리 쪽 reverse proxy(Caddy)를 두지 않기로 했다.** 앞단에 다른 팀 nginx가 이미 있고,
-같은 경로 분기를 두 겹으로 할 이유가 없다. `caddy/Caddyfile*`은 남아 있지만 어느
-compose도 마운트하지 않는다.
+**세 번 바뀌어 여기 왔다.** 기록해 둔다 — 되돌아가려는 논의가 반복되기 때문이다.
 
-그래서 **경로 분기는 nginx가 해야 한다.** 넣어 달라고 요청한 설정은
-`individual_tasks/도커구성/nginx_연동_요청.md`에 그대로 있다(저장소에 없다).
+1. 우리 쪽에 Caddy를 두고 `:80 → fastapi`로 프록시했다.
+2. 앞단에 다른 팀 nginx가 이미 있어 같은 일을 두 겹으로 할 이유가 없었다.
+   Caddy를 빼고 경로 분기를 그쪽에 요청했다(`/` → fastapi, `/n8n/` → n8n).
+3. **지금은 그 nginx도 쓰지 않는다.** 브라우저가 붙던 둘이 결정 0026으로 개인 PC로
+   갔고, **인터넷에 공개하지 않기로 하면서** 도메인·TLS·경로 분기가 전부 필요 없어졌다.
 
-| 경로 | 대상 | 비고 |
+`individual_tasks/도커구성/nginx_연동_요청.md`의 요청은 **철회 대상이다.**
+`caddy/Caddyfile*`도 이미 없다.
+
+그래서 브라우저는 tailnet 안에서 개인 PC의 포트에 직접 붙는다.
+
+| 주소 | 대상 |
+| --- | --- |
+| `http://100.119.241.93:8076` | 웹 화면·API (실시간 영상 시그널링 포함) |
+| `http://100.119.241.93:15678` | n8n 편집기. **경로 접두사가 없다**(`N8N_PATH=/`) |
+
+`N8N_PATH=/n8n/`은 nginx 전제였으므로 함께 없앴다. 접두사가 없으면 편집기가 자기 자산을
+`/assets/…`로 찾아도 그 앞에 fastapi가 없어 새어 나갈 곳이 없다.
+
+**MediaMTX가 돌려주는 `Location`에 접두사가 없던 문제**는 앞단과 무관하게 이미 풀려
+있다 — fastapi가 시그널링을 중계하면서 자기 경로로 다시 써 준다(결정 0014).
+
+### 붙이게 되면 되돌려야 할 것
+
+평문 http 전제로 고정한 값이 셋이다.
+
+| 값 | 지금 | 왜 |
 | --- | --- | --- |
-| `/` (나머지 전부) | `127.0.0.1:8076` → `fastapi:8001` | 실질적인 기능은 여기 안에서 쓴다 |
-| `/n8n/*` | `127.0.0.1:15678` → `n8n:5678` | 접두사를 떼지 않고 그대로 넘긴다 |
+| `PLAYBACK_SESSION_COOKIE_SECURE` | `false` | true면 평문 http에서 브라우저가 세션 cookie를 보내지 않아 영상 재생이 조용히 실패한다 |
+| `N8N_SECURE_COOKIE` | `false` | 같은 이유로 n8n 로그인 세션이 깨진다 |
+| uvicorn `FORWARDED_ALLOW_IPS` | 미설정 | 기본값이 `127.0.0.1`이라 컨테이너 network를 타고 온 `X-Forwarded-*`를 무시한다 |
 
-HLS(`/stream/*`)는 요청서에서 뺐다. 화면이 WebRTC로만 보기 때문이다.
-필요해지면 `location /stream/`과 `127.0.0.1:18888:8888`을 함께 되살린다.
-
-HTTPS는 nginx가 끝낸다. 도메인이 정해져도 우리 쪽은 평문 HTTP 그대로 두면 되고,
-`N8N_EDITOR_BASE_URL`·`N8N_WEBHOOK_URL`만 그 주소로 바꾼다.
-
-### 경로로 나눌 때 걸리는 것
-
-Caddy로 붙여 보며 확인한 것들이다. **nginx로 넘어가면서 같은 문제를 nginx 문법으로
-다시 풀어야 한다** — 요청서의 `location` 블록에 그렇게 적어 두었다.
-
-- **n8n은 접두사를 알아야 한다.** 그냥 프록시만 하면 편집기가 자기 자산을 `/assets/…`로
-  찾아서 fastapi로 새어 나간다. `N8N_PATH=/n8n/`을 주면 n8n이 HTML의 자산 경로를
-  전부 `/n8n/…`로 만든다. `compose.main.dev.yml`의 `n8n.environment`에 있다.
-  **로컬(`compose.main.local.yml`)은 nginx가 없어 `N8N_PATH=/`다** — 접두사 없이
-  포트로 직접 붙는다.
-- **MediaMTX가 돌려주는 `Location`에 접두사가 없었다.** Caddy·nginx로 직접 프록시할
-  때 겪던 문제인데, **지금은 fastapi가 시그널링을 중계하면서 자기 경로로 다시 써 주므로
-  앞단에서 손댈 것이 없다**(결정 0014).
+**공개 도메인을 붙이는 것은 별도 결정이 필요하다.** 앱에 인증이 없어서
+(결정 0030) URL을 아는 사람이면 학생 얼굴이 담긴 화면과 스냅샷을 그대로 볼 수 있다.
 
 ## 사용자용 실시간 영상은 WebRTC로 간다
 
@@ -335,7 +407,7 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
 
 | 환경변수 | 값 | 이유 |
 | --- | --- | --- |
-| `MTX_WEBRTCADDITIONALHOSTS` | `compose.main.dev.yml`에 직접 적혀 있다 | ICE 후보로 알릴 주소 |
+| `MTX_WEBRTCADDITIONALHOSTS` | `compose.main.dev.gpu.yml`에 직접 적혀 있다 | ICE 후보로 알릴 주소 |
 | `MTX_WEBRTCIPSFROMINTERFACES` | `no` | 컨테이너 사설 IP가 후보로 새는 것을 막는다 |
 | `MTX_WEBRTCLOCALUDPADDRESS` | `:18189` | 미디어. 기본값 8189가 아니라 5자리로 옮겼다 |
 | `MTX_WEBRTCLOCALTCPADDRESS` | `:18189` | UDP가 막힌 망을 위한 폴백. 기본은 꺼져 있다 |
@@ -355,10 +427,13 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
 **이 머신에 NVIDIA GPU가 없다**(`nvidia-smi` 없음). GPU가 실제로 붙는지는 공용 서버에서만
 확인할 수 있다. 그 외는 GPU 없이 돌 수 있는 데까지 실제로 띄워서 확인했다.
 
-**아래 라우팅 검증은 Caddy가 있던 시점의 기록이다.** Caddy를 빼고 경로 분기를 nginx로
-넘긴 뒤로는 **다시 확인하지 않았다.** 검증 자체(무엇이 통했고 무엇이 걸렸는지)는 그대로
-유효하지만, 지금 그 일을 하는 주체는 nginx이고 그쪽 설정은 아직 들어가지 않았다.
+**아래 라우팅 검증은 Caddy가 있던 시점의 기록이다.** Caddy를 뺀 뒤로도, 앞단에
+proxy를 아예 두지 않기로 한 뒤로도 **다시 확인하지 않았다.** 검증 자체(무엇이 통했고
+무엇이 걸렸는지)는 그대로 유효하지만 경로 앞단이 이제 없다.
 포트 번호도 5자리로 옮겨서(`8189` → `18189`) 아래 로그의 번호와 다르다.
+
+**호스트 분할(결정 0026) 이후의 구성은 아직 아무것도 실행으로 확인하지 않았다.**
+`docker compose config` 통과만 확인했다. 확인해야 할 것은 아래 "안 한 것"에 있다.
 
 확인한 것:
 
@@ -430,29 +505,88 @@ MediaMTX 설정은 커스텀 `mediamtx.yml` 대신 `MTX_<파라미터명 대문�
 - **MinIO를 내렸을 때** API는 503 `SNAPSHOT_STORAGE_UNAVAILABLE`, 화면은 "조회하지
   못했습니다"로 빈 상태와 구분되는 것
 - n8n 편집기의 실제 조작과 워크플로 저장. HTTP 응답과 자산 로딩까지만 봤다.
-- **Caddy를 뺀 뒤의 기동.** 경로 분기를 nginx로 넘기고 호스트 포트를 5자리로 옮긴
-  구성은 아직 띄워 보지 않았다. 서버에서 이 순서로 확인한다:
-
-  ```bash
-  docker compose -f .docker/compose.main.dev.yml up -d
-  curl -i http://127.0.0.1:8076/health          # 우리 쪽 (nginx 없이)
-  curl -i http://127.0.0.1:15678/n8n/           # n8n
-  curl -i http://116.42.115.24:<nginx 포트>/health   # 전체 경로 (nginx 설정 후)
-  ```
-
-- **nginx 쪽 설정.** 요청서를 고쳐 두었을 뿐 그 팀이 적용했는지는 모른다.
-  `location` 셋이 들어가기 전에는 `/n8n/`과 실시간 영상이 동작하지 않는다.
-- HTTPS·도메인 경로. 계속 평문 HTTP로만 확인했다. TLS는 nginx가 끝내는 구성이다.
+- n8n 편집기의 실제 조작과 워크플로 저장. HTTP 응답과 자산 로딩까지만 봤다.
 - **WebRTC 미디어가 실제로 흐르는 것.** 시그널링(WHEP)과 ICE 후보까지만 봤다.
   DTLS 핸드셰이크부터 영상 재생까지는 브라우저나 WebRTC 클라이언트가 필요하다.
-  서버에 올린 뒤 브라우저로 확인한다.
-- Prometheus 스크랩 대상. 여전히 자기 자신뿐이다 — 어떤 서비스도 `/metrics`를
-  노출하지 않는다(`monitoring/internal/README.md` "구현 전").
+- **subnet router를 거쳐 CCTV에 닿는 것.** 라즈베리파이가 아직 서지 않았다.
+  현재 worker 로그는 `No route to host`를 3초 간격으로 반복한다 — **설정이 아니라
+  경로가 없어서다.** 파이를 세운 뒤 아래로 확인한다.
+
+  ```bash
+  # GPU 서버에서 — 라우트가 실제로 들어왔는지
+  tailscale status | grep -i route
+  ip route get 192.168.0.63
+
+  # 포트가 열리는지 (RTSP가 554가 아니라 80이다)
+  nc -vz 192.168.0.63 80
+
+  # 영상이 실제로 오는지
+  ffprobe -rtsp_transport tcp "rtsp://<계정>:<비밀번호>@192.168.0.63:80/rtsp/streaming?channel=07"
+  ```
+
+  **라우트 승인을 잊기 쉽다.** 파이에서 광고해도 Tailscale 관리 콘솔에서 승인하기
+  전에는 대기 상태로 남아 GPU 서버에 들어오지 않는다.
+- **worker -> fastapi 탐지 이벤트 전송.** 카메라가 붙지 않아 보낼 것이 없다.
+  주소(`FASTAPI_URL`)는 바꿔 뒀고 반대 방향(Prometheus -> fastapi)이 같은 경로로
+  통하는 것은 확인됐으므로, 남은 것은 이벤트가 실제로 실릴 때의 동작이다.
+
+### 호스트 분할(결정 0026) 구성을 실제로 띄워 확인했다
+
+2026-08-22, 양쪽 스택을 모두 올린 상태에서 확인했다.
+
+- **포트가 의도한 인터페이스에만 묶인다.** 서버에서 `ss -lntp`로 실측:
+  `18100`·`19000`·`18889`·`18008`은 `100.85.0.72`에만, `18189`만 `0.0.0.0`에 LISTEN.
+  공용 서버의 공인 IP로는 넷 다 열리지 않는다.
+- **Windows Docker Desktop에서 특정 IP bind가 먹는다.** 노트북의 fastapi·n8n이
+  `127.0.0.1`과 `100.119.241.93` 두 주소에 동시에 묶였고 양쪽 다 응답한다.
+- **개인 PC 컨테이너 -> GPU 서버 넷 다 통한다.** fastapi 컨테이너 안에서:
+
+  | 대상 | 응답 |
+  | --- | --- |
+  | `100.85.0.72:18100/health` (deeplearning) | 200 `{"status":"ok"}` · 20ms |
+  | `100.85.0.72:19000/minio/health/live` | 200 · 11ms |
+  | `100.85.0.72:18008/health` (llama-server) | 200 `{"status":"ok"}` · 13ms |
+  | `100.85.0.72:18889/camera-01/whep` (mediamtx) | 405 · 13ms — GET이라 정상이다. WHEP은 POST다 |
+
+  bridge network에서 호스트를 거쳐 tailnet으로 나가는 경로가 그대로 동작한다.
+- **스냅샷 읽기가 호스트를 넘어 실제로 된다.** `GET /api/v1/snapshots`가 GPU 서버
+  MinIO의 목록을 돌려주고, 이미지 프록시도 통했다 —
+  `GET /api/v1/snapshots/image/...` 200, 31,927 B JPEG(640×480), **47ms.**
+  결정 0026이 "GPU 서버 -> 개인 PC -> 브라우저로 두 번 이동한다"고 우려한 구간인데
+  실측은 견딜 만하다.
+- **Prometheus가 개인 PC의 fastapi를 스크랩한다.** target
+  `http://100.119.241.93:8076/metrics`가 `up`. GPU 서버 -> 개인 PC 방향이 실제로 열려 있다는
+  뜻이므로, 같은 경로를 쓰는 worker의 탐지 이벤트 전송도 주소는 맞다.
+- **카메라 자격 증명이 로그에 평문으로 남지 않는다.** worker의 연결 실패 로그를
+  200줄 뒤져 비밀번호 문자열이 나오지 않는 것을 확인했다. 로그는 Loki로도 가므로 중요하다.
+
+**같이 드러난 것 — 서버의 `:latest` 이미지 둘이 낡았다.** 호스트 분할과 무관한
+기존 문제이며, Prometheus 타겟 둘이 `down`인 원인이다.
+
+| 이미지 | 서버 빌드 시각 | 문제 |
+| --- | --- | --- |
+| `worker:latest` | 2026-08-12 | `9101`을 열지 않는다. 지표 노출은 08-18 커밋 `34c5d98`로 들어왔다 |
+| `deeplearning:latest` | 2026-08-18 05:06 | `/metrics`가 404. OpenAPI에 경로 자체가 없다. 지표는 같은 날 커밋 `748ca7f`로 들어왔다 |
+
+**CLAUDE.md와 `monitoring/internal/README.md`는 둘 다 지표를 노출한다고 적고 있다.**
+소스는 맞지만 **서버에 올라간 이미지가 그 커밋 이전이다.** worker 이미지는 CI가 자동
+빌드하지 않으므로(결정 0014, 크기 때문) 손으로 다시 빌드해 올려야 한다.
 
 ## 정하지 않고 남긴 것
 
+- **입구 카메라(라즈베리파이 웹캠)를 어느 방향으로 넣을 것인가.** 파이가 RTSP 서버를
+  띄워 worker가 당길지, 파이의 ffmpeg가 GPU 서버 MediaMTX로 밀어 넣을지 정해지지 않았다.
+  **밀어 넣는 쪽을 고르면 MediaMTX RTSP publish(8554)를 Tailscale 주소에 열어야 한다** —
+  지금은 닫혀 있다. 당기는 쪽이면 `STREAM_SOURCES`에 항목을 하나 더 붙이면 끝이다.
+  카메라 역할 구분(입구는 좌석을 판정하지 않는다)은 결정 0024에 있다.
+- **개인 PC가 꺼져 있을 때 worker의 동작.** 지금은 제한 재시도 뒤 버린다.
+  버퍼링할지, 얼마나 들고 있을지, 복구되면 밀린 것을 보낼지가 정해져 있지 않다
+  (결정 0026의 남은 일).
+- **개인 PC가 꺼졌을 때의 알림.** Prometheus의 fastapi target이 `up=0`이 되는데,
+  이것을 장애로 볼지 정상으로 볼지 정해지지 않았다. 노트북이라 늘 켜져 있지 않다.
 - **스냅샷 버킷의 접근 권한.** 지금은 worker와 fastapi가 모두 MinIO root 키로 붙는다.
   쓰기(worker)와 읽기(fastapi)를 나눈 전용 키가 필요하다.
+  **호스트 분할로 더 급해졌다** — MinIO S3 API가 이제 호스트 포트로 열려 있다.
 - **어떤 GGUF를 `gemma.gguf`로 둘 것인가.** 파일명은 `compose.llm.dev.yml`에
   고정했고 바꾸지 않는다 — 모델을 바꿀 때마다 compose를 고치면 서버와 저장소가
   어긋난다. **받은 가중치를 `models/gemma.gguf`로 이름을 바꿔 두고, 무엇을 두었는지

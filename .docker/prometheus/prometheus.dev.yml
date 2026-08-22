@@ -1,0 +1,48 @@
+# 공용 GPU 서버(dev) 스택용 수집 설정. **로컬용은 prometheus.local.yml이다.**
+# 지표 이름·label 규칙과 무엇을 왜 재는지는 monitoring/internal/README.md가 정본이다.
+#
+# **Prometheus는 GPU 서버에 남고 fastapi는 개인 PC로 갔다**(결정 0026).
+# 그래서 target이 두 종류로 갈린다.
+#
+#   같은 호스트(GPU 서버)  -> 컨테이너 이름. backend network에서 그대로 부른다.
+#   호스트를 넘음          -> 개인 PC의 Tailscale 주소와 그쪽이 호스트에 연 포트 번호.
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # 웹앱. 앱과 같은 포트에 /metrics를 연다. METRICS_ENABLED=true가 기본이다.
+  # 지금 나오는 것은 자연어 검색 지표뿐이다.
+  #
+  # **컨테이너 이름이 아니라 개인 PC의 Tailscale 주소를 본다.** 다른 기계라
+  # backend network로 닿지 않는다. 포트도 컨테이너 포트(8001)가 아니라 개인 PC가
+  # 호스트에 연 번호(8076)다 — compose.main.dev.pc.yml의 포트 표가 정본이다.
+  #
+  # **개인 PC가 꺼져 있으면 up=0이 된다. 장애가 아니라 정상 상태다.** 노트북이라
+  # 항상 켜져 있지 않다. 알림을 붙일 때 이 구분을 먼저 정해야 한다(결정 0026의 남은 일).
+  #
+  # **uvicorn을 워커 여러 개로 띄우면 값이 갈라진다.** 프로세스마다 레지스트리가
+  # 따로 생기고 스크랩은 그중 하나에만 닿는다. 배포 방식이 정해질 때 함께 본다.
+  - job_name: fastapi
+    static_configs:
+      - targets: ["100.119.241.93:8076"]
+
+  # n8n도 개인 PC에 있지만 job을 두지 않는다. 결정 0026은 "prometheus -> fastapi·n8n
+  # 지표"를 경계를 넘는 호출로 적었으나, **n8n의 지표 노출을 아직 켜지 않았다**
+  # (N8N_METRICS 미설정). 켜는 시점에 여기에 job을 추가한다.
+
+  # 얼굴 분석 내부 서비스. 앱과 같은 포트(8100)에 /metrics를 연다.
+  # GPU 서버 안이라 컨테이너 이름으로 부른다.
+  - job_name: deeplearning
+    static_configs:
+      - targets: ["deeplearning:8100"]
+
+  # 추론 파이프라인(stream + inference). METRICS_ENABLED=true(기본)일 때 9101을 연다.
+  # GPU 서버 안이라 컨테이너 이름으로 부른다.
+  - job_name: inference-worker
+    static_configs:
+      - targets: ["inference-worker:9101"]
