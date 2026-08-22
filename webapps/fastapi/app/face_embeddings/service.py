@@ -89,6 +89,9 @@ class FaceEmbeddingService:
     def find_by_student(self, student_id: str) -> FaceEmbedding | None:
         return self._repository.find_by_student(student_id)
 
+    def delete_for_student(self, student_id: str) -> None:
+        self._repository.delete_by_student(student_id)
+
 
 def _select_evenly(values: list[bytes], maximum: int) -> list[bytes]:
     if len(values) <= maximum:

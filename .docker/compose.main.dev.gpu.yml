@@ -73,12 +73,18 @@ volumes:
 #   확인: tailscale status / ip addr show tailscale0
 
 services:
-  # 얼굴 분석 내부 서비스(SCRFD + MediaPipe). **fastapi만 호출한다.**
+  # 얼굴 분석·식별 내부 서비스(SCRFD + ArcFace + MediaPipe).
+  # fastapi는 등록 분석을, inference-worker는 입구 카메라 식별을 호출한다.
   # **GPU를 예약하지 않는다** — app.py가 onnxruntime의 CPUExecutionProvider를
   # 고정하고 있어 GPU를 줘도 쓰지 않는다. 그래서 inference-worker와 달리
   # 드라이버 조건이 없고 GPU가 없는 호스트에서도 뜬다.
   deeplearning:
     image: ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+    env_file:
+      # MongoDB URL과 평가로 고른 식별 임계값을 넣는다. 파일이 없으면 얼굴 식별만
+      # 기본값(false)으로 꺼지고 기존 등록 분석 서비스는 그대로 뜬다.
+      - path: ./env/deeplearning.dev.env
+        required: false
     environment:
       # 가중치는 이미지에도 저장소에도 없다. .docker/models/face에 미리 올려 둔다.
       # 셋 다 실제 파일이어야 하며, 없으면 기동 시점에 죽는다(app.py의 lifespan).

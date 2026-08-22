@@ -16,12 +16,14 @@ gallery 벡터는 모델별로 공간이 다르므로 항상 같은 원본 얼�
 from __future__ import annotations
 
 import csv
+import json
 import math
 import os
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 import numpy as np
 
@@ -172,6 +174,7 @@ def evaluate_split(
     gallery: FaceGallery,
     *,
     similarity_threshold: float,
+    margin_threshold: float = 0.0,
 ) -> list[EvalRow]:
     rows: list[EvalRow] = []
     for image in images:
@@ -191,7 +194,10 @@ def evaluate_split(
                 )
             )
             continue
-        accepted = probe.top1_cosine >= similarity_threshold
+        accepted = (
+            probe.top1_cosine >= similarity_threshold
+            and probe.top1_cosine - probe.top2_cosine >= margin_threshold
+        )
         predicted_id = probe.predicted_top1_id if accepted else UNKNOWN_LABEL
         rows.append(
             EvalRow(
@@ -215,17 +221,33 @@ def _safe_ratio(numerator: int, denominator: int) -> float:
 def aggregate_metrics(rows: list[EvalRow]) -> AggregateMetrics:
     registered_rows = [row for row in rows if row.true_id != UNKNOWN_LABEL]
     unknown_rows = [row for row in rows if row.true_id == UNKNOWN_LABEL]
-    registered_success = sum(1 for row in registered_rows if row.failure_type == "correct_match")
-    registered_false_reject = sum(1 for row in registered_rows if row.failure_type == "false_reject")
-    unknown_false_accept = sum(1 for row in unknown_rows if row.failure_type == "false_accept")
-    unknown_correct_reject = sum(1 for row in unknown_rows if row.failure_type == "correct_reject")
-    recognition_times = [row.recognition_ms for row in rows if row.failure_type != "face_not_detected"]
+    registered_success = sum(
+        1 for row in registered_rows if row.failure_type == "correct_match"
+    )
+    registered_false_reject = sum(
+        1 for row in registered_rows if row.failure_type == "false_reject"
+    )
+    unknown_false_accept = sum(
+        1 for row in unknown_rows if row.failure_type == "false_accept"
+    )
+    unknown_correct_reject = sum(
+        1 for row in unknown_rows if row.failure_type == "correct_reject"
+    )
+    recognition_times = [
+        row.recognition_ms for row in rows if row.failure_type != "face_not_detected"
+    ]
     return AggregateMetrics(
         registered_success_rate=_safe_ratio(registered_success, len(registered_rows)),
-        registered_false_reject_rate=_safe_ratio(registered_false_reject, len(registered_rows)),
+        registered_false_reject_rate=_safe_ratio(
+            registered_false_reject, len(registered_rows)
+        ),
         unknown_false_accept_rate=_safe_ratio(unknown_false_accept, len(unknown_rows)),
-        unknown_correct_reject_rate=_safe_ratio(unknown_correct_reject, len(unknown_rows)),
-        average_recognition_ms=(sum(recognition_times) / len(recognition_times)) if recognition_times else 0.0,
+        unknown_correct_reject_rate=_safe_ratio(
+            unknown_correct_reject, len(unknown_rows)
+        ),
+        average_recognition_ms=(sum(recognition_times) / len(recognition_times))
+        if recognition_times
+        else 0.0,
         registered_probe_count=len(registered_rows),
         unknown_probe_count=len(unknown_rows),
     )
@@ -262,6 +284,36 @@ def write_csv(rows: list[EvalRow], path: Path) -> None:
             )
 
 
+def write_thresholds(
+    path: Path,
+    *,
+    similarity_threshold: float,
+    margin_threshold: float,
+    target_far: float,
+    model_name: str,
+    model_version: str,
+    preprocessing_version: str,
+) -> None:
+    """실시간 런타임이 그대로 읽을 수 있는 임계값 산출물을 쓴다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "similarity_threshold": similarity_threshold,
+                "margin_threshold": margin_threshold,
+                "target_far": target_far,
+                "model_name": model_name,
+                "model_version": model_version,
+                "preprocessing_version": preprocessing_version,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def build_gallery_from_directory(directory: Path, embedder: Embedder) -> FaceGallery:
     """MongoDB 없이 로컬 등록 사진 폴더(`<student_id>/*.jpg`)로 gallery를 만든다.
 
@@ -295,11 +347,14 @@ def build_embedder(*, providers: list[str] | None = None) -> Embedder:
 
     recognizer_kind = os.environ.get("FACE_RECOGNIZER", "arcface")
     if recognizer_kind not in ("arcface", "adaface"):
-        raise ValueError(f"알 수 없는 FACE_RECOGNIZER={recognizer_kind!r} (arcface 또는 adaface만 지원)")
+        raise ValueError(
+            f"알 수 없는 FACE_RECOGNIZER={recognizer_kind!r} (arcface 또는 adaface만 지원)"
+        )
 
     model_root = Path(__file__).resolve().parents[1] / ".models"
     detector_path = Path(
-        os.environ.get("FACE_DETECTION_MODEL_PATH") or model_root / "scrfd/scrfd_10g_bnkps.onnx"
+        os.environ.get("FACE_DETECTION_MODEL_PATH")
+        or model_root / "scrfd/scrfd_10g_bnkps.onnx"
     ).resolve()
     recognizer_path = Path(os.environ["FACE_RECOGNITION_MODEL_PATH"]).resolve()
     for path in (detector_path, recognizer_path):
@@ -341,7 +396,9 @@ def build_embedder(*, providers: list[str] | None = None) -> Embedder:
         if keypoints is None or len(keypoints) == 0:
             return None, 0.0
         best_index = int(np.argmax(detections[:, 4]))
-        aligned = face_align.norm_crop(image_bgr, landmark=keypoints[best_index], image_size=112)
+        aligned = face_align.norm_crop(
+            image_bgr, landmark=keypoints[best_index], image_size=112
+        )
         started = time.perf_counter()
         raw_embedding = recognizer.get_feat(aligned)
         recognition_ms = (time.perf_counter() - started) * 1000.0
@@ -360,17 +417,40 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
     from pymongo.errors import PyMongoError
 
     if expected_model_name is None:
-        expected_model_name = os.environ.get("FACE_EMBEDDING_MODEL_NAME", os.environ.get("FACE_RECOGNIZER", "arcface"))
+        expected_model_name = os.environ.get(
+            "FACE_EMBEDDING_MODEL_NAME", os.environ.get("FACE_RECOGNIZER", "arcface")
+        )
+    expected_model_version = os.environ.get(
+        "FACE_EMBEDDING_MODEL_VERSION",
+        "insightface-buffalo_l-w600k_r50-v0.7",
+    )
+    expected_preprocessing_version = os.environ.get(
+        "FACE_EMBEDDING_PREPROCESSING_VERSION",
+        "insightface-norm-crop-112-v1",
+    )
 
     mongodb_uri = os.environ.get("MONGODB_URI") or os.environ.get("DATABASE_URL", "")
-    mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get("DATABASE_NAME", "")
+    mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get(
+        "DATABASE_NAME", ""
+    )
     collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
 
     entries: list[GalleryEntry] = []
-    client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000)
+    client = MongoClient(
+        mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000
+    )
     try:
         client.admin.command("ping")
-        projection = {"_id": 0, "student_id": 1, "vector": 1, "dimension": 1, "normalized": 1, "model_name": 1}
+        projection = {
+            "_id": 0,
+            "student_id": 1,
+            "vector": 1,
+            "dimension": 1,
+            "normalized": 1,
+            "model_name": 1,
+            "model_version": 1,
+            "preprocessing_version": 1,
+        }
         for document in client[mongodb_database][collection_name].find({}, projection):
             student_id = document.get("student_id")
             if (
@@ -379,9 +459,18 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
                 or document.get("dimension") != 512
                 or document.get("normalized") is not True
                 or document.get("model_name") != expected_model_name
+                or document.get("model_version") != expected_model_version
+                or document.get("preprocessing_version")
+                != expected_preprocessing_version
             ):
-                raise RuntimeError(f"{student_id!r} 얼굴 벡터가 {expected_model_name} gallery 조건과 다릅니다.")
-            entries.append(GalleryEntry(student_id, np.asarray(document.get("vector"), dtype=np.float32)))
+                raise RuntimeError(
+                    f"{student_id!r} 얼굴 벡터가 {expected_model_name} gallery 조건과 다릅니다."
+                )
+            entries.append(
+                GalleryEntry(
+                    student_id, np.asarray(document.get("vector"), dtype=np.float32)
+                )
+            )
     except PyMongoError as exc:
         raise RuntimeError("MongoDB 연결/조회에 실패했습니다.") from exc
     finally:
@@ -391,7 +480,9 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
     return FaceGallery.from_entries(entries)
 
 
-def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[Embedder, FaceGallery]:
+def build_embedder_and_gallery(
+    *, providers: list[str] | None = None
+) -> tuple[Embedder, FaceGallery]:
     """`build_embedder()` + `build_mongo_gallery()`를 함께 만든다 (기존 호출부 호환용)."""
     embedder = build_embedder(providers=providers)
     gallery = build_mongo_gallery()
@@ -399,6 +490,9 @@ def build_embedder_and_gallery(*, providers: list[str] | None = None) -> tuple[E
 
 
 def main() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).with_name(".env"))
     known_validation_dir = Path(os.environ["FACE_EVAL_KNOWN_VALIDATION_DIR"])
     unknown_validation_dir = Path(os.environ["FACE_EVAL_UNKNOWN_VALIDATION_DIR"])
     known_test_dir = Path(os.environ["FACE_EVAL_KNOWN_TEST_DIR"])
@@ -406,37 +500,97 @@ def main() -> None:
     target_far = float(os.environ.get("FACE_EVAL_TARGET_FAR", "0.001"))
     output_csv = Path(
         os.environ.get("FACE_EVAL_OUTPUT_CSV")
-        or Path(__file__).resolve().parents[1] / "training/runs/face_identification/eval.csv"
+        or Path(__file__).resolve().parents[1]
+        / "training/runs/face_identification/eval.csv"
+    )
+    threshold_output = Path(
+        os.environ.get("FACE_EVAL_THRESHOLD_OUTPUT")
+        or output_csv.with_name("thresholds.json")
     )
 
     embedder = build_embedder()
     gallery_source = os.environ.get("FACE_EVAL_GALLERY_SOURCE", "mongodb")
     if gallery_source == "directory":
         # MongoDB에 실제 등록 데이터가 없을 때(dry-run) 로컬 등록 사진 폴더로 gallery를 만든다.
-        gallery = build_gallery_from_directory(Path(os.environ["FACE_EVAL_GALLERY_DIR"]), embedder)
+        gallery = build_gallery_from_directory(
+            Path(os.environ["FACE_EVAL_GALLERY_DIR"]), embedder
+        )
     elif gallery_source == "mongodb":
         gallery = build_mongo_gallery()
     else:
-        raise ValueError(f"알 수 없는 FACE_EVAL_GALLERY_SOURCE={gallery_source!r} (mongodb 또는 directory만 지원)")
+        raise ValueError(
+            f"알 수 없는 FACE_EVAL_GALLERY_SOURCE={gallery_source!r} (mongodb 또는 directory만 지원)"
+        )
 
     known_validation = load_split(known_validation_dir, labeled=True)
     unknown_validation = load_split(unknown_validation_dir, labeled=False)
     validation_scores = [
-        score for score in (score_probe(image, embedder, gallery) for image in known_validation + unknown_validation)
+        score
+        for score in (
+            score_probe(image, embedder, gallery)
+            for image in known_validation + unknown_validation
+        )
         if score is not None
     ]
-    unknown_validation_scores = [score for score in validation_scores if score.true_id is None]
-    threshold = select_threshold_for_far(
+    unknown_validation_scores = [
+        score for score in validation_scores if score.true_id is None
+    ]
+    similarity_threshold = select_threshold_for_far(
         (score.top1_cosine for score in unknown_validation_scores),
         target_far=target_far,
     )
+    wrong_known_validation_scores = [
+        score
+        for score in validation_scores
+        if score.true_id is not None and score.predicted_top1_id != score.true_id
+    ]
+    margin_threshold = (
+        select_threshold_for_far(
+            (
+                score.top1_cosine - score.top2_cosine
+                for score in wrong_known_validation_scores
+            ),
+            target_far=target_far,
+        )
+        if wrong_known_validation_scores
+        else 0.0
+    )
 
-    test_images = load_split(known_test_dir, labeled=True) + load_split(unknown_test_dir, labeled=False)
-    rows = evaluate_split(test_images, embedder, gallery, similarity_threshold=threshold)
+    test_images = load_split(known_test_dir, labeled=True) + load_split(
+        unknown_test_dir, labeled=False
+    )
+    rows = evaluate_split(
+        test_images,
+        embedder,
+        gallery,
+        similarity_threshold=similarity_threshold,
+        margin_threshold=margin_threshold,
+    )
     write_csv(rows, output_csv)
+    model_name = os.environ.get(
+        "FACE_EMBEDDING_MODEL_NAME", os.environ.get("FACE_RECOGNIZER", "arcface")
+    )
+    model_version = os.environ.get(
+        "FACE_EMBEDDING_MODEL_VERSION",
+        "insightface-buffalo_l-w600k_r50-v0.7",
+    )
+    preprocessing_version = os.environ.get(
+        "FACE_EMBEDDING_PREPROCESSING_VERSION",
+        "insightface-norm-crop-112-v1",
+    )
+    write_thresholds(
+        threshold_output,
+        similarity_threshold=similarity_threshold,
+        margin_threshold=margin_threshold,
+        target_far=target_far,
+        model_name=model_name,
+        model_version=model_version,
+        preprocessing_version=preprocessing_version,
+    )
     metrics = aggregate_metrics(rows)
 
-    print(f"selected_similarity_threshold={threshold:.4f}")
+    print(f"selected_similarity_threshold={similarity_threshold:.4f}")
+    print(f"selected_margin_threshold={margin_threshold:.4f}")
     print(f"registered_success_rate={metrics.registered_success_rate:.4f}")
     print(f"registered_false_reject_rate={metrics.registered_false_reject_rate:.4f}")
     print(f"unknown_false_accept_rate={metrics.unknown_false_accept_rate:.4f}")
@@ -445,6 +599,7 @@ def main() -> None:
     print(f"registered_probe_count={metrics.registered_probe_count}")
     print(f"unknown_probe_count={metrics.unknown_probe_count}")
     print(f"csv_written_to={output_csv}")
+    print(f"thresholds_written_to={threshold_output}")
 
 
 if __name__ == "__main__":

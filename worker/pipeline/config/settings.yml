@@ -11,6 +11,11 @@ inference_poll_timeout_seconds: 0.5
 # 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다
 inference_max_consecutive_failures: 5
 
+# 얼굴 식별 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의 FACE_IDENTITY_URL이
+# 소유하고, 비워 두면 기능을 끈다. 실패하면 사람 탐지 결과는 그대로 전송한다.
+face_identity_timeout_seconds: 5.0
+face_identity_jpeg_quality: 95
+
 # 지표 노출(Prometheus). 워커는 웹 서버가 아니라서 켜면 전용 포트에 /metrics만 연다.
 # 나가는 값은 처리량·지연 같은 집계 숫자뿐이며 개인을 식별하는 값은 담기지 않는다.
 metrics_enabled: true

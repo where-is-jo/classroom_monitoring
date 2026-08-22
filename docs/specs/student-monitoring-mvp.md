@@ -50,15 +50,17 @@ MVP의 범위, 도메인 구조, 계약, 완료 조건을 정한다.
 | 좌석 관측 | batch 전체 선검증, event ID 멱등 처리, 오래된 관측은 현재 상태를 되돌리지 않음 |
 | 모니터링·검색 | `DEMO_MODE_ENABLED=true`인 local/dev의 고정 합성 데이터. 실제 스트림·의미 검색이 아니다 |
 | `worker/stream` | 다중 RTSP 수신·재연결·프레임 샘플링 |
-| `worker/inference` | 프레임 버퍼에서 최신 프레임을 꺼내 YOLOv8n으로 탐지. `FASTAPI_URL` 설정 시 내부 API로 제한 재시도하며 전달 |
+| `worker/inference` | 최신 프레임을 YOLOv8n으로 탐지. 설정된 입구 카메라는 deeplearning HTTP로 얼굴 식별을 보강하고 `FASTAPI_URL`로 전달. 식별 장애 시 사람 탐지는 계속 전달 |
 | `worker/recorder` | FFmpeg 세그먼트를 객체 저장소에 적재하고 보존 기간 경과분 삭제 |
-| `deeplearning` | SCRFD 얼굴 검출·MediaPipe 자세 내부 HTTP 서비스. 나머지 품질·얼굴 인식은 미구현 |
-| 학생·얼굴·좌석 연동 | 학생 등록, 얼굴 등록 프로필, 좌석 지정, 카메라별 ROI, 합성 식별 이벤트의 `PRESENT`·`WRONG_SEAT`·`UNKNOWN` REST/SSE가 구현됨. 실제 얼굴 식별 모델과 `ABSENT`는 미구현 |
+| `deeplearning` | SCRFD·ArcFace 오픈셋 식별, 얼굴 track, MongoDB 대표 embedding 갤러리, MediaPipe 자세와 모델 비교 평가 하네스 구현 |
+| 학생·얼굴·좌석 연동 | 학생 등록·대표 embedding·좌석 지정·ROI·상태 REST/SSE와 입구 특정 학생 식별 이벤트 경로 구현. 카메라 간 신원 인계와 시간표 기반 `ABSENT`는 미구현 |
 
-현재 핵심 단절은 셋이다 — 실제 얼굴 식별 모델이 `student_id`·식별 신뢰도 필드를 채우지
-못하는 것, 트래킹이 없는 것, **입구 track과 CCTV track을 잇는 방법이 정해지지 않은 것**
-([0025](../architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 셋째가 가장 크다. worker → FastAPI HTTP 전달과 FastAPI의 ROI·좌석 지정 기반 상태
-판정은 구현됐다
+입구 카메라 안에서는 얼굴 track에 `student_id`와 식별 신뢰도를 채워 FastAPI 이벤트로
+보낼 수 있다([0035](../architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+현재 핵심 단절은 교실 사람 트래킹과 **입구 track을 CCTV track에 안전하게 잇는 방법**이다
+([0025](../architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)).
+따라서 특정 학생의 입구 통과는 탐지할 수 있지만 좌석까지 같은 신원을 유지하지는 못한다.
+worker → FastAPI HTTP 전달과 FastAPI의 ROI·좌석 지정 기반 상태 판정은 구현됐다
 ([결정 0027](../architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다),
 [결정 0019](../architecture/decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)).
 
@@ -304,20 +306,21 @@ POST /internal/inference/events
 평가 요청이나 탐지 이벤트 수신에서만 일어난다. 조회가 부작용을 일으키면 화면을
 두 번 연 것과 한 번 연 것의 결과가 달라진다.
 
-## MongoDB 컬렉션 (`예정`)
+## MongoDB 컬렉션
 
 | 컬렉션 | 내용 | 상태 |
 | --- | --- | --- |
 | `classrooms` | 강의실 | 구현됨 |
-| `seats` | 좌석과 geometry. **좌석 ROI 필드 추가 `예정`** | 일부 구현됨 |
+| `seats` | 좌석과 배치도 geometry | 구현됨 |
 | `seat_observation_batches` | 관측 batch 멱등성 키 | 구현됨 |
 | `seat_occupancy_history` | 좌석 점유 이력 | 구현됨 |
-| `students` | 학생 원장 | `예정` |
-| `seat_assignments` | 좌석-학생 지정 | `예정` |
-| `face_enrollment_sessions` | 얼굴 등록 세션 | `예정` |
-| `face_profiles` | 학생별 embedding과 모델 버전 | `예정` |
-| `detection_events` | 수신한 탐지 결과 | `예정` |
-| `student_state_history` | 학생 상태 전이 이력 | `예정` |
+| `students` | 학생 원장 | 구현됨 |
+| `seat_assignments` | 좌석-학생 지정 | 구현됨 |
+| `face_enrollments` | 얼굴 등록 세션 | 구현됨 |
+| `face_profiles` | 학생별 얼굴 등록 프로필 | 구현됨 |
+| `face_embeddings` | 학생별 대표 embedding과 모델·전처리 버전 | 구현됨. deeplearning이 읽기 전용 갤러리로 조회 |
+| `detection_events` | 수신한 탐지 결과 | 구현됨 |
+| `student_state_history` | 학생 상태 전이 이력 | 구현됨 |
 | `class_sessions` | 수업 시간대 | `예정` |
 | `admin_reviews` | 관리자 확인·보정 기록 | `예정` |
 
@@ -334,9 +337,9 @@ POST /internal/inference/events
 | 강의실 현황 | `/classrooms` | 강의실 선택, 좌석 지도, 좌석별 지정 학생과 상태, 재석·잘못된 자리·부재·확인 필요 집계, 마지막 관측 시각 |
 | 실시간 모니터링 | `/monitoring` | 카메라별 영상 영역, 연결 상태, 마지막 상태 시각, demo 여부 |
 | 검색 | `/video-search` | 검색 문장과 기간·강의실 조건, 결과와 일치 이유 |
-| 학생 관리 | `/students` (`예정`) | 학생 목록·등록·수정, 얼굴 등록 여부 |
-| 좌석 지정 | `/classrooms/seat-assignments` (`예정`) | 좌석에 학생 지정·해제 |
-| 얼굴 등록 | `/students/{student_id}/face-enrollment` (`예정`) | 샘플 수집, 품질 판정 결과, 등록 완료 |
+| 학생 관리 | `/students` | 학생 목록·등록, 얼굴 등록 여부 |
+| 좌석 지정 | `/classrooms/seat-assignments` | 좌석에 학생 지정·해제 |
+| 얼굴 등록 | `/students/{student_id}/face-enrollment` | 샘플 수집, 품질 판정 결과, 등록 완료 |
 
 화면 규칙:
 
@@ -439,8 +442,8 @@ POST /internal/inference/events
 | `webapps/fastapi` | 기능 디렉터리 3개 추가, `classrooms` 확장, 화면 추가 |
 | API 계약 | 추가. 기존 `classrooms` 응답은 **필드 추가만** 한다. 삭제·이름 변경은 깨는 변경 |
 | 데이터 | MongoDB 컬렉션 8개 추가. **얼굴 데이터는 별도 권한 경계가 필요하다** |
-| `deeplearning` | 얼굴 탐지·인식 구현. 트래킹과 신원 인계를 여기에 둘지 `결정 필요` |
-| `worker/inference` | 모델 호출을 `deeplearning`으로 이관, 트래킹 추가(위치 `결정 필요`), `track_id` 전달 |
+| `deeplearning` | SCRFD·ArcFace 갤러리 식별과 얼굴 track 구현. CCTV 사람 tracking·신원 인계는 실험 코드만 있음 |
+| `worker/inference` | 입구 얼굴 식별을 deeplearning HTTP로 호출하고 `track_id`·신원 전달. 사람 탐지 모델 이관은 남음 |
 | `worker/stream` | 어안 CCTV 수신 추가. 왜곡 보정을 여기서 할지 `결정 필요` |
 | 입구 카메라 노드 | 라즈베리파이 + 웹캠의 RTSP 송출 구성. 저장소에 코드가 없다 |
 | `monitoring` | 식별 성공률·추론 지연에 더해 track 유실률·인계 성공률·평균 track 수명 추가(`예정`) |

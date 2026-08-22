@@ -13,8 +13,13 @@
                                                           ▼
                                                       YOLOv8n
                                                           │
+                              지정 입구 카메라만           ▼
+                              deeplearning HTTP ◀── 사람 bbox + JPEG
+                                      │             (SCRFD · ArcFace · 갤러리)
+                                      └──────────▶ student_id 보강
+                                                          │
                                                           ▼
-                                                    탐지 결과 로그
+                                            FastAPI HTTP 또는 탐지 결과 로그
 ```
 
 설정을 읽고 객체를 조립하는 코드를 여기 한 곳에 모은다. 워커 안에서 서로를
@@ -45,7 +50,8 @@ python -m pipeline.main
 > **직접 확인한 것**: 필수 환경변수가 없을 때 종료 코드 1로 멈추는 것,
 > ultralytics가 없을 때 무엇을 설치해야 하는지 알리고 멈추는 것,
 > 수신 → 샘플링 → 버퍼 → 소비자까지 실제 컴포넌트로 잇는 통합 테스트.
-> **확인하지 못한 것**: 실제 카메라와 실제 YOLO 가중치를 붙인 동작.
+> 얼굴 식별 보강·대상 카메라 제한·장애 시 원본 탐지 통과는 대역 HTTP로 검증했다.
+> **확인하지 못한 것**: 실제 카메라와 실제 YOLO·얼굴 인식 가중치를 붙인 동작.
 > 장비와 모델이 있는 사람이 확인한 뒤 이 문단을 갱신한다.
 
 ## 환경변수와 설정
@@ -63,6 +69,10 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `frame_buffer_maxsize` | 버퍼에 담아둘 최대 프레임 수 | 기본 1 |
 | `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
 | `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
+| `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
+| `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
+| `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |
+| `face_identity_jpeg_quality` | 얼굴 식별 요청 JPEG 품질 | 기본 95 |
 | `metrics_enabled` | 지표 노출 여부 | 기본 `true` |
 | `metrics_host` | 지표 서버 바인딩 주소 | 기본 `0.0.0.0` |
 | `metrics_port` | 지표 서버 포트 | 기본 9101 |
@@ -115,6 +125,7 @@ curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
 | ultralytics 미설치·가중치 없음 | 무엇을 설치할지 알리고 종료 코드 1 |
 | 카메라 한 대 연결 실패 | 그 카메라만 재연결을 반복한다. 다른 카메라는 계속 돈다 |
 | 추론 1회 실패 | 스택을 로그로 남기고 다음 프레임으로 넘어간다 |
+| 얼굴 식별 HTTP·응답 실패 | 경고를 남기고 신원 없는 원래 사람 탐지를 FastAPI로 보낸다 |
 | 추론 연속 실패가 한계 초과 | 파이프라인 전체를 멈춘다. 프레임만 버리며 도는 상태를 두지 않는다 |
 
 ## 한 프로세스로 두는 것은 잠정 선택이다

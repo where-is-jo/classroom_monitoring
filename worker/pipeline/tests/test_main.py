@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from inference.config import InferenceSettings
 from inference.consumer import log_result
+from inference.face_identity import FaceIdentityResultHandler
 from inference.handler import FastAPIResultHandler
 from inference.snapshot import SnapshotResultHandler
 from stream.config import StreamSettings
@@ -37,7 +38,12 @@ class StubDetector:
     """모델 로딩이 없는 Yolo8nDetector 대역. 빌드 인자만 기록한다."""
 
     def __init__(
-        self, *, model_path: str, device: str, confidence_threshold: float, image_size: int
+        self,
+        *,
+        model_path: str,
+        device: str,
+        confidence_threshold: float,
+        image_size: int,
     ) -> None:
         self.model_path = model_path
         self.device = device
@@ -118,6 +124,20 @@ def test_FASTAPI_URL_설정이어도_스냅샷_핸들러를_감싼다() -> None:
 
     assert isinstance(handler, FastAPIResultHandler)
     assert isinstance(handler._inner, SnapshotResultHandler)  # type: ignore[attr-defined]
+
+
+def test_FACE_IDENTITY_URL_설정이면_기존_전송_앞에서_식별을_보강한다() -> None:
+    settings = build_inference_settings()
+
+    handler = pipeline_main.build_result_handler(
+        settings,
+        fastapi_url="http://fastapi:8000",
+        face_identity_url="http://deeplearning:8100",
+        face_identity_camera_ids=frozenset({"entry-camera"}),
+    )
+
+    assert isinstance(handler, FaceIdentityResultHandler)
+    assert isinstance(handler._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
 
 
 def test_FASTAPI_URL_미설정이면_스냅샷_설정은_기존대로_적용된다() -> None:

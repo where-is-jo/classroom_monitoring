@@ -122,6 +122,32 @@ Ultralytics 모델에 직접 전달하므로 N1을 그 경로에 그대로 배�
 소유 경계는 `deeplearning`이며, worker 통합 전에 전처리 어댑터와 원본 좌표계 유지 테스트를
 별도 변경으로 완료해야 한다. 운영 confidence는 N1 validation 기준 `0.25`다.
 
+## 얼굴 식별 모델 평가와 임계값 산출
+
+`face_identification_eval.py`는 등록 학생(known)과 미등록 인원(unknown)을 validation/test로
+고정 분리해 ArcFace 또는 AdaFace를 같은 조건으로 평가한다. validation으로 유사도와
+1·2위 margin 임계값을 고르고, test 결과 CSV와 런타임용 `thresholds.json`을 만든다.
+test 결과를 보고 다시 임계값을 고르지 않는다.
+
+```bash
+cd <저장소 루트>
+python -m deeplearning.training.face_identification_eval
+```
+
+필수 디렉터리와 모델 경로는 [`.env.example`](./.env.example)의 `FACE_EVAL_*`,
+`FACE_*_MODEL_PATH`를 따른다. known 디렉터리는 `<student_id>/*.jpg`, unknown 디렉터리는
+하위의 이미지 파일 구조다. 실제 얼굴·가중치·CSV·임계값 산출물은 커밋하지 않는다.
+MongoDB를 건드리지 않는 dry-run은 `FACE_EVAL_GALLERY_SOURCE=directory`와
+`FACE_EVAL_GALLERY_DIR=<student_id별 등록 이미지 루트>`를 쓴다.
+
+생성된 임계값 파일에는 모델명·모델 버전·전처리 버전이 함께 들어간다. 실시간 서비스의
+`FACE_IDENTITY_THRESHOLD_FILE`로 연결하며, 현재 런타임 메타데이터와 하나라도 다르면
+기동을 거부한다. 실측 데이터가 없으면 임의 임계값으로 학생 이름을 붙이지 않는다.
+
+AdaFace ONNX는 `prepare_adaface_model.py`, person re-ID 가중치는
+`prepare_person_reid.py`로 준비한다. `cross_camera_demo.py`와 tracking 노트북은 카메라 간
+인계 실험용이며 운영 파이프라인에는 연결돼 있지 않다.
+
 ## Jupyter 사용법
 
 1. **SSH로 공용 서버에 접속한다.**
@@ -204,8 +230,12 @@ training/
 ├── README.md          이 문서
 ├── requirements.txt    학습 노트북 의존성
 ├── .env.example         설정값 이름(값은 비움)
+├── face_identification_eval.py   고정 split 얼굴 식별 평가·임계값 생성
+├── adaface_recognizer.py         AdaFace ONNX 런타임 어댑터
+├── cross_camera_demo.py          카메라 간 인계 실험 진입점
 └── notebooks/
-    └── 01_person_detection_training.ipynb   사람 탐지 모델 학습 노트북
+    ├── 01_person_detection_training*.ipynb   사람 탐지 모델 학습·평가
+    └── 02_person_detection_tracking*.ipynb   단일·교차 카메라 tracking 실험
 ```
 
 ## 남은 일
@@ -219,6 +249,6 @@ training/
 ## 관련 문서
 
 - [deeplearning README](../README.md)
-- [결정 0012](../../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)
+- [결정 0029](../../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)
 - [결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다) — 공용 서버 용량 제약의 근거
 - [환경변수 규칙](../../docs/conventions/environment-convention.md)

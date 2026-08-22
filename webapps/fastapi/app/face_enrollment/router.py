@@ -6,7 +6,8 @@ from contextlib import suppress
 
 from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect, status
 
-from ..shared.dependencies import get_face_enrollment_service
+from ..face_embeddings.service import FaceEmbeddingService
+from ..shared.dependencies import get_face_embedding_service, get_face_enrollment_service
 from ..shared.templating import templates
 from .errors import (
     EnrollmentConflictError,
@@ -81,7 +82,11 @@ def get_face_profile(
 def delete_face_profile(
     student_id: str,
     service: FaceEnrollmentService = Depends(get_face_enrollment_service),
+    embedding_service: FaceEmbeddingService = Depends(get_face_embedding_service),
 ) -> Response:
+    # 식별 갤러리의 근거부터 없앤다. 프로필만 지워 대표 embedding이 남으면
+    # 사용자가 삭제한 뒤에도 다음 갤러리 갱신에서 다시 식별될 수 있다.
+    embedding_service.delete_for_student(student_id)
     service.delete_profile(student_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

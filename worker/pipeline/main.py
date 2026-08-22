@@ -16,16 +16,20 @@ from types import FrameType
 from inference.config import DEFAULT_DATA_DIR as INFERENCE_DATA_DIR
 from inference.config import InferenceSettings
 from inference.consumer import InferenceConsumer, ResultHandler, log_result
+from inference.face_identity import (
+    FaceIdentityResultHandler,
+    HttpFaceIdentifier,
+)
 from inference.handler import FastAPIResultHandler
 from inference.model import Yolo8nDetector
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
 from pydantic import ValidationError
 from shared.config_errors import format_validation_error
-from shared.object_storage.factory import build_object_storage
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
 from shared.metrics import register_frame_buffer, start_metrics_server
+from shared.object_storage.factory import build_object_storage
 from stream.config import StreamSettings
 from stream.errors import StreamWorkerError
 from stream.main import build_publisher
@@ -41,6 +45,10 @@ def build_result_handler(
     settings: InferenceSettings,
     *,
     fastapi_url: str | None = None,
+    face_identity_url: str | None = None,
+    face_identity_camera_ids: frozenset[str] = frozenset(),
+    face_identity_timeout_seconds: float = 5.0,
+    face_identity_jpeg_quality: int = 95,
 ) -> ResultHandler:
     """탐지 결과를 무엇으로 받을지 정한다.
 
@@ -71,11 +79,24 @@ def build_result_handler(
             jpeg_quality=settings.snapshot_jpeg_quality,
         )
 
-    if fastapi_url is None:
-        return handler
+    if fastapi_url is not None:
+        logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
+        handler = FastAPIResultHandler(fastapi_url, inner=handler)
 
-    logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
-    return FastAPIResultHandler(fastapi_url, inner=handler)
+    if face_identity_url is not None:
+        logger.info(
+            "사람 탐지 결과를 얼굴 식별 서비스(%s)로 보강한다.", face_identity_url
+        )
+        handler = FaceIdentityResultHandler(
+            HttpFaceIdentifier(
+                face_identity_url,
+                timeout_seconds=face_identity_timeout_seconds,
+                jpeg_quality=face_identity_jpeg_quality,
+            ),
+            camera_ids=face_identity_camera_ids,
+            inner=handler,
+        )
+    return handler
 
 
 def build_runner(
@@ -103,6 +124,11 @@ def build_runner(
         candidate = pipeline_settings.fastapi_url.strip()
         if candidate:
             fastapi_url = candidate
+    face_identity_url: str | None = None
+    if "face_identity_url" in pipeline_settings.model_fields_set:
+        candidate = pipeline_settings.face_identity_url.strip()
+        if candidate:
+            face_identity_url = candidate
 
     consumer = InferenceConsumer(
         frame_buffer=frame_buffer,
@@ -111,7 +137,16 @@ def build_runner(
         poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
         max_consecutive_failures=pipeline_settings.inference_max_consecutive_failures,
         result_handler=build_result_handler(
-            inference_settings, fastapi_url=fastapi_url
+            inference_settings,
+            fastapi_url=fastapi_url,
+            face_identity_url=face_identity_url,
+            face_identity_camera_ids=(
+                pipeline_settings.parsed_face_identity_camera_ids
+            ),
+            face_identity_timeout_seconds=(
+                pipeline_settings.face_identity_timeout_seconds
+            ),
+            face_identity_jpeg_quality=pipeline_settings.face_identity_jpeg_quality,
         ),
     )
     stream_worker = StreamWorker(

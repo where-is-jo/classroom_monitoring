@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,7 @@ from deeplearning.training.face_identification_eval import (
     score_probe,
     select_threshold_for_far,
     write_csv,
+    write_thresholds,
 )
 
 
@@ -170,7 +172,26 @@ def test_evaluate_split_and_aggregate_metrics(tmp_path: Path) -> None:
     assert metrics.average_recognition_ms == pytest.approx(5.0)
 
 
-def test_build_gallery_from_directory_averages_and_normalizes_per_student(tmp_path: Path) -> None:
+def test_evaluate_split_rejects_near_tie_below_margin(tmp_path: Path) -> None:
+    gallery = _gallery()
+    image = ProbeImage(tmp_path / "probe.jpg", "student-a")
+    embedding = _vector(0) * 0.71 + _vector(1) * 0.70
+
+    rows = evaluate_split(
+        [image],
+        lambda path: (embedding, 1.0),
+        gallery,
+        similarity_threshold=0.5,
+        margin_threshold=0.1,
+    )
+
+    assert rows[0].predicted_id == "UNKNOWN"
+    assert rows[0].failure_type == "false_reject"
+
+
+def test_build_gallery_from_directory_averages_and_normalizes_per_student(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "gallery"
     (root / "student-a").mkdir(parents=True)
     (root / "student-a" / "1.jpg").write_bytes(b"fake")
@@ -231,3 +252,26 @@ def test_write_csv_round_trip(tmp_path: Path) -> None:
     ]
     assert reader[1][0] == "a1.jpg"
     assert reader[1][6] == "correct_match"
+
+
+def test_write_thresholds_creates_runtime_artifact(tmp_path: Path) -> None:
+    output_path = tmp_path / "thresholds.json"
+
+    write_thresholds(
+        output_path,
+        similarity_threshold=0.61,
+        margin_threshold=0.08,
+        target_far=0.001,
+        model_name="arcface",
+        model_version="model-v1",
+        preprocessing_version="crop-v1",
+    )
+
+    assert json.loads(output_path.read_text(encoding="utf-8")) == {
+        "similarity_threshold": 0.61,
+        "margin_threshold": 0.08,
+        "target_far": 0.001,
+        "model_name": "arcface",
+        "model_version": "model-v1",
+        "preprocessing_version": "crop-v1",
+    }

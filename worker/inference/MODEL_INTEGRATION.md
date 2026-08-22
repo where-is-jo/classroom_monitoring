@@ -26,7 +26,7 @@
 | `student_id` | 아니요 | FastAPI 학생 원장의 내부 ID. 이름이나 학번을 대신 보내지 않음 |
 | `identity_confidence` | 아니요 | 얼굴 식별 신뢰도, `0.0 <= value <= 1.0` |
 | `face_bbox` | 아니요 | 얼굴 영역의 같은 픽셀 좌표계 bbox. 이미지나 embedding은 보내지 않음 |
-| `track_id` | 아니요 | 같은 카메라 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). 트래킹 미구현이라 지금은 항상 생략된다. 신원과 달리 단독으로도 뜻이 있으므로 식별 여부와 무관하게 보낸다 |
+| `track_id` | 아니요 | 같은 카메라 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). 입구 얼굴 식별은 `face-<번호>`를 채운다. 교실 사람 track과 카메라 간 인계는 아직 없다. 신원과 달리 단독으로도 뜻이 있어 미식별 얼굴에도 보낼 수 있다 |
 
 식별 성공이면 `student_id`와 `identity_confidence`를 함께 채우고 `face_bbox`는 선택으로
 채운다. 미식별이거나 모델 기준 미달이면 세 필드를 모두 `null`로 두거나 생략한다. 가장

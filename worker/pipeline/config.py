@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic import Field, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 from shared.settings_sources import customise_sources_with_yaml
 
 _PIPELINE_DIR = Path(__file__).resolve().parent
@@ -68,6 +73,30 @@ class PipelineSettings(BaseSettings):
     # 환경마다 다른 주소이므로 .env.{APP_ENV} 쪽에 둔다 — settings.yml에 넣지 않는다.
     fastapi_url: str = Field(default="http://127.0.0.1:8001")
 
+    # 얼굴 식별 내부 서비스 주소. 비어 있으면 사람 탐지만 유지한다. worker는 모델
+    # 종류나 갤러리 구조를 모르고 이 계약만 호출한다.
+    face_identity_url: str = Field(default="")
+    # 얼굴 인식은 입구 IDENTITY_ONLY 카메라에서만 한다. 쉼표 구분 camera_id 목록이다.
+    face_identity_camera_ids: str = Field(default="")
+    face_identity_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    face_identity_jpeg_quality: int = Field(default=95, ge=1, le=100)
+
+    @property
+    def parsed_face_identity_camera_ids(self) -> frozenset[str]:
+        return frozenset(
+            value.strip()
+            for value in self.face_identity_camera_ids.split(",")
+            if value.strip()
+        )
+
+    @model_validator(mode="after")
+    def _validate_face_identity_contract(self) -> Self:
+        if self.face_identity_url.strip() and not self.parsed_face_identity_camera_ids:
+            raise ValueError(
+                "FACE_IDENTITY_URL을 설정하면 FACE_IDENTITY_CAMERA_IDS가 필요합니다."
+            )
+        return self
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -78,5 +107,9 @@ class PipelineSettings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return customise_sources_with_yaml(
-            settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+            settings_cls,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
         )

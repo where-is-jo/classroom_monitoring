@@ -20,7 +20,7 @@
                        ┌─────────────┴─────────────┐
                        ▼                           ▼
                 ② inference worker           ③ recorder worker
-                   프레임 → 모델 호출            영상 세그먼트 → MinIO
+                   사람 탐지 → 입구 얼굴 식별     영상 세그먼트 → MinIO
                        │
                        ▼
                 탐지 결과(student_id · bbox · 신뢰도)
@@ -65,9 +65,13 @@
 `recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
 객체 저장소에 적재한 뒤, 보존 기간이 지난 것을 지운다.
 
-**아직 없는 것**: 실시간 얼굴 식별 모델 연결, 적재한 객체의 참조를 `fastapi`에 알리는
-경로. 탐지 HTTP 전달은 구현되어 `FASTAPI_URL`로 켠다
-([결정 0027](../docs/architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
+입구 카메라는 `FACE_IDENTITY_URL`과 `FACE_IDENTITY_CAMERA_IDS`를 설정하면 사람 탐지 뒤
+deeplearning의 SCRFD·ArcFace 갤러리 식별을 호출한다. 식별된 학생 ID를 포함한 최종
+탐지는 `FASTAPI_URL`로 보낸다. 얼굴 식별 서비스 장애는 사람 탐지 전송을 막지 않는다
+([결정 0035](../docs/architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+
+아직 없는 것은 입구 얼굴 track을 교실 사람 track으로 넘기는 경로다. 따라서 특정 학생을
+입구 이벤트에서 식별할 수는 있지만, 그 학생이 어느 좌석에 앉았는지는 이어 말할 수 없다.
 
 ## 워커 사이의 경계
 
@@ -75,7 +79,8 @@
 - **`inference`는 모델을 소유하지 않는다.** 프레임을 꺼내 호출하고 실패를 처리하는
   실행 단계이며, 모델 종류·가중치·전처리는 [`deeplearning`](../deeplearning/README.md)이
   가진다([결정 0009](../docs/architecture/decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)).
-  **현재 코드는 이 경계를 아직 만족하지 않는다** — `inference`가 ultralytics를 직접 부른다.
+  얼굴 식별은 내부 HTTP로 경계를 지키고, 사람 탐지만 `inference`가 ultralytics를 직접
+  부르는 잠정 예외다.
 - **`inference`는 의미를 부여하지 않는다.** `student_001, conf 0.87, bbox`까지가 출력이다.
   `PRESENT` 같은 업무 어휘를 넣지 않는다.
 - **`recorder`는 `stream`의 프레임이 아니라 MediaMTX에서 직접 받는다.** 저장 때문에
@@ -110,8 +115,8 @@
 ## 다른 서비스와의 관계
 
 - **영상 소스(강의실 카메라 / Jetson)**: 외부 시스템이다. 접속 정보는 환경변수로 주입한다.
-- **`deeplearning`**: `inference` worker가 모델을 불러 쓴다. 호출 방식(라이브러리 import /
-  별도 프로세스)은 `결정 필요`.
+- **`deeplearning`**: `inference` worker가 지정된 입구 카메라의 JPEG와 사람 bbox를 내부
+  HTTP로 보내 얼굴 식별 결과를 받는다. 모델·갤러리 구현은 worker가 알지 않는다.
 - **`fastapi`**: 탐지 결과의 소비자이자 상태 판정 주체다. worker가 HTTP로 전달한다.
 - **브라우저**: 제품 API와 탐지 SSE는 `fastapi`를 호출한다. 영상은 허용된 WebRTC
   세션에 한해 MediaMTX에 연결하며 worker를 직접 호출하지 않는다.
@@ -131,8 +136,8 @@
 상시 녹화가 성립하지 않는다. `recorder`는 코드가 남아 있으나 공용 서버에서 돌리지 않는다.
 0007의 상시 녹화와 보존 기간 30일 기본값은 0011로 대체됐다.
 
-**스냅샷 해상도·보존 기간·카메라당 최소 적재 간격은 아직 `결정 필요`다.**
-적재 주체는 `inference`이며 코드는 아직 없다.
+스냅샷은 inference가 적재하며 해상도·품질·최소 간격은 설정으로 관리한다. 보존 삭제는
+MinIO lifecycle이 수행한다.
 
 `stream`의 로컬 저장은 학습 데이터 확보를 위한 개발용이며 **기본값이 꺼져 있고
 `APP_ENV=prod`에서는 켤 수 없다.**

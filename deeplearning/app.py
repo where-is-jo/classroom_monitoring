@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import AsyncIterator
@@ -14,11 +15,17 @@ from typing import Any
 import cv2
 import mediapipe as mp
 import numpy as np
+from face_identification import (
+    FaceGalleryUnavailable,
+    FaceIdentificationConfig,
+    FaceIdentificationRuntime,
+    FaceModelMetadata,
+    MongoFaceGalleryLoader,
+)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from insightface.model_zoo import get_model
 from insightface.utils import face_align
-from pydantic import BaseModel
 
 # **상대 import를 쓰지 않는다.** 컨테이너는 `uvicorn app:app`으로 띄우므로
 # app.py가 패키지의 일부가 아니다(Dockerfile). 테스트는 `deeplearning.tests.conftest`가
@@ -29,6 +36,13 @@ from metrics import (
     record_analysis_request,
     record_embedding_request,
     render_metrics,
+)
+from pydantic import BaseModel
+
+FACE_MODEL_METADATA = FaceModelMetadata(
+    model_name="arcface",
+    model_version="insightface-buffalo_l-w600k_r50-v0.7",
+    preprocessing_version="insightface-norm-crop-112-v1",
 )
 
 
@@ -55,6 +69,18 @@ class EmbeddingResponse(BaseModel):
     model_name: str
     model_version: str
     preprocessing_version: str
+
+
+class PersonIdentityResponse(BaseModel):
+    person_index: int
+    face_bbox: tuple[int, int, int, int]
+    track_id: str
+    student_id: str | None = None
+    identity_confidence: float | None = None
+
+
+class FaceIdentificationResponse(BaseModel):
+    identities: list[PersonIdentityResponse]
 
 
 @dataclass(frozen=True)
@@ -123,16 +149,130 @@ def _recognition_model_path() -> Path:
     return path
 
 
+def _environment_bool(name: str, default: str = "false") -> bool:
+    value = os.environ.get(name, default).strip().lower()
+    if value not in {"true", "false"}:
+        raise RuntimeError(f"{name}은 true 또는 false여야 합니다.")
+    return value == "true"
+
+
+def _required_environment(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name}가 필요합니다.")
+    return value
+
+
+def _face_detection_threshold() -> float:
+    try:
+        value = float(os.environ.get("FACE_DETECTION_THRESHOLD", "0.6"))
+    except ValueError:
+        raise RuntimeError("FACE_DETECTION_THRESHOLD는 실수여야 합니다.") from None
+    if not 0.0 <= value <= 1.0:
+        raise RuntimeError("FACE_DETECTION_THRESHOLD는 0과 1 사이여야 합니다.")
+    return value
+
+
+def _identity_thresholds() -> tuple[float, float]:
+    configured_path = os.environ.get("FACE_IDENTITY_THRESHOLD_FILE", "").strip()
+    if not configured_path:
+        return (
+            float(_required_environment("FACE_IDENTITY_SIMILARITY_THRESHOLD")),
+            float(_required_environment("FACE_IDENTITY_MARGIN_THRESHOLD")),
+        )
+    path = Path(configured_path)
+    if not path.is_file():
+        raise RuntimeError("얼굴 식별 임계값 파일을 찾을 수 없습니다.")
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            values.get("model_name") != FACE_MODEL_METADATA.model_name
+            or values.get("model_version") != FACE_MODEL_METADATA.model_version
+            or values.get("preprocessing_version")
+            != FACE_MODEL_METADATA.preprocessing_version
+        ):
+            raise ValueError
+        return (
+            float(values["similarity_threshold"]),
+            float(values["margin_threshold"]),
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        raise RuntimeError(
+            "얼굴 식별 임계값 파일이 현재 모델과 호환되지 않습니다."
+        ) from None
+
+
+def _build_face_identification_runtime(
+    *, detector: Any, recognizer: Any
+) -> FaceIdentificationRuntime | None:
+    if not _environment_bool("FACE_IDENTIFICATION_ENABLED"):
+        return None
+    similarity_threshold, margin_threshold = _identity_thresholds()
+    gallery_loader = MongoFaceGalleryLoader(
+        database_url=_required_environment("FACE_GALLERY_DATABASE_URL"),
+        database_name=_required_environment("FACE_GALLERY_DATABASE_NAME"),
+        collection_name=os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings"),
+        expected_metadata=FACE_MODEL_METADATA,
+        timeout_seconds=float(os.environ.get("FACE_GALLERY_TIMEOUT_SECONDS", "5")),
+    )
+    config = FaceIdentificationConfig(
+        # 평가 하네스로 고른 값만 넣게 한다. 근거 없는 기본값으로 이름을 붙이지 않는다.
+        similarity_threshold=similarity_threshold,
+        margin_threshold=margin_threshold,
+        gallery_refresh_seconds=float(
+            os.environ.get("FACE_GALLERY_REFRESH_SECONDS", "30")
+        ),
+        detection_threshold=_face_detection_threshold(),
+        identity_min_detection_confidence=float(
+            os.environ.get("FACE_IDENTITY_MIN_DETECTION_CONFIDENCE", "0.6")
+        ),
+        minimum_face_size=int(os.environ.get("FACE_MINIMUM_SIZE", "40")),
+        preferred_face_size=int(os.environ.get("FACE_PREFERRED_SIZE", "112")),
+        minimum_blur_score=float(os.environ.get("FACE_MINIMUM_BLUR_SCORE", "20")),
+        preferred_blur_score=float(os.environ.get("FACE_PREFERRED_BLUR_SCORE", "100")),
+        uncertain_quality_threshold=float(
+            os.environ.get("FACE_UNCERTAIN_QUALITY_THRESHOLD", "0.45")
+        ),
+        use_flip_tta=_environment_bool("FACE_USE_FLIP_TTA", "true"),
+        tta_similarity_band=float(os.environ.get("FACE_TTA_SIMILARITY_BAND", "0.08")),
+        tta_margin_band=float(os.environ.get("FACE_TTA_MARGIN_BAND", "0.06")),
+        tracker_history_size=int(os.environ.get("FACE_IDENTITY_HISTORY_SIZE", "12")),
+        tracker_minimum_observations=int(
+            os.environ.get("FACE_IDENTITY_MINIMUM_OBSERVATIONS", "4")
+        ),
+        tracker_stale_frames=int(
+            os.environ.get("FACE_IDENTITY_TRACK_STALE_FRAMES", "30")
+        ),
+        minimum_face_coverage=float(
+            os.environ.get("FACE_PERSON_COVERAGE_THRESHOLD", "0.8")
+        ),
+    )
+    return FaceIdentificationRuntime(
+        detector=detector,
+        recognizer=recognizer,
+        gallery_loader=gallery_loader,
+        config=config,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     detector = get_model(str(_model_path()), providers=["CPUExecutionProvider"])
-    detector.prepare(ctx_id=-1, input_size=(640, 640), det_thresh=0.6)
+    detector.prepare(
+        ctx_id=-1,
+        input_size=(640, 640),
+        det_thresh=_face_detection_threshold(),
+    )
     app.state.detector = detector
     recognizer = get_model(
         str(_recognition_model_path()), providers=["CPUExecutionProvider"]
     )
     recognizer.prepare(ctx_id=-1)
     app.state.recognizer = recognizer
+    app.state.face_identification_runtime = _build_face_identification_runtime(
+        detector=detector,
+        recognizer=recognizer,
+    )
     app.state.landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
         mp.tasks.vision.FaceLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=str(_landmarker_path())),
@@ -373,7 +513,9 @@ async def create_embedding(request: Request) -> EmbeddingResponse:
         raise
 
 
-async def _create_embedding(request: Request, *, started_at: float) -> EmbeddingResponse:
+async def _create_embedding(
+    request: Request, *, started_at: float
+) -> EmbeddingResponse:
     content = await request.body()
     image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
@@ -402,9 +544,84 @@ async def _create_embedding(request: Request, *, started_at: float) -> Embedding
         vector=normalized.tolist(),
         dimension=int(normalized.size),
         normalized=True,
-        model_name="arcface",
-        model_version="insightface-buffalo_l-w600k_r50-v0.7",
-        preprocessing_version="insightface-norm-crop-112-v1",
+        model_name=FACE_MODEL_METADATA.model_name,
+        model_version=FACE_MODEL_METADATA.model_version,
+        preprocessing_version=FACE_MODEL_METADATA.preprocessing_version,
+    )
+
+
+def _person_bboxes(request: Request) -> tuple[tuple[int, int, int, int], ...]:
+    raw_value = request.headers.get("X-Person-Bboxes")
+    if raw_value is None:
+        raise HTTPException(status_code=400, detail="사람 bbox 목록이 필요합니다.")
+    try:
+        values = json.loads(raw_value)
+        if not isinstance(values, list) or len(values) > 100:
+            raise ValueError
+        if any(
+            not isinstance(value, list)
+            or len(value) != 4
+            or any(
+                not isinstance(item, int) or isinstance(item, bool) for item in value
+            )
+            for value in values
+        ):
+            raise ValueError
+        bboxes = tuple((value[0], value[1], value[2], value[3]) for value in values)
+        if any(bbox[0] >= bbox[2] or bbox[1] >= bbox[3] for bbox in bboxes):
+            raise ValueError
+        return bboxes
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise HTTPException(
+            status_code=400, detail="사람 bbox 목록이 올바르지 않습니다."
+        ) from None
+
+
+@app.post(
+    "/internal/face-identifications",
+    response_model=FaceIdentificationResponse,
+)
+async def identify_faces(request: Request) -> FaceIdentificationResponse:
+    """사람 bbox가 있는 JPEG에서 등록 학생 신원만 안전하게 보강한다."""
+    runtime: FaceIdentificationRuntime | None = getattr(
+        request.app.state, "face_identification_runtime", None
+    )
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="얼굴 식별 기능이 꺼져 있습니다.")
+    camera_id = request.headers.get("X-Camera-ID", "").strip()
+    if not camera_id or len(camera_id) > 128:
+        raise HTTPException(status_code=400, detail="카메라 ID가 필요합니다.")
+    person_bboxes = _person_bboxes(request)
+    content = await request.body()
+    image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=400, detail="JPEG 이미지를 해석할 수 없습니다.")
+    try:
+        identities = runtime.identify(
+            camera_id=camera_id,
+            image_bgr=image,
+            person_bboxes=person_bboxes,
+        )
+    except FaceGalleryUnavailable:
+        # DB 주소나 embedding 값은 응답과 로그에 싣지 않는다.
+        raise HTTPException(
+            status_code=503, detail="얼굴 갤러리를 사용할 수 없습니다."
+        ) from None
+    return FaceIdentificationResponse(
+        identities=[
+            PersonIdentityResponse(
+                person_index=identity.person_index,
+                face_bbox=identity.face_bbox,
+                track_id=f"face-{identity.track_id}",
+                student_id=identity.student_id,
+                identity_confidence=(
+                    None
+                    if identity.similarity is None
+                    else max(0.0, min(1.0, identity.similarity))
+                ),
+            )
+            for identity in identities
+        ]
     )
 
 

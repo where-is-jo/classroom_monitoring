@@ -50,7 +50,8 @@
   ([결정 0028](./docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
   `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
-  전달한다. 실제 얼굴 식별 모델과 트래킹은 아직 연결되지 않아 기본 출력은 사람 탐지까지다.
+  전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 deeplearning의
+  SCRFD·ArcFace 갤러리 식별로 `student_id`를 보강한다. 기본값은 꺼져 있다.
 
 ```bash
 cd webapps/fastapi
@@ -68,14 +69,16 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 `deeplearning`·LLM과 MediaMTX·MinIO·모니터링을 두고 Tailscale로 잇는다. MongoDB는 Atlas라 호스트와
 무관하다([결정 0026](./docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)). **개발·검증용 구성이며 운영 배포가 아니다.**
 
-`deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석 내부 서비스와 모델 학습용
-Jupyter 노트북이 있다
+`deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석, ArcFace 갤러리 식별
+내부 서비스와 모델 학습·얼굴 식별 평가용 Jupyter/CLI 도구가 있다
 ([결정 0029](./docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 `monitoring`, `RPAs`에는 아직 실행 코드가 없다.
-실제 얼굴 식별 모델, 트래킹, **입구 카메라와 CCTV 사이의 신원 인계**, 시간표 기반
-`ABSENT`는 구현되지 않았다. 셋째가 현재 가장 큰 미해결 항목이며 방법 자체가 아직
-`결정 필요`다([결정 0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 학생 식별 필드를 받은 뒤 ROI와 좌석 지정으로
-현재 상태를 판정하고 화면을 실시간 갱신하는 기반은 구현됐다.
+입구 카메라의 얼굴 track과 특정 학생 식별은 연결됐다. 그러나 **입구 카메라와 CCTV
+사이의 신원 인계**, 교실 사람 트래킹, 시간표 기반 `ABSENT`는 구현되지 않았다. 신원
+인계가 현재 가장 큰 미해결 항목이며 방법 자체가 아직 `결정 필요`다
+([결정 0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)).
+학생 식별 필드를 받은 뒤 ROI와 좌석 지정으로 상태를 판정하고 화면을 갱신하는 기반은
+구현됐지만, 입구 신원을 좌석까지 전달하기 전에는 둘이 이어지지 않는다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -104,7 +107,7 @@ README.md      이 문서
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
-| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD 검출·MediaPipe 자세 구현. 나머지 예정 |
+| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD·ArcFace 식별·얼굴 추적·MediaPipe 자세와 평가 하네스 구현. 교실 사람 tracking·카메라 간 인계는 미연결 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | 세 서비스 지표 수집 + Grafana 대시보드 둘(스택 상태·애플리케이션 지표). 알림 규칙은 아직 없음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 
