@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+import cv2
+
 from .core import (
     SAFE_ID_PATTERN,
     CandidateBox,
@@ -22,6 +24,7 @@ from .core import (
     write_jsonl,
 )
 from .errors import AutoLabelingError
+from .preprocessing import apply_training_preprocessing
 from .yolo import YoloBox, parse_yolo_file, validate_yolo_box, write_yolo_file
 
 
@@ -33,6 +36,7 @@ class ModelInfo:
     model_runtime: str
     model_runtime_version: str
     device: str
+    input_preprocessing: dict[str, object] | None = None
 
 
 class CandidatePredictor(Protocol):
@@ -41,7 +45,12 @@ class CandidatePredictor(Protocol):
 
 class UltralyticsPredictor:
     def __init__(
-        self, model_path: Path, *, confidence_threshold: float, device: str
+        self,
+        model_path: Path,
+        *,
+        confidence_threshold: float,
+        device: str,
+        input_preprocessing: dict[str, object] | None = None,
     ) -> None:
         try:
             from ultralytics import YOLO
@@ -53,12 +62,22 @@ class UltralyticsPredictor:
             raise AutoLabelingError("모델 가중치를 로드할 수 없습니다.") from exc
         self._confidence_threshold = confidence_threshold
         self._device = device
+        self._input_preprocessing = input_preprocessing
         self._person_class_id = _find_person_class_id(self._model.names)
 
     def predict(self, image_path: Path) -> list[CandidateBox]:
+        source: str | Any = str(image_path)
+        if self._input_preprocessing is not None:
+            image = cv2.imread(str(image_path))
+            if image is None:
+                raise AutoLabelingError("자동 라벨링 입력 이미지를 읽을 수 없습니다.")
+            source = apply_training_preprocessing(
+                image,
+                self._input_preprocessing,
+            )
         try:
             results = self._model.predict(
-                source=str(image_path),
+                source=source,
                 conf=self._confidence_threshold,
                 device=self._device,
                 verbose=False,
@@ -152,6 +171,8 @@ def run_prelabel(
     settings: Settings,
     *,
     device: str,
+    expected_model_sha256: str | None = None,
+    input_preprocessing: dict[str, object] | None = None,
 ) -> Path:
     try:
         resolved_model_path = model_path.resolve(strict=True)
@@ -159,10 +180,18 @@ def run_prelabel(
         raise AutoLabelingError("모델 가중치 파일을 찾을 수 없습니다.") from exc
     if not resolved_model_path.is_file():
         raise AutoLabelingError("모델 가중치 경로는 파일이어야 합니다.")
-    if resolved_model_path.name != settings.pilot_model_file_name:
-        raise AutoLabelingError(
-            f"V1 파일럿 모델 파일 이름은 {settings.pilot_model_file_name}이어야 합니다."
-        )
+    if resolved_model_path.suffix.lower() != ".pt":
+        raise AutoLabelingError("자동 라벨링 모델은 .pt 가중치여야 합니다.")
+    observed_model_sha256 = sha256_file(resolved_model_path)
+    if expected_model_sha256 is not None:
+        normalized_expected_sha256 = expected_model_sha256.strip().lower()
+        if len(normalized_expected_sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in normalized_expected_sha256
+        ):
+            raise AutoLabelingError("기대 모델 SHA-256 형식이 올바르지 않습니다.")
+        if observed_model_sha256 != normalized_expected_sha256:
+            raise AutoLabelingError("자동 라벨링 모델 SHA-256이 N1 계약과 다릅니다.")
     try:
         import ultralytics
     except ImportError as exc:
@@ -170,15 +199,17 @@ def run_prelabel(
     model_info = ModelInfo(
         model_path=str(resolved_model_path),
         model_file_name=resolved_model_path.name,
-        model_sha256=sha256_file(resolved_model_path),
+        model_sha256=observed_model_sha256,
         model_runtime="ultralytics",
         model_runtime_version=ultralytics.__version__,
         device=device,
+        input_preprocessing=input_preprocessing,
     )
     predictor = UltralyticsPredictor(
         resolved_model_path,
         confidence_threshold=settings.candidate_confidence_threshold,
         device=device,
+        input_preprocessing=input_preprocessing,
     )
     return generate_candidate_labels(run_dir, predictor, model_info, settings)
 
@@ -270,7 +301,11 @@ def _verify_existing_prelabel(
     manifest = read_json(manifest_path)
     if not isinstance(manifest, dict):
         raise AutoLabelingError("prelabel.json 형식이 올바르지 않습니다.")
-    if manifest.get("model") != asdict(model_info):
+    recorded_model = manifest.get("model")
+    if isinstance(recorded_model, dict) and "input_preprocessing" not in recorded_model:
+        # 구 모델 영수증은 전처리를 기록하지 않았으며 이는 전처리 없음과 같다.
+        recorded_model = {**recorded_model, "input_preprocessing": None}
+    if recorded_model != asdict(model_info):
         raise AutoLabelingError("같은 run에 다른 모델 후보 라벨이 이미 있습니다.")
     if (
         manifest.get("candidate_confidence_threshold")

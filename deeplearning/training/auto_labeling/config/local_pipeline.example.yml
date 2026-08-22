@@ -1,0 +1,28 @@
+# 상대 경로는 deeplearning/training을 기준으로 해석합니다.
+schema_version: 1
+pipeline_id: classroom-person-v009
+video_dir: data/person-pipeline/raw-v009/camera-01
+workspace_dir: data/person-pipeline/workflows/classroom-person-v009
+camera_id: camera-01
+timezone_name: Asia/Seoul
+expected_clip_seconds: 300.0
+session_gap_seconds: 60.0
+overlap_tolerance_seconds: 2.0
+allow_approved_student_data: true
+
+# 검증된 N1 가중치와 입력 계약입니다. 다른 파일로 바꾸면 SHA-256도 함께 바꿔야 합니다.
+n1_model_path: runs/person-detection/n1-yolo11n-v008-true-empty-negative17-seed42/weights/best.pt
+n1_model_sha256: 7dc378a9923562e257da9bc1f649c0d39061829c47bdc121c031da4642d535e0
+prelabel_device: cpu
+pixelation_block_size: 8
+force_full_review: true
+manual_excluded_frame_ids: []
+
+# 첫 실행 때는 아래 값을 비워 둬도 됩니다. LabelImg 검수 후 채우고
+# pipeline-local --complete-review로 재실행합니다.
+reviewer_id: null
+labelimg_executable: null
+labelimg_smoke_confirmed: false
+
+operator_id: person-detection-pipeline-auto
+approved_cohort_policy: ai-student-cohort-person-detection-v1

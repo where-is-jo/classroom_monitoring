@@ -5,10 +5,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import cv2
+import numpy as np
 import pytest
 
+from auto_labeling.core import load_settings, sha256_file
 from auto_labeling.errors import AutoLabelingError
-from auto_labeling.prelabel import UltralyticsPredictor, _find_person_class_id
+from auto_labeling.prelabel import (
+    UltralyticsPredictor,
+    _find_person_class_id,
+    run_prelabel,
+)
 
 
 class FakeTensor:
@@ -152,3 +159,122 @@ def test_find_person_class_id_rejects_missing_or_duplicate_person(
 ) -> None:
     with pytest.raises(AutoLabelingError, match="person을 하나만"):
         _find_person_class_id(names)
+
+
+def test_run_prelabel_accepts_yolo11n(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    model_path = tmp_path / "yolo11n.pt"
+    model_path.write_bytes(b"weights")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    expected = run_dir / "candidate-labels"
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ultralytics",
+        SimpleNamespace(__version__="test"),
+    )
+    monkeypatch.setattr(
+        "auto_labeling.prelabel.UltralyticsPredictor",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "auto_labeling.prelabel.generate_candidate_labels",
+        lambda *_args, **_kwargs: expected,
+    )
+
+    result = run_prelabel(
+        run_dir,
+        model_path,
+        load_settings(),
+        device="cpu",
+    )
+
+    assert result == expected
+
+
+def test_run_prelabel_accepts_verified_n1_best_weight(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    model_path = tmp_path / "best.pt"
+    model_path.write_bytes(b"n1-weights")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    expected = run_dir / "candidate-labels"
+    predictor_calls: list[dict[str, object]] = []
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ultralytics",
+        SimpleNamespace(__version__="test"),
+    )
+
+    def predictor(*_args: object, **kwargs: object) -> object:
+        predictor_calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr("auto_labeling.prelabel.UltralyticsPredictor", predictor)
+    monkeypatch.setattr(
+        "auto_labeling.prelabel.generate_candidate_labels",
+        lambda *_args, **_kwargs: expected,
+    )
+    preprocessing = {
+        "method": "uniform-full-frame-pixelation-v1",
+        "pixelation_block_size": 8,
+    }
+
+    result = run_prelabel(
+        run_dir,
+        model_path,
+        load_settings(),
+        device="cpu",
+        expected_model_sha256=sha256_file(model_path),
+        input_preprocessing=preprocessing,
+    )
+
+    assert result == expected
+    assert predictor_calls[0]["input_preprocessing"] == preprocessing
+
+
+def test_run_prelabel_rejects_wrong_n1_hash(
+    tmp_path: Path,
+) -> None:
+    model_path = tmp_path / "best.pt"
+    model_path.write_bytes(b"unexpected-weights")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    with pytest.raises(AutoLabelingError, match="N1 계약"):
+        run_prelabel(
+            run_dir,
+            model_path,
+            load_settings(),
+            device="cpu",
+            expected_model_sha256="0" * 64,
+        )
+
+
+def test_ultralytics_predictor_applies_input_preprocessing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    model = FakeModel([FakeResult(None, shape=(16, 16))], names=["person"])
+    _install_fake_ultralytics(monkeypatch, model)
+    image_path = tmp_path / "frame.jpg"
+    image = np.arange(16 * 16 * 3, dtype=np.uint8).reshape(16, 16, 3)
+    assert cv2.imwrite(str(image_path), image)
+    predictor = UltralyticsPredictor(
+        tmp_path / "best.pt",
+        confidence_threshold=0.25,
+        device="cpu",
+        input_preprocessing={
+            "method": "uniform-full-frame-pixelation-v1",
+            "pixelation_block_size": 8,
+        },
+    )
+
+    assert predictor.predict(image_path) == []
+    source = model.calls[0]["source"]
+    assert isinstance(source, np.ndarray)
+    assert source.shape == image.shape
+    assert not np.array_equal(source, image)

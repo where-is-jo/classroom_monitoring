@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 import cv2
@@ -22,6 +23,8 @@ from .core import (
 )
 from .errors import AutoLabelingError
 
+DIRECTORY_REPLACE_RETRY_DELAYS_SECONDS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0)
+
 
 def default_runs_root() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "auto-labeling" / "runs"
@@ -32,9 +35,13 @@ def prepare_run(
     settings: Settings,
     *,
     output_root: Path | None = None,
+    allow_approved_student_data: bool = False,
 ) -> Path:
     manifest_path = manifest_path.resolve(strict=True)
-    manifest = load_input_manifest(manifest_path)
+    manifest = load_input_manifest(
+        manifest_path,
+        allow_approved_student_data=allow_approved_student_data,
+    )
     manifest_sha256 = sha256_file(manifest_path)
     runs_root = (output_root or default_runs_root()).resolve()
     runs_root.mkdir(parents=True, exist_ok=True)
@@ -68,6 +75,8 @@ def prepare_run(
                     "session_id": source.session_id,
                     "captured_at": source.captured_at,
                     "subject_category": source.subject_category,
+                    "usage": source.usage,
+                    "requested_split": source.requested_split,
                     "frame_count": len(source_records),
                 }
             )
@@ -86,13 +95,36 @@ def prepare_run(
                 "sampling_interval_seconds": settings.sampling_interval_seconds,
                 "jpeg_quality": settings.jpeg_quality,
                 "sampling_policy_version": settings.sampling_policy_version,
+                "approved_student_data": any(
+                    source.subject_category == "student" for source in manifest.sources
+                ),
                 "prepared_at": utc_now_iso(),
                 "frame_count": len(frame_records),
                 "sources": sanitized_sources,
             },
         )
-        temporary_dir.replace(run_dir)
+        _replace_directory_with_retry(temporary_dir, run_dir)
     return run_dir
+
+
+def _replace_directory_with_retry(source: Path, target: Path) -> None:
+    """Windows의 일시적인 파일 잠금이 풀릴 때까지 run 발행을 제한적으로 재시도한다."""
+
+    for delay_seconds in (*DIRECTORY_REPLACE_RETRY_DELAYS_SECONDS, None):
+        try:
+            source.replace(target)
+            return
+        except PermissionError as exc:
+            if target.exists():
+                raise AutoLabelingError(
+                    "같은 run_id의 출력 디렉터리가 동시에 생성됐습니다."
+                ) from exc
+            if delay_seconds is None:
+                raise AutoLabelingError(
+                    "Windows 파일 잠금 때문에 준비된 run 디렉터리를 발행하지 "
+                    "못했습니다. 잠시 후 다시 실행하세요."
+                ) from exc
+            time.sleep(delay_seconds)
 
 
 def _verify_existing_run(run_dir: Path, manifest_sha256: str) -> None:
@@ -168,6 +200,8 @@ def _extract_source(
                         consent_scope=source.consent_scope,
                         retention_expires_at=source.retention_expires_at,
                         subject_category=source.subject_category,
+                        usage=source.usage,
+                        requested_split=source.requested_split,
                         image_path=f"frames/{frame_id}.jpg",
                         image_sha256=sha256_file(image_path),
                     )

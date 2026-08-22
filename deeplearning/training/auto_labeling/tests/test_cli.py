@@ -12,6 +12,65 @@ from auto_labeling.errors import AutoLabelingError
 @pytest.mark.parametrize(
     "arguments",
     [
+        ["scan-folder", "--input-dir", "videos", "--output-dir", "scan"],
+        [
+            "partition-sessions",
+            "--scan-dir",
+            "scan",
+            "--assignments",
+            "session_assignments.csv",
+            "--output-dir",
+            "partition",
+        ],
+        [
+            "partition-validation-extension",
+            "--scan-dir",
+            "scan",
+            "--assignments",
+            "session_assignments.csv",
+            "--output-dir",
+            "partition-val",
+            "--base-export-dir",
+            "colab-export-v001",
+        ],
+        [
+            "sample-evaluation",
+            "--manifest",
+            "evaluation_manifest.json",
+            "--output-dir",
+            "evaluation",
+        ],
+        [
+            "freeze-evaluation",
+            "--evaluation-dir",
+            "evaluation",
+            "--reviewer-id",
+            "reviewer-001",
+            "--training-dataset-dir",
+            "dataset",
+        ],
+        [
+            "export-colab",
+            "--dataset-dir",
+            "dataset",
+            "--output-dir",
+            "export",
+            "--operator-id",
+            "operator-001",
+            "--confirm-manual-privacy-review",
+        ],
+        [
+            "export-colab",
+            "--dataset-dir",
+            "dataset",
+            "--output-dir",
+            "export",
+            "--operator-id",
+            "person-detection-pipeline-auto",
+            "--approved-cohort-policy",
+            "ai-student-cohort-person-detection-v1",
+        ],
+        ["validate-privacy", "--export-dir", "export"],
         ["prepare", "--manifest", "input.json"],
         [
             "prelabel",
@@ -36,6 +95,10 @@ from auto_labeling.errors import AutoLabelingError
         ["calibrate", "--run-dir", "run", "--review-dir", "review"],
         ["publish", "--run-dir", "run"],
         ["validate", "--dataset-dir", "dataset"],
+        ["pipeline-local", "--config", "local.yml"],
+        ["pipeline-status", "--config", "local.yml"],
+        ["pipeline-train", "--config", "training.yml"],
+        ["pipeline-train-check", "--config", "training.yml"],
     ],
 )
 def test_parser_accepts_every_public_command(arguments: list[str]) -> None:
@@ -158,3 +221,63 @@ def test_main_returns_stable_error_contract(
     assert exit_code == 2
     assert captured.out == ""
     assert message in captured.err
+
+
+def test_main_dispatches_high_level_pipeline_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    local_config = object()
+    training_config = object()
+    monkeypatch.setattr(cli, "load_settings", lambda: object())
+    monkeypatch.setattr(cli, "load_local_pipeline_config", lambda _path: local_config)
+    monkeypatch.setattr(
+        cli,
+        "load_training_pipeline_config",
+        lambda _path: training_config,
+    )
+    monkeypatch.setattr(
+        cli,
+        "advance_local_pipeline",
+        lambda config, **_kwargs: {
+            "status": "waiting-for-human-review",
+            "same_config": config is local_config,
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_training_pipeline",
+        lambda config: {
+            "status": "training-complete",
+            "same_config": config is training_config,
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "check_training_readiness",
+        lambda config: {
+            "status": "ready-for-training",
+            "same_config": config is training_config,
+        },
+    )
+
+    assert cli.main(["pipeline-local", "--config", "local.yml"]) == 0
+    local_output = json.loads(capsys.readouterr().out)
+    assert local_output == {
+        "status": "waiting-for-human-review",
+        "same_config": True,
+    }
+
+    assert cli.main(["pipeline-train", "--config", "training.yml"]) == 0
+    training_output = json.loads(capsys.readouterr().out)
+    assert training_output == {
+        "status": "training-complete",
+        "same_config": True,
+    }
+
+    assert cli.main(["pipeline-train-check", "--config", "training.yml"]) == 0
+    check_output = json.loads(capsys.readouterr().out)
+    assert check_output == {
+        "status": "ready-for-training",
+        "same_config": True,
+    }

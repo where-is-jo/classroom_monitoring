@@ -1,7 +1,9 @@
 # 사람 탐지 모델 학습 노트북에 필요한 패키지.
 # 공용 GPU 서버의 torch가 이미 CUDA에 맞게 설치돼 있다면 그 환경을 그대로 쓰고
-# 이 파일로 torch를 다시 설치하지 않는다 — GPU 빌드가 CPU 전용으로 덮어써질 수 있다.
-ultralytics>=8.3
+# 이 파일의 ultralytics도 기본 설치에서는 torch를 전이 의존성으로 확인한다.
+# 서버 관리자가 승인한 CUDA torch를 유지해야 하면 먼저 pipeline-train-check로 확인하고,
+# 패키지 설치 방식은 서버 관리자와 정한다. 조사 목적으로 pip install을 실행하지 않는다.
+ultralytics>=8.3,<9
 opencv-python>=4.10
 jupyterlab>=4.0
 python-dotenv>=1.0
