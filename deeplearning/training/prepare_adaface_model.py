@@ -110,7 +110,10 @@ def export_onnx(model, output_path: Path) -> None:
         str(output_path),
         input_names=["input"],
         output_names=output_names,
-        opset_version=13,
+        # opset 13을 요청하면 torch의 dynamo exporter가 18로 내보낸 뒤
+        # 다운그레이드를 시도하다 실패하는 로그가 남는다(결과 자체는 정상
+        # 폴백되지만 에러처럼 보인다). 18을 직접 요청해 그 노이즈를 없앤다.
+        opset_version=18,
         dynamic_axes=dynamic_axes,
     )
 
