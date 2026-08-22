@@ -31,11 +31,19 @@ from app.shared.dependencies import get_student_monitoring_service
 from app.shared.student_identity import StudentIdentity
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
+    MemoryStudentStateRepository,
     MemoryVideoSegmentRepository,
 )
-from app.student_monitoring.models import Detection, DetectionEvent, FrameInfo, StudentState
+from app.student_monitoring.models import (
+    Detection,
+    DetectionEvent,
+    FrameInfo,
+    StudentState,
+    StudentStateReason,
+)
 from app.student_monitoring.service import StudentMonitoringService
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
+from app.video_monitoring.errors import VideoStreamNotFoundError
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
 CLASSROOM_ID = "classroom-a101"
@@ -140,6 +148,7 @@ def _build_context(*, assign_two_students: bool = True) -> StateContext:
         detection_repository=detection_repository,
         segment_repository=MemoryVideoSegmentRepository(),
         stream_repository=stream_repository,
+        state_repository=MemoryStudentStateRepository(),
         broadcaster=broadcaster,
         classroom_service=classroom_service,
         roi_service=roi_service,
@@ -147,7 +156,9 @@ def _build_context(*, assign_two_students: bool = True) -> StateContext:
         occupancy_hold_seconds=0,
         identity_confidence_threshold=0.7,
         stale_seconds=300,
-        recent_event_limit=500,
+        identity_hold_seconds=0,
+        absent_grace_seconds=300,
+        history_limit=50,
         clock=lambda: NOW,
         student_lookup=student_lookup,
     )
@@ -228,7 +239,12 @@ def _event(
 
 
 def _save(context: StateContext, event: DetectionEvent) -> None:
-    context.detection_repository.save(event)
+    """탐지 이벤트를 서비스 경로로 넣는다.
+
+    판정이 조회에서 수신으로 옮겨졌으므로, 저장소에 직접 넣으면 상태가 만들어지지
+    않는다. 조회가 판정하지 않는다는 것이 결정 0008이 요구한 동작이다.
+    """
+    context.service.receive_inference_event(event)
 
 
 def test_list_includes_all_assigned_students_and_unobserved_unknown() -> None:
@@ -248,7 +264,10 @@ def test_list_includes_all_assigned_students_and_unobserved_unknown() -> None:
     assert present.last_observed_at == RECENT
     assert unknown.current_state == StudentState.UNKNOWN
     assert unknown.confidence is None
-    assert unknown.last_observed_at is None
+    # 판정이 수신 시점으로 옮겨져, 식별하지 못한 학생도 "언제 본 프레임으로 판정했는지"가
+    # 남는다. 관측 자체는 있었고 신원만 없었다는 사실을 이 값이 구분해 준다.
+    assert unknown.last_observed_at == RECENT
+    assert unknown.reason == StudentStateReason.SEAT_VACANT_WITHIN_GRACE
 
 
 def test_assignment_is_truth_even_when_roi_legacy_student_differs() -> None:
@@ -272,39 +291,65 @@ def test_detection_on_other_roi_is_wrong_seat() -> None:
 
 
 @pytest.mark.parametrize(
-    "event",
+    ("event", "expected_reason"),
     [
-        _event("no-roi", (_person("det-1", (800, 800, 900, 900)),)),
-        _event(
-            "stale",
-            (_person("det-1", (150, 150, 250, 250)),),
-            captured_at=datetime(2026, 8, 13, 9, 4, 59, tzinfo=UTC),
+        (
+            _event(
+                "stale",
+                (_person("det-1", (150, 150, 250, 250)),),
+                captured_at=datetime(2026, 8, 13, 9, 4, 59, tzinfo=UTC),
+            ),
+            StudentStateReason.SEAT_NOT_OBSERVED,
         ),
-        _event(
-            "low-detection",
-            (_person("det-1", (150, 150, 250, 250), confidence=0.59),),
+        (
+            _event(
+                "low-detection",
+                (_person("det-1", (150, 150, 250, 250), confidence=0.59),),
+            ),
+            # 사람은 잡혔지만 확신이 없다. 좌석은 UNKNOWN이고 학생도 판정하지 않는다.
+            StudentStateReason.SEAT_NOT_OBSERVED,
         ),
-        _event(
-            "low-identity",
-            (_person("det-1", (150, 150, 250, 250), identity_confidence=0.69),),
+        (
+            _event(
+                "low-identity",
+                (_person("det-1", (150, 150, 250, 250), identity_confidence=0.69),),
+            ),
+            # 누군가 앉아 있지만 그가 누구인지 확신할 수 없다. 이름을 붙이지 않는다.
+            StudentStateReason.SEAT_OCCUPIED_BY_UNKNOWN,
         ),
     ],
-    ids=("no-roi", "stale", "low-detection", "low-identity"),
+    ids=("stale", "low-detection", "low-identity"),
 )
-def test_missing_stale_or_low_confidence_evidence_is_unknown(event: DetectionEvent) -> None:
+def test_stale_or_low_confidence_evidence_is_unknown(
+    event: DetectionEvent, expected_reason: StudentStateReason
+) -> None:
     context = _build_context(assign_two_students=False)
     _save(context, event)
 
     state = context.service.list_student_states(CLASSROOM_ID)[0]
 
     assert state.current_state == StudentState.UNKNOWN
+    assert state.reason == expected_reason
     assert state.current_seat_id is None
-    if event.event_id == "no-roi":
-        assert state.last_observed_at == RECENT
-        assert state.confidence == 0.9
-    else:
-        assert state.last_observed_at is None
-        assert state.confidence is None
+    assert state.confidence is None
+
+
+def test_identified_outside_every_roi_is_in_classroom() -> None:
+    """누군지 아는 사람이 좌석 밖에 있다는 것은 "모른다"와 다른 사실이다.
+
+    결정 0025의 7번이 `IN_CLASSROOM`을 MVP 범위로 올렸다. 신원 없는 좌석 밖 탐지는
+    여전히 아무의 상태도 바꾸지 않는다.
+    """
+    context = _build_context(assign_two_students=False)
+    _save(context, _event("outside", (_person("det-1", (800, 800, 900, 900)),)))
+
+    state = context.service.list_student_states(CLASSROOM_ID)[0]
+
+    assert state.current_state == StudentState.IN_CLASSROOM
+    assert state.reason == StudentStateReason.IDENTIFIED_OUTSIDE_SEATS
+    assert state.current_seat_id is None
+    assert state.confidence == 0.9
+    assert state.last_observed_at == RECENT
 
 
 def test_overlapping_rois_are_unknown() -> None:
@@ -388,27 +433,32 @@ def test_inactive_student_and_broken_seat_assignments_are_excluded() -> None:
     assert [state.student_id for state in states] == ["student-1"]
 
 
-def test_missing_camera_reference_keeps_identified_student_unknown() -> None:
+def test_missing_camera_reference_is_rejected_and_changes_no_state() -> None:
+    """등록되지 않은 카메라의 이벤트로는 어떤 학생 상태도 만들지 않는다."""
     context = _build_context(assign_two_students=False)
-    _save(
-        context,
-        _event(
-            "event-missing-camera",
-            (_person("det-1", (150, 150, 250, 250)),),
-            camera_id="missing-camera",
-        ),
-    )
+
+    with pytest.raises(VideoStreamNotFoundError):
+        context.service.receive_inference_event(
+            _event(
+                "event-missing-camera",
+                (_person("det-1", (150, 150, 250, 250)),),
+                camera_id="missing-camera",
+            )
+        )
 
     state = context.service.list_student_states(CLASSROOM_ID)[0]
 
     assert state.current_state == StudentState.UNKNOWN
-    assert state.last_observed_at == RECENT
+    assert state.last_observed_at is None
 
 
 def test_get_read_model_does_not_publish_sse() -> None:
     context = _build_context(assign_two_students=False)
     queue = context.broadcaster.subscribe()
     _save(context, _event("event-1", (_person("det-1", (150, 150, 250, 250)),)))
+    # 수신이 발행한 것은 비운다. 여기서 보려는 것은 "조회가 더 발행하는가"다.
+    while not queue.empty():
+        queue.get_nowait()
 
     context.service.list_student_states(CLASSROOM_ID)
 
@@ -462,7 +512,9 @@ def test_new_event_publishes_safe_detection_labels_and_student_state_once() -> N
         "assigned_seat_id": "seat-1",
         "assigned_seat_label": "좌석 S01",
         "current_seat_id": "seat-1",
+        "current_seat_label": "좌석 S01",
         "current_state": "PRESENT",
+        "reason": "IDENTIFIED_AT_ASSIGNED_SEAT",
         "confidence": 0.9,
         "observed_at": "2026-08-13T09:09:00+00:00",
     }
@@ -494,7 +546,10 @@ def test_student_states_endpoint_preserves_response_contract() -> None:
                 "student_no": "20260001",
                 "assigned_seat_id": "seat-1",
                 "assigned_seat_label": "좌석 S01",
+                "current_seat_id": "seat-1",
+                "current_seat_label": "좌석 S01",
                 "current_state": "PRESENT",
+                "reason": "IDENTIFIED_AT_ASSIGNED_SEAT",
                 "confidence": 0.9,
                 "last_observed_at": "2026-08-13T09:09:00Z",
             }
@@ -512,3 +567,72 @@ def test_student_states_endpoint_keeps_missing_classroom_envelope() -> None:
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "CLASSROOM_NOT_FOUND"
+
+
+def test_state_transitions_are_recorded_as_history() -> None:
+    """상태가 바뀐 순간의 근거를 되짚을 수 있어야 한다(결정 0008)."""
+    context = _build_context(assign_two_students=False)
+    _save(context, _event("event-present", (_person("det-1", (150, 150, 250, 250)),)))
+    _save(
+        context,
+        _event(
+            "event-wrong",
+            (_person("det-2", (550, 150, 650, 250)),),
+            captured_at=datetime(2026, 8, 13, 9, 9, 30, tzinfo=UTC),
+        ),
+    )
+
+    history = context.service.list_student_state_history(CLASSROOM_ID, "student-1")
+
+    assert [(item.from_state, item.to_state) for item in history] == [
+        (StudentState.PRESENT, StudentState.WRONG_SEAT),
+        (StudentState.UNKNOWN, StudentState.PRESENT),
+    ]
+    assert history[0].event_id == "event-wrong"
+    assert history[0].reason == StudentStateReason.IDENTIFIED_AT_OTHER_SEAT
+    assert history[0].seat_id == "seat-2"
+
+
+def test_unchanged_state_does_not_pile_up_history() -> None:
+    """같은 상태가 이어지는 동안 이력이 프레임마다 쌓이면 근거를 찾을 수 없다."""
+    context = _build_context(assign_two_students=False)
+    for index in range(3):
+        _save(
+            context,
+            _event(
+                f"event-{index}",
+                (_person(f"det-{index}", (150, 150, 250, 250)),),
+                captured_at=datetime(2026, 8, 13, 9, 9, index, tzinfo=UTC),
+            ),
+        )
+
+    history = context.service.list_student_state_history(CLASSROOM_ID, "student-1")
+
+    assert len(history) == 1
+    assert history[0].to_state == StudentState.PRESENT
+
+
+def test_old_event_does_not_revert_newer_state() -> None:
+    """늦게 도착한 오래된 프레임이 최신 판정을 되돌리지 않는다."""
+    context = _build_context(assign_two_students=False)
+    _save(
+        context,
+        _event(
+            "event-new",
+            (_person("det-new", (550, 150, 650, 250)),),
+            captured_at=RECENT,
+        ),
+    )
+    _save(
+        context,
+        _event(
+            "event-late",
+            (_person("det-late", (150, 150, 250, 250)),),
+            captured_at=datetime(2026, 8, 13, 9, 8, tzinfo=UTC),
+        ),
+    )
+
+    state = context.service.list_student_states(CLASSROOM_ID)[0]
+
+    assert state.current_state == StudentState.WRONG_SEAT
+    assert state.last_observed_at == RECENT

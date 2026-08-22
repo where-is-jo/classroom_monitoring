@@ -17,6 +17,22 @@ class PlaybackKind(StrEnum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
+class CameraRole(StrEnum):
+    """카메라가 판정에 참여하는 범위 (결정 0024의 3번).
+
+    장비 구성이 전체 조망 CCTV 1대 + 입구 카메라 1대로 바뀌면서, 두 카메라가 하는 일이
+    갈렸다. 역할을 데이터로 두지 않으면 좌석 ROI가 없는 입구 카메라의 이벤트가 "최신"
+    이라는 이유만으로 직전 판정을 UNKNOWN으로 덮는다 — 결정 0020이 남은 일로 적어 둔
+    문제다.
+
+    `IDENTITY_ONLY` 카메라의 탐지는 좌석 점유와 좌석 대조에 참여하지 않는다. 그 신원을
+    좌석까지 잇는 방법(카메라 간 인계)은 결정 0025의 3번에서 아직 `결정 필요`다.
+    """
+
+    SEAT_JUDGING = "SEAT_JUDGING"  # 좌석 판정을 한다 (조망 CCTV)
+    IDENTITY_ONLY = "IDENTITY_ONLY"  # 신원만 만든다 (입구 카메라)
+
+
 class SourceStatus(StrEnum):
     CONNECTED = "CONNECTED"
     STALE = "STALE"
@@ -86,6 +102,9 @@ class VideoStream:
     is_demo: bool
     created_at: datetime
     updated_at: datetime
+    # 기본값은 좌석 판정이다. 기존 카메라의 동작을 바꾸지 않기 위해서이며,
+    # 입구 카메라를 붙일 때만 명시적으로 IDENTITY_ONLY로 등록한다.
+    role: CameraRole = CameraRole.SEAT_JUDGING
 
 
 class PlaybackSessionStatus(StrEnum):

@@ -67,7 +67,11 @@ python -m pytest -q
 
 - 설정은 `webapps/fastapi/pyproject.toml`에 있다. **저장소 최상위가 아니다.**
 - **mypy는 `strict`다.** 공개 함수에 타입 힌트가 없으면 실패한다.
-- 기본 테스트는 memory mode와 대역 저장소를 쓰므로 외부 서비스가 필요 없다.
+- 기능 디렉터리의 테스트는 memory mode와 대역 저장소를 쓰므로 외부 서비스가 필요 없다.
+- **`tests/integration`은 실제 MongoDB에 붙는다.** 접속 정보는 `TEST_DATABASE_URL`
+  환경변수, 없으면 `webapps/fastapi/.env.local`에서 읽는다. 어느 쪽도 없으면 skip되므로
+  **통과 결과만 보고 MongoDB까지 확인했다고 판단하지 않는다** — skip 수를 함께 본다.
+  database 이름은 `test_`로 시작해야 하고 기본값은 `test_classroom_monitoring`이다.
 
 단일 테스트 실행:
 
@@ -75,7 +79,8 @@ python -m pytest -q
 python -m pytest tests/classrooms                               # 기능 단위
 python -m pytest tests/classrooms/test_mongo_adapter.py         # 파일 단위
 python -m pytest -k "임계값"                                     # 이름으로 필터
-python -m pytest -q -m mongodb                                  # MongoDB 통합 테스트
+python -m pytest tests/integration                              # 실제 MongoDB 통합 테스트
+python -m pytest -q -m mongodb                                  # marker로 통합 테스트만
 ```
 
 테스트는 `app`과 같은 기능별 디렉터리로 나뉜다. 배치 기준은

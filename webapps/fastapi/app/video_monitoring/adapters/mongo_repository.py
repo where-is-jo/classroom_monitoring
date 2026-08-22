@@ -9,7 +9,7 @@ from pymongo.errors import PyMongoError
 
 from ...shared.database import MongoDatabase, MongoDocument
 from ...shared.errors import RepositoryDataError, RepositoryUnavailableError
-from ..models import PlaybackKind, VideoStream
+from ..models import CameraRole, PlaybackKind, VideoStream
 
 
 class MongoVideoStreamRepository:
@@ -104,6 +104,7 @@ class MongoVideoStreamRepository:
             "last_frame_at": stream.last_frame_at,
             "last_detection_at": stream.last_detection_at,
             "is_demo": stream.is_demo,
+            "role": stream.role.value,
             "created_at": stream.created_at,
             "updated_at": stream.updated_at,
         }
@@ -122,6 +123,8 @@ class MongoVideoStreamRepository:
                 last_frame_at=document.get("last_frame_at"),
                 last_detection_at=document.get("last_detection_at"),
                 is_demo=bool(document["is_demo"]),
+                # 역할이 없는 기존 문서는 좌석 판정 카메라로 읽는다.
+                role=CameraRole(str(document.get("role", CameraRole.SEAT_JUDGING.value))),
                 created_at=document["created_at"],
                 updated_at=document["updated_at"],
             )

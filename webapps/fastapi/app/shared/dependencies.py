@@ -67,13 +67,19 @@ from ..snapshots.ports import SnapshotStorage
 from ..snapshots.service import SnapshotService
 from ..student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
+    MemoryStudentStateRepository,
     MemoryVideoSegmentRepository,
 )
 from ..student_monitoring.adapters.mongo_repository import (
     MongoDetectionEventRepository,
+    MongoStudentStateRepository,
     MongoVideoSegmentRepository,
 )
-from ..student_monitoring.ports import DetectionEventRepository, VideoSegmentRepository
+from ..student_monitoring.ports import (
+    DetectionEventRepository,
+    StudentStateRepository,
+    VideoSegmentRepository,
+)
 from ..student_monitoring.service import StudentMonitoringService
 from ..students.adapters.memory import InMemoryStudentRepository
 from ..students.adapters.mongo import MongoStudentRepository
@@ -134,6 +140,11 @@ def _detection_event_repository() -> MemoryDetectionEventRepository:
 @lru_cache
 def _video_segment_repository() -> MemoryVideoSegmentRepository:
     return MemoryVideoSegmentRepository()
+
+
+@lru_cache
+def _student_state_repository() -> MemoryStudentStateRepository:
+    return MemoryStudentStateRepository()
 
 
 @lru_cache
@@ -244,6 +255,11 @@ def _mongo_video_segment_repository() -> MongoVideoSegmentRepository:
 
 
 @lru_cache
+def _mongo_student_state_repository() -> MongoStudentStateRepository:
+    return MongoStudentStateRepository(_mongo_database())
+
+
+@lru_cache
 def _mongo_video_stream_repository() -> MongoVideoStreamRepository:
     return MongoVideoStreamRepository(_mongo_database())
 
@@ -316,6 +332,14 @@ def get_video_segment_repository(
     if settings.database_mode == "memory":
         return _video_segment_repository()
     return _mongo_video_segment_repository()
+
+
+def get_student_state_repository(
+    settings: Settings = Depends(get_settings),
+) -> StudentStateRepository:
+    if settings.database_mode == "memory":
+        return _student_state_repository()
+    return _mongo_student_state_repository()
 
 
 def get_video_stream_repository(
@@ -729,6 +753,7 @@ def get_student_monitoring_service(
     detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
     segment_repository: VideoSegmentRepository = Depends(get_video_segment_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    state_repository: StudentStateRepository = Depends(get_student_state_repository),
     broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
     classroom_service: ClassroomService = Depends(get_classroom_service),
     roi_service: RoiConnectionService = Depends(get_roi_connection_service),
@@ -739,14 +764,17 @@ def get_student_monitoring_service(
         detection_repository=detection_repository,
         segment_repository=segment_repository,
         stream_repository=stream_repository,
+        state_repository=state_repository,
         broadcaster=broadcaster,
         classroom_service=classroom_service,
         roi_service=roi_service,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         occupancy_hold_seconds=settings.seat_occupancy_hold_seconds,
         identity_confidence_threshold=settings.student_identity_confidence_threshold,
+        identity_hold_seconds=settings.student_identity_hold_seconds,
+        absent_grace_seconds=settings.student_absent_grace_seconds,
         stale_seconds=settings.detection_event_stale_seconds,
-        recent_event_limit=settings.student_state_recent_event_limit,
+        history_limit=settings.student_state_history_limit,
         clock=utc_now,
         student_lookup=student_lookup,
     )
@@ -784,6 +812,7 @@ def initialize_data_store() -> None:
                 MongoSeatMigrationRepository.ensure_indexes,
                 MongoDetectionEventRepository.ensure_indexes,
                 MongoVideoSegmentRepository.ensure_indexes,
+                MongoStudentStateRepository.ensure_indexes,
                 MongoVideoStreamRepository.ensure_indexes,
                 MongoPlaybackSessionRepository.ensure_indexes,
                 MongoStudentRepository.ensure_indexes,
@@ -831,6 +860,8 @@ def close_data_store() -> None:
     _mongo_seat_migration_repository.cache_clear()
     _mongo_seat_mutation_uow.cache_clear()
     _mongo_detection_event_repository.cache_clear()
+    _student_state_repository.cache_clear()
+    _mongo_student_state_repository.cache_clear()
     _mongo_video_segment_repository.cache_clear()
     _mongo_video_stream_repository.cache_clear()
     _mongo_playback_session_repository.cache_clear()

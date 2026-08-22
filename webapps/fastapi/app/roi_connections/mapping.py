@@ -53,9 +53,15 @@ def map_bbox_to_roi(
     if frame_width_pixels <= 0 or frame_height_pixels <= 0:
         return RoiMappingResult(None, RoiMappingReason.INVALID_INPUT)
     x_min, y_min, x_max, y_max = bbox
-    if x_min < 0 or y_min < 0 or x_max <= x_min or y_max <= y_min:
+    if x_max <= x_min or y_max <= y_min:
         return RoiMappingResult(None, RoiMappingReason.INVALID_INPUT)
-    if x_max > frame_width_pixels or y_max > frame_height_pixels:
+    # 탐지기는 프레임 경계를 넘는 bbox를 낸다. 화면 끝에 선 사람의 상자가 몇 px
+    # 삐져나왔다는 이유로 탐지를 통째로 버리면, 가장자리 좌석이 조용히 관측에서
+    # 빠진다. 프레임 안으로 잘라낸 뒤 그 상자의 중심으로 판정한다.
+    x_min, x_max = _clamp(x_min, frame_width_pixels), _clamp(x_max, frame_width_pixels)
+    y_min, y_max = _clamp(y_min, frame_height_pixels), _clamp(y_max, frame_height_pixels)
+    if x_max <= x_min or y_max <= y_min:
+        # 잘라내고 나니 면적이 없다 = bbox 전체가 프레임 밖이다.
         return RoiMappingResult(None, RoiMappingReason.INVALID_INPUT)
     center = Point(
         x=(x_min + x_max) / 2 / frame_width_pixels,
@@ -69,6 +75,11 @@ def map_bbox_to_roi(
     if len(matches) > 1:
         return RoiMappingResult(None, RoiMappingReason.AMBIGUOUS)
     return RoiMappingResult(None, RoiMappingReason.NO_MATCH)
+
+
+def _clamp(value: int, maximum: int) -> int:
+    """좌표를 `[0, maximum]` 안으로 잘라낸다."""
+    return min(max(value, 0), maximum)
 
 
 def _point_in_polygon(point: Point, polygon: tuple[Point, ...]) -> bool:

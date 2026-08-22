@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -25,12 +26,13 @@ from app.shared.adapters.memory_student_lookup import InMemoryStudentLookup
 from app.shared.broadcaster import InMemoryBroadcaster
 from app.student_monitoring.adapters.memory_repository import (
     MemoryDetectionEventRepository,
+    MemoryStudentStateRepository,
     MemoryVideoSegmentRepository,
 )
 from app.student_monitoring.models import Detection, DetectionEvent, FrameInfo
 from app.student_monitoring.service import StudentMonitoringService
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
-from app.video_monitoring.models import PlaybackKind, VideoStream
+from app.video_monitoring.models import CameraRole, PlaybackKind, VideoStream
 
 _CLASSROOM_ID = "classroom-a101"
 
@@ -159,6 +161,7 @@ def _make_service(
         detection_repository=detection_repo,
         segment_repository=segment_repo,
         stream_repository=stream_repo,
+        state_repository=MemoryStudentStateRepository(),
         broadcaster=broadcaster or InMemoryBroadcaster(),
         classroom_service=classroom_service,
         roi_service=roi_service,
@@ -166,7 +169,9 @@ def _make_service(
         occupancy_hold_seconds=hold_seconds,
         identity_confidence_threshold=0.5,
         stale_seconds=300,
-        recent_event_limit=500,
+        identity_hold_seconds=0,
+        absent_grace_seconds=300,
+        history_limit=50,
         clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),
         student_lookup=student_lookup,
     )
@@ -238,8 +243,9 @@ class TestAutomaticSeatMapping:
         assert seat_1.current_occupancy.state == SeatOccupancy.OCCUPIED
         assert seat_1.current_occupancy.source == OccupancySource.SYSTEM
         assert seat_1.current_occupancy.event_id == "event-1"
-        # 탐지가 없는 좌석은 UNKNOWN(확인 필요)으로 둔다.
-        assert seat_2.current_occupancy.state == SeatOccupancy.UNKNOWN
+        # 이 카메라가 보는 좌석인데 아무도 없었다 = VACANT.
+        # UNKNOWN은 ROI가 없어 관측 대상이 아니거나 신뢰도가 모자랄 때만 쓴다.
+        assert seat_2.current_occupancy.state == SeatOccupancy.VACANT
 
     def test_receive_without_classroom_skips_mapping_but_saves_event(self) -> None:
         """강의실이 등록되지 않았으면 매핑을 건너뛰고 탐지 이벤트는 정상 저장한다."""
@@ -417,10 +423,10 @@ class TestAutomaticSeatMapping:
         assert occupied["state"] == SeatOccupancy.OCCUPIED.value
         assert occupied["confidence"] == 0.95
 
-        # 탐지가 없는 좌석은 UNKNOWN 상태로 발행된다.
-        unknown = next(item for item in occupancy_events if item["seat_id"] == "seat-2")
-        assert unknown["state"] == SeatOccupancy.UNKNOWN.value
-        assert unknown["confidence"] == 0.0
+        # 탐지가 없는 좌석은 VACANT 상태로 발행된다.
+        vacant = next(item for item in occupancy_events if item["seat_id"] == "seat-2")
+        assert vacant["state"] == SeatOccupancy.VACANT.value
+        assert vacant["confidence"] == 0.0
 
     def test_receive_duplicate_event_publishes_no_occupancy_events(self) -> None:
         """같은 event_id 재수신에서는 occupancy SSE 이벤트를 다시 발행하지 않는다."""
@@ -476,8 +482,8 @@ def test_점유가_한_프레임_끊겨도_유지_시간_안이면_점유로_남
 def test_유지_시간이_지나면_점유를_놓는다() -> None:
     """자리를 뜬 사람을 계속 앉아 있다고 기록하지 않는다.
 
-    놓은 뒤는 VACANT가 아니라 UNKNOWN이다. 사람을 못 봤다는 것이 없다는 뜻은 아니므로
-    빈 관측에는 신뢰도를 주지 않고, 임계값 미달은 UNKNOWN이 된다.
+    놓은 뒤는 VACANT다. 그 카메라의 ROI에 등록된 좌석이므로 "보고 있는데 아무도 없다"가
+    관측 결과이고, 그것을 UNKNOWN으로 뭉개면 화면에서 빈 자리와 못 본 자리가 섞인다.
     """
     classroom_service = _build_classroom_service(_two_seats())
     service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
@@ -492,7 +498,7 @@ def test_유지_시간이_지나면_점유를_놓는다() -> None:
         )
     )
 
-    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
 
 
 def test_붙들린_좌석은_유지_구간을_다시_늘리지_못한다() -> None:
@@ -514,7 +520,7 @@ def test_붙들린_좌석은_유지_구간을_다시_늘리지_못한다() -> No
             _event(f"e{i}", elsewhere, captured_at=base + timedelta(seconds=seconds))
         )
 
-    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
 
 
 def test_유지_시간이_0이면_이전과_같이_곧바로_놓는다() -> None:
@@ -531,4 +537,137 @@ def test_유지_시간이_0이면_이전과_같이_곧바로_놓는다() -> None
         )
     )
 
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
+
+
+def test_탐지가_0건인_이벤트도_좌석을_비어_있음으로_관측한다() -> None:
+    """마지막 사람이 나간 뒤 좌석이 점유인 채로 얼어붙지 않아야 한다.
+
+    worker는 사람이 잡히지 않은 프레임에도 이벤트를 보낸다. 예전에는 `detections`가
+    비면 좌석 매핑을 통째로 건너뛰어, 아무도 없는 강의실의 좌석이 마지막 `OCCUPIED`로
+    영원히 남았다. 유지 시간(hold)도 다음 탐지가 올 때까지 만료되지 않았다.
+    """
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.OCCUPIED
+
+    # 아무도 잡히지 않은 프레임이 이어진다. 유지 시간 안에는 점유를 붙들어 둔다.
+    service.receive_inference_event(_event("e2", (), captured_at=base + timedelta(seconds=2)))
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.OCCUPIED
+
+    # 유지 시간이 지나면 놓는다.
+    service.receive_inference_event(_event("e3", (), captured_at=base + timedelta(seconds=9)))
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
+
+
+def test_임계값_미만_탐지만_있는_좌석은_UNKNOWN이다() -> None:
+    """흐릿하게 잡힌 자리를 비었다고 단정하지 않는다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois())
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    # _build_classroom_service의 임계값은 0.5다.
+    service.receive_inference_event(
+        _event(
+            "e1",
+            (_person("d1", (150, 150, 250, 250), confidence=0.3),),
+            captured_at=base,
+        )
+    )
+
     assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+    # 탐지가 아예 없던 좌석과 구분된다.
+    assert _seat_state(classrooms, "seat-2") == SeatOccupancy.VACANT
+
+
+def test_임계값_미만_탐지는_유지_시간을_늘리지_못한다() -> None:
+    """약한 근거가 "방금 확실히 봤다"로 둔갑해 점유를 연장하면 안 된다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+    # 3초 간격으로 임계값 미만 탐지만 들어온다. 이것이 유지 시간을 갱신하면 영원히 점유다.
+    for index, seconds in enumerate((3, 6, 9), start=2):
+        service.receive_inference_event(
+            _event(
+                f"e{index}",
+                (_person(f"d{index}", (150, 150, 250, 250), confidence=0.3),),
+                captured_at=base + timedelta(seconds=seconds),
+            )
+        )
+
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+
+
+def _identity_only_service(
+    classroom_service: ClassroomService,
+    rois: tuple[RoiConnection, ...],
+) -> tuple[StudentMonitoringService, ClassroomService]:
+    """입구 카메라(신원 전용)로 등록된 스트림을 가진 서비스를 만든다."""
+    service, _, classrooms = _make_service(classroom_service, rois=rois)
+    stream = service._stream_repository.find_by_camera_id("camera-a")
+    assert stream is not None
+    service._stream_repository.save(replace(stream, role=CameraRole.IDENTITY_ONLY))
+    return service, classrooms
+
+
+def test_신원_전용_카메라는_좌석_판정에_참여하지_않는다() -> None:
+    """입구 카메라의 이벤트가 조망 카메라의 좌석 판정을 덮지 않는다(결정 0024의 3번).
+
+    좌석을 담지 않는 화각의 이벤트가 "최신"이라는 이유로 직전 판정을 UNKNOWN으로
+    되돌리는 것이 결정 0020이 남은 일로 적어 둔 문제였다.
+    """
+    classroom_service = _build_classroom_service(_two_seats())
+    service, classrooms = _identity_only_service(classroom_service, _two_seat_rois())
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+
+    result = service.receive_inference_event(
+        _event("e1", (_person("d1", (150, 150, 250, 250)),), captured_at=base)
+    )
+
+    # 이벤트 자체는 정상 저장된다. 좌석 상태만 건드리지 않는다.
+    assert result.is_new is True
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.UNKNOWN
+    assert classroom_service._repository.get_observation_batch("e1") is None
+
+
+def test_track_id는_저장되고_그대로_돌아온다() -> None:
+    """트래킹이 붙기 전에도 값을 잃지 않고 실어 나르는지 확인한다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, detection_repo, _ = _make_service(classroom_service, rois=_two_seat_rois())
+    detection = replace(_person("d1", (150, 150, 250, 250)), track_id="camera-a-17")
+
+    service.receive_inference_event(_event("e-track", (detection,)))
+
+    saved = detection_repo.find_by_event_id("e-track")
+    assert saved is not None
+    assert saved.detections[0].track_id == "camera-a-17"
+
+
+def test_늦게_도착한_프레임이_유지_시간을_되돌리지_않는다() -> None:
+    """순서가 뒤바뀌어 도착한 오래된 프레임이 점유 유지 구간을 앞당기면 안 된다."""
+    classroom_service = _build_classroom_service(_two_seats())
+    service, _, classrooms = _make_service(classroom_service, rois=_two_seat_rois(), hold_seconds=5)
+    base = datetime(2026, 8, 13, 9, 5, 0, tzinfo=UTC)
+    seated = (_person("d1", (150, 150, 250, 250)),)
+
+    service.receive_inference_event(
+        _event("e-new", seated, captured_at=base + timedelta(seconds=4))
+    )
+    # 4초 시점보다 오래된 프레임이 뒤늦게 도착한다.
+    service.receive_inference_event(_event("e-late", seated, captured_at=base))
+
+    # 마지막으로 본 시각은 4초 그대로여야 한다. 되돌아갔다면 6초에 이미 놓았을 것이다.
+    service.receive_inference_event(_event("e-empty", (), captured_at=base + timedelta(seconds=6)))
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.OCCUPIED
+
+    service.receive_inference_event(_event("e-gone", (), captured_at=base + timedelta(seconds=10)))
+    assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
