@@ -392,7 +392,8 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 서 있는 사람과 앉은 사람의 구분 | **결정 필요.** 지나가는 사람의 bbox 중심이 옆자리 앉은 사람과 같은 높이라 좌석 ROI에 들어갈 수 있다. 현재 구분 수단이 없다 | fastapi, worker |
 | 전체 조망 카메라가 좌석 판정을 덮어쓰는 문제 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 카메라 역할 구분으로 해소했다 — 입구 카메라는 좌석을 판정하지 않고 CCTV는 신원을 만들지 않는다. 역할을 데이터 모델에 넣는 방식은 구현 계약에서 정한다 | fastapi |
 | ROI를 그릴 기준 화면 확보 방법 | 확정([0031](./decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)). fastapi가 RTSP에서 정지 프레임 한 장을 캡처한다. 실시간 영상 위에 그리지 않는다 | fastapi |
-| **GPU 서버가 카메라 사설망에 닿는가** | **결정 필요.** 카메라는 개인 PC와 같은 192.168.0.x에 있는 것이 실측으로 확인됐다. 닿지 않으면 [0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)의 MediaMTX·worker 배치를 다시 정해야 한다 | worker, monitoring |
+| **GPU 서버가 카메라 사설망에 닿는가** | **방법 확정, 구성 `예정`.** 입구 카메라용 라즈베리파이를 Tailscale subnet router로 세워 CCTV 한 대(`192.168.0.63/32`)만 광고한다. RTSP는 pull이라 필요한 방향이 GPU 서버 → CCTV이고, CCTV는 임베디드 장치라 Tailscale에 직접 붙지 못한다. **개인 PC를 라우터로 쓰지 않는다** — 꺼지면 탐지가 멈춘다. 절차는 [`.docker/README.server.md`](../../.docker/README.server.md)에 있다. 이 결정으로 [0026](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)의 MediaMTX·worker 배치를 그대로 유지한다 | worker, monitoring |
+| 입구 카메라 영상을 넣는 방향 | **결정 필요.** 라즈베리파이가 RTSP 서버를 띄워 worker가 당길지, 파이의 ffmpeg가 GPU 서버 MediaMTX로 밀어 넣을지. 미는 쪽을 고르면 MediaMTX RTSP publish(8554)를 다시 열어야 한다 | worker |
 | 실제 CCTV의 화각과 코덱 | 실측: HEVC(H.265) 1280×1944 15fps, **어안이 아닌 일반 광각**. 0024의 어안 전제와 다르다 — 카메라를 바꿀지 전제를 고칠지 `결정 필요` | worker, deeplearning |
 | 고정 화각 기반 ROI 자동 생성 | 후보: 배치도 `seat.geometry` + 카메라 기준점 호모그래피. 판정 기준점 변경 여부와 함께 결정 | fastapi |
 | 수업 시간표의 원본 관리 주체 | 결정 필요 | fastapi |
