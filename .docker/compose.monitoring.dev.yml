@@ -1,6 +1,6 @@
 name: classroom-monitoring-dev-observability
 
-# 공용 GPU 서버(dev)의 모니터링 스택. **로컬용은 compose.monitoring.local.yml이다.**
+# 공용 GPU 서버(dev)의 모니터링 스택. **local 판본은 없다**(결정 0034).
 #
 # 실행 (저장소 루트에서, compose.main.dev.gpu.yml을 먼저 올린 뒤):
 #   docker compose -f .docker/compose.monitoring.dev.yml up -d

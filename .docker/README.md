@@ -15,23 +15,20 @@
 환경마다 다른 것이 값이 아니라 **구조**(이미지를 빌드하나 받나, GPU를 예약하나, 포트를
 어디까지 여나)라서 파일 자체를 나눴다.
 
-**dev는 여기에 호스트 축이 하나 더 붙는다.**
+**남은 것은 dev뿐이고, dev는 호스트 축으로 나뉜다.**
 [결정 0026](../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)이
 백엔드를 개인 PC로 옮기면서 dev 환경이 기계 두 대에 걸치게 됐고, 그 4번이 "compose
 파일을 호스트 축으로 나눈다"를 남은 일로 적었다. 아래가 그 구현이다.
 
-| 스택 | local (개발자 PC 한 대) | dev · 개인 PC | dev · 공용 GPU 서버 |
-| --- | --- | --- | --- |
-| 메인 | `compose.main.local.yml` | `compose.main.dev.pc.yml` | `compose.main.dev.gpu.yml` |
-| LLM | `compose.llm.local.yml` | — | `compose.llm.dev.yml` |
-| 모니터링 | `compose.monitoring.local.yml` | — | `compose.monitoring.dev.yml` |
+| 스택 | dev · 개인 PC(노트북) | dev · 공용 GPU 서버 |
+| --- | --- | --- |
+| 메인 | `compose.main.dev.pc.yml` | `compose.main.dev.gpu.yml` |
+| LLM | — | `compose.llm.dev.yml` |
+| 모니터링 | — | `compose.monitoring.dev.yml` |
 
 `compose.main.dev.yml` 하나였던 것이 `.pc`와 `.gpu` 둘로 갈렸다. **이름에 환경 다음
 호스트를 붙인다**(`compose.<스택>.<환경>.<호스트>.yml`). 호스트가 하나뿐인 스택은
 그대로 두 마디를 쓴다 — 나뉘지 않는 것에 축을 붙이면 이름만 길어진다.
-
-**local은 그대로 남는다.** 한 대에서 전부 도는 구성이라 호스트 축이 없고, 소스를
-고쳐 가며 확인하는 용도로 계속 쓴다.
 
 | 어느 스택에 무엇이 있나 | 서비스 |
 | --- | --- |
@@ -39,6 +36,28 @@
 | GPU 서버 (`compose.main.dev.gpu.yml`) | `deeplearning`, `inference-worker`, `mediamtx`, `minio`, `minio-init` |
 | GPU 서버 (`compose.llm.dev.yml`) | `llama-server` |
 | GPU 서버 (`compose.monitoring.dev.yml`) | `prometheus`, `grafana`, `loki`, `alloy` |
+
+### local 스택은 없앴다
+
+`compose.*.local.yml` 셋과 짝인 `prometheus.local.yml`·`config.local.alloy`를 지웠다
+([결정 0034](../docs/architecture/decisions.md#0034--local-compose-스택을-없애고-로컬-실행은-소스-직접-구동으로-한정한다)).
+백엔드가 노트북으로 오면서 "개발자 PC 한 대에서 전부"와 "dev의 개인 PC 절반"이 같은
+기계를 가리키게 됐고, 같은 포트를 두 파일이 다투게 됐다.
+
+**`APP_ENV=local`이 없어진 것이 아니다.** 컨테이너로 띄우는 local 스택만 없앴다.
+로컬에서 소스를 고쳐 가며 볼 때는 컨테이너를 거치지 않고 직접 띄운다.
+
+```bash
+cd webapps/fastapi
+cp .env.example .env.local     # DATABASE_MODE=memory라 외부 의존이 없다
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+`--reload`가 붙어 이쪽이 오히려 빠르다. 컨테이너 local 스택은 소스를 고칠 때마다
+`--build`가 필요했다.
+
+**`--env-file`을 주지 않는다.** 커밋되는 파일이므로 실행에 필요한 값을 파일 안에 직접
+적었다. `${...}` 치환에 의존하면 저장소에서 받은 파일만으로 실행할 수 없기 때문이다.
 
 **`--env-file`을 주지 않는다.** 커밋되는 파일이므로 실행에 필요한 값을 파일 안에 직접
 적었다. `${...}` 치환에 의존하면 저장소에서 받은 파일만으로 실행할 수 없기 때문이다.
@@ -87,33 +106,8 @@ reverse proxy를 붙이게 되면 uvicorn에 `FORWARDED_ALLOW_IPS`를 함께 줘
 
 ## 실행 방법
 
-저장소 루트에서 (local 스택):
-
-```bash
-docker compose -f .docker/compose.main.local.yml up -d
-docker compose -f .docker/compose.main.local.yml up -d --build fastapi   # 소스 반영
-docker compose -f .docker/compose.main.local.yml config                  # 검증
-docker compose -f .docker/compose.main.local.yml down
-
-# GPU가 있는 PC에서만. 기본으로는 inference-worker가 뜨지 않는다.
-docker compose -f .docker/compose.main.local.yml --profile worker up -d
-```
-
-메인 스택이 network를 만드므로 **먼저 올린다.** LLM·모니터링은 그 network를
-`external`로 참조한다.
-
-로컬 진입 주소는 이렇다. 모두 `127.0.0.1`에 묶여 다른 PC에서는 보이지 않는다.
-
-| 주소 | 무엇 |
-| --- | --- |
-| `http://localhost:8076` | 웹 화면·API |
-| `http://localhost:15678` | n8n 편집기 (경로 접두사 없음) |
-| `http://localhost:19001` | MinIO 콘솔 |
-| `http://localhost:13000` | Grafana (모니터링 스택을 올렸을 때) |
-
-**실시간 영상은 앞단 proxy 없이도 확인된다** — fastapi가 WHEP 시그널링을 중계하기
-때문이다(결정 0014). 대신 `PLAYBACK_SESSION_COOKIE_SECURE=false`가 필요하다.
-평문 http라 true면 브라우저가 세션 cookie를 보내지 않는다.
+**컨테이너로 띄우는 것은 dev 하나뿐이다.** 소스를 고쳐 가며 볼 때는 위
+[local 스택은 없앴다](#local-스택은-없앴다)의 직접 구동을 쓴다.
 
 ### dev 스택 — 개인 PC(노트북)
 
@@ -237,11 +231,12 @@ docker compose -f .docker/compose.monitoring.dev.yml up -d
 
 구조와 규칙은 [결정 0017](../docs/architecture/decisions.md)과
 [환경변수 규칙](../docs/conventions/environment-convention.md)에 있다. 요약은
-[README.server.md의 환경변수 절](./README.server.md#환경변수)을 본다. 여기서는 로컬
-구동에만 해당하는 것을 적는다.
+[README.server.md의 환경변수 절](./README.server.md#환경변수)을 본다.
 
-- 로컬은 `compose.*.local.yml`로 띄운다. 그 파일이 `APP_ENV=local`을 고정하고
-  `.docker/env/*.local.env`를 읽는다. 서버 값을 손으로 되돌릴 필요가 없다.
+- **`.docker/env/`에는 이제 `*.dev.env`만 있다.** `*.local.env` 다섯은 local 스택과 함께
+  지웠다(결정 0034). 소스로 직접 띄울 때는 `.docker/`가 아니라 각 서비스의
+  `.env.local`(예: `webapps/fastapi/.env.local`)을 읽는다 — 실행 방식이 다르면 값을
+  담는 파일도 다르다는 [결정 0017](../docs/architecture/decisions.md#0017--컨테이너-실행의-환경변수를-세-계층으로-나누고-docker-아래에-둔다)의 구분은 그대로다.
 - **컨테이너 이미지에는 `.env`가 들어 있지 않다**(`webapps/fastapi/.dockerignore`).
   `APP_ENV`·`DATABASE_MODE`는 기본값이 없는 필수 설정이라, env 없이 `docker run`하면
   기동 시점에 pydantic `ValidationError`로 죽는다. 이미지 문제가 아니라 주입 문제다.
@@ -250,14 +245,13 @@ docker compose -f .docker/compose.monitoring.dev.yml up -d
 - n8n은 최신 버전에서 basic auth 대신 첫 접속 시 브라우저에서 owner 계정을 직접
   만드는 방식이라 별도 비밀번호 env var가 없다.
 
-### local 판본은 memory mode다
+### memory mode 주의 (소스 직접 구동에도 그대로 해당한다)
 
-`.docker/env/fastapi.local.env`가 `DATABASE_MODE=memory`이고 `DATABASE_URL`은 비어 있다.
-**컨테이너를 다시 만들면 데이터가 사라지고 Atlas에는 아무것도 쌓이지 않는다.**
+`.env.example`이 `DATABASE_MODE=memory`이고 `DATABASE_URL`은 비어 있다.
+**프로세스를 다시 띄우면 데이터가 사라지고 Atlas에는 아무것도 쌓이지 않는다.**
 `/health/ready`가 ready인 것도 Atlas 연결 확인이 아니라 memory 저장소 응답이다.
-로컬에서 Atlas를 쓰려면 그 파일의 `DATABASE_MODE`·`DATABASE_URL`·`DATABASE_NAME`을 채우고
-`docker compose -f .docker/compose.main.local.yml up -d fastapi`로
-재생성한다. 단 `DATABASE_MODE=memory`는 `APP_ENV=local`에서만 허용되므로 그 반대는 막힌다.
+로컬에서 Atlas를 쓰려면 `.env.local`의 `DATABASE_MODE`·`DATABASE_URL`·`DATABASE_NAME`을
+채운다. 단 `DATABASE_MODE=memory`는 `APP_ENV=local`에서만 허용되므로 그 반대는 막힌다.
 
 ## reverse proxy(Caddy) 설계
 

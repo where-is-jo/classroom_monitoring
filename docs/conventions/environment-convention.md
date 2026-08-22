@@ -78,7 +78,6 @@ compose 파일을 커밋하면서 그 안에 직접 적기로 했다. `${...}` �
 ```bash
 docker compose -f .docker/compose.main.dev.pc.yml  up -d   # dev · 개인 PC
 docker compose -f .docker/compose.main.dev.gpu.yml up -d   # dev · GPU 서버
-docker compose -f .docker/compose.main.local.yml   up -d   # local (한 대에서 전부)
 ```
 
 **dev는 이름에 호스트가 하나 더 붙는다.**

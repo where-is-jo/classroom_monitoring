@@ -28,8 +28,9 @@
 그래서 `compose.main.dev.yml`이 `.gpu`와 `.pc` 둘로 갈렸다. 이 서버에 남은 것은 GPU가
 필요한 셋과, 그 셋이 쓰는 영상·저장소다.
 
-같은 이름의 `.local.yml` 짝이 개발자 PC용으로 따로 있다. 환경마다 다른 것이 값이 아니라
-구조(이미지를 빌드하나 받나, GPU 예약, 포트 노출 범위)라서 파일을 나눴다.
+**`.local.yml` 짝은 더 이상 없다.** 개발자 PC용 local 스택을 없앴고, 로컬에서 소스를
+고쳐 가며 볼 때는 컨테이너를 거치지 않고 직접 띄운다
+([결정 0034](../docs/architecture/decisions.md#0034--local-compose-스택을-없애고-로컬-실행은-소스-직접-구동으로-한정한다)).
 
 세 스택은 project name이 달라 서로 독립적으로 올리고 내릴 수 있다.
 network만 공유한다: `compose.main.dev.gpu.yml`이 `classroom-monitoring-dev-backend`를
@@ -60,8 +61,7 @@ docker compose -f .docker/compose.llm.dev.yml down
 
 내릴 때는 역순이다. 메인 스택을 먼저 내리면 network가 사라져 나머지 스택이 깨진다.
 
-**`.local.yml`을 서버에서 실행하지 않는다.** 로컬 파일은 소스에서 이미지를 빌드하는데
-서버에는 소스가 없다. **`.pc.yml`도 여기서 실행하지 않는다** — 개인 PC 쪽 절반이다.
+**`.pc.yml`을 여기서 실행하지 않는다** — 개인 PC 쪽 절반이다.
 
 **먼저 `tailscale status`로 tailnet 연결을 확인한다.** 이 스택은 포트 넷을 Tailscale
 주소(`100.85.0.72`)에 bind하므로, 인터페이스가 없으면 기동에 실패한다. 조용히 뜨는

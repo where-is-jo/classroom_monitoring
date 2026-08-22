@@ -20,11 +20,13 @@ name: classroom-monitoring-dev-pc
 # **--env-file을 주지 않는다**(결정 0018). 이 파일이 커밋되므로 실행에 필요한 값을
 # 파일 안에 직접 적었다. 비밀값만 env_file로 주입하고 그 파일들은 커밋하지 않는다.
 #
-# **compose.main.local.yml과 무엇이 다른가.**
-# local은 "한 대에서 전부"다 — 이미지를 직접 빌드하고 mediamtx·minio까지 함께 띄워
-# 외부 의존 없이 소스를 고쳐 가며 확인한다. 이 파일은 그 반대로 **두 호스트로 나뉜
-# dev 환경의 개인 PC 쪽 절반**이며, 이미지를 GHCR에서 받고 나머지는 Tailscale 너머의
-# GPU 서버를 부른다. 소스를 고쳐 가며 볼 때는 계속 local을 쓴다.
+# **컨테이너로 띄우는 스택은 이제 dev뿐이다**(결정 0034). 개발자 PC 한 대에서 전부
+# 돌리던 compose.main.local.yml은 없앴다 — 백엔드가 노트북으로 오면서 그 스택과 이
+# 파일이 같은 기계·같은 포트를 다투게 됐기 때문이다.
+#
+# **소스를 고쳐 가며 볼 때는 컨테이너를 쓰지 않는다.** webapps/fastapi에서 직접 띄운다:
+#   cp .env.example .env.local && python -m uvicorn app.main:app --reload --port 8000
+# --reload가 붙어 이쪽이 더 빠르다. 이 파일은 CI가 만든 이미지를 받아 도는 쪽이다.
 
 networks:
   backend:
@@ -76,7 +78,7 @@ volumes:
 services:
   fastapi:
     # **build 블록을 두지 않는다.** dev 스택은 CI가 만든 이미지를 받아서 돈다.
-    # 소스를 고쳐 가며 볼 때는 compose.main.local.yml이 빌드한다.
+    # 소스를 고쳐 가며 볼 때는 위 주석의 직접 구동을 쓴다.
     #
     # **:latest가 아니라 :develop을 본다.** CI는 develop 병합마다 develop과 sha-* 태그로
     # 올리고 latest는 붙이지 않는다(결정 0014). 여기서 latest를 보면 병합해도

@@ -27,10 +27,11 @@ monitoring/internal/grafana/
 벌** 있으며, 둘 다 `fastapi`·`deeplearning`·`inference-worker` job을 들고 있다.
 통합 실행 수단이 공식화되면 이 디렉터리로 옮긴다(`결정 필요`).
 
-| 파일 | fastapi target | 왜 다른가 |
+| 파일 | fastapi target | 비고 |
 | --- | --- | --- |
-| `.docker/prometheus/prometheus.local.yml` | `fastapi:8001` | local은 한 대에서 전부 돈다 |
 | `.docker/prometheus/prometheus.dev.yml` | `100.119.241.93:8076` | dev는 fastapi가 개인 PC에 있어 스크랩이 호스트 경계를 넘는다([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) |
+
+`prometheus.local.yml`은 local 스택과 함께 없앴다([결정 0034](../../docs/architecture/decisions.md#0034--local-compose-스택을-없애고-로컬-실행은-소스-직접-구동으로-한정한다)).
 
 **dev에서 fastapi target이 `up=0`인 것은 장애가 아닐 수 있다.** 개인 PC가 노트북이라
 꺼져 있을 수 있다. 이 구분을 어떻게 다룰지는 `결정 필요`다.

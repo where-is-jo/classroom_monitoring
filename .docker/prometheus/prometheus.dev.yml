@@ -1,4 +1,4 @@
-# 공용 GPU 서버(dev) 스택용 수집 설정. **로컬용은 prometheus.local.yml이다.**
+# 공용 GPU 서버(dev) 스택용 수집 설정. **local 판본은 없다**(결정 0034).
 # 지표 이름·label 규칙과 무엇을 왜 재는지는 monitoring/internal/README.md가 정본이다.
 #
 # **Prometheus는 GPU 서버에 남고 fastapi는 개인 PC로 갔다**(결정 0026).
