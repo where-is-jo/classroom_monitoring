@@ -82,6 +82,7 @@ class CameraConfig:
     source_type: str
     rtsp_url: str
     camera_index: int
+    file_path: str = ""
 
     def source(self) -> str | int:
         if self.source_type == "rtsp":
@@ -90,7 +91,15 @@ class CameraConfig:
             return self.rtsp_url
         if self.source_type == "webcam":
             return self.camera_index
-        raise ValueError(f"{self.camera_id} source는 rtsp 또는 webcam이어야 합니다.")
+        if self.source_type == "file":
+            # 실제 카메라 2대 없이 녹화된 영상으로 V2 파이프라인을 검증할 때 쓴다.
+            # LatestFrameReader가 끝에 도달하면 처음으로 되감아 계속 재생한다.
+            if not self.file_path:
+                raise ValueError(f"{self.camera_id} 영상 파일 경로가 필요합니다.")
+            if not Path(self.file_path).is_file():
+                raise FileNotFoundError(self.file_path)
+            return self.file_path
+        raise ValueError(f"{self.camera_id} source는 rtsp, webcam 또는 file이어야 합니다.")
 
 
 def load_camera_configs() -> tuple[CameraConfig, CameraConfig]:
@@ -100,6 +109,7 @@ def load_camera_configs() -> tuple[CameraConfig, CameraConfig]:
         os.environ.get("ENTRY_CAMERA_RTSP_URL")
         or os.environ.get("HOME_CAM_RTSP_URL", ""),
         int(os.environ.get("ENTRY_CAMERA_INDEX", os.environ.get("HOME_CAM_CAMERA_INDEX", "0"))),
+        os.environ.get("ENTRY_CAMERA_FILE_PATH", ""),
     )
     classroom = CameraConfig(
         "classroom",
@@ -107,6 +117,7 @@ def load_camera_configs() -> tuple[CameraConfig, CameraConfig]:
         os.environ.get("CLASSROOM_CAMERA_RTSP_URL")
         or os.environ.get("FACE_RTSP_URL", ""),
         int(os.environ.get("CLASSROOM_CAMERA_INDEX", "0")),
+        os.environ.get("CLASSROOM_CAMERA_FILE_PATH", ""),
     )
     return entry, classroom
 
@@ -117,6 +128,8 @@ class LatestFrameReader:
         backend = (
             cv2.CAP_FFMPEG
             if config.source_type == "rtsp"
+            else cv2.CAP_ANY
+            if config.source_type == "file"
             else (cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
         )
         self._capture = cv2.VideoCapture(source, backend)
@@ -125,6 +138,7 @@ class LatestFrameReader:
         if not self._capture.isOpened():
             self._capture.release()
             raise RuntimeError(f"{config.camera_id} 카메라 입력을 열지 못했습니다.")
+        self._loop_file = config.source_type == "file"
         self._lock = threading.Lock()
         self._frame: np.ndarray | None = None
         self._captured_at: float | None = None
@@ -136,6 +150,10 @@ class LatestFrameReader:
         while not self._stopped:
             ok, frame = self._capture.read()
             if not ok:
+                if self._loop_file:
+                    # 실제 카메라 2대 없이 녹화 영상으로 테스트할 때, 끝에 도달하면
+                    # 처음으로 되감아 계속 재생한다(실시간 스트림처럼 동작).
+                    self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 time.sleep(0.02)
                 continue
             with self._lock:
