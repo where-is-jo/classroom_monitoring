@@ -99,7 +99,16 @@ services:
 
   # stream + inference 조립 실행(python -m pipeline.main). GPU를 쓴다.
   inference-worker:
-    image: ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+    # **GHCR의 :latest가 아니라 GPU 서버에서 직접 빌드한 이미지다.**
+    # CI는 fastapi 이미지만 올린다(결정 0014) — worker는 14.9GB라 수동 빌드로 남겼고,
+    # 그 결과 GHCR :latest가 2026-08-12에 멈춰 있었다. 그 이미지에는 탐지 결과를
+    # fastapi로 보내는 코드(FASTAPI_URL / inference.handler)가 아예 없어서, 추론은
+    # 도는데 이벤트가 한 건도 도달하지 않았다.
+    #
+    # 태그에 날짜를 박아 어느 소스로 빌드했는지 되짚을 수 있게 한다. :latest로 두면
+    # 다음 `docker compose pull`이 낡은 GHCR 이미지로 조용히 되돌린다.
+    #   빌드: cd ~/worker-build/worker && docker build -t classroom-monitoring-worker:local-20260822b .
+    image: classroom-monitoring-worker:local-20260822b
     env_file:
       # 변수 목록의 기준은 worker/pipeline/.env.example이다(조립 실행이라 pipeline 것을 쓴다).
       # STREAM_SOURCES에 카메라 자격 증명이 들어가므로 이 파일 전체가 비밀값이다.
@@ -149,15 +158,23 @@ services:
       MTX_WEBRTCLOCALTCPADDRESS: ":18189"
     # HLS(8888)는 열지 않는다. 화면은 WebRTC로만 본다.
     #
-    # **RTSP publish(8554)도 열지 않는다.** worker가 STREAM_SOURCES로 외부에서
-    # 당겨오는 구조라 여기로 밀어 넣는 경로가 없다. 카메라가 서버로 직접 송출하는
-    # 방식으로 바꾸면 그때 되살린다.
+    # **RTSP publish(8554)를 Tailscale 주소에만 연다.** 강의실 CCTV는 개인 PC와
+    # 같은 192.168.0.x 사설망에 있는데, 이 서버도 192.168.0.103/24에 직접 물려 있어
+    # subnet route로는 닿을 수 없다 - 직결 라우트가 tailscale 라우트를 항상 이긴다.
+    # 그래서 방향을 뒤집는다. 개인 PC가 CCTV를 당겨 여기로 밀어 넣고, worker는
+    # mediamtx:8554에서 되받는다. 송출은 개인 PC가 거는 바깥 방향 연결이라
+    # 라우팅이 필요 없다.
+    #
+    # **0.0.0.0에 열지 않는다.** 인증을 걸지 않았으므로(MTX_AUTH* 미설정) 공인 IP에
+    # 열면 누구나 이 경로에 영상을 밀어 넣을 수 있다.
     ports:
       # **WHEP 시그널링(8889)을 Tailscale 주소에 연다.** 전에는 fastapi가 같은
       # network 안에 있어 아예 열지 않았지만(결정 0014), 이제 fastapi가 개인 PC에
       # 있어 경계를 넘는다. 브라우저는 여전히 fastapi에만 붙는다 — fastapi가
       # WHEP_BASE_URL=http://100.85.0.72:18889로 중계한다.
       - "100.85.0.72:18889:8889"
+      # RTSP 수신(개인 PC -> 여기). 바로 위 주석 참고.
+      - "100.85.0.72:18554:8554"
       # WebRTC 미디어(ICE). **호스트와 컨테이너 번호가 같아야 한다** — MediaMTX가 위
       # MTX_WEBRTCLOCAL*ADDRESS의 번호를 ICE 후보로 알리기 때문이다.
       # 브라우저가 직접 붙으므로 여기만 0.0.0.0이다.
