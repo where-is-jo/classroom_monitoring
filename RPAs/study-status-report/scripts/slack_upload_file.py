@@ -1,0 +1,123 @@
+"""Upload a report file to Slack using current external upload APIs."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import mimetypes
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+
+SLACK_API = "https://slack.com/api"
+
+
+def api_call(method: str, token: str, fields: dict[str, str]) -> dict[str, Any]:
+    body = urllib.parse.urlencode(fields).encode("utf-8")
+    request = urllib.request.Request(
+        f"{SLACK_API}/{method}",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not payload.get("ok"):
+        raise RuntimeError(f"Slack API {method} failed: {payload.get('error', 'unknown_error')}")
+    return payload
+
+
+def post_file_bytes(upload_url: str, path: Path) -> None:
+    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    request = urllib.request.Request(
+        upload_url,
+        data=path.read_bytes(),
+        headers={"Content-Type": mime_type},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        if response.status < 200 or response.status >= 300:
+            raise RuntimeError(f"Slack file byte upload failed with status {response.status}")
+
+
+def upload_file(token: str, channel_id: str, path: Path, title: str, comment: str) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    upload = api_call(
+        "files.getUploadURLExternal",
+        token,
+        {
+            "filename": path.name,
+            "length": str(path.stat().st_size),
+        },
+    )
+    post_file_bytes(upload["upload_url"], path)
+    return api_call(
+        "files.completeUploadExternal",
+        token,
+        {
+            "files": json.dumps([{"id": upload["file_id"], "title": title}], ensure_ascii=False),
+            "channel_id": channel_id,
+            "initial_comment": comment,
+        },
+    )
+
+
+def post_webhook(webhook_url: str, text: str) -> None:
+    request = urllib.request.Request(
+        webhook_url,
+        data=json.dumps({"text": text}, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read().decode("utf-8", errors="replace")
+    if body.strip().lower() != "ok":
+        raise RuntimeError("Slack webhook did not return ok")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--file", type=Path, required=True)
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--comment", required=True)
+    parser.add_argument("--token", default=os.environ.get("SLACK_BOT_TOKEN", ""))
+    parser.add_argument("--channel-id", default=os.environ.get("SLACK_CHANNEL_ID", ""))
+    parser.add_argument("--webhook-url", default=os.environ.get("SLACK_WEBHOOK_URL", ""))
+    parser.add_argument("--webhook-only", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    if args.webhook_only:
+        if not args.webhook_url:
+            raise SystemExit("SLACK_WEBHOOK_URL is required for webhook-only mode")
+        post_webhook(args.webhook_url, args.comment)
+        print("OK: Slack webhook message sent")
+        return
+
+    if not args.token:
+        raise SystemExit("SLACK_BOT_TOKEN is required")
+    if not args.channel_id:
+        raise SystemExit("SLACK_CHANNEL_ID is required for file upload")
+
+    result = upload_file(args.token, args.channel_id, args.file, args.title, args.comment)
+    file_ids = [item.get("id") for item in result.get("files", [])]
+    print(f"OK: Slack file upload complete ({', '.join(file_ids)})")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"Slack HTTP error {exc.code}: {detail}") from exc
