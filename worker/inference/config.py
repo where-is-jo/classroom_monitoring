@@ -61,6 +61,20 @@ class InferenceSettings(ObjectStorageSettings):
     # 1280을 넘기면 탐지 수는 더 늘지 않고 처리 시간만 배로 늘었다.
     inference_image_size: int = Field(default=1280, ge=320, le=4096)
 
+    # 모델이 내놓는 클래스 중 어떤 것을 탐지로 볼지. `{클래스 번호: 이름}`이다.
+    #
+    # **모델을 바꾸면 이 값도 함께 바꿔야 한다.** 클래스 번호는 모델마다 다르다.
+    # COCO로 학습한 범용 모델은 person이 0, cell phone이 67이지만, 사람만 학습한
+    # 전용 모델은 클래스가 0 하나뿐이다. 그런 모델에 67을 요구하면 ultralytics가
+    # 존재하지 않는 클래스를 거르게 되고, 무엇이 빠졌는지 로그에 남지 않는다.
+    #
+    # 그래서 코드 상수가 아니라 설정으로 둔다 — 모델 교체가 이미지 재빌드를 부르지
+    # 않아야 한다. 환경변수로는 JSON으로 준다:
+    #   INFERENCE_TARGET_CLASS_IDS={"0": "person"}
+    inference_target_class_ids: dict[int, str] = Field(
+        default_factory=lambda: {0: "person", 67: "cell phone"}
+    )
+
     # --- 탐지 스냅샷 (결정 0011) ---
     # 영상 원본을 저장하지 않는 대신 탐지 시점 정지 이미지를 남긴다.
     # 저장은 명시적으로 켠다. recorder의 RECORDING_ENABLED가 기본 꺼짐인 것과 같다.

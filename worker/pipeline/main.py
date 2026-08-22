@@ -94,6 +94,7 @@ def build_runner(
         device=inference_settings.inference_device,
         confidence_threshold=inference_settings.inference_confidence_threshold,
         image_size=inference_settings.inference_image_size,
+        target_class_ids=inference_settings.inference_target_class_ids,
     )
     # FASTAPI_URL은 .env·환경변수로 명시해야만 전송을 켠다. 필드에 기본값이 있어
     # 값이 채워져 있는 것만으로는 "설정했다"를 판단할 수 없다. 명시 여부는 pydantic이

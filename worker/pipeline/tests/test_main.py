@@ -37,12 +37,19 @@ class StubDetector:
     """모델 로딩이 없는 Yolo8nDetector 대역. 빌드 인자만 기록한다."""
 
     def __init__(
-        self, *, model_path: str, device: str, confidence_threshold: float, image_size: int
+        self,
+        *,
+        model_path: str,
+        device: str,
+        confidence_threshold: float,
+        image_size: int,
+        target_class_ids: dict[int, str],
     ) -> None:
         self.model_path = model_path
         self.device = device
         self.confidence_threshold = confidence_threshold
         self.image_size = image_size
+        self.target_class_ids = target_class_ids
 
 
 class StubStreamWorker:
@@ -207,3 +214,18 @@ def test_지표를_끄면_아무것도_열지_않는다(monkeypatch: pytest.Monk
 
     assert spy.registered == []
     assert spy.started == []
+
+
+def test_탐지_클래스_설정이_그대로_detector에_전달된다(monkeypatch: pytest.MonkeyPatch) -> None:
+    """모델을 바꿀 때 클래스 목록이 코드가 아니라 설정으로 따라가야 한다.
+
+    사람만 학습한 전용 모델은 클래스가 0 하나뿐이라, 범용 모델 기준의 67(cell phone)을
+    그대로 요구하면 존재하지 않는 클래스를 거르게 된다.
+    """
+    monkeypatch.setenv("INFERENCE_TARGET_CLASS_IDS", '{"0": "person"}')
+
+    runner = build_runner(monkeypatch)
+
+    # 조립 결과로만 확인할 수 있어 내부 필드를 본다 (위 핸들러 테스트들과 같은 방식).
+    detector = runner._consumer._processor._detector  # type: ignore[attr-defined]
+    assert detector.target_class_ids == {0: "person"}
