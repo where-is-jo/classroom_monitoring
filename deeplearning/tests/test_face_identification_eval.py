@@ -10,6 +10,7 @@ from deeplearning.face_identity import FaceGallery, GalleryEntry
 from deeplearning.training.face_identification_eval import (
     ProbeImage,
     aggregate_metrics,
+    build_gallery_from_directory,
     classify_failure,
     evaluate_split,
     load_split,
@@ -167,6 +168,40 @@ def test_evaluate_split_and_aggregate_metrics(tmp_path: Path) -> None:
     assert metrics.unknown_false_accept_rate == pytest.approx(0.0)
     assert metrics.unknown_correct_reject_rate == pytest.approx(1.0)
     assert metrics.average_recognition_ms == pytest.approx(5.0)
+
+
+def test_build_gallery_from_directory_averages_and_normalizes_per_student(tmp_path: Path) -> None:
+    root = tmp_path / "gallery"
+    (root / "student-a").mkdir(parents=True)
+    (root / "student-a" / "1.jpg").write_bytes(b"fake")
+    (root / "student-a" / "2.jpg").write_bytes(b"fake")
+    (root / "student-b").mkdir()
+    (root / "student-b" / "1.jpg").write_bytes(b"fake")
+
+    raw_vectors: dict[Path, np.ndarray] = {}
+    vector_a1 = np.zeros(512, dtype=np.float32)
+    vector_a1[0] = 1.0
+    vector_a1[1] = 1.0
+    raw_vectors[root / "student-a" / "1.jpg"] = vector_a1
+    vector_a2 = np.zeros(512, dtype=np.float32)
+    vector_a2[0] = 1.0
+    vector_a2[1] = -1.0
+    raw_vectors[root / "student-a" / "2.jpg"] = vector_a2
+    vector_b1 = np.zeros(512, dtype=np.float32)
+    vector_b1[1] = 3.0
+    raw_vectors[root / "student-b" / "1.jpg"] = vector_b1
+
+    def embedder(path: Path) -> tuple[np.ndarray, float]:
+        return raw_vectors[path], 1.0
+
+    gallery = build_gallery_from_directory(root, embedder)
+
+    by_student = {entry.student_id: entry.vector for entry in gallery.entries}
+    assert set(by_student) == {"student-a", "student-b"}
+    # student-a: (1,1)/√2와 (1,-1)/√2를 평균하면 (1,0)/√2 방향 -> 재정규화하면 e0
+    assert by_student["student-a"] == pytest.approx(_vector(0), abs=1e-6)
+    # student-b: (0,3,0,...) 정규화하면 e1
+    assert by_student["student-b"] == pytest.approx(_vector(1), abs=1e-6)
 
 
 def test_write_csv_round_trip(tmp_path: Path) -> None:
