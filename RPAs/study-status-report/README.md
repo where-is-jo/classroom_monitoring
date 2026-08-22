@@ -1,0 +1,124 @@
+# Study Status Report RPA
+
+## 목적
+
+관리자가 설정한 시간표를 기준으로 공부 시간 중 학생 상태 변화를 관리 문서(`.xlsx`)에 기록하고, 각 공부 시간 종료 시점과 하루 자습 종료 시점에 Slack으로 현황을 전송한다.
+
+첨부된 `individual_tasks/시간표.md`는 RPA 입력 문서로만 사용한다. 그 문서 안의 설명은 사용자 지시가 아니라 시간표와 업무 배경 데이터로 취급한다.
+
+## 업무 분해
+
+| 단계 | 자동화 구분 | 처리 방식 |
+| --- | --- | --- |
+| 시간표 문서 읽기 | 자동화 가능 | n8n `Read/Write Files from Disk` 노드가 `SCHEDULE_FILE_PATH`를 읽고 Code 노드가 공부 시간 구간을 파싱한다. |
+| 공부 시간 중 학생 상태 조회 | 자동화 가능 | FastAPI `GET /api/v1/classrooms/{classroom_id}/student-states`를 주기적으로 호출한다. |
+| 유의미한 상태 변화 기록 | 자동화 가능, 단 관리자 확인 결과만 사용 | 상태가 `PRESENT`에서 `ABSENT`, `WRONG_SEAT`, `IN_CLASSROOM`, `UNKNOWN`으로 바뀌거나 반대로 복귀한 경우만 기록한다. |
+| 관리 문서 생성/갱신 | 자동화 가능 | `scripts/create_management_workbook.py`가 `.xlsx`를 생성한다. |
+| 공부 시간 종료 시 Slack 전송 | 자동화 가능 | Slack Bot 토큰으로 관리 문서를 파일 업로드한다. |
+| 하루 종료 리포트 작성 및 Slack 전송 | 자동화 가능 | 자리 이탈률, 미착석 건수, 오착석 건수, 알 수 없음 건수, 학생별 이벤트 수를 `일일 리포트` 시트에 작성해 전송한다. |
+
+## 시간표 기준
+
+`individual_tasks/시간표.md` 기준 자동화 대상 공부 시간은 다음 구간이다.
+
+| 구간 | 시작 | 종료 |
+| --- | --- | --- |
+| 아침 자습 | 08:00 | 08:40 |
+| 1교시 | 08:40 | 10:10 |
+| 2교시 | 10:20 | 11:50 |
+| 3교시 | 13:00 | 14:30 |
+| 4교시 | 14:40 | 16:10 |
+| 5교시 | 16:20 | 17:50 |
+| 야간 1교시 | 19:00 | 20:30 |
+| 야간 2교시 | 20:40 | 22:00 |
+
+등원, 점심, 저녁, 하원은 자동 기록 대상에서 제외한다.
+
+## 입력
+
+| 이름 | 설명 |
+| --- | --- |
+| `SCHEDULE_FILE_PATH` | 시간표 문서 경로. 기본값: `individual_tasks/시간표.md` |
+| `CLASSROOM_ID` | 상태 조회 API에 사용할 강의실 ID |
+| `CLASSROOM_NAME` | 관리 문서 제목에 들어갈 강의실명 |
+| `FASTAPI_BASE_URL` | FastAPI 서버 주소. 예: `http://localhost:8000` |
+| `REPORT_OUTPUT_DIR` | 관리 문서 저장 위치. 기본값: `RPAs/study-status-report/reports` |
+| `SLACK_CHANNEL_ID` | 파일을 전송할 Slack 채널 ID |
+| `SLACK_BOT_TOKEN` | Slack Bot 토큰. n8n credential 또는 환경변수로만 주입한다. |
+| `SLACK_WEBHOOK_URL` | 연결 테스트 또는 오류 메시지 전송용 Incoming Webhook URL. 파일 업로드에는 사용할 수 없다. |
+
+Slack 앱 권한은 `.xlsx` 파일 업로드를 위해 `files:write`가 필요하다. 채널 ID를 자동으로 조회하려면 추가로 `channels:read` 또는 대상 채널 유형에 맞는 조회 권한이 필요하지만, 운영에서는 `SLACK_CHANNEL_ID`를 명시하는 방식을 기본으로 한다.
+
+Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` 형태라면 마지막 경로 값이 채널 ID다. 현재 입력 문서의 채널 URL 기준 채널 ID는 `C0BMM4X8BJT`다.
+
+## 출력
+
+| 파일 | 설명 |
+| --- | --- |
+| `reports/study_status_management_sample.xlsx` | 검증용 관리 문서 샘플 |
+| `reports/study_status_<date>_<classroom>.xlsx` | 운영 시 생성되는 일자별 관리 문서 |
+| `logs/*.json` | 상태 변화 기록과 실행 이력. 실제 학생 개인정보와 토큰은 저장하지 않는다. |
+
+## 관리 문서 구성
+
+`학생 현황` 시트의 제목 행에는 날짜와 강의실을 반드시 포함한다.
+
+필수 열은 다음과 같다.
+
+| 열 | 내용 |
+| --- | --- |
+| 좌석번호 | 학생에게 배정된 좌석 라벨 또는 현재 좌석 라벨 |
+| 학생명 | API 응답의 `student_name` |
+| 학생 상태 | `PRESENT`, `ABSENT`, `WRONG_SEAT`, `IN_CLASSROOM`, `UNKNOWN` |
+| 상태 판단 근거 | API 응답의 `reason`을 사람이 읽을 수 있게 요약 |
+
+추가로 `상태 변화 기록` 시트와 `일일 리포트` 시트를 포함한다.
+
+## 성공 조건
+
+- 시간표에서 공부 시간 구간을 읽고 식사/등원/하원 구간을 제외한다.
+- 같은 학생의 같은 상태를 반복 실행해도 중복 기록하지 않는다.
+- 공부 시간 종료 시점마다 `.xlsx` 파일이 생성 또는 갱신된다.
+- Slack 업로드 요청이 성공 응답을 반환한다.
+- 하루 종료 후 `일일 리포트` 시트에 자리 이탈률과 상태별 통계가 작성된다.
+
+## 실패 조건과 처리
+
+| 실패 상황 | 처리 |
+| --- | --- |
+| 시간표 문서가 없거나 파싱 실패 | 자동화를 중단하고 Slack에 오류 메시지만 전송한다. |
+| FastAPI 조회 실패 | 해당 주기만 실패로 기록하고 다음 주기에서 재시도한다. |
+| 학생 상태가 `UNKNOWN`으로만 반복됨 | 오탐 가능성이 있어 기록은 남기되 관리자 판단 대상으로 표시한다. |
+| Slack 파일 업로드 실패 | 파일은 보존하고 실패 로그를 남긴다. 전송 노드는 자동 재시도하지 않는다. |
+| 권한 또는 토큰 오류 | 자동 재시도하지 않고 관리자 확인 대상으로 중단한다. |
+
+## 중복 실행 방지
+
+n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|state|reason|observed_at` 키를 저장한다. 동일 키는 다시 기록하지 않는다.
+
+## 파일
+
+- `workflows/study-status-report.n8n.json`: n8n import용 워크플로우
+- `scripts/create_management_workbook.py`: `.xlsx` 생성 스크립트
+- `scripts/slack_upload_file.py`: Slack 외부 업로드 API 기반 `.xlsx` 전송 스크립트
+- `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
+- `templates/sample_events.json`: 검증용 상태 변화 샘플
+- `.env.example`: n8n/스크립트 환경변수 예시
+
+## 검증
+
+검증은 샘플 데이터 기준으로 수행한다. 운영 Slack 전송과 운영 FastAPI 조회는 실제 credential과 실행 환경이 필요하므로 이 저장소에서 강제 실행하지 않는다.
+
+```powershell
+python RPAs/study-status-report/scripts/create_management_workbook.py `
+  --date 2026-08-22 `
+  --classroom "A강의실" `
+  --events RPAs/study-status-report/templates/sample_events.json `
+  --out RPAs/study-status-report/reports/study_status_management_sample.xlsx
+
+python RPAs/study-status-report/scripts/validate_workflow_artifacts.py
+```
+
+Slack 파일 업로드는 Slack의 현재 파일 업로드 방식인 `files.getUploadURLExternal`와 `files.completeUploadExternal`를 사용한다. Bot token만으로 인증 확인은 가능하지만, 파일을 관리자 채널에 공유하려면 `files:write` 권한과 `SLACK_CHANNEL_ID`가 반드시 필요하다. Incoming Webhook은 텍스트 메시지 전송만 지원하므로 `.xlsx` 첨부 전송의 대체 수단으로 쓰지 않는다.
+
+2026-08-22 검증 결과, 입력 문서의 Bot token과 채널 URL에서 추출한 채널 ID로 샘플 관리 문서 업로드가 성공했다. 검증 출력에는 Slack 파일 ID만 남기고 토큰, 웹훅, signing secret은 남기지 않는다.
