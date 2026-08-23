@@ -1,0 +1,74 @@
+name: classroom-monitoring-dev-pc-publisher
+
+# 강의실 CCTV를 GPU 서버의 MediaMTX로 **밀어 넣는** 송출 스택. 개인 PC(노트북)에서 돈다.
+#
+# **왜 이 스택이 필요한가 — 방향을 뒤집기 위해서다.**
+#
+#   [안 되는 구조]  GPU worker ──pull──▶ 192.168.0.63 (CCTV)
+#   [이 구조]       개인 PC ──push──▶ 100.85.0.72:18554 (MediaMTX) ──▶ GPU worker
+#
+# CCTV는 개인 PC와 같은 192.168.0.x 사설망에 있다. GPU 서버를 그 망에 넣으려면
+# Tailscale subnet route를 써야 하는데, **GPU 서버 자신이 192.168.0.103/24에 직접
+# 물려 있어서 성립하지 않는다.** 직결 라우트가 tailscale 라우트를 항상 이기므로
+# 192.168.0.63은 계속 GPU 자기 LAN으로 나가고, 거기엔 그 주소가 없다
+# (`No route to host`). 라우트를 승인하고 --accept-routes를 켜도 마찬가지이며,
+# 나중에 GPU 쪽 LAN의 .63에 다른 장치가 생기면 남의 장비에 붙는 사고가 된다.
+#
+# 송출은 개인 PC가 거는 **바깥 방향** 연결이라 GPU가 우리 LAN을 알 필요가 없다.
+# 그래서 라우팅도, 관리 콘솔 승인도, GPU의 --accept-routes도 필요 없다.
+# 이 구조를 위해 compose.main.dev.gpu.yml에서 mediamtx의 8554를 Tailscale
+# 주소에만 열었다. 결정 0033의 라즈베리파이 subnet router가 서면 그때 다시 뒤집는다.
+#
+# 실행 (저장소 루트에서):
+#   docker compose -f .docker/compose.publisher.dev.pc.yml up -d
+#   docker compose -f .docker/compose.publisher.dev.pc.yml logs -f
+#
+# **GPU 스택을 먼저 올려야 한다.** MediaMTX가 없으면 송출 대상이 없어 재시작만 반복한다.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  cctv-publisher:
+    image: linuxserver/ffmpeg:latest
+    env_file:
+      # CCTV_RTSP_URL에 카메라 자격 증명이 들어가므로 이 파일 전체가 비밀값이다.
+      # .docker/env/는 .gitignore 대상이다. 변수 목록은 아래 environment 주석에 있다.
+      - ./env/publisher.dev.env
+    environment:
+      # 송출 대상. 자격 증명이 없으므로 여기 직접 적는다(결정 0018).
+      # MediaMTX는 인증을 걸지 않았고 Tailscale 주소에만 열려 있다.
+      PUBLISH_TARGET_URL: rtsp://100.85.0.72:18554/camera-01
+    # 이미지의 entrypoint가 ffmpeg 자체라 그대로 두면 env_file 값을 펼칠 수 없다.
+    # compose의 ${} 치환은 env_file이 아니라 셸 환경과 .env만 본다 — 그래서 컨테이너
+    # 안의 셸에게 펼치게 한다.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        exec ffmpeg -hide_banner -loglevel warning
+        -rtsp_transport tcp -fflags nobuffer -flags low_delay
+        -i "$${CCTV_RTSP_URL}"
+        -an
+        -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
+        -g 30 -b:v 4M -maxrate 4M -bufsize 8M
+        -f rtsp -rtsp_transport tcp "$${PUBLISH_TARGET_URL}"
+    # **왜 재인코딩하는가.** 이 CCTV는 H.265(HEVC) 1280x1944 15fps로 내보낸다.
+    # 추론만 보면 -c copy로 충분하지만(FFmpeg이 디코딩한다), 브라우저 WebRTC가
+    # H.265를 거의 받지 못해 관제 화면이 검게 남는다. 화면까지 봐야 하므로 H.264로
+    # 바꾼다. 대가는 이 노트북의 CPU다 — 2.5MP를 실시간으로 인코딩한다.
+    #
+    # ultrafast/zerolatency는 화질이 아니라 지연과 CPU를 위한 선택이다. 관제는
+    # "지금 무엇이 보이는가"가 중요하고, 정밀 판독용 원본은 어차피 저장하지 않는다
+    # (결정 0028).
+    #
+    # CPU가 모자라면 해상도를 줄인다. 추론은 어차피 640으로 리사이즈하므로 탐지
+    # 성능 손해가 크지 않다:
+    #   -vf scale=960:-2
+    #
+    # 재시작은 컨테이너에 맡긴다. CCTV가 잠깐 끊기거나 MediaMTX가 재시작하면
+    # ffmpeg이 종료되는데, 그때 자동으로 다시 붙어야 관제가 끊기지 않는다.
+    restart: unless-stopped
+    logging: *default-logging

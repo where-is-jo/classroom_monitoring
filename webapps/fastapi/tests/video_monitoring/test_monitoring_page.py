@@ -183,7 +183,7 @@ def test_monitoring_page_single_camera_uses_full_width_grid() -> None:
 
 
 def test_monitoring_grid_css_supports_large_two_column_responsive_layout() -> None:
-    """최대 2열(desktop)·1열(900px 이하) 대형 grid와 16:9 프레임 CSS."""
+    """최대 2열(desktop)·1열(900px 이하) 대형 grid와 카메라 비율을 따르는 프레임 CSS."""
     css = STATIC_CSS.read_text(encoding="utf-8")
 
     assert ".camera-monitoring-grid {" in css
@@ -195,8 +195,13 @@ def test_monitoring_grid_css_supports_large_two_column_responsive_layout() -> No
     segment = css[media_start : next_media if next_media != -1 else len(css)]
     assert ".camera-monitoring-grid" in segment
     assert "grid-template-columns: minmax(0, 1fr)" in segment
-    # 카드 영상 영역은 16:9 비율을 유지한다.
-    assert ".camera-monitoring-frame { position: relative; aspect-ratio: 16 / 9;" in css
+    # 카드 영상 영역의 비율은 카메라를 따라간다. 16:9로 박아 두면 세로가 긴 어안
+    # CCTV(1280x1944)가 위아래로 잘려 앞뒷줄 좌석이 화면에서 사라진다.
+    assert "aspect-ratio: var(--frame-aspect, 16 / 9)" in css
+    # 잘라내는 cover가 아니라 전체를 담는 contain이어야 한다.
+    assert (
+        ".camera-monitoring-frame video { width: 100%; height: 100%; object-fit: contain; }" in css
+    )
 
 
 # ── 전체화면 (MON-008, TASK-006) ───────────────────────────────────────────

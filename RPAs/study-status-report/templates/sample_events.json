@@ -5,9 +5,7 @@
     "seat_number": "A-01",
     "student_id": "student-001",
     "student_name": "김민준",
-    "student_state": "ABSENT",
-    "reason": "SEAT_VACANT_BEYOND_GRACE",
-    "note": "공부 시간 중 배정 좌석 미착석"
+    "student_state": "ABSENT"
   },
   {
     "period": "1교시",
@@ -15,9 +13,7 @@
     "seat_number": "A-03",
     "student_id": "student-003",
     "student_name": "이서연",
-    "student_state": "WRONG_SEAT",
-    "reason": "IDENTIFIED_AT_OTHER_SEAT",
-    "note": "다른 좌석에서 식별됨"
+    "student_state": "WRONG_SEAT"
   },
   {
     "period": "4교시",
@@ -25,9 +21,7 @@
     "seat_number": "A-05",
     "student_id": "student-005",
     "student_name": "박지호",
-    "student_state": "UNKNOWN",
-    "reason": "SEAT_NOT_OBSERVED",
-    "note": "좌석 관측 근거 부족"
+    "student_state": "UNKNOWN"
   },
   {
     "period": "야간 2교시",
@@ -35,8 +29,6 @@
     "seat_number": "A-01",
     "student_id": "student-001",
     "student_name": "김민준",
-    "student_state": "PRESENT",
-    "reason": "IDENTIFIED_AT_ASSIGNED_SEAT",
-    "note": "배정 좌석 복귀 확인"
+    "student_state": "PRESENT"
   }
 ]
