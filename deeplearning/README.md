@@ -3,8 +3,12 @@
 컴퓨터 비전 모델을 실행해 영상 프레임에서 **사람을 찾고, 얼굴을 찾고, 학생을 식별**하는
 추론 디렉터리다.
 
-> 현재 상태: SCRFD 얼굴 검출과 MediaPipe 자세 분석 내부 HTTP 서비스가 구현됐다.
-> 기본 속도·특징점 안정성·흐림·밝기·중복 품질 수치는 구현되었다. 전용 가림 모델과 AdaFace 인식은 아직 구현되지 않았다.
+> 현재 상태: SCRFD 얼굴 검출, ArcFace embedding·오픈셋 갤러리 대조, 얼굴 단위 시간
+> 추적과 MediaPipe 자세 분석이 구현됐다. worker가 지정된 입구 카메라 프레임을 내부
+> HTTP로 보내면 FastAPI가 만든 대표 embedding 갤러리와 대조해 `student_id`를 돌려준다.
+> AdaFace 어댑터·고정 split 평가 하네스와 카메라 간 인계 실험 코드도 있다. 운영
+> 카메라별 사람 ByteTrack과 문 영역·통과 시각 기반 인계는 `worker/inference`가 담당하며,
+> 복장 re-ID는 아직 실험 경로로만 유지한다.
 > 모델 학습용 Jupyter 노트북은 [`training/`](./training/README.md)에 있다
 > ([결정 0029](../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 성능 수치나 정확도를 측정 없이 이 문서에 기록하지 않는다.
@@ -24,9 +28,9 @@
 | `deeplearning` | 모델 종류, 가중치, 전처리, 후처리, 탐지 결과 스키마 |
 | [`worker/inference`](../worker/inference/README.md) | 언제 호출하는가, 실패하면 어떻게 하는가, 언제 멈추는가 |
 
-**현재 코드는 이 경계를 만족하지 않는다.** 이 디렉터리에 코드가 없어서
-`worker/inference`가 ultralytics를 직접 부른다. 구현 시 그 모델 호출을 이 디렉터리로
-옮긴다. 새 모델 코드는 `worker`가 아니라 여기에 만든다.
+얼굴 식별은 이 경계를 따른다. `worker/inference`는 모델이나 갤러리를 모르고
+`POST /internal/face-identifications`만 호출한다. 사람 탐지는 아직 예외다.
+`worker/inference`가 ultralytics를 직접 부르므로 이후 이관 대상이다.
 
 ## 목표 파이프라인
 
@@ -88,11 +92,11 @@ student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 | 단계 | 후보 | 상태 |
 | --- | --- | --- |
 | Person Detection | YOLO11n/s, YOLOv8n(현재 코드) | 버전 `결정 필요` |
-| Face Detection | SCRFD | `후보` |
-| Face Recognition | AdaFace R50, ArcFace | 비교 후 결정 |
+| Face Detection | SCRFD | 등록·실시간 식별에 구현됨. 모델 버전 확정은 `결정 필요` |
+| Face Recognition | ArcFace(현재), AdaFace R50 | 둘 다 평가 가능. 운영 기본은 기존 등록 embedding과 같은 ArcFace이며 최종 선택은 비교 후 결정 |
 | Head Pose | Landmark/Pose 모델 | `후보`. 얼굴 등록 시점의 각도 보정용 |
-| Tracking | ByteTrack | **MVP 핵심 경로.** 신원 유지가 여기에 걸린다([결정 0025](../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 구현 위치가 `deeplearning`인지 `worker/inference`인지는 `결정 필요` |
-| 카메라 간 신원 인계 | CCTV 문 영역 + 통과 시각 기반 인계 / 복장·외형 re-ID | **방법 `결정 필요`.** 0025의 최우선 항목. 두 화각이 겹치지 않아 겹침 기반 인계는 배제됐다 |
+| Tracking | 얼굴 bbox+embedding 시간 추적 + worker 사람 ByteTrack | 입구·CCTV는 독립 tracker를 쓰며, 얼굴 식별은 사람 track ID를 덮어쓰지 않는다([결정 0025](../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
+| 카메라 간 신원 인계 | CCTV 문 영역+통과 시각 운영 경로, 시간·기하·복장 re-ID 실험 | 운영 경로는 유일 후보일 때만 인계하고 모호하면 미식별로 둔다. re-ID는 실험 코드로 유지한다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)) |
 | Super Resolution | 별도 모델 | **핵심 경로에서 빠졌다.** 얼굴 인식을 입구에서만 한다([결정 0024](../docs/architecture/decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 아래 참고 |
 
 ### 작은 얼굴 문제를 Super Resolution으로 먼저 풀지 않는다
@@ -154,19 +158,19 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 | 언어 | Python | |
 | 모델 | 위 [모델 선정](#모델-선정) 표 참고 | 대부분 `결정 필요` |
 | 실행 환경 | CPU / GPU 모두 고려 | Jetson 실행 여부 **결정 필요** |
-| 호출 방식 | 결정 필요 | 라이브러리 import / 별도 프로세스 후보 |
+| 호출 방식 | 내부 HTTP | worker → deeplearning. [결정 0035](../docs/architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다) |
 
 ## 다른 서비스와의 관계
 
-- [`worker/inference`](../worker/inference/README.md): 프레임을 넘겨 이 디렉터리의
-  추론을 호출한다. 호출 방식은 **결정 필요**.
+- [`worker/inference`](../worker/inference/README.md): 지정된 입구 카메라의 JPEG와 사람
+  bbox를 내부 HTTP로 보내고 학생 ID·신뢰도·얼굴 bbox·얼굴 track만 받는다.
 - `webapps/fastapi`: 추론 결과의 소비자이자 상태 판정 주체다. 얼굴 등록 시 embedding
   생성도 여기를 통한다. 결과 스키마는 fastapi와 합의한 뒤 변경한다.
 - 브라우저: 직접 호출하지 않는다. `fastapi`를 통해서만 결과에 접근한다.
 - `monitoring`: 추론 지연·처리량·식별 성공률 지표를 노출한다.
   지표 이름은 `classroom_monitoring_` 접두사를 사용한다.
 
-## 향후 구현 시 필요한 환경변수
+## 환경변수
 
 값의 취급과 명명 규칙은 [환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
 
@@ -179,9 +183,14 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 | `DEVICE` | 실행 장치 | `cpu` / `cuda` |
 | `CONFIDENCE_THRESHOLD` | 탐지 신뢰도 임계값 | 기본값 허용, 환경별 조정 가능 |
 | `MAX_BATCH_SIZE` | 배치 크기 | 배치 처리 도입 시 |
+| `FACE_IDENTIFICATION_ENABLED` | 실시간 갤러리 식별 활성화 | 기본 `false` |
+| `FACE_GALLERY_DATABASE_URL`, `_NAME` | FastAPI 대표 embedding 갤러리 조회 | 읽기 전용 MongoDB 자격 증명 권장 |
+| `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 유사도·margin 임계값 | 식별을 켤 때 파일 또는 아래 두 값이 필수 |
+| `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD` | 임계값 파일을 쓰지 않을 때의 값 | 근거 없는 기본값 없음 |
 
-학생 식별 신뢰도 임계값(`IDENTITY_CONFIDENCE_THRESHOLD`)은 판정 기준값이므로
-`webapps/fastapi` 쪽 설정이다. 두 값을 하나로 합치지 않는다.
+갤러리의 누구인지 결정하는 유사도·margin 임계값은 `deeplearning` 설정이다. 식별된
+결과를 학생 상태 근거로 받아들일지 정하는 `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`는
+`webapps/fastapi` 설정이다. 목적이 다르므로 하나로 합치지 않는다.
 
 ## 지표 노출
 
@@ -253,6 +262,13 @@ bbox 기반 크기 비율, 검출 신뢰도, 안내 타원 포함 여부, MediaP
 얼굴 crop의 흐림·밝기, 프레임 간 각속도·중복 점수를 반환한다. 중복은 같은 세션의 최근
 120개 특징 중 유사 자세와 비교하고, 비교 상태는 완료·취소 시 삭제한다. 얼굴 이미지와
 비교 지문은 응답·로그에 포함하지 않으며 저장 여부와 파일명은 FastAPI가 결정한다.
+
+`POST /internal/face-identifications`는 JPEG 바이트, `X-Camera-ID`, JSON 형식의
+`X-Person-Bboxes`를 받는다. 기능이 켜져 있으면 FastAPI의 `face_embeddings` 컬렉션을
+주기적으로 읽어 현재 ArcFace 메타데이터와 정확히 맞는 대표 벡터만 갤러리에 넣는다.
+응답에는 사람 인덱스·얼굴 bbox·얼굴 track과 기준을 통과한 `student_id`·유사도만 있고
+embedding은 없다. 갤러리 조회 실패·빈 갤러리·호환되지 않는 문서는 503으로 닫힌다.
+임계값은 `training/face_identification_eval.py`가 만든 산출물을 사용한다.
 
 ## 관련 문서
 

@@ -50,15 +50,16 @@ MVP의 범위, 도메인 구조, 계약, 완료 조건을 정한다.
 | 좌석 관측 | batch 전체 선검증, event ID 멱등 처리, 오래된 관측은 현재 상태를 되돌리지 않음 |
 | 모니터링·검색 | `DEMO_MODE_ENABLED=true`인 local/dev의 고정 합성 데이터. 실제 스트림·의미 검색이 아니다 |
 | `worker/stream` | 다중 RTSP 수신·재연결·프레임 샘플링 |
-| `worker/inference` | 프레임 버퍼에서 최신 프레임을 꺼내 YOLOv8n으로 탐지. `FASTAPI_URL` 설정 시 내부 API로 제한 재시도하며 전달 |
+| `worker/inference` | 카메라별 최신 프레임을 학습 YOLO로 탐지하고 사람 ByteTrack을 부여. 입구 얼굴 식별을 CCTV track에 인계한 뒤 `FASTAPI_URL`로 전달 |
 | `worker/recorder` | FFmpeg 세그먼트를 객체 저장소에 적재하고 보존 기간 경과분 삭제 |
-| `deeplearning` | SCRFD 얼굴 검출·MediaPipe 자세 내부 HTTP 서비스. 나머지 품질·얼굴 인식은 미구현 |
-| 학생·얼굴·좌석 연동 | 학생 등록, 얼굴 등록 프로필, 좌석 지정, 카메라별 ROI, 합성 식별 이벤트의 `PRESENT`·`WRONG_SEAT`·`UNKNOWN` REST/SSE가 구현됨. 실제 얼굴 식별 모델과 `ABSENT`는 미구현 |
+| `deeplearning` | SCRFD·ArcFace 오픈셋 식별, 얼굴 track, MongoDB 대표 embedding 갤러리, MediaPipe 자세와 모델 비교 평가 하네스 구현 |
+| 학생·얼굴·좌석 연동 | 입구 식별→CCTV ByteTrack→좌석 ROI 코드 경로 구현. 실제 문 ROI·가중치 배포 검증과 시간표 기반 `ABSENT`는 남음 |
 
-현재 핵심 단절은 셋이다 — 실제 얼굴 식별 모델이 `student_id`·식별 신뢰도 필드를 채우지
-못하는 것, 트래킹이 없는 것, **입구 track과 CCTV track을 잇는 방법이 정해지지 않은 것**
-([0025](../architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 셋째가 가장 크다. worker → FastAPI HTTP 전달과 FastAPI의 ROI·좌석 지정 기반 상태
-판정은 구현됐다
+입구 카메라 안에서는 사람 ByteTrack에 `student_id`와 식별 신뢰도를 채운다([0035](../architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+worker는 CCTV 문 영역에서 유일하게 새로 생긴 ByteTrack에만 그 신원을 인계하고, 같은
+track이 유지되는 동안 좌석 ROI까지 전달한다([0036](../architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
+동시 입장처럼 후보가 모호하면 잘못 잇지 않고 `UNKNOWN`으로 둔다.
+worker → FastAPI HTTP 전달과 FastAPI의 ROI·좌석 지정 기반 상태 판정은 구현됐다
 ([결정 0027](../architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다),
 [결정 0019](../architecture/decisions.md#0019--실시간-학생-상태-연동은-카메라별-roi와-fastapi-판정을-사용한다)).
 
@@ -170,18 +171,15 @@ MVP는 역할이 다른 카메라 2대를 쓴다([결정 0024](../architecture/d
        ↓                                        │
   track_id에 student_id를 붙인다 ──인계──────────┘
                                     ↑
-                          방법이 아직 정해지지 않았다
+                     문 영역 + 통과 시각의 유일 후보
 ```
 
 - **신원은 학생이 아니라 track에 붙는다.** track이 유지되는 동안만 신원이 유지된다.
 - **두 카메라는 화각이 달라 좌표계를 공유하지 않으므로 각각 독립적으로 트래킹한다.**
-- **인계 방법은 `결정 필요`다.** 화각이 겹치지 않으므로 겹침 구간에서 같은 사람을 보고
-  잇는 방법은 쓸 수 없다. 남은 단서는 **CCTV 화면 안의 문 영역**과 **입구 통과 시각** 둘뿐이다.
-  즉 "문 앞에서 t에 식별된 학생은 t 직후 CCTV의 문 영역에서 새로 생기는 track"이라는
-  형태가 되며, 여기에 복장·외형 re-ID를 보태 모호성을 줄일지가 남은 선택이다.
-- **여러 명이 짧은 간격으로 들어올 때가 이 방법의 약점이다.** 시간 창을 좁히면 놓치고
-  넓히면 섞인다. 입구 통과 순서만으로 잇는 규칙은 단독으로 채택하지 않는다 — 어긋나도
-  그 사실을 시스템이 알 방법이 없다.
+- **인계는 CCTV 문 영역과 입구 통과 시각을 함께 쓴다.** "문 앞에서 t에 식별된 학생"과
+  "t 직후 CCTV 문 영역에서 처음 생긴 track"이 각각 하나일 때만 연결한다.
+- **여러 명이 짧은 간격으로 들어오면 인계하지 않는다.** 후보 학생이나 신규 track이
+  둘 이상이면 순서·거리로 추정하지 않고 `UNKNOWN`으로 둔다([0036](../architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 - **track이 끊기거나 인계에 실패하면 `UNKNOWN`이다.** 가까운 track에 이어붙이지 않는다.
 - **ID switch가 이 구조에서 가장 위험한 실패다.** 얼굴 인식은 틀려도 다음 프레임에서
   회복되지만, 트래킹은 한 번 어긋나면 확신을 가진 채 계속 틀린다. track 유실률·인계
@@ -304,20 +302,21 @@ POST /internal/inference/events
 평가 요청이나 탐지 이벤트 수신에서만 일어난다. 조회가 부작용을 일으키면 화면을
 두 번 연 것과 한 번 연 것의 결과가 달라진다.
 
-## MongoDB 컬렉션 (`예정`)
+## MongoDB 컬렉션
 
 | 컬렉션 | 내용 | 상태 |
 | --- | --- | --- |
 | `classrooms` | 강의실 | 구현됨 |
-| `seats` | 좌석과 geometry. **좌석 ROI 필드 추가 `예정`** | 일부 구현됨 |
+| `seats` | 좌석과 배치도 geometry | 구현됨 |
 | `seat_observation_batches` | 관측 batch 멱등성 키 | 구현됨 |
 | `seat_occupancy_history` | 좌석 점유 이력 | 구현됨 |
-| `students` | 학생 원장 | `예정` |
-| `seat_assignments` | 좌석-학생 지정 | `예정` |
-| `face_enrollment_sessions` | 얼굴 등록 세션 | `예정` |
-| `face_profiles` | 학생별 embedding과 모델 버전 | `예정` |
-| `detection_events` | 수신한 탐지 결과 | `예정` |
-| `student_state_history` | 학생 상태 전이 이력 | `예정` |
+| `students` | 학생 원장 | 구현됨 |
+| `seat_assignments` | 좌석-학생 지정 | 구현됨 |
+| `face_enrollments` | 얼굴 등록 세션 | 구현됨 |
+| `face_profiles` | 학생별 얼굴 등록 프로필 | 구현됨 |
+| `face_embeddings` | 학생별 대표 embedding과 모델·전처리 버전 | 구현됨. deeplearning이 읽기 전용 갤러리로 조회 |
+| `detection_events` | 수신한 탐지 결과 | 구현됨 |
+| `student_state_history` | 학생 상태 전이 이력 | 구현됨 |
 | `class_sessions` | 수업 시간대 | `예정` |
 | `admin_reviews` | 관리자 확인·보정 기록 | `예정` |
 
@@ -334,9 +333,9 @@ POST /internal/inference/events
 | 강의실 현황 | `/classrooms` | 강의실 선택, 좌석 지도, 좌석별 지정 학생과 상태, 재석·잘못된 자리·부재·확인 필요 집계, 마지막 관측 시각 |
 | 실시간 모니터링 | `/monitoring` | 카메라별 영상 영역, 연결 상태, 마지막 상태 시각, demo 여부 |
 | 검색 | `/video-search` | 검색 문장과 기간·강의실 조건, 결과와 일치 이유 |
-| 학생 관리 | `/students` (`예정`) | 학생 목록·등록·수정, 얼굴 등록 여부 |
-| 좌석 지정 | `/classrooms/seat-assignments` (`예정`) | 좌석에 학생 지정·해제 |
-| 얼굴 등록 | `/students/{student_id}/face-enrollment` (`예정`) | 샘플 수집, 품질 판정 결과, 등록 완료 |
+| 학생 관리 | `/students` | 학생 목록·등록, 얼굴 등록 여부 |
+| 좌석 지정 | `/classrooms/seat-assignments` | 좌석에 학생 지정·해제 |
+| 얼굴 등록 | `/students/{student_id}/face-enrollment` | 샘플 수집, 품질 판정 결과, 등록 완료 |
 
 화면 규칙:
 
@@ -358,7 +357,8 @@ POST /internal/inference/events
 | `ABSENCE_GRACE_PERIOD_SECONDS` | 미식별이 이만큼 이어지면 `ABSENT` | **값 `결정 필요`** (5/10/20/30분 후보) |
 | `SEAT_MATCH_TOLERANCE` | 좌석 ROI 판정 여유 | 판정 방식 확정 후 |
 | `TRACK_STALE_SECONDS` | 이 시간 갱신이 없으면 track을 끊긴 것으로 본다 | 실제 촬영으로 정한다 |
-| `IDENTITY_HANDOVER_*` | 카메라 간 신원 인계 기준값 | **인계 방법 확정 후**(`결정 필요`) |
+| `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 | 배치별 `.env`; 실제 화면으로 보정 |
+| `IDENTITY_HANDOVER_*` | 인계 시간 창·clock skew·track stale·신뢰도 | 실제 통과 영상으로 조정 |
 | `FACE_ENROLLMENT_MIN_SAMPLES` | 등록에 필요한 최소 샘플 수 | |
 | `FACE_QUALITY_MIN_SIZE_PIXELS` | 등록 샘플의 최소 얼굴 크기 | |
 
@@ -439,11 +439,11 @@ POST /internal/inference/events
 | `webapps/fastapi` | 기능 디렉터리 3개 추가, `classrooms` 확장, 화면 추가 |
 | API 계약 | 추가. 기존 `classrooms` 응답은 **필드 추가만** 한다. 삭제·이름 변경은 깨는 변경 |
 | 데이터 | MongoDB 컬렉션 8개 추가. **얼굴 데이터는 별도 권한 경계가 필요하다** |
-| `deeplearning` | 얼굴 탐지·인식 구현. 트래킹과 신원 인계를 여기에 둘지 `결정 필요` |
-| `worker/inference` | 모델 호출을 `deeplearning`으로 이관, 트래킹 추가(위치 `결정 필요`), `track_id` 전달 |
+| `deeplearning` | SCRFD·ArcFace 갤러리 식별과 얼굴 track 구현. 외형 re-ID·homography 인계는 실험 코드로 유지 |
+| `worker/inference` | 카메라별 사람 ByteTrack, 입구 얼굴 식별, 문 영역·시각 기반 CCTV 신원 인계와 `track_id`·신원 전달 구현 |
 | `worker/stream` | 어안 CCTV 수신 추가. 왜곡 보정을 여기서 할지 `결정 필요` |
 | 입구 카메라 노드 | 라즈베리파이 + 웹캠의 RTSP 송출 구성. 저장소에 코드가 없다 |
-| `monitoring` | 식별 성공률·추론 지연에 더해 track 유실률·인계 성공률·평균 track 수명 추가(`예정`) |
+| `monitoring` | track 생성·만료·활성 수, track 수명, 인계 결과 지표 구현. 대시보드·경보는 남음 |
 | 개인정보 | **동의·보존·접근 권한 합의가 선행되어야 한다** |
 
 ## 예외와 실패 상황
@@ -482,9 +482,8 @@ POST /internal/inference/events
 3. **얼굴 등록** — 품질 판정 규칙과 등록 흐름. embedding 생성은 `deeplearning`에 위임한다.
 4. **모델 비교** — 얼굴 탐지기와 인식 모델 후보를 같은 조건으로 비교하고 결정을 기록한다.
 5. **`worker` → `deeplearning` 연결** — 모델 호출을 이관한다.
-5-1. **트래킹** — ByteTrack을 붙여 카메라별 `track_id`를 만든다. 구현 위치를 정한다.
-5-2. **카메라 간 신원 인계** — 1번의 촬영 결과로 방법을 정해 결정으로 기록하고 구현한다.
-   **이것이 정해지기 전에는 6번 이후가 실제 신원 없이 돌아간다.**
+5-1. **트래킹 실측** — 구현된 카메라별 ByteTrack의 ID switch·유실 구간을 실제 영상으로 측정한다.
+5-2. **카메라 간 신원 인계 보정** — CCTV 문 ROI와 시간 창을 실제 통과 영상으로 확정하고 동시 입장 실패율을 측정한다.
 6. **탐지 결과 → `fastapi` 연결** — 전달 방식을 확정하고 수신 API를 만든다.
 7. **좌석 대조** — 위치와 좌석 ROI로 현재 좌석을 정한다.
 8. **상태 판정** — 지정 좌석 비교와 시간 정책을 붙여 상태를 완성한다.

@@ -2,7 +2,8 @@
 
 **정의를 여기 한곳에 모은다.** 계측 코드가 로직에 흩어지면 어떤 지표가 어디서
 올라오는지 추적할 수 없고, label을 바꿀 때 고칠 곳도 흩어진다. 실제 계측은
-`processor.py`(모델 호출 한 번)와 `consumer.py`(루프 한 바퀴) 두 자리뿐이다.
+`processor.py`(모델 호출), `consumer.py`(루프), `tracking.py`(track 수명),
+`identity_handover.py`(인계 결과)에 있다.
 
 프레임 버퍼 지표는 여기 없다. stream과 함께 쓰는 값이라 `shared/metrics.py`에 있다.
 
@@ -15,6 +16,8 @@
 | `detection_confidence` | `class_name` | 2 |
 | `inference_duration_seconds` | 없음 | 1 |
 | `inference_consecutive_failures` | 없음 | 1 |
+| `person_tracks_*` | `camera_id` | 카메라 대수 |
+| `identity_handoff_total` | `outcome` | 4 |
 
 `camera_id`는 `STREAM_SOURCES`에 적은 카메라만 나오므로 대수가 고정이다. **프레임
 번호·이벤트 id·학생 id는 label로 쓰지 않는다** — 값이 무한히 늘어나고, 학생 id는
@@ -25,15 +28,19 @@
 from __future__ import annotations
 
 from prometheus_client import Counter, Gauge, Histogram
-
 from shared.metrics import METRIC_PREFIX
 
 __all__ = [
     "CONSECUTIVE_FAILURES",
-    "DETECTION_CONFIDENCE",
     "DETECTIONS_TOTAL",
+    "DETECTION_CONFIDENCE",
     "FRAMES_PROCESSED_TOTAL",
+    "IDENTITY_HANDOFF_TOTAL",
     "INFERENCE_DURATION_SECONDS",
+    "PERSON_TRACKS_ACTIVE",
+    "PERSON_TRACKS_CREATED_TOTAL",
+    "PERSON_TRACKS_EXPIRED_TOTAL",
+    "PERSON_TRACK_LIFETIME_FRAMES",
 ]
 
 # 모델 호출 한 번에 걸린 시간. **평균이 아니라 분포로 본다** — 평균은 가끔 튀는
@@ -84,4 +91,39 @@ DETECTION_CONFIDENCE = Histogram(
     "탐지 신뢰도 분포. 내려가면 모델이나 촬영 환경이 바뀐 것이다",
     labelnames=("class_name",),
     buckets=(0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0),
+)
+
+# ByteTrack 상태. camera_id는 설정된 카메라 목록 안에서만 나오며, track_id나
+# student_id는 label로 내보내지 않는다.
+PERSON_TRACKS_CREATED_TOTAL = Counter(
+    f"{METRIC_PREFIX}person_tracks_created_total",
+    "ByteTrack이 새로 만든 사람 track 수",
+    labelnames=("camera_id",),
+)
+
+PERSON_TRACKS_EXPIRED_TOTAL = Counter(
+    f"{METRIC_PREFIX}person_tracks_expired_total",
+    "track buffer를 넘겨 만료된 사람 track 수",
+    labelnames=("camera_id",),
+)
+
+PERSON_TRACKS_ACTIVE = Gauge(
+    f"{METRIC_PREFIX}person_tracks_active",
+    "카메라별 활성·유실 대기 중 사람 track 수",
+    labelnames=("camera_id",),
+)
+
+PERSON_TRACK_LIFETIME_FRAMES = Histogram(
+    f"{METRIC_PREFIX}person_track_lifetime_frames",
+    "만료된 ByteTrack이 유지된 처리 프레임 수",
+    labelnames=("camera_id",),
+    buckets=(5, 10, 20, 30, 60, 120, 300, 600, 1800, 3600),
+)
+
+# outcome은 accepted / no_candidate / ambiguous_candidates / ambiguous_tracks 네
+# 값뿐이다. 학생 식별자는 개인정보이므로 포함하지 않는다.
+IDENTITY_HANDOFF_TOTAL = Counter(
+    f"{METRIC_PREFIX}identity_handoff_total",
+    "입구 신원을 교실 CCTV track으로 인계한 시도 결과",
+    labelnames=("outcome",),
 )

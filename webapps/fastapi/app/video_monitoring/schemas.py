@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .models import (
+    CameraRole,
     DemoStream,
     PlaybackSession,
     SourceStatus,
@@ -53,6 +54,7 @@ class RealStreamResponse(BaseModel):
     camera_id: str
     classroom_id: str
     camera_label: str
+    role: CameraRole
     status: str
     playback_kind: str
     playback_path: str | None
@@ -67,6 +69,7 @@ class RealStreamResponse(BaseModel):
             camera_id=item.camera_id,
             classroom_id=item.classroom_id,
             camera_label=item.camera_label,
+            role=item.role,
             status=status.value,
             playback_kind=item.playback_kind.value,
             playback_path=item.playback_path,
@@ -90,6 +93,9 @@ class VideoStreamCreateRequest(BaseModel):
     camera_id: str = Field(..., min_length=1, max_length=64)
     classroom_id: str = Field(..., min_length=1)
     camera_label: str = Field(..., min_length=1, max_length=100)
+    # 입구 카메라는 좌석 판정에서 제외해야 하므로 등록 시 역할을 명시할 수 있어야 한다.
+    # 생략하면 기존 카메라와 호환되도록 좌석 판정 역할을 유지한다.
+    role: CameraRole = CameraRole.SEAT_JUDGING
     enabled: bool = True
 
 

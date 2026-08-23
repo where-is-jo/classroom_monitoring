@@ -119,8 +119,10 @@ python -m recorder.main
 [recorder README](../../worker/recorder/README.md)에,
 설정값의 근거와 겪은 문제는 [카메라 수집 구성](../../worker/stream/camera-guides.md)에 있다.
 
-`deeplearning`, `monitoring`, `RPAs`에는 아직 실행 코드가 없다.
-실행 방법을 지어내지 말고, 구현한 사람이 해당 서비스 README에 실제로 확인한 명령을 적는다.
+`deeplearning`의 얼굴 분석·식별 내부 HTTP 서비스와 학습·평가 도구 실행법은
+[deeplearning README](../../deeplearning/README.md)를 따른다. `monitoring/internal`에는
+Prometheus·Grafana·Loki·Alloy 구성이 있고, `RPAs`에는 아직 실행 코드가 없다.
+문서에 없는 실행 방법을 지어내지 말고 해당 서비스 README에서 확인한 명령만 사용한다.
 
 ## 환경변수
 
@@ -133,11 +135,11 @@ python -m recorder.main
 
 ## 통합 실행과 배포
 
-여러 서비스를 한 번에 띄우는 공식 수단은 아직 없다. docker compose 구성을 개인 로컬에서
-쓰고 있으나 팀 공식 실행 수단으로 확정되지 않아 저장소에 포함되지 않는다.
-배포 환경과 방식도 정해지지 않았다.
-둘 다 [미결정 항목](../architecture/README.md#미결정-항목)이며, 확정하면
-[결정 기록](../architecture/decisions.md)에 남기고 이 절을 절차로 바꾼다.
+여러 서비스를 함께 띄우는 팀 공식 개발 수단은 `.docker/compose.*.yml`이다. dev main
+스택은 개인 PC용과 GPU 서버용으로 분리돼 있으며, 실제 주소·자격 증명은 gitignore 대상
+`.docker/env/`에서 주입한다. 호스트별 실행 범위와 명령은
+[아키텍처](../architecture/README.md)와 각 compose 파일의 주석을 따른다. 개인 로컬 검증
+override나 실제 환경파일을 공식 compose에 합치거나 저장소에 커밋하지 않는다.
 
 ## 작업 흐름
 

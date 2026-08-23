@@ -162,9 +162,9 @@ def test_retained_sessions_are_split_deterministically() -> None:
     second = _assign_session_splits(list(reversed(frames)))
 
     assert first == second
-    assert list(first.values()).count("train") == 8
+    assert list(first.values()).count("train") == 9
     assert list(first.values()).count("val") == 1
-    assert list(first.values()).count("test") == 1
+    assert "test" not in first.values()
 
 
 def _input(

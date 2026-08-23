@@ -26,7 +26,7 @@
 | `student_id` | 아니요 | FastAPI 학생 원장의 내부 ID. 이름이나 학번을 대신 보내지 않음 |
 | `identity_confidence` | 아니요 | 얼굴 식별 신뢰도, `0.0 <= value <= 1.0` |
 | `face_bbox` | 아니요 | 얼굴 영역의 같은 픽셀 좌표계 bbox. 이미지나 embedding은 보내지 않음 |
-| `track_id` | 아니요 | 같은 카메라 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). 트래킹 미구현이라 지금은 항상 생략된다. 신원과 달리 단독으로도 뜻이 있으므로 식별 여부와 무관하게 보낸다 |
+| `track_id` | 아니요 | 같은 카메라 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). worker의 사람 ByteTrack은 `person-<번호>`를 채운다. 단독 얼굴 식별은 `face-<번호>`를 폴백으로 쓰며, 사람 ID가 있으면 덮어쓰지 않는다. 신원과 달리 단독으로도 뜻이 있어 미식별 track에도 보낸다 |
 
 식별 성공이면 `student_id`와 `identity_confidence`를 함께 채우고 `face_bbox`는 선택으로
 채운다. 미식별이거나 모델 기준 미달이면 세 필드를 모두 `null`로 두거나 생략한다. 가장
@@ -51,9 +51,9 @@ FastAPI 쪽 판정은 이미 구현돼 있다([결정 0032](../../docs/architect
 2. **`identity_confidence`가 `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`(기본 0.5) 이상
    이어야 이름이 붙는다.** 미달은 `UNKNOWN`이다 — 오인식은 다른 학생의 출결을 바꾸는
    사고라 억지로 고르지 않는다.
-3. **그 카메라에 좌석 ROI가 등록돼 있어야 좌석까지 이어진다.** ROI가 없으면 좌석 판정에
-   참여하지 않는다. 입구 카메라처럼 신원만 만드는 카메라는 `role=IDENTITY_ONLY`로
-   등록하며, 그 신원을 좌석까지 잇는 방법은 결정 0025의 3번에서 아직 `결정 필요`다.
+3. **교실 CCTV에 좌석 ROI와 문 영역 인계 route가 등록돼 있어야 좌석까지 이어진다.**
+   입구 카메라는 `role=IDENTITY_ONLY`, CCTV는 `role=SEAT_JUDGING`으로 등록한다. worker가
+   입구 신원을 CCTV ByteTrack에 인계하고, FastAPI는 CCTV detection을 좌석 ROI에 대조한다.
 
 판정이 왜 그렇게 나왔는지는 상태와 함께 저장되는 근거 코드(`reason`)와
 `GET /api/v1/classrooms/{classroom_id}/students/{student_id}/state-history`로 확인한다.
@@ -111,4 +111,5 @@ python -m pytest tests/student_monitoring/test_monitoring_integration_foundation
 모델과 worker payload에는 `student_name`, `student_no`, `classroom_id`, `seat_id`,
 `current_seat_id`, `PRESENT`, `WRONG_SEAT`, `UNKNOWN`, `ABSENT`, `IN_CLASSROOM`을 넣지
 않는다. ROI 매핑, `seat_assignments` 대조, 활성 학생 이름 보강, stale 판단과 상태 SSE는
-FastAPI 책임이다. 현 범위에서는 tracking과 시간표 기반 `ABSENT`가 아직 구현되지 않았다.
+FastAPI 책임이다. 카메라별 사람 ByteTrack과 보수적 입구→CCTV 신원 인계는 worker에
+구현돼 있다. 시간표 기반 `ABSENT`는 아직 구현되지 않았다.

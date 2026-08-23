@@ -80,6 +80,7 @@ def create_video_stream(
         classroom_id=request.classroom_id,
         camera_label=request.camera_label,
         enabled=request.enabled,
+        role=request.role,
     )
     return RealStreamResponse.from_domain(stream, stream_service.get_source_status(stream))
 

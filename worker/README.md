@@ -20,7 +20,7 @@
                        ┌─────────────┴─────────────┐
                        ▼                           ▼
                 ② inference worker           ③ recorder worker
-                   프레임 → 모델 호출            영상 세그먼트 → MinIO
+                   사람 탐지 → 입구 얼굴 식별     영상 세그먼트 → MinIO
                        │
                        ▼
                 탐지 결과(student_id · bbox · 신뢰도)
@@ -58,16 +58,27 @@
 실행은 [`pipeline`](./pipeline/README.md) 진입점이다.
 
 ```text
-카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─최신 1장─▶ inference ─▶ 로그 + 선택적 HTTP
-                                 오래된 것 버림
+카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─카메라별 최신 1장─▶ inference
+                                 같은 카메라의 오래된 것 버림        │
+                                                                      ▼
+                           ByteTrack → 입구 얼굴 식별 → CCTV 문 영역 인계
+                                                                      │
+                                                                      ▼
+                                                        로그 + 선택적 FastAPI HTTP
 ```
 
 `recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
 객체 저장소에 적재한 뒤, 보존 기간이 지난 것을 지운다.
 
-**아직 없는 것**: 실시간 얼굴 식별 모델 연결, 적재한 객체의 참조를 `fastapi`에 알리는
-경로. 탐지 HTTP 전달은 구현되어 `FASTAPI_URL`로 켠다
-([결정 0027](../docs/architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
+입구 카메라는 `FACE_IDENTITY_URL`과 `FACE_IDENTITY_CAMERA_IDS`를 설정하면 사람 탐지 뒤
+deeplearning의 SCRFD·ArcFace 갤러리 식별을 호출한다. 식별된 학생 ID를 포함한 최종
+탐지는 `FASTAPI_URL`로 보낸다. 얼굴 식별 서비스 장애는 사람 탐지 전송을 막지 않는다
+([결정 0035](../docs/architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+
+사람 탐지에는 카메라별 ByteTrack을 붙인다. 입구에서 확인된 `student_id`는 설정한 시간
+창 안에 CCTV 문 영역에서 **유일하게 새로 생긴 track**에만 인계한다. 후보 학생이나 신규
+track이 둘 이상이면 추측하지 않고 신원 없이 둔다. 인계된 신원은 같은 CCTV track이
+유지되는 동안 좌석 ROI까지 전달된다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 
 ## 워커 사이의 경계
 
@@ -75,7 +86,8 @@
 - **`inference`는 모델을 소유하지 않는다.** 프레임을 꺼내 호출하고 실패를 처리하는
   실행 단계이며, 모델 종류·가중치·전처리는 [`deeplearning`](../deeplearning/README.md)이
   가진다([결정 0009](../docs/architecture/decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)).
-  **현재 코드는 이 경계를 아직 만족하지 않는다** — `inference`가 ultralytics를 직접 부른다.
+  얼굴 식별은 내부 HTTP로 경계를 지키고, 사람 탐지만 `inference`가 ultralytics를 직접
+  부르는 잠정 예외다.
 - **`inference`는 의미를 부여하지 않는다.** `student_001, conf 0.87, bbox`까지가 출력이다.
   `PRESENT` 같은 업무 어휘를 넣지 않는다.
 - **`recorder`는 `stream`의 프레임이 아니라 MediaMTX에서 직접 받는다.** 저장 때문에
@@ -110,8 +122,8 @@
 ## 다른 서비스와의 관계
 
 - **영상 소스(강의실 카메라 / Jetson)**: 외부 시스템이다. 접속 정보는 환경변수로 주입한다.
-- **`deeplearning`**: `inference` worker가 모델을 불러 쓴다. 호출 방식(라이브러리 import /
-  별도 프로세스)은 `결정 필요`.
+- **`deeplearning`**: `inference` worker가 지정된 입구 카메라의 JPEG와 사람 bbox를 내부
+  HTTP로 보내 얼굴 식별 결과를 받는다. 모델·갤러리 구현은 worker가 알지 않는다.
 - **`fastapi`**: 탐지 결과의 소비자이자 상태 판정 주체다. worker가 HTTP로 전달한다.
 - **브라우저**: 제품 API와 탐지 SSE는 `fastapi`를 호출한다. 영상은 허용된 WebRTC
   세션에 한해 MediaMTX에 연결하며 worker를 직접 호출하지 않는다.
@@ -131,8 +143,8 @@
 상시 녹화가 성립하지 않는다. `recorder`는 코드가 남아 있으나 공용 서버에서 돌리지 않는다.
 0007의 상시 녹화와 보존 기간 30일 기본값은 0011로 대체됐다.
 
-**스냅샷 해상도·보존 기간·카메라당 최소 적재 간격은 아직 `결정 필요`다.**
-적재 주체는 `inference`이며 코드는 아직 없다.
+스냅샷은 inference가 적재하며 해상도·품질·최소 간격은 설정으로 관리한다. 보존 삭제는
+MinIO lifecycle이 수행한다.
 
 `stream`의 로컬 저장은 학습 데이터 확보를 위한 개발용이며 **기본값이 꺼져 있고
 `APP_ENV=prod`에서는 켤 수 없다.**

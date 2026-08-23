@@ -129,7 +129,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection?camera_id=...` | 좌석 하나의 ROI를 삭제. 그 카메라는 해당 좌석을 관측하지 않게 된다. 지울 것이 없으면 404 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | `camera_id`·좌석·legacy 학생 연결과 ROI를 기준 이미지 없이 저장(`revision=0`). **화면은 더 이상 이 경로를 쓰지 않는다** |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
-| `POST` | `/api/v1/video-streams` | 실제 카메라 source 등록. MongoDB mode에는 seed가 없어 이 경로로 넣는다 |
+| `POST` | `/api/v1/video-streams` | 실제 카메라 source 등록. MongoDB mode에는 seed가 없어 이 경로로 넣으며, 입구 카메라는 `role=IDENTITY_ONLY`로 등록한다 |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태. 목록의 `id`로 조회하며 `camera_id`도 받는다 |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |
 | `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP offer signaling (MediaMTX proxy) |
@@ -391,9 +391,11 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
   `/internal/inference/events`로 전달된다. 설정하지 않으면 로그만 남기므로 저장소와 검색
   결과가 비어 있는 것이 정상이다. 실제 영상 없이 확인할 때는
   [`worker/inference` 계약 fixture](../../worker/inference/MODEL_INTEGRATION.md)를 사용한다.
-- **"누가"에는 아직 답하지 못한다.** `student_id`를 채우는 얼굴 인식이 구현되지
-  않았다. 응답과 화면은 값을 그대로 통과시켜 식별된 학생이 있으면 보여주고, 없으면
-  "식별 미연동"으로 표시한다. 인식이 붙으면 코드 변경 없이 이름이 나타난다.
+- `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정한 worker는 deeplearning의 얼굴 식별
+  결과로 `student_id`를 채운다. 문 영역·통과 시간 route가 설정되면 신원을 CCTV
+  ByteTrack에 보수적으로 인계한다. 응답과 화면은 값을 그대로 통과시켜 이름과
+  `track_id`를 보여주며, 미식별이면 "식별 미연동"으로 표시한다. 실제 카메라에서는
+  얼굴 가중치·갤러리·문 영역·인계 시간 창을 별도로 검증해야 한다.
 
 ## 지표 노출
 

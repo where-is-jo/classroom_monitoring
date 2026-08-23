@@ -18,3 +18,6 @@ class InMemoryFaceEmbeddingRepository:
 
     def find_by_student(self, student_id: str) -> FaceEmbedding | None:
         return self._items.get(student_id)
+
+    def delete_by_student(self, student_id: str) -> None:
+        self._items.pop(student_id, None)

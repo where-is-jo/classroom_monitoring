@@ -62,6 +62,24 @@ def test_manifest_rejects_student_video(tmp_path: Path) -> None:
         load_input_manifest(manifest_path)
 
 
+def test_manifest_accepts_student_video_only_with_explicit_approval_flag(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_manifest(
+        tmp_path,
+        subject_category="student",
+        expires_at="2099-01-01T00:00:00+00:00",
+    )
+
+    manifest = load_input_manifest(
+        manifest_path,
+        now=datetime(2026, 8, 18, tzinfo=UTC),
+        allow_approved_student_data=True,
+    )
+
+    assert manifest.sources[0].subject_category == "student"
+
+
 def test_manifest_rejects_expired_retention(tmp_path: Path) -> None:
     manifest_path = _write_manifest(
         tmp_path,

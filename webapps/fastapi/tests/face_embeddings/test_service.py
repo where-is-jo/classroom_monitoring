@@ -88,3 +88,12 @@ def test_too_few_valid_samples_does_not_complete_student() -> None:
 
     assert service.find_by_student("student-uuid") is None
     assert students.get_student("student-uuid").face_registered is False
+
+
+def test_deleting_face_embedding_removes_student_from_gallery_source() -> None:
+    service, _ = make_service()
+    service.create_for_student("student-uuid", "enrollment-uuid")
+
+    service.delete_for_student("student-uuid")
+
+    assert service.find_by_student("student-uuid") is None

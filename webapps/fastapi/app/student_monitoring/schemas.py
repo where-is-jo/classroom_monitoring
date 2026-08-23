@@ -135,6 +135,9 @@ class DetectionResponse(BaseModel):
     confidence: float
     bbox: tuple[int, int, int, int]
     student_id: str | None = None
+    # 같은 카메라에서 연속 관측된 사람인지 API 소비자가 확인할 수 있게 한다.
+    # 얼굴 유사도 같은 민감한 판정 근거는 공개하지 않고 worker가 만든 track 식별자만 싣는다.
+    track_id: str | None = None
 
 
 class DetectionEventResponse(BaseModel):
@@ -167,6 +170,7 @@ class DetectionEventResponse(BaseModel):
                     confidence=d.confidence,
                     bbox=d.bbox,
                     student_id=d.student_id,
+                    track_id=d.track_id,
                 )
                 for d in event.detections
             ],

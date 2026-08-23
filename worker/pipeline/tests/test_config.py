@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ..config import PipelineSettings
 
 
@@ -56,3 +58,62 @@ def test_지표_바인딩_주소를_로컬로_낮출_수_있다() -> None:
 
     assert settings.metrics_host == "127.0.0.1"
     assert settings.metrics_port == 19101
+
+
+def test_신원_인계_route를_파싱한다() -> None:
+    settings = build_settings(
+        face_identity_url="http://deeplearning:8100",
+        face_identity_camera_ids="entry-camera",
+        identity_handover_routes=(
+            '[{"entry_camera_id":"entry-camera",'
+            '"classroom_camera_id":"classroom-cctv",'
+            '"classroom_entry_zone":[0,0,0.3,1]}]'
+        ),
+    )
+
+    route = settings.parsed_identity_handover_routes[0]
+    assert route.entry_camera_id == "entry-camera"
+    assert route.classroom_camera_id == "classroom-cctv"
+
+
+def test_인계_route의_입구_카메라는_얼굴_식별_대상이어야_한다() -> None:
+    with pytest.raises(ValueError, match="FACE_IDENTITY_CAMERA_IDS"):
+        build_settings(
+            face_identity_url="http://deeplearning:8100",
+            face_identity_camera_ids="different-entry",
+            identity_handover_routes=(
+                '[{"entry_camera_id":"entry-camera",'
+                '"classroom_camera_id":"classroom-cctv",'
+                '"classroom_entry_zone":[0,0,0.3,1]}]'
+            ),
+        )
+
+
+def test_신원_인계를_켜고_ByteTrack을_끌_수_없다() -> None:
+    with pytest.raises(ValueError, match="PERSON_TRACKING_ENABLED"):
+        build_settings(
+            person_tracking_enabled=False,
+            face_identity_url="http://deeplearning:8100",
+            face_identity_camera_ids="entry-camera",
+            identity_handover_routes=(
+                '[{"entry_camera_id":"entry-camera",'
+                '"classroom_camera_id":"classroom-cctv",'
+                '"classroom_entry_zone":[0,0,0.3,1]}]'
+            ),
+        )
+
+
+def test_인계_track_stale은_시간창과_시각오차의_합보다_길어야_한다() -> None:
+    with pytest.raises(ValueError, match="CLOCK_SKEW"):
+        build_settings(
+            face_identity_url="http://deeplearning:8100",
+            face_identity_camera_ids="entry-camera",
+            identity_handover_routes=(
+                '[{"entry_camera_id":"entry-camera",'
+                '"classroom_camera_id":"classroom-cctv",'
+                '"classroom_entry_zone":[0,0,0.3,1]}]'
+            ),
+            identity_handover_max_delay_seconds=8,
+            identity_handover_clock_skew_seconds=2,
+            identity_handover_track_stale_seconds=9,
+        )

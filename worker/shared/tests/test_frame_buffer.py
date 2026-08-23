@@ -128,6 +128,51 @@ class TestGetLatest:
         assert received[0].sequence == 7
 
 
+class TestPerCameraLatest:
+    def test_카메라마다_최신_한_장을_보존한다(self) -> None:
+        buffer = FrameBuffer(maxsize=2, per_camera=True)
+
+        buffer.put(make_captured(0, camera_id="classroom-cctv"))
+        buffer.put(make_captured(0, camera_id="entry-camera"))
+        buffer.put(make_captured(1, camera_id="classroom-cctv"))
+
+        first = buffer.get_latest(timeout=0)
+        second = buffer.get_latest(timeout=0)
+
+        assert first is not None and first.camera_id == "classroom-cctv"
+        assert first.sequence == 1
+        assert second is not None and second.camera_id == "entry-camera"
+        assert buffer.stats.dropped == 1
+        assert buffer.stats.consumed == 2
+
+    def test_빠른_카메라가_느린_카메라를_굶기지_않는다(self) -> None:
+        buffer = FrameBuffer(maxsize=2, per_camera=True)
+        buffer.put(make_captured(0, camera_id="classroom-cctv"))
+        buffer.put(make_captured(0, camera_id="entry-camera"))
+        for sequence in range(1, 20):
+            buffer.put(make_captured(sequence, camera_id="classroom-cctv"))
+
+        first = buffer.get_latest(timeout=0)
+        second = buffer.get_latest(timeout=0)
+
+        assert first is not None and first.camera_id == "classroom-cctv"
+        assert second is not None and second.camera_id == "entry-camera"
+
+    def test_용량보다_카메라가_많으면_가장_오래_대기한_카메라를_버린다(self) -> None:
+        buffer = FrameBuffer(maxsize=2, per_camera=True)
+        buffer.put(make_captured(0, camera_id="camera-01"))
+        buffer.put(make_captured(0, camera_id="camera-02"))
+        buffer.put(make_captured(0, camera_id="camera-03"))
+
+        camera_ids = {
+            buffer.get_latest(timeout=0).camera_id,  # type: ignore[union-attr]
+            buffer.get_latest(timeout=0).camera_id,  # type: ignore[union-attr]
+        }
+
+        assert camera_ids == {"camera-02", "camera-03"}
+        assert buffer.stats.dropped == 1
+
+
 class TestClose:
     def test_기다리는_소비자를_깨운다(self) -> None:
         """닫아도 깨우지 않으면 종료가 timeout만큼 늦어진다."""

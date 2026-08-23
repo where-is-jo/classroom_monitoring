@@ -1,0 +1,9 @@
+# 공용 GPU 서버의 격리 가상환경 전용 의존성.
+# 기존 시스템 Python과 Docker 컨테이너에는 설치하지 않는다.
+# CUDA torch/torchvision은 저장소 worker와 같은 cu126 index에서 먼저 설치한다.
+# N1 Colab 성공 실행에서 확인한 Ultralytics 버전을 고정해 서버 재현 편차를 줄인다.
+ultralytics==8.4.123
+opencv-python>=4.10
+numpy>=1.26
+matplotlib>=3.8
+pyyaml>=6.0

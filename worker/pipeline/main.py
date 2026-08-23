@@ -16,16 +16,25 @@ from types import FrameType
 from inference.config import DEFAULT_DATA_DIR as INFERENCE_DATA_DIR
 from inference.config import InferenceSettings
 from inference.consumer import InferenceConsumer, ResultHandler, log_result
+from inference.face_identity import (
+    FaceIdentityResultHandler,
+    HttpFaceIdentifier,
+)
 from inference.handler import FastAPIResultHandler
+from inference.identity_handover import (
+    IdentityHandoverResultHandler,
+    IdentityHandoverRoute,
+)
 from inference.model import Yolo8nDetector
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
+from inference.tracking import ByteTrackConfig, ByteTrackResultHandler
 from pydantic import ValidationError
 from shared.config_errors import format_validation_error
-from shared.object_storage.factory import build_object_storage
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
 from shared.metrics import register_frame_buffer, start_metrics_server
+from shared.object_storage.factory import build_object_storage
 from stream.config import StreamSettings
 from stream.errors import StreamWorkerError
 from stream.main import build_publisher
@@ -41,6 +50,17 @@ def build_result_handler(
     settings: InferenceSettings,
     *,
     fastapi_url: str | None = None,
+    face_identity_url: str | None = None,
+    face_identity_camera_ids: frozenset[str] = frozenset(),
+    face_identity_timeout_seconds: float = 5.0,
+    face_identity_jpeg_quality: int = 95,
+    person_tracking_config: ByteTrackConfig | None = None,
+    person_tracking_camera_ids: frozenset[str] | None = None,
+    identity_handover_routes: tuple[IdentityHandoverRoute, ...] = (),
+    identity_handover_max_delay_seconds: float = 8.0,
+    identity_handover_clock_skew_seconds: float = 0.5,
+    identity_handover_track_stale_seconds: float = 30.0,
+    identity_handover_min_confidence: float = 0.6,
 ) -> ResultHandler:
     """탐지 결과를 무엇으로 받을지 정한다.
 
@@ -71,11 +91,47 @@ def build_result_handler(
             jpeg_quality=settings.snapshot_jpeg_quality,
         )
 
-    if fastapi_url is None:
-        return handler
+    if fastapi_url is not None:
+        logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
+        handler = FastAPIResultHandler(fastapi_url, inner=handler)
 
-    logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
-    return FastAPIResultHandler(fastapi_url, inner=handler)
+    # 인계는 얼굴 식별이 끝난 결과를 받아야 하므로 FaceIdentityResultHandler의
+    # 안쪽에 둔다. 여기서 보강한 CCTV student_id가 FastAPI 좌석 ROI 판정까지 간다.
+    if identity_handover_routes:
+        logger.info("입구 → 교실 CCTV 신원 인계 route %d개를 켠다.", len(identity_handover_routes))
+        handler = IdentityHandoverResultHandler(
+            identity_handover_routes,
+            inner=handler,
+            maximum_delay_seconds=identity_handover_max_delay_seconds,
+            clock_skew_seconds=identity_handover_clock_skew_seconds,
+            track_stale_seconds=identity_handover_track_stale_seconds,
+            minimum_identity_confidence=identity_handover_min_confidence,
+        )
+
+    if face_identity_url is not None:
+        logger.info(
+            "사람 탐지 결과를 얼굴 식별 서비스(%s)로 보강한다.", face_identity_url
+        )
+        handler = FaceIdentityResultHandler(
+            HttpFaceIdentifier(
+                face_identity_url,
+                timeout_seconds=face_identity_timeout_seconds,
+                jpeg_quality=face_identity_jpeg_quality,
+            ),
+            camera_ids=face_identity_camera_ids,
+            inner=handler,
+        )
+
+    # 호출 순서의 가장 바깥이다: 사람 track_id를 먼저 만든 뒤 얼굴 식별이 그 track에
+    # student_id를 붙이고, 이어서 카메라 간 인계가 CCTV의 같은 track에 신원을 잠근다.
+    if person_tracking_config is not None:
+        logger.info("카메라별 사람 ByteTrack을 켠다.")
+        handler = ByteTrackResultHandler(
+            person_tracking_config,
+            camera_ids=person_tracking_camera_ids,
+            inner=handler,
+        )
+    return handler
 
 
 def build_runner(
@@ -86,7 +142,21 @@ def build_runner(
 ) -> PipelineRunner:
     """설정에서 파이프라인을 조립한다. 모델은 여기서 한 번만 로딩한다."""
     shutdown_event = threading.Event()
-    frame_buffer = FrameBuffer(maxsize=pipeline_settings.frame_buffer_maxsize)
+    camera_sources = stream_settings.camera_sources
+    # 카메라마다 최신 한 장을 보존한다. 전역 최신 한 장만 두면 프레임 속도가 빠른
+    # CCTV가 입구 카메라를 계속 덮어써 얼굴 식별과 인계가 시작조차 못할 수 있다.
+    frame_buffer = FrameBuffer(
+        maxsize=max(pipeline_settings.frame_buffer_maxsize, len(camera_sources)),
+        per_camera=True,
+    )
+
+    if pipeline_settings.person_tracking_enabled and not any(
+        class_name.casefold() == "person"
+        for class_name in inference_settings.inference_target_class_ids.values()
+    ):
+        raise ValueError(
+            "ByteTrack을 켜려면 INFERENCE_TARGET_CLASS_IDS에 person 클래스가 필요합니다."
+        )
 
     # 모델 로딩은 프로세스 시작 시 1회다. 프레임마다 불러오면 추론이 멈춘다.
     detector = Yolo8nDetector(
@@ -104,6 +174,39 @@ def build_runner(
         candidate = pipeline_settings.fastapi_url.strip()
         if candidate:
             fastapi_url = candidate
+    face_identity_url: str | None = None
+    if "face_identity_url" in pipeline_settings.model_fields_set:
+        candidate = pipeline_settings.face_identity_url.strip()
+        if candidate:
+            face_identity_url = candidate
+
+    handover_routes = pipeline_settings.parsed_identity_handover_routes
+    configured_camera_ids = {source.camera_id for source in camera_sources}
+    handover_camera_ids = {
+        camera_id
+        for route in handover_routes
+        for camera_id in (route.entry_camera_id, route.classroom_camera_id)
+    }
+    missing_camera_ids = handover_camera_ids - configured_camera_ids
+    if missing_camera_ids:
+        raise ValueError(
+            "신원 인계 route의 카메라가 STREAM_SOURCES에 없습니다: "
+            + ", ".join(sorted(missing_camera_ids))
+        )
+    tracking_camera_ids = pipeline_settings.parsed_person_tracking_camera_ids
+    if tracking_camera_ids is not None:
+        missing_tracking_ids = tracking_camera_ids - configured_camera_ids
+        if missing_tracking_ids:
+            raise ValueError(
+                "PERSON_TRACKING_CAMERA_IDS의 카메라가 STREAM_SOURCES에 없습니다: "
+                + ", ".join(sorted(missing_tracking_ids))
+            )
+        untracked_handover_ids = handover_camera_ids - tracking_camera_ids
+        if untracked_handover_ids:
+            raise ValueError(
+                "신원 인계 route의 모든 카메라에 ByteTrack이 필요합니다: "
+                + ", ".join(sorted(untracked_handover_ids))
+            )
 
     consumer = InferenceConsumer(
         frame_buffer=frame_buffer,
@@ -112,7 +215,50 @@ def build_runner(
         poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
         max_consecutive_failures=pipeline_settings.inference_max_consecutive_failures,
         result_handler=build_result_handler(
-            inference_settings, fastapi_url=fastapi_url
+            inference_settings,
+            fastapi_url=fastapi_url,
+            face_identity_url=face_identity_url,
+            face_identity_camera_ids=(
+                pipeline_settings.parsed_face_identity_camera_ids
+            ),
+            face_identity_timeout_seconds=(
+                pipeline_settings.face_identity_timeout_seconds
+            ),
+            face_identity_jpeg_quality=pipeline_settings.face_identity_jpeg_quality,
+            person_tracking_config=(
+                ByteTrackConfig(
+                    high_confidence_threshold=(
+                        pipeline_settings.bytetrack_high_confidence_threshold
+                    ),
+                    low_confidence_threshold=(
+                        pipeline_settings.bytetrack_low_confidence_threshold
+                    ),
+                    new_track_threshold=pipeline_settings.bytetrack_new_track_threshold,
+                    first_match_iou_threshold=(
+                        pipeline_settings.bytetrack_first_match_iou_threshold
+                    ),
+                    second_match_iou_threshold=(
+                        pipeline_settings.bytetrack_second_match_iou_threshold
+                    ),
+                    track_buffer_frames=pipeline_settings.bytetrack_buffer_frames,
+                )
+                if pipeline_settings.person_tracking_enabled
+                else None
+            ),
+            person_tracking_camera_ids=tracking_camera_ids,
+            identity_handover_routes=handover_routes,
+            identity_handover_max_delay_seconds=(
+                pipeline_settings.identity_handover_max_delay_seconds
+            ),
+            identity_handover_clock_skew_seconds=(
+                pipeline_settings.identity_handover_clock_skew_seconds
+            ),
+            identity_handover_track_stale_seconds=(
+                pipeline_settings.identity_handover_track_stale_seconds
+            ),
+            identity_handover_min_confidence=(
+                pipeline_settings.identity_handover_min_confidence
+            ),
         ),
     )
     stream_worker = StreamWorker(
@@ -185,7 +331,7 @@ def main() -> int:
             inference_settings=inference_settings,
             pipeline_settings=pipeline_settings,
         )
-    except (ImportError, OSError) as error:
+    except (ImportError, OSError, ValueError) as error:
         # ultralytics 미설치나 가중치 파일을 찾지 못한 경우가 대부분이다.
         logger.error("추론 모델을 준비하지 못했다: %s", error)
         return 1

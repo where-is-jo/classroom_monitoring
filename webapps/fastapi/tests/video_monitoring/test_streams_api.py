@@ -48,6 +48,7 @@ def test_detail_is_reachable_by_the_id_the_list_returns(client: TestClient) -> N
     assert response.status_code == 200
     assert response.json()["id"] == STREAM_ID
     assert response.json()["camera_id"] == CAMERA_ID
+    assert response.json()["role"] == "SEAT_JUDGING"
 
 
 def test_detail_still_accepts_camera_id(client: TestClient) -> None:

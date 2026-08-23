@@ -32,7 +32,7 @@
 
 ## 현재 단계
 
-실행 코드가 있는 곳은 두 곳이다.
+핵심 실행 코드는 `webapps/fastapi`, `worker`, `deeplearning` 세 곳에 있다.
 
 - **`webapps/fastapi`** — 강의실 좌석 현황, 실시간 모니터링, 탐지 스냅샷, 자연어
   탐지 검색, 데모 영상 검색 화면과 그 API. worker가 식별한 학생을 카메라별 좌석 ROI와
@@ -50,7 +50,8 @@
   ([결정 0028](./docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
   `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
-  전달한다. 실제 얼굴 식별 모델과 트래킹은 아직 연결되지 않아 기본 출력은 사람 탐지까지다.
+  전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 deeplearning의
+  SCRFD·ArcFace 갤러리 식별로 `student_id`를 보강한다. 기본값은 꺼져 있다.
 
 ```bash
 cd webapps/fastapi
@@ -68,14 +69,19 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 `deeplearning`·LLM과 MediaMTX·MinIO·모니터링을 두고 Tailscale로 잇는다. MongoDB는 Atlas라 호스트와
 무관하다([결정 0026](./docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)). **개발·검증용 구성이며 운영 배포가 아니다.**
 
-`deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석 내부 서비스와 모델 학습용
-Jupyter 노트북이 있다
+`deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석, ArcFace 갤러리 식별
+내부 서비스와 모델 학습·얼굴 식별 평가용 Jupyter/CLI 도구가 있다
 ([결정 0029](./docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
-`monitoring`, `RPAs`에는 아직 실행 코드가 없다.
-실제 얼굴 식별 모델, 트래킹, **입구 카메라와 CCTV 사이의 신원 인계**, 시간표 기반
-`ABSENT`는 구현되지 않았다. 셋째가 현재 가장 큰 미해결 항목이며 방법 자체가 아직
-`결정 필요`다([결정 0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 학생 식별 필드를 받은 뒤 ROI와 좌석 지정으로
-현재 상태를 판정하고 화면을 실시간 갱신하는 기반은 구현됐다.
+`monitoring/internal`에는 Prometheus·Grafana·Loki·Alloy 구성이 있고, `RPAs`에는 아직
+실행 코드가 없다.
+
+입구 카메라의 얼굴 track과 특정 학생 식별, 카메라별 사람 ByteTrack, 문 영역·통과
+시각을 이용한 입구→CCTV 신원 인계가 코드와 합성 테스트로 연결됐다
+([결정 0036](./docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
+CCTV detection의 `student_id`와 `track_id`는 FastAPI의 ROI·좌석 판정을 거쳐 저장·SSE·
+화면까지 전달된다. 다만 **실제 입구 카메라와 CCTV를 동시에 사용한 종단 간 검증**, 현장
+문 영역·인계 시간 창 보정, 시간표 기반 `ABSENT`는 남아 있다. 실제 영상 검증 전에는
+특정 학생이 좌석까지 안정적으로 추적된다고 완료 판정하지 않는다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -104,7 +110,7 @@ README.md      이 문서
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
-| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD 검출·MediaPipe 자세 구현. 나머지 예정 |
+| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD·ArcFace 식별·얼굴 추적·MediaPipe 자세와 평가 하네스 구현. worker의 카메라별 사람 ByteTrack·보수적 신원 인계와 연결됨 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | 세 서비스 지표 수집 + Grafana 대시보드 둘(스택 상태·애플리케이션 지표). 알림 규칙은 아직 없음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 
@@ -195,14 +201,14 @@ README.md      이 문서
 - **운영 접근 통제 방식** — 정해지기 전까지 `APP_ENV=prod` 배포를 하지 않는다
 - 얼굴 탐지·인식 모델과 사람 탐지 모델 버전
 - 결석 유예 시간 값과 bbox 중심점 기반 좌석 판정의 조정 여부 — 실제 촬영이 선행되어야 한다
-- **카메라 간 신원 인계 방법** — 입구 track과 CCTV track을 잇는 방법. 두 화각이 겹치지
-  않으므로 CCTV의 문 영역과 통과 시각이 유일한 단서다. 실제 촬영이 선행되어야 한다
-- **입구 카메라 영상을 넣는 방향** — 라즈베리파이가 RTSP 서버를 띄워 worker가 당길지,
-  파이가 GPU 서버 MediaMTX로 밀어 넣을지. 미는 쪽이면 RTSP publish 포트를 다시 열어야 한다
-  (GPU 서버가 CCTV에 닿는 문제는 파이를 subnet router로 세우는 것으로 방법이 정해졌다)
+- **카메라 간 신원 인계 실측값** — 방법은 CCTV 문 영역·통과 시각의 유일 후보 인계로
+  확정·구현됐다(결정 0036). 실제 문 ROI, 시간 창, 시각 오차와 ByteTrack 임계값은 촬영으로
+  보정해야 한다
+- **입구 카메라의 운영 RTSP 경로** — 현재 송출을 사용할 수 없다. GPU worker가 읽을
+  경로와 운영 시 MediaMTX 배치를 확정하고 실제 입력으로 검증해야 한다
 - **실제 CCTV가 어안이 아니라 일반 광각이다** — 결정 0024의 어안 전제와 다르다.
   카메라를 바꿀지 전제를 고칠지 정해야 한다
-- 어안 왜곡 보정 수행 위치와 트래킹 구현 위치
+- 어안 왜곡 보정 수행 위치
 - 카메라 높이·화각·거리와 CCTV 화면상의 문 영역 (대수·역할과 겹침 없음은 결정 0024로 확정)
 - 수업 시간표의 원본 관리 주체
 - 일반 모니터링 SSE의 다중 프로세스 broker·replay와 브라우저 영상 재생 방식

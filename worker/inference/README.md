@@ -12,26 +12,32 @@
 | [`deeplearning`](../../deeplearning/README.md) | 모델 종류, 가중치, 전처리, 후처리, 탐지 결과 스키마 |
 | `worker/inference` | 언제 호출하는가, 실패하면 어떻게 하는가, 언제 멈추는가 |
 
-**현재 코드는 이 경계를 아직 만족하지 않는다.** `deeplearning`에 코드가 없어서
-이 워커가 ultralytics를 직접 부른다. 잠정 상태이며, `deeplearning` 구현 시
-`model.py`의 모델 호출을 그쪽으로 옮긴다. 새 모델 코드는 여기에 만들지 않는다.
+얼굴 식별은 이 경계를 만족한다. 이 워커는 모델·갤러리를 모르고 deeplearning의 내부
+HTTP 계약만 호출한다. 사람 탐지는 아직 `model.py`가 ultralytics를 직접 부르는 잠정
+상태다. 새 모델 코드는 여기가 아니라 `deeplearning`에 만든다.
 
 ## 현재 상태
 
-YOLOv8n으로 프레임 한 장에서 `person`과 `cell phone`을 탐지한다. 입력은 두 갈래다.
+`MODEL_PATH`로 지정한 YOLO 가중치로 프레임 한 장을 탐지한다. 사용할 클래스 번호와
+이름은 `INFERENCE_TARGET_CLASS_IDS`로 함께 지정한다. 기본 COCO 호환 설정은 `person`과
+`cell phone`이고, 프로젝트의 사람 전용 학습 모델은 `{"0":"person"}`을 사용한다.
+입력은 두 갈래다.
 
 - **프레임 버퍼** — `stream`이 넣은 최신 프레임을 소비자 루프가 꺼내 쓴다.
   실행은 [`pipeline`](../pipeline/README.md) 진입점이다.
 - **이미지 파일** — `python -m inference.main <이미지경로>`로 한 장만 확인한다.
 
-**`cell phone` 클래스는 이전 주제(직원 통화 판정)에서 온 것으로 강의실 학생
-모니터링에서 쓰이지 않는다.** 모델 이관 때 함께 정리한다.
+**`cell phone` 클래스는 이전 주제(직원 통화 판정)의 하위 호환 기본값이며 강의실 학생
+모니터링에서는 쓰지 않는다.** 사람 전용 학습 가중치를 쓸 때는 클래스 설정에서도 뺀다.
 
-**아직 없는 것**: 얼굴 탐지와 얼굴 인식(`deeplearning` `예정`). HTTP 전달 경로는
-구현되어 `pipeline`의 `FASTAPI_URL`을 설정하면 `/internal/inference/events`로 전송한다.
-설정하지 않으면 기존처럼 로그만 출력한다. 추론 지연·처리량·탐지 신뢰도는 Prometheus
-지표로 노출한다([아래](#노출하는-지표)). **식별 성공률 지표는 `예정`이다** — 얼굴
-인식이 아직 없어 지금 만들면 값이 항상 0이다.
+`pipeline`은 사람 탐지에 카메라별 ByteTrack을 먼저 붙인다. `FACE_IDENTITY_URL`과 입구
+카메라 ID를 설정하면 해당 프레임만 deeplearning에 보내 `student_id`·식별 신뢰도·얼굴
+bbox를 사람 track에 보강한다. 인계 route가 있으면 그 신원을 CCTV 문 영역의 신규
+ByteTrack으로 넘겨 같은 track이 좌석까지 이동하는 동안 유지한다.
+얼굴 서비스가 실패하면 원래 사람 탐지를 그대로 FastAPI에 보내 좌석 점유 경로를
+멈추지 않는다. `FASTAPI_URL`을 설정하면 최종 결과를 `/internal/inference/events`로
+전송하며, 설정하지 않으면 로그만 출력한다. track 생성·만료·활성 수와 수명, 인계 결과
+지표는 구현됐고 현장 기준선과 Grafana 패널은 아직 남아 있다.
 
 ## 서비스 목적
 
@@ -48,7 +54,10 @@ YOLOv8n으로 프레임 한 장에서 `person`과 `cell phone`을 탐지한다. 
 | `processor.py` | 프레임을 모델에 넘기는 경계. 추론 지연·탐지 신뢰도를 재는 자리 |
 | `consumer.py` | 프레임 버퍼에서 최신 프레임을 꺼내 도는 소비자 루프 |
 | `handler.py` | 결과를 FastAPI 내부 API 계약으로 직렬화하고 제한 재시도 |
-| `metrics.py` | Prometheus 지표 정의. 계측은 `processor.py`·`consumer.py` 두 자리뿐 |
+| `face_identity.py` | 입구 프레임을 deeplearning에 보내 얼굴 식별 결과를 사람 탐지에 보강. 실패하면 원본 탐지를 통과시킴 |
+| `tracking.py` | 사람 bbox를 카메라별 ByteTrack 두 단계 매칭으로 이어 `person-<번호>` 부여 |
+| `identity_handover.py` | 입구 신원을 CCTV 문 영역의 유일한 신규 track에 인계하고 track 수명 동안 유지 |
+| `metrics.py` | 추론·ByteTrack·신원 인계 Prometheus 지표 정의 |
 | `fixtures/` | 얼굴·영상 없는 모델 연동 계약 fixture |
 | `main.py` | 이미지 파일 한 장을 검사하는 진입점 |
 
@@ -69,15 +78,17 @@ InferenceResult(
             student_id="student-uuid",           # 선택
             identity_confidence=0.88,             # 선택
             face_bbox=(40, 50, 120, 150),         # 선택
+            track_id="person-12",                  # 선택
         ),
     ),
 )
 ```
 
-`bbox`와 `face_bbox`는 원본 프레임 기준 `(x1, y1, x2, y2)` 픽셀 좌표다. 얼굴 인식이
-붙으면 `student_id`와 `identity_confidence`를 함께 채운다. 미식별이면 세 신원 필드를
-모두 비우며, 불완전한 조합은 HTTP payload에서 안전하게 미식별로 낮춘다. 전체 내부 API
-계약과 검증 방법은 [모델 연동 인계](./MODEL_INTEGRATION.md)를 따른다.
+`bbox`와 `face_bbox`는 원본 프레임 기준 `(x1, y1, x2, y2)` 픽셀 좌표다. 식별 성공이면
+`student_id`와 `identity_confidence`를 함께 채운다. 사람 ByteTrack ID가 이미 있으면 얼굴
+track ID로 덮어쓰지 않는다. 미식별 사람도 `track_id`는 남길 수 있지만 신원 필드는
+비운다. 불완전한 조합은 HTTP payload에서 안전하게 미식별로 낮춘다.
+전체 내부 API 계약과 검증 방법은 [모델 연동 인계](./MODEL_INTEGRATION.md)를 따른다.
 
 **여기까지가 이 워커의 출력이다.** `PRESENT`, `WRONG_SEAT`, `ABSENT` 같은 업무
 의미는 붙이지 않는다. 그 해석은 `webapps/fastapi`의 일이다
@@ -101,8 +112,8 @@ InferenceResult(
 | --- | --- | --- |
 | 언어 | Python | 3.12 이상 |
 | 사람 탐지 모델 | YOLOv8n (ultralytics) | 버전 고정은 `결정 필요`. 소유는 `deeplearning`으로 이관 `예정` |
-| 얼굴 탐지 모델 | `후보`: SCRFD | `deeplearning` 책임 |
-| 얼굴 인식 모델 | `후보`: AdaFace R50, ArcFace | 비교 후 결정. `deeplearning` 책임 |
+| 얼굴 탐지 모델 | SCRFD | deeplearning 내부 HTTP로 호출. 최종 버전은 결정 필요 |
+| 얼굴 인식 모델 | ArcFace(현재), AdaFace R50(평가 가능) | 비교와 임계값 선택은 `deeplearning` 책임 |
 | 실행 장치 | CPU 기본, CUDA 선택 | `INFERENCE_DEVICE`로 고른다 |
 | 프레임 수신 | 프레임 버퍼 | [결정 0006](../../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다) |
 | 결과 전달 방식 | HTTP | `FASTAPI_URL` 설정 시 내부 API로 제한 재시도, 미설정 시 로그 출력 |
@@ -154,9 +165,15 @@ python -m pipeline.main
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
 | `MODEL_PATH` | 모델 가중치 경로 | 기본 `yolo11m.pt`. GPU 서버는 다른 경로를 쓸 수 있다 |
+| `INFERENCE_TARGET_CLASS_IDS` | 탐지할 모델 클래스 JSON | 기본 `{"0":"person","67":"cell phone"}`. 사람 전용 학습 모델은 `{"0":"person"}` |
 | `INFERENCE_DEVICE` | 실행 장치 | `cpu` / `cuda`. local은 보통 cpu, dev는 cuda |
 | `OBJECT_STORAGE_BACKEND` | 객체 저장소 종류 | `local` / `minio`. local은 보통 `local` |
 | `OBJECT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필요. 비밀값 |
+
+얼굴 식별 주소와 대상 카메라는 조립 진입점의 `.env.{APP_ENV}`에 둔다.
+`FACE_IDENTITY_URL`이 비어 있으면 기존 사람 탐지만 유지한다.
+`FACE_IDENTITY_CAMERA_IDS`에는 FastAPI에서 `IDENTITY_ONLY` 역할로 등록한 입구
+`camera_id`만 쉼표로 구분해 넣는다. 좌석 CCTV는 넣지 않는다.
 
 ### `config/settings.yml`
 
@@ -248,6 +265,9 @@ python -m pytest inference/tests -q
 - `test_model.py` — 대역 모델로 탐지 결과 변환 검증
 - `test_consumer.py` — 최신 프레임 선택, 실패 누적과 중단, 종료 처리
 - `test_handler.py` — 승인 fixture와 payload 일치, 멱등 ID, HTTP 제한 재시도 검증
+- `test_face_identity.py` — 식별 결과 보강, 미식별 track, 응답 검증, 대상 카메라 제한과 장애 시 원본 탐지 통과
+- `test_tracking.py` — ByteTrack 고·저신뢰도 2단계 매칭, 짧은 미탐 회복, 만료, 카메라 격리
+- `test_identity_handover.py` — 입구→CCTV 인계, 좌석까지 유지, 역순 프레임, 다중 후보 거부
 - `test_metrics.py` — 지연·탐지 신뢰도·처리 결과 계측. 실패한 추론이 지연 분포에
   들어가지 않는 것과 연속 실패 Gauge가 성공 시 0으로 돌아가는 것을 함께 본다
 

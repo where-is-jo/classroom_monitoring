@@ -15,7 +15,7 @@ import yaml
 from .errors import AutoLabelingError
 
 SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
-ALLOWED_SUBJECT_CATEGORIES = {"synthetic", "consenting-adult"}
+ALLOWED_SUBJECT_CATEGORIES = {"synthetic", "consenting-adult", "student"}
 REQUIRED_CONSENT_SCOPE = "person-detection-training"
 
 
@@ -25,7 +25,6 @@ class Settings:
     jpeg_quality: int
     sampling_policy_version: str
     candidate_confidence_threshold: float
-    pilot_model_file_name: str
     overlap_review_iou_threshold: float
     review_sample_fraction: float
     review_sample_min_frames: int
@@ -53,12 +52,15 @@ class SourceInput:
     session_id: str
     captured_at: str
     subject_category: str
+    usage: str
+    requested_split: str | None
 
 
 @dataclass(frozen=True)
 class InputManifest:
     run_id: str
     sources: tuple[SourceInput, ...]
+    manifest_role: str
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,8 @@ class FrameRecord:
     consent_scope: str
     retention_expires_at: str
     subject_category: str
+    usage: str
+    requested_split: str | None
     image_path: str
     image_sha256: str
 
@@ -134,8 +138,6 @@ def _validate_settings(settings: Settings) -> None:
         raise AutoLabelingError("신뢰도·IoU·표본 비율 설정은 0~1이어야 합니다.")
     if settings.review_sample_min_frames < 1:
         raise AutoLabelingError("최소 검수 표본 수는 1 이상이어야 합니다.")
-    if not settings.pilot_model_file_name.strip():
-        raise AutoLabelingError("파일럿 모델 파일 이름은 비어 있을 수 없습니다.")
     if settings.review_time_bucket_seconds < 1:
         raise AutoLabelingError("검수 시간 구간은 1초 이상이어야 합니다.")
     if settings.calibration_min_frames < 1 or settings.calibration_min_sessions < 1:
@@ -148,7 +150,12 @@ def _validate_settings(settings: Settings) -> None:
         raise AutoLabelingError("중복 비교 이미지 크기는 8 이상이어야 합니다.")
 
 
-def load_input_manifest(path: Path, *, now: datetime | None = None) -> InputManifest:
+def load_input_manifest(
+    path: Path,
+    *,
+    now: datetime | None = None,
+    allow_approved_student_data: bool = False,
+) -> InputManifest:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -156,6 +163,9 @@ def load_input_manifest(path: Path, *, now: datetime | None = None) -> InputMani
     if not isinstance(raw, dict):
         raise AutoLabelingError("입력 manifest 최상위는 JSON 객체여야 합니다.")
     run_id = _require_safe_id(raw.get("run_id"), "run_id")
+    manifest_role = raw.get("manifest_role", "dataset")
+    if manifest_role != "dataset":
+        raise AutoLabelingError("prepare 입력 manifest_role은 dataset이어야 합니다.")
     raw_sources = raw.get("sources")
     if not isinstance(raw_sources, list) or not raw_sources:
         raise AutoLabelingError("sources는 한 개 이상의 항목이 있는 배열이어야 합니다.")
@@ -163,15 +173,27 @@ def load_input_manifest(path: Path, *, now: datetime | None = None) -> InputMani
     if current_time.tzinfo is None:
         raise AutoLabelingError("현재 시각에는 timezone이 있어야 합니다.")
     sources = tuple(
-        _parse_source(item, path.parent, current_time) for item in raw_sources
+        _parse_source(
+            item,
+            path.parent,
+            current_time,
+            allow_approved_student_data=allow_approved_student_data,
+        )
+        for item in raw_sources
     )
     source_ids = [source.source_id for source in sources]
     if len(source_ids) != len(set(source_ids)):
         raise AutoLabelingError("source_id는 manifest 안에서 중복될 수 없습니다.")
-    return InputManifest(run_id=run_id, sources=sources)
+    return InputManifest(run_id=run_id, sources=sources, manifest_role=manifest_role)
 
 
-def _parse_source(raw: Any, manifest_dir: Path, now: datetime) -> SourceInput:
+def _parse_source(
+    raw: Any,
+    manifest_dir: Path,
+    now: datetime,
+    *,
+    allow_approved_student_data: bool,
+) -> SourceInput:
     if not isinstance(raw, dict):
         raise AutoLabelingError("sources 항목은 JSON 객체여야 합니다.")
     source_id = _require_safe_id(raw.get("source_id"), "source_id")
@@ -188,7 +210,22 @@ def _parse_source(raw: Any, manifest_dir: Path, now: datetime) -> SourceInput:
     subject_category = _require_text(raw.get("subject_category"), "subject_category")
     if subject_category not in ALLOWED_SUBJECT_CATEGORIES:
         raise AutoLabelingError(
-            f"source_id={source_id}: 실제 학생 영상은 현재 처리할 수 없습니다."
+            f"source_id={source_id}: 허용되지 않은 subject_category입니다."
+        )
+    if subject_category == "student" and not allow_approved_student_data:
+        raise AutoLabelingError(
+            f"source_id={source_id}: 실제 학생 영상은 "
+            "--allow-approved-student-data가 필요합니다."
+        )
+    usage = raw.get("usage", "dataset")
+    if usage != "dataset":
+        raise AutoLabelingError(
+            f"source_id={source_id}: prepare는 dataset 입력만 받습니다."
+        )
+    requested_split = raw.get("requested_split")
+    if requested_split is not None and requested_split not in {"train", "val"}:
+        raise AutoLabelingError(
+            f"source_id={source_id}: requested_split은 train 또는 val이어야 합니다."
         )
     captured_at = _parse_aware_datetime(raw.get("captured_at"), "captured_at")
     retention_expires_at = _parse_aware_datetime(
@@ -220,6 +257,8 @@ def _parse_source(raw: Any, manifest_dir: Path, now: datetime) -> SourceInput:
         session_id=session_id,
         captured_at=captured_at.isoformat(),
         subject_category=subject_category,
+        usage=usage,
+        requested_split=requested_split,
     )
 
 

@@ -11,10 +11,20 @@
   camera-02 스레드 ─┼─put─▶ FrameBuffer ─get_latest─▶ inference-consumer 스레드
   camera-03 스레드 ─┘        (오래된 것 버림)              │
                                                           ▼
-                                                      YOLOv8n
+                                                      학습 YOLO
                                                           │
                                                           ▼
-                                                    탐지 결과 로그
+                                              카메라별 ByteTrack
+                                                          │
+                              지정 입구 카메라만           ▼
+                              deeplearning HTTP ◀── 사람 bbox + JPEG
+                                      │             (SCRFD · ArcFace · 갤러리)
+                                      └──────────▶ student_id 보강
+                                                          │
+                                      CCTV 문 영역·시각으로 track 인계
+                                                          │
+                                                          ▼
+                                            FastAPI HTTP 또는 탐지 결과 로그
 ```
 
 설정을 읽고 객체를 조립하는 코드를 여기 한 곳에 모은다. 워커 안에서 서로를
@@ -45,7 +55,9 @@ python -m pipeline.main
 > **직접 확인한 것**: 필수 환경변수가 없을 때 종료 코드 1로 멈추는 것,
 > ultralytics가 없을 때 무엇을 설치해야 하는지 알리고 멈추는 것,
 > 수신 → 샘플링 → 버퍼 → 소비자까지 실제 컴포넌트로 잇는 통합 테스트.
-> **확인하지 못한 것**: 실제 카메라와 실제 YOLO 가중치를 붙인 동작.
+> 얼굴 식별 보강·대상 카메라 제한·장애 시 원본 탐지 통과, 카메라별 ByteTrack,
+> 역순 프레임을 포함한 입구→CCTV 인계와 좌석까지 신원 유지는 대역으로 검증했다.
+> **확인하지 못한 것**: 실제 학습 YOLO·얼굴 인식 가중치를 함께 띄운 end-to-end 동작.
 > 장비와 모델이 있는 사람이 확인한 뒤 이 문단을 갱신한다.
 
 ## 환경변수와 설정
@@ -60,18 +72,51 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
-| `frame_buffer_maxsize` | 버퍼에 담아둘 최대 프레임 수 | 기본 1 |
+| `frame_buffer_maxsize` | 카메라별 최신 프레임 슬롯의 최소 수 | pipeline이 `STREAM_SOURCES` 수 이상으로 자동 확장 |
 | `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
 | `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
+| `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
+| `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
+| `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
+| `PERSON_TRACKING_CAMERA_IDS` | ByteTrack 대상 camera ID | 비우면 모든 `STREAM_SOURCES` |
+| `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | `.env.{APP_ENV}`. 실제 화면으로 보정 |
+| `bytetrack_*` | 두 단계 매칭·track buffer 기준 | `config/settings.yml` |
+| `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도 | `config/settings.yml` |
+| `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |
+| `face_identity_jpeg_quality` | 얼굴 식별 요청 JPEG 품질 | 기본 95 |
 | `metrics_enabled` | 지표 노출 여부 | 기본 `true` |
 | `metrics_host` | 지표 서버 바인딩 주소 | 기본 `0.0.0.0` |
 | `metrics_port` | 지표 서버 포트 | 기본 9101 |
 
-### 버퍼 크기를 1로 두는 이유
+### CCTV 문 영역 보정
 
-실시간 파이프라인에서 필요한 것은 **지금 화면**이다. 버퍼를 키우면 추론이 밀릴 때
-오래된 프레임을 들고 있다가 뒤늦게 처리하게 되고, 결과가 가리키는 시점이 계속
-과거로 밀린다. 추론 시간의 편차를 흡수해야 하는 경우에만 2 이상으로 올린다.
+카메라 간 인계를 켜기 전에 실제 CCTV 기준 프레임에서 학생이 교실로 처음 나타나는 문
+영역을 선택한다. 화면을 추측해 좌표를 넣지 않는다.
+
+```bash
+cd worker
+python -m pipeline.handover_calibration \
+  pipeline/data/cctv-handover-reference.jpg \
+  --entry-camera-id entry-camera \
+  --classroom-camera-id classroom-cctv \
+  --preview-output pipeline/data/cctv-entry-zone-preview.jpg
+```
+
+마우스로 문 영역을 드래그하고 Enter를 누르면 정규화된
+`IDENTITY_HANDOVER_ROUTES=...` 한 줄을 출력한다. 그 값을 `pipeline/.env.dev` 또는
+`.docker/env/worker.dev.env`에 옮기고 preview에서 문만 포함됐는지 확인한다. GUI를 쓸 수
+없는 호스트에서는 `--rect X Y WIDTH HEIGHT`로 같은 픽셀 사각형을 줄 수 있다.
+
+한 사람 bbox의 **하단 중앙점**이 이 영역에 처음 들어오는 순간이 CCTV 인계 후보가 된다.
+통로 전체나 좌석까지 넓게 잡으면 여러 신규 track이 동시에 후보가 되어 보수적 인계가
+의도대로 `UNKNOWN`을 반환하므로, 실제 출입문 바닥 경계만 포함한다.
+
+### 카메라별 최신 한 장만 두는 이유
+
+실시간 파이프라인에서 필요한 것은 **각 카메라의 지금 화면**이다. pipeline은 설정된
+카메라 수만큼 슬롯을 자동 확보하고 카메라마다 최신 한 장만 보존한다. 같은 카메라의
+새 프레임은 그 카메라의 대기 프레임만 교체하므로 빠른 CCTV가 입구 프레임을 덮지 않는다.
+대기 카메라는 공정한 순서로 한 장씩 소비한다.
 
 버린 프레임 수는 종료 시 로그에 남는다. `dropped`가 계속 늘면 추론이 수신을
 못 따라가고 있다는 뜻이므로, 버퍼를 키울 게 아니라 `FRAME_SAMPLE_INTERVAL_FRAMES`를
@@ -101,8 +146,8 @@ curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
 (`METRICS_HOST=127.0.0.1`) — 환경변수가 yml보다 우선한다. 앱 전체에 인증이 없는 상태([결정 0010](../../docs/architecture/decisions.md))라
 공인 IP에 그대로 여는 것은 접근 통제 결정 전까지 피한다.
 
-> **직접 확인한 것**: 서버 기동 → `/metrics` 응답 → 9개 지표(카메라 1대 기준 46개
-> 시계열)가 나오는 것을 대역 모델로 실측했다.
+> **직접 확인한 것**: 서버 기동과 `/metrics` 응답을 대역 모델로 실측했고, ByteTrack과
+> 신원 인계 지표의 계측 경로를 단위·통합 테스트로 검증했다.
 > **확인하지 못한 것**: docker 스택의 Prometheus가 `inference-worker:9101`을 실제로
 > 수집하는 것. `--profile worker`로 컨테이너를 띄울 수 있는 환경에서 확인한 뒤
 > 이 문단을 갱신한다.
@@ -115,6 +160,9 @@ curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
 | ultralytics 미설치·가중치 없음 | 무엇을 설치할지 알리고 종료 코드 1 |
 | 카메라 한 대 연결 실패 | 그 카메라만 재연결을 반복한다. 다른 카메라는 계속 돈다 |
 | 추론 1회 실패 | 스택을 로그로 남기고 다음 프레임으로 넘어간다 |
+| 얼굴 식별 HTTP·응답 실패 | 경고를 남기고 신원 없는 원래 사람 탐지를 FastAPI로 보낸다 |
+| 인계 후보 학생 또는 문 영역 신규 track이 여러 명 | 신원을 붙이지 않고 각 CCTV track을 미식별로 둔다 |
+| ByteTrack이 buffer보다 오래 끊김 | 이전 신원을 버리고 새 track ID로 시작한다 |
 | 추론 연속 실패가 한계 초과 | 파이프라인 전체를 멈춘다. 프레임만 버리며 도는 상태를 두지 않는다 |
 
 ## 한 프로세스로 두는 것은 잠정 선택이다

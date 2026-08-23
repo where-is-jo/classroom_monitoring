@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.shared.dependencies import get_video_stream_service
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
+from app.video_monitoring.models import CameraRole
 from app.video_monitoring.service import VideoStreamService
 
 from .fakes import FakeClock, make_classroom_service, make_stream
@@ -60,11 +61,24 @@ def test_등록에_성공하면_201과_생성된_source를_돌려준다(
     body = response.json()
     assert body["camera_id"] == "camera-02"
     assert body["classroom_id"] == "classroom-a101"
+    assert body["role"] == "SEAT_JUDGING"
     assert body["is_demo"] is False
     # 아직 프레임을 받은 적이 없다. 등록만으로 CONNECTED가 되면 안 된다.
     assert body["status"] == "UNKNOWN"
     assert body["last_frame_at"] is None
     assert repository.find_by_camera_id("camera-02") is not None
+
+
+def test_입구_source를_신원_전용_역할로_등록한다(
+    client: TestClient, repository: MemoryVideoStreamRepository
+) -> None:
+    response = client.post(ENDPOINT, json=_payload(role="IDENTITY_ONLY"))
+
+    assert response.status_code == 201
+    assert response.json()["role"] == "IDENTITY_ONLY"
+    saved = repository.find_by_camera_id("camera-02")
+    assert saved is not None
+    assert saved.role is CameraRole.IDENTITY_ONLY
 
 
 def test_재생_경로는_요청이_아니라_camera_id로_조립된다(client: TestClient) -> None:
@@ -101,9 +115,16 @@ def test_없는_강의실을_참조하면_404를_돌려준다(client: TestClient
         {"camera_id": ""},
         {"camera_label": ""},
         {"classroom_id": ""},
+        {"role": "UNKNOWN_ROLE"},
         {"playback_path": "/webrtc/침입"},
     ],
-    ids=["빈_camera_id", "빈_라벨", "빈_강의실", "허용되지_않은_필드"],
+    ids=[
+        "빈_camera_id",
+        "빈_라벨",
+        "빈_강의실",
+        "잘못된_역할",
+        "허용되지_않은_필드",
+    ],
 )
 def test_잘못된_입력은_422로_거절한다(client: TestClient, overrides: dict[str, object]) -> None:
     response = client.post(ENDPOINT, json=_payload(**overrides))

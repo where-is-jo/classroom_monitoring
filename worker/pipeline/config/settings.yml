@@ -11,6 +11,28 @@ inference_poll_timeout_seconds: 0.5
 # 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다
 inference_max_consecutive_failures: 5
 
+# 얼굴 식별 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의 FACE_IDENTITY_URL이
+# 소유하고, 비워 두면 기능을 끈다. 실패하면 사람 탐지 결과는 그대로 전송한다.
+face_identity_timeout_seconds: 5.0
+face_identity_jpeg_quality: 95
+
+# 사람 탐지에는 카메라별 ByteTrack을 항상 붙인다. camera ID 선택과 인계 route는
+# 배치마다 달라 .env.*가 소유하고, 아래 값은 모든 환경에서 같은 판정 기준이다.
+person_tracking_enabled: true
+bytetrack_high_confidence_threshold: 0.5
+bytetrack_low_confidence_threshold: 0.1
+bytetrack_new_track_threshold: 0.6
+bytetrack_first_match_iou_threshold: 0.3
+bytetrack_second_match_iou_threshold: 0.2
+bytetrack_buffer_frames: 30
+
+# 입구에서 식별된 시각과 CCTV 문 영역에서 새 track이 생긴 시각의 허용 범위.
+identity_handover_max_delay_seconds: 8.0
+identity_handover_clock_skew_seconds: 0.5
+# 신원이 붙은 CCTV track이 잠시 가려져도 이 시간 안에는 같은 신원을 유지한다.
+identity_handover_track_stale_seconds: 30.0
+identity_handover_min_confidence: 0.6
+
 # 지표 노출(Prometheus). 워커는 웹 서버가 아니라서 켜면 전용 포트에 /metrics만 연다.
 # 나가는 값은 처리량·지연 같은 집계 숫자뿐이며 개인을 식별하는 값은 담기지 않는다.
 metrics_enabled: true

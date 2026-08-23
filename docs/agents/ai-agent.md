@@ -23,9 +23,10 @@
 | `deeplearning` | 모델 로딩·전처리·추론·후처리와 탐지 결과 스키마. **모델을 아는 유일한 곳** |
 | `worker/inference` | 프레임 버퍼에서 프레임을 꺼내 호출하고 실패를 처리하는 **실행 단계** |
 
-**현재 코드는 이 경계를 아직 만족하지 않는다.** `worker/inference`가 ultralytics를
-직접 부르고 `deeplearning`에는 코드가 없다. 새 모델 코드는 `deeplearning`에 만들고,
-기존 호출은 `deeplearning` 구현 시 이관한다.
+현재 얼굴 모델은 `deeplearning` 내부 HTTP 서비스에 있고 worker는 호출·실패 처리와
+신원 인계를 담당해 이 경계를 따른다. 사람 YOLO만 기존 배치 호환을 위해 아직
+`worker/inference`가 직접 로딩하므로 경계를 완전히 만족한 상태는 아니다. 새 모델 코드는
+`deeplearning`에 만들고, 사람 탐지 모델 이관은 별도 호환 작업으로 다룬다.
 
 ## Responsibilities
 
@@ -83,9 +84,9 @@
   테스트에는 실제 사람의 얼굴을 쓰지 않는다.
 - 탐지 결과는 HTTP로 fastapi에 전달한다
   ([결정 0027](../architecture/decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)).
-  모델 종류·버전, `deeplearning` 호출 방식, 실행 장치는 **결정 필요** 항목이다.
-  확정 전이면 특정 선택에 강하게 결합된 구조를 굳히지 않고, 확정 시
-  [결정 기록](../architecture/decisions.md)에 남긴다.
+  입구 얼굴 식별은 내부 HTTP 호출로 확정됐다([결정 0035](../architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+  새 모델 종류·버전이나 실행 장치를 바꾸면 [결정 기록](../architecture/decisions.md)에
+  근거를 남긴다.
 
 ## Expected Outputs
 

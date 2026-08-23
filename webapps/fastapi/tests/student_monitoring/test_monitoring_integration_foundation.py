@@ -326,6 +326,7 @@ def test_approved_fixture_runs_post_rest_and_all_sse_payloads_idempotently() -> 
     assert len(occupancy_events) == 2
     assert len(student_events) == 1
     assert detection_events[0]["detections"][0]["display_label"] == "합성 학생 A"
+    assert detection_events[0]["detections"][0]["track_id"] == "person-17"
     assert "identity_confidence" not in detection_events[0]["detections"][0]
     assert student_events[0]["current_state"] == "PRESENT"
 

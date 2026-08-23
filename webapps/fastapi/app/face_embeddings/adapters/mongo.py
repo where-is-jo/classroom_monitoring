@@ -56,6 +56,12 @@ class MongoFaceEmbeddingRepository:
             raise RepositoryUnavailableError() from None
         return None if document is None else _to_domain(document)
 
+    def delete_by_student(self, student_id: str) -> None:
+        try:
+            self._collection.delete_one({"student_id": student_id})
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+
 
 def _to_document(value: FaceEmbedding) -> MongoDocument:
     return {

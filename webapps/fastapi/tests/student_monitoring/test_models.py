@@ -15,6 +15,7 @@ from app.student_monitoring.models import (
     FrameInfo,
     VideoSegment,
 )
+from app.student_monitoring.schemas import DetectionEventResponse
 from app.video_monitoring.errors import VideoStreamNotFoundError
 
 
@@ -82,6 +83,36 @@ class TestDetectionEvent:
             schema_version=1,
         )
         assert len(event.detections) == 0
+
+    def test_public_response_keeps_track_id(self) -> None:
+        event = DetectionEvent(
+            event_id="test-event-track",
+            camera_id="camera-a",
+            stream_id="stream-camera-a",
+            classroom_id="classroom-a101",
+            captured_at=datetime(2026, 8, 12, 1, 3, 0, tzinfo=UTC),
+            sequence=18422,
+            frame=FrameInfo(width_pixels=1920, height_pixels=1080),
+            detections=(
+                Detection(
+                    detection_id="det-track",
+                    class_id=0,
+                    class_name="person",
+                    confidence=0.91,
+                    bbox=(100, 120, 300, 600),
+                    student_id=None,
+                    identity_confidence=None,
+                    face_bbox=None,
+                    track_id="person-17",
+                ),
+            ),
+            received_at=datetime(2026, 8, 12, 1, 3, 1, tzinfo=UTC),
+            schema_version=1,
+        )
+
+        response = DetectionEventResponse.from_domain(event)
+
+        assert response.detections[0].track_id == "person-17"
 
 
 class TestVideoSegment:

@@ -1,11 +1,12 @@
 # deeplearning/training
 
-공용 GPU 서버에 SSH로 접속해 학습 데이터를 올리고, 팀원이 Jupyter 노트북을 셀 단위로
-실행하며 **사람 탐지(Person Detection) 모델**을 학습하는 절차다.
+공용 GPU 서버에서 **사람 탐지(Person Detection) 모델**을 학습하는 절차다. 탐색 작업은
+Jupyter 노트북으로 할 수 있고, 확정된 전처리·검수·학습 계약은 `auto_labeling`의 Python
+CLI로 반복 실행할 수 있다.
 
 > **범위**: 사람 탐지 모델의 수동 fine-tuning까지만 다룬다. 얼굴 탐지·인식 모델 학습,
 > 자동 재학습 파이프라인, 데이터셋 라벨링 도구는 범위 밖이다
-> ([결정 0029](../../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
+> ([결정 0012](../../docs/architecture/decisions.md#0012--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 얼굴 데이터는 개인정보 합의 전까지 이 노트북에서도 다루지 않는다.
 
 ## 준비물
@@ -16,7 +17,138 @@
   데이터셋을 어떻게 확보·라벨링할지는 아직 `결정 필요`다 — 이 노트북은 이미 만들어진
   데이터셋이 있다고 가정한다.
 
-## 사용법
+## Python 파이프라인 경계
+
+원본 강의실 영상은 GPU 서버로 보내지 않는다. 다음 두 실행 경계를 유지한다.
+
+1. 로컬 PC: 세션 분리 → 프레임 추출 → N1 자동 라벨링 → 사람 검수 → 비식별 ZIP 생성
+2. GPU 서버: 비식별 ZIP과 SHA-256 검증 → 1 epoch smoke → YOLO11n 정식 학습 → 결과 ZIP 생성
+
+이 CLI는 운영자가 직접 실행하는 오프라인 작업이다. 예약 실행이나 자동 재학습 서비스가
+아니며, 기존 서버 Docker 구성과도 연결되지 않는다.
+
+## GPU 서버 Python CLI 사용법
+
+저장소와 비식별 ZIP을 서버의 작업 허용 경로에 준비한 뒤
+[`gpu_server_training.example.yml`](./auto_labeling/config/gpu_server_training.example.yml)을
+복사해 `server_root`, 절대 경로와 SHA-256을 채운다. SSH 접속 정보와 비밀번호는 설정
+파일에 넣지 않는다. N1 v008을 같은 설정으로 재현할 때는 실제 해시가 채워진
+[`gpu_server_training.v008.yml`](./auto_labeling/config/gpu_server_training.v008.yml)을
+`data/server-transfer-v008/gpu-server-training.yml`로 복사하고 경로 자리표시자를 승인된
+서버 작업 경로로 바꾼다. 이 로컬 설정은 `data/` 아래라 커밋되지 않는다.
+
+서버로 `deeplearning/training` 전체를 복사하면 원본 데이터·review·과거 run이 함께 갈 수
+있으므로 금지한다. 대신 비식별 ZIP·기준 모델의 해시를 검증하고 실행 코드만 묶는다.
+
+```powershell
+python -m auto_labeling.server_bundle `
+  --config data/server-transfer-v008/gpu-server-training.yml `
+  --dataset-archive data/person-pipeline/colab-export-v008-true-empty-negative17.zip `
+  --base-model data/auto-labeling/models/yolo11n.pt `
+  --output-dir data/server-transfer-v008 `
+  --bundle-id v008
+```
+
+출력되는 코드 ZIP에는 `auto_labeling` 런타임, 서버 전용 requirements, 실제 학습 YAML만
+포함된다. 원본 영상·review 프레임·가중치는 포함하지 않는다. 함께 생성되는 transfer
+영수증의 세 항목(코드 ZIP, 비식별 데이터 ZIP, 기준 모델)만 승인 후 서버로 보낸다.
+
+```bash
+cd classroom_monitoring/deeplearning/training
+python3 -B -m auto_labeling.server_preflight --config /absolute/path/to/training.yml
+```
+
+이 부트스트랩 검사는 Torch·Ultralytics·OpenCV를 import하지 않으므로 패키지가 아직 없는
+호스트에서도 GPU 할당, 여유 메모리, ZIP SHA-256과 경로 권한을 확인한다. 누락 패키지를
+준비한 뒤 전체 계약 검사를 실행한다.
+
+```bash
+python -B -m auto_labeling pipeline-train-check --config /absolute/path/to/training.yml
+```
+
+`status`가 `ready-for-training`인지 확인한 다음에만 학습한다. 사전점검은 데이터 압축을
+풀거나 학습 출력 폴더를 만들지 않으며 `artifact_writes_performed: false`를 반환한다.
+다만 ZIP 내부 개인정보 계약의 전체 파일 검증은 압축 해제 후에만 가능하므로 실제 학습
+진입점에서 다시 검사한다.
+
+`device: auto`는 `allowed_cuda_devices` 안에서 여유 메모리가 가장 큰 장치를 고른다.
+2026-08-22 읽기 전용 서버 조사에서는 프로젝트에 할당된 장치가 GPU 1번이므로 서버 예시는
+`allowed_cuda_devices: [1]`로 고정했다. 다른 GPU가 비어 보여도 허용 목록 밖이면 사용하지
+않는다. 기본 `minimum_cuda_free_gib: 8`을 만족하지 못하면 시작하지 않는다. 이는 GPU 예약
+기능이 아니므로 사전점검과 실제 학습 사이에 다른 작업이 시작될 수 있다. 공용 서버에서는
+학습 직전에 팀 채널에서 GPU 사용 시간을 확인한다.
+
+### 2026-08-22 서버 읽기 전용 조사 결과
+
+- Ubuntu 24.04.4, Python 3.12.3, NVIDIA L40S 4장, 드라이버 595.84
+- 프로젝트의 기존 inference 컨테이너는 GPU 1번만 할당받고 모델 마운트는 읽기 전용이다.
+- 호스트 Python에는 Torch·Ultralytics·NumPy·OpenCV가 없다. `nvcc`도 없지만 사전 빌드
+  CUDA torch wheel을 쓰므로 학습 필수 조건은 아니다.
+- 기존 Docker와 컨테이너는 학습 환경으로 재사용하거나 변경하지 않는다. 별도 승인을 받은
+  사용자 작업 폴더의 Python 3.12 가상환경에서 실행한다.
+
+서버에는 `python3-venv`와 `ensurepip`가 없으므로 `python3 -m venv`로 만들지 않는다.
+사용자 작업 폴더 생성과 패키지 설치가 승인된 뒤에는 `virtualenv` 자체도 승인된 폴더에만
+설치하고, 저장소의 worker GPU 이미지와 같은 CUDA 12.6 wheel 계열을 사용한다. 시스템
+Python이나 기존 컨테이너에는 설치하지 않는다.
+
+```bash
+python3 -m pip install --target /absolute/approved/path/bootstrap \
+  'virtualenv>=20,<21'
+PYTHONPATH=/absolute/approved/path/bootstrap \
+  python3 -m virtualenv /absolute/approved/path/.venv
+source /absolute/approved/path/.venv/bin/activate
+python -m pip install --index-url https://download.pytorch.org/whl/cu126 torch torchvision
+python -m pip install -r requirements-server.txt
+python -m pip check
+```
+
+```bash
+python -m auto_labeling pipeline-train --config /absolute/path/to/training.yml
+```
+
+학습 명령이 쓰는 위치는 설정의 `extract_root`와 `output_root`뿐이다. `mode: smoke-full`은
+1 epoch smoke가 끝난 뒤 정식 학습을 이어가며, 완료 시 `best.pt`, 학습 영수증, validation
+F1 threshold, 결과 ZIP과 각 SHA-256 영수증을 남긴다. 서버가 오프라인이면
+`base_model`에 미리 준비한 `yolo11n.pt`의 절대 경로를, `base_model_sha256`에 실제 해시를
+지정한다.
+
+### N1 추론 배포 전 확인
+
+N1 데이터셋은 `uniform-full-frame-pixelation-v1`, block size 8로 학습됐고
+`inference_preprocessing_required: true`다. 따라서 운영 추론에서도 BGR 프레임 전체에 같은
+전처리를 적용한 뒤 모델에 전달해야 한다. 현재 `worker/inference/model.py`는 원본 프레임을
+Ultralytics 모델에 직접 전달하므로 N1을 그 경로에 그대로 배치하지 않는다. 모델 전처리
+소유 경계는 `deeplearning`이며, worker 통합 전에 전처리 어댑터와 원본 좌표계 유지 테스트를
+별도 변경으로 완료해야 한다. 운영 confidence는 N1 validation 기준 `0.25`다.
+
+## 얼굴 식별 모델 평가와 임계값 산출
+
+`face_identification_eval.py`는 등록 학생(known)과 미등록 인원(unknown)을 validation/test로
+고정 분리해 ArcFace 또는 AdaFace를 같은 조건으로 평가한다. validation으로 유사도와
+1·2위 margin 임계값을 고르고, test 결과 CSV와 런타임용 `thresholds.json`을 만든다.
+test 결과를 보고 다시 임계값을 고르지 않는다.
+
+```bash
+cd <저장소 루트>
+python -m deeplearning.training.face_identification_eval
+```
+
+필수 디렉터리와 모델 경로는 [`.env.example`](./.env.example)의 `FACE_EVAL_*`,
+`FACE_*_MODEL_PATH`를 따른다. known 디렉터리는 `<student_id>/*.jpg`, unknown 디렉터리는
+하위의 이미지 파일 구조다. 실제 얼굴·가중치·CSV·임계값 산출물은 커밋하지 않는다.
+MongoDB를 건드리지 않는 dry-run은 `FACE_EVAL_GALLERY_SOURCE=directory`와
+`FACE_EVAL_GALLERY_DIR=<student_id별 등록 이미지 루트>`를 쓴다.
+
+생성된 임계값 파일에는 모델명·모델 버전·전처리 버전이 함께 들어간다. 실시간 서비스의
+`FACE_IDENTITY_THRESHOLD_FILE`로 연결하며, 현재 런타임 메타데이터와 하나라도 다르면
+기동을 거부한다. 실측 데이터가 없으면 임의 임계값으로 학생 이름을 붙이지 않는다.
+
+AdaFace ONNX는 `prepare_adaface_model.py`, person re-ID 가중치는
+`prepare_person_reid.py`로 준비한다. `cross_camera_demo.py`와 tracking 노트북은 카메라 간
+인계 실험용이며 운영 파이프라인에는 연결돼 있지 않다.
+
+## Jupyter 사용법
 
 1. **SSH로 공용 서버에 접속한다.**
 
@@ -83,7 +215,7 @@
 - **공용 GPU를 여러 명이 나눠 쓴다.** 학습을 시작하기 전에 노트북의 GPU 확인 셀로
   `nvidia-smi` 결과를 보고, 이미 쓰는 사람이 있으면 팀 채널에 먼저 확인한다.
 - **디스크 여유가 크지 않다.** 공용 서버의 가용 용량이 약 17~20 GB뿐이다
-  ([결정 0028](../../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
+  ([결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   학습이 끝나면 노트북의 정리 셀로 데이터셋과 `runs/`를 지운다. 큰 데이터셋을
   서버에 영구히 두지 않는다.
 - **데이터셋·가중치·`runs/`는 커밋하지 않는다.** 저장소의 `.gitignore`가 이 디렉터리
@@ -98,8 +230,12 @@ training/
 ├── README.md          이 문서
 ├── requirements.txt    학습 노트북 의존성
 ├── .env.example         설정값 이름(값은 비움)
+├── face_identification_eval.py   고정 split 얼굴 식별 평가·임계값 생성
+├── adaface_recognizer.py         AdaFace ONNX 런타임 어댑터
+├── cross_camera_demo.py          카메라 간 인계 실험 진입점
 └── notebooks/
-    └── 01_person_detection_training.ipynb   사람 탐지 모델 학습 노트북
+    ├── 01_person_detection_training*.ipynb   사람 탐지 모델 학습·평가
+    └── 02_person_detection_tracking*.ipynb   단일·교차 카메라 tracking 실험
 ```
 
 ## 남은 일
@@ -114,5 +250,5 @@ training/
 
 - [deeplearning README](../README.md)
 - [결정 0029](../../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)
-- [결정 0028](../../docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다) — 공용 서버 용량 제약의 근거
+- [결정 0011](../../docs/architecture/decisions.md#0011--영상-원본을-저장하지-않고-스냅샷만-남긴다) — 공용 서버 용량 제약의 근거
 - [환경변수 규칙](../../docs/conventions/environment-convention.md)

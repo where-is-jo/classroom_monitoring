@@ -37,7 +37,8 @@ from .review import verify_review_receipt
 from .yolo import parse_yolo_file
 
 DATASET_PATTERN = re.compile(r"^person-v(\d{4})$")
-SPLITS = ("train", "val", "test")
+LEGACY_SPLITS = ("train", "val", "test")
+CURRENT_SPLITS = ("train", "val")
 
 
 def default_datasets_root() -> Path:
@@ -116,7 +117,7 @@ def publish_dataset(
         prefix=f".{dataset_version}-", dir=datasets_root
     ) as temporary:
         temporary_dir = Path(temporary)
-        for split in SPLITS:
+        for split in CURRENT_SPLITS:
             (temporary_dir / "images" / split).mkdir(parents=True)
             (temporary_dir / "labels" / split).mkdir(parents=True)
         items: list[dict[str, object]] = []
@@ -144,6 +145,10 @@ def publish_dataset(
                     "consent_scope": frame.get("consent_scope"),
                     "retention_expires_at": frame.get("retention_expires_at"),
                     "subject_category": frame.get("subject_category"),
+                    "approved_student_data": bool(
+                        run_manifest.get("approved_student_data", False)
+                    ),
+                    "requested_split": frame.get("requested_split"),
                     "approval_type": approval_type,
                     "duplicate_group_id": deduplication.group_id_by_representative.get(
                         frame_id
@@ -170,7 +175,7 @@ def publish_dataset(
         write_json(
             temporary_dir / "manifest.json",
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "dataset_version": dataset_version,
                 "status": status,
                 "class_names": ["person"],
@@ -186,6 +191,13 @@ def publish_dataset(
                 },
                 "deduplication": deduplication_manifest,
                 "session_splits": session_splits,
+                "privacy": {
+                    "raw_video_export_allowed": False,
+                    "colab_export_requires_privacy_receipt": True,
+                    "approved_student_data": bool(
+                        run_manifest.get("approved_student_data", False)
+                    ),
+                },
                 "published_at": utc_now_iso(),
                 "items": items,
             },
@@ -201,7 +213,7 @@ def validate_dataset(
     dataset_dir = dataset_dir.resolve(strict=True)
     manifest = _require_dict(read_json(dataset_dir / "manifest.json"), "manifest.json")
     schema_version = manifest.get("schema_version")
-    if schema_version not in {1, 2}:
+    if schema_version not in {1, 2, 3}:
         raise AutoLabelingError("지원하지 않는 데이터셋 manifest schema입니다.")
     dataset_version = _require_string(
         manifest.get("dataset_version"), "dataset_version"
@@ -236,7 +248,8 @@ def validate_dataset(
         raise AutoLabelingError("data.yaml 클래스 계약은 0: person 하나여야 합니다.")
     if data_config.get("path") != ".":
         raise AutoLabelingError("data.yaml의 기준 경로는 현재 데이터셋이어야 합니다.")
-    for split in SPLITS:
+    splits = CURRENT_SPLITS if schema_version == 3 else LEGACY_SPLITS
+    for split in splits:
         if data_config.get(split) != f"images/{split}":
             raise AutoLabelingError(f"data.yaml의 {split} 경로가 올바르지 않습니다.")
     items = manifest.get("items")
@@ -245,13 +258,13 @@ def validate_dataset(
     frame_ids: set[str] = set()
     image_hashes: dict[str, str] = {}
     session_splits: dict[str, str] = {}
-    split_counts = {split: 0 for split in SPLITS}
+    split_counts = {split: 0 for split in splits}
     for raw_item in items:
         item = _require_dict(raw_item, "item")
         frame_id = _require_string(item.get("frame_id"), "frame_id")
         split = _require_string(item.get("split"), "split")
         session_id = _require_string(item.get("session_id"), "session_id")
-        if split not in SPLITS:
+        if split not in splits:
             raise AutoLabelingError(f"frame_id={frame_id}: 알 수 없는 split입니다.")
         if frame_id in frame_ids:
             raise AutoLabelingError("manifest.json에 중복 frame_id가 있습니다.")
@@ -283,9 +296,9 @@ def validate_dataset(
             raise AutoLabelingError("서로 다른 frame_id에 같은 이미지 해시가 있습니다.")
         image_hashes[image_sha256] = frame_id
         parse_yolo_file(label_path)
-        _validate_item_approval(item, frame_id)
+        _validate_item_approval(item, frame_id, schema_version=schema_version)
         split_counts[split] += 1
-    for split in SPLITS:
+    for split in splits:
         actual_images = {
             path.stem for path in (dataset_dir / "images" / split).glob("*.jpg")
         }
@@ -304,15 +317,28 @@ def validate_dataset(
     )
     if declared_session_splits != session_splits:
         raise AutoLabelingError("manifest의 session split 목록이 항목과 다릅니다.")
-    expected_splits = _assign_session_splits(
-        [{"session_id": session_id} for session_id in session_splits]
-    )
+    if schema_version == 3:
+        expected_splits = _assign_session_splits(
+            [
+                {
+                    "session_id": _require_string(item.get("session_id"), "session_id"),
+                    "requested_split": item.get("requested_split"),
+                }
+                for item in items
+                if isinstance(item, dict)
+            ]
+        )
+    else:
+        expected_splits = _assign_legacy_session_splits(
+            [{"session_id": session_id} for session_id in session_splits]
+        )
     if session_splits != expected_splits:
-        raise AutoLabelingError("session split이 고정 80/10/10 정책과 다릅니다.")
+        policy = "90/10 train/val" if schema_version == 3 else "80/10/10"
+        raise AutoLabelingError(f"session split이 고정 {policy} 정책과 다릅니다.")
     expected_status = "ready" if len(session_splits) >= 10 else "pilot"
     if manifest.get("status") != expected_status:
         raise AutoLabelingError("세션 수와 데이터셋 상태가 다릅니다.")
-    if schema_version == 2:
+    if schema_version in {2, 3}:
         deduplication_report = _validate_deduplication(
             dataset_dir, manifest, items, frame_ids
         )
@@ -655,6 +681,38 @@ def _select_publishable_review(
 
 
 def _assign_session_splits(frames: list[dict[str, Any]]) -> dict[str, str]:
+    requested: dict[str, str] = {}
+    for frame in frames:
+        session_id = _require_string(frame.get("session_id"), "session_id")
+        split = frame.get("requested_split")
+        if split is None:
+            continue
+        if split not in CURRENT_SPLITS:
+            raise AutoLabelingError("requested_split은 train 또는 val이어야 합니다.")
+        previous = requested.setdefault(session_id, split)
+        if previous != split:
+            raise AutoLabelingError(
+                "같은 session_id에 서로 다른 requested_split이 있습니다."
+            )
+    sessions = sorted(
+        {_require_string(frame.get("session_id"), "session_id") for frame in frames},
+        key=lambda value: sha256_bytes(value.encode()),
+    )
+    count = len(sessions)
+    val_count = 0 if count <= 1 else max(1, round(count * 0.1))
+    splits: dict[str, str] = {}
+    for index, session_id in enumerate(sessions):
+        splits[session_id] = requested.get(
+            session_id, "val" if index < val_count else "train"
+        )
+    if splits and set(splits.values()) == {"val"}:
+        raise AutoLabelingError("train 세션이 한 개 이상 필요합니다.")
+    return splits
+
+
+def _assign_legacy_session_splits(
+    frames: list[dict[str, Any]],
+) -> dict[str, str]:
     sessions = sorted(
         {_require_string(frame.get("session_id"), "session_id") for frame in frames},
         key=lambda value: sha256_bytes(value.encode()),
@@ -669,16 +727,16 @@ def _assign_session_splits(frames: list[dict[str, Any]]) -> dict[str, str]:
     else:
         test_count = max(1, round(count * 0.1))
         val_count = max(1, round(count * 0.1))
-    splits: dict[str, str] = {}
-    for index, session_id in enumerate(sessions):
-        if index < test_count:
-            split = "test"
-        elif index < test_count + val_count:
-            split = "val"
-        else:
-            split = "train"
-        splits[session_id] = split
-    return splits
+    return {
+        session_id: (
+            "test"
+            if index < test_count
+            else "val"
+            if index < test_count + val_count
+            else "train"
+        )
+        for index, session_id in enumerate(sessions)
+    }
 
 
 def _write_data_yaml(path: Path) -> None:
@@ -688,7 +746,6 @@ def _write_data_yaml(path: Path) -> None:
                 "path": ".",
                 "train": "images/train",
                 "val": "images/val",
-                "test": "images/test",
                 "nc": 1,
                 "names": {0: "person"},
             },
@@ -749,12 +806,17 @@ def _next_dataset_version(datasets_root: Path) -> str:
     return f"person-v{next_version:04d}"
 
 
-def _validate_item_approval(item: dict[str, Any], frame_id: str) -> None:
+def _validate_item_approval(
+    item: dict[str, Any], frame_id: str, *, schema_version: int
+) -> None:
     for field_name in ("approval_reference", "consent_scope", "retention_expires_at"):
         _require_string(item.get(field_name), field_name)
     if item.get("consent_scope") != "person-detection-training":
         raise AutoLabelingError(f"frame_id={frame_id}: 동의 범위가 올바르지 않습니다.")
-    if item.get("subject_category") not in {"synthetic", "consenting-adult"}:
+    allowed_categories = {"synthetic", "consenting-adult"}
+    if schema_version == 3 and item.get("approved_student_data") is True:
+        allowed_categories.add("student")
+    if item.get("subject_category") not in allowed_categories:
         raise AutoLabelingError(f"frame_id={frame_id}: 허용되지 않은 대상 영상입니다.")
     if item.get("approval_type") not in {"human-reviewed", "calibrated-auto-accept"}:
         raise AutoLabelingError(f"frame_id={frame_id}: 승인 유형이 올바르지 않습니다.")

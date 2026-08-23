@@ -10,20 +10,21 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
 pytest.importorskip("mediapipe", reason="모델 의존성이 없는 환경에서는 건너뛴다")
 pytest.importorskip("insightface", reason="모델 의존성이 없는 환경에서는 건너뛴다")
 
-import cv2  # noqa: E402
-import metrics  # noqa: E402
-import numpy as np  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from prometheus_client import REGISTRY  # noqa: E402
+import cv2
+import metrics
+import numpy as np
+from face_identification import PersonIdentity
+from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
-from deeplearning import app as app_module  # noqa: E402
+from deeplearning import app as app_module
 
 # 640x480 화면의 가이드 타원 안에 들어오는 얼굴 상자(test_face_guide.py와 같은 값).
 _GUIDE_FACE = (220.0, 115.0, 420.0, 365.0)
@@ -53,8 +54,8 @@ class FakeDetector:
 class _EmptyLandmarkResult:
     """랜드마크를 못 찾은 결과. `_head_pose`가 0으로 빠져나간다."""
 
-    face_landmarks: list[Any] = []
-    facial_transformation_matrixes: list[Any] = []
+    face_landmarks: ClassVar[list[Any]] = []
+    facial_transformation_matrixes: ClassVar[list[Any]] = []
 
 
 class FakeLandmarker:
@@ -63,7 +64,9 @@ class FakeLandmarker:
 
 
 def value(name: str, **labels: str) -> float:
-    sampled = REGISTRY.get_sample_value(f"{metrics.METRIC_PREFIX}{name}", labels or None)
+    sampled = REGISTRY.get_sample_value(
+        f"{metrics.METRIC_PREFIX}{name}", labels or None
+    )
     return 0.0 if sampled is None else float(sampled)
 
 
@@ -86,12 +89,14 @@ def jpeg(width: int = 640, height: int = 480) -> bytes:
 def client() -> Iterator[TestClient]:
     app_module._frame_history.clear()
     app_module._fingerprint_history.clear()
+    app_module.app.state.face_identification_runtime = None
     # 세션 Gauge는 프로세스에 하나뿐이라 다른 테스트가 바꿔 놓았을 수 있다.
     metrics.install_session_gauge(app_module._active_session_count)
     app_module.app.state.landmarker = FakeLandmarker()
     yield TestClient(app_module.app, raise_server_exceptions=False)
     app_module._frame_history.clear()
     app_module._fingerprint_history.clear()
+    app_module.app.state.face_identification_runtime = None
 
 
 def use_detector(detections: Any = None, **kwargs: Any) -> None:
@@ -100,10 +105,14 @@ def use_detector(detections: Any = None, **kwargs: Any) -> None:
 
 def test_성공한_분석은_구간별로_시간을_남긴다(client: TestClient) -> None:
     use_detector(np.array([[*_GUIDE_FACE, 0.9]]))
-    before = {stage: stage_count(stage) for stage in ("detect", "quality", "pose", "total")}
+    before = {
+        stage: stage_count(stage) for stage in ("detect", "quality", "pose", "total")
+    }
     before_ok = analysis_requests("ok")
 
-    response = client.post("/internal/face-analysis", content=jpeg(), headers=_SESSION_HEADERS)
+    response = client.post(
+        "/internal/face-analysis", content=jpeg(), headers=_SESSION_HEADERS
+    )
 
     assert response.status_code == 200
     assert analysis_requests("ok") == before_ok + 1
@@ -117,7 +126,9 @@ def test_가이드_안에_얼굴이_없으면_실패로_세지_않는다(client:
     before_no_face = analysis_requests("no_face")
     before_pose = stage_count("pose")
 
-    response = client.post("/internal/face-analysis", content=jpeg(), headers=_SESSION_HEADERS)
+    response = client.post(
+        "/internal/face-analysis", content=jpeg(), headers=_SESSION_HEADERS
+    )
 
     assert response.status_code == 200
     assert response.json()["face_count"] == 0
@@ -153,7 +164,9 @@ def test_모델이_죽으면_실패로_센다(client: TestClient) -> None:
     use_detector(error=RuntimeError("ONNX 세션이 죽었다"))
     before = analysis_requests("error")
 
-    response = client.post("/internal/face-analysis", content=jpeg(), headers=_SESSION_HEADERS)
+    response = client.post(
+        "/internal/face-analysis", content=jpeg(), headers=_SESSION_HEADERS
+    )
 
     assert response.status_code == 500
     assert analysis_requests("error") == before + 1
@@ -198,7 +211,9 @@ def test_embedding_얼굴이_하나가_아니면_따로_센다(client: TestClien
     response = client.post("/internal/face-embeddings", content=jpeg())
 
     assert response.status_code == 422
-    assert value("face_embedding_requests_total", result="not_single_face") == before + 1
+    assert (
+        value("face_embedding_requests_total", result="not_single_face") == before + 1
+    )
 
 
 def test_embedding_신뢰도가_부족하면_따로_센다(client: TestClient) -> None:
@@ -213,9 +228,54 @@ def test_embedding_신뢰도가_부족하면_따로_센다(client: TestClient) -
 
 
 def test_embedding_요청은_걸린_시간을_남긴다(client: TestClient) -> None:
-    use_detector(np.array([[*_GUIDE_FACE, 0.2]]), keypoints=np.zeros((1, 5, 2), dtype=np.float32))
+    use_detector(
+        np.array([[*_GUIDE_FACE, 0.2]]), keypoints=np.zeros((1, 5, 2), dtype=np.float32)
+    )
     before = value("face_embedding_duration_seconds_count")
 
     client.post("/internal/face-embeddings", content=jpeg())
 
     assert value("face_embedding_duration_seconds_count") == before + 1
+
+
+def test_얼굴_식별_API는_embedding_없이_학생_ID와_bbox만_돌려준다(
+    client: TestClient,
+) -> None:
+    class Runtime:
+        def identify(self, **kwargs: Any) -> tuple[PersonIdentity, ...]:
+            assert kwargs["camera_id"] == "entry-camera"
+            assert kwargs["person_bboxes"] == ((10, 5, 120, 115),)
+            return (
+                PersonIdentity(
+                    person_index=0,
+                    face_bbox=(30, 20, 80, 75),
+                    track_id=3,
+                    student_id="student-a",
+                    similarity=0.86,
+                ),
+            )
+
+    app_module.app.state.face_identification_runtime = Runtime()
+
+    response = client.post(
+        "/internal/face-identifications",
+        content=jpeg(160, 120),
+        headers={
+            "X-Camera-ID": "entry-camera",
+            "X-Person-Bboxes": "[[10,5,120,115]]",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "identities": [
+            {
+                "person_index": 0,
+                "face_bbox": [30, 20, 80, 75],
+                "track_id": "face-3",
+                "student_id": "student-a",
+                "identity_confidence": 0.86,
+            }
+        ]
+    }
+    assert "vector" not in response.text

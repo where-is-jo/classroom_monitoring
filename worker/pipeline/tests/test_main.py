@@ -9,8 +9,14 @@ from __future__ import annotations
 import pytest
 from inference.config import InferenceSettings
 from inference.consumer import log_result
+from inference.face_identity import FaceIdentityResultHandler
 from inference.handler import FastAPIResultHandler
+from inference.identity_handover import (
+    IdentityHandoverResultHandler,
+    IdentityHandoverRoute,
+)
 from inference.snapshot import SnapshotResultHandler
+from inference.tracking import ByteTrackResultHandler
 from stream.config import StreamSettings
 
 from .. import main as pipeline_main
@@ -127,6 +133,20 @@ def test_FASTAPI_URL_설정이어도_스냅샷_핸들러를_감싼다() -> None:
     assert isinstance(handler._inner, SnapshotResultHandler)  # type: ignore[attr-defined]
 
 
+def test_FACE_IDENTITY_URL_설정이면_기존_전송_앞에서_식별을_보강한다() -> None:
+    settings = build_inference_settings()
+
+    handler = pipeline_main.build_result_handler(
+        settings,
+        fastapi_url="http://fastapi:8000",
+        face_identity_url="http://deeplearning:8100",
+        face_identity_camera_ids=frozenset({"entry-camera"}),
+    )
+
+    assert isinstance(handler, FaceIdentityResultHandler)
+    assert isinstance(handler._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
+
+
 def test_FASTAPI_URL_미설정이면_스냅샷_설정은_기존대로_적용된다() -> None:
     """fastapi_url을 안 준다고 스냅샷이 꺼지면 안 된다."""
     settings = build_inference_settings(snapshot_enabled=True)
@@ -143,8 +163,9 @@ def test_조립_시_FASTAPI_URL_설정이면_FastAPIResultHandler가_주입된�
 
     # 핸들러는 조립 결과로만 확인할 수 있어 소비자 내부 필드를 본다.
     handler = runner._consumer._result_handler  # type: ignore[attr-defined]
-    assert isinstance(handler, FastAPIResultHandler)
-    assert handler._inner is log_result  # type: ignore[attr-defined]
+    assert isinstance(handler, ByteTrackResultHandler)
+    assert isinstance(handler._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
+    assert handler._inner._inner is log_result  # type: ignore[attr-defined]
 
 
 def test_조립_시_FASTAPI_URL_미설정이면_log_result가_주입된다(
@@ -154,7 +175,8 @@ def test_조립_시_FASTAPI_URL_미설정이면_log_result가_주입된다(
 
     # 핸들러는 조립 결과로만 확인할 수 있어 소비자 내부 필드를 본다.
     handler = runner._consumer._result_handler  # type: ignore[attr-defined]
-    assert handler is log_result
+    assert isinstance(handler, ByteTrackResultHandler)
+    assert handler._inner is log_result  # type: ignore[attr-defined]
 
 
 def test_조립_시_FASTAPI_URL_빈_문자열이면_전송을_켜지_않는다(
@@ -165,7 +187,87 @@ def test_조립_시_FASTAPI_URL_빈_문자열이면_전송을_켜지_않는다(
 
     # 핸들러는 조립 결과로만 확인할 수 있어 소비자 내부 필드를 본다.
     handler = runner._consumer._result_handler  # type: ignore[attr-defined]
-    assert handler is log_result
+    assert isinstance(handler, ByteTrackResultHandler)
+    assert handler._inner is log_result  # type: ignore[attr-defined]
+
+
+def test_ByteTrack_얼굴식별_인계_FastAPI_순서로_핸들러를_조립한다() -> None:
+    settings = build_inference_settings()
+    route = IdentityHandoverRoute(
+        "entry-camera", "classroom-cctv", (0.0, 0.0, 0.3, 1.0)
+    )
+
+    handler = pipeline_main.build_result_handler(
+        settings,
+        fastapi_url="http://fastapi:8000",
+        face_identity_url="http://deeplearning:8100",
+        face_identity_camera_ids=frozenset({"entry-camera"}),
+        person_tracking_config=pipeline_main.ByteTrackConfig(),
+        identity_handover_routes=(route,),
+    )
+
+    assert isinstance(handler, ByteTrackResultHandler)
+    assert isinstance(handler._inner, FaceIdentityResultHandler)  # type: ignore[attr-defined]
+    handover = handler._inner._inner  # type: ignore[attr-defined]
+    assert isinstance(handover, IdentityHandoverResultHandler)
+    assert isinstance(handover._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
+
+
+def test_다중_카메라_조립은_카메라마다_최신_프레임을_보존한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FASTAPI_URL", raising=False)
+    monkeypatch.setattr(pipeline_main, "Yolo8nDetector", StubDetector)
+    monkeypatch.setattr(pipeline_main, "StreamWorker", StubStreamWorker)
+
+    runner = pipeline_main.build_runner(
+        stream_settings=StreamSettings(  # type: ignore[call-arg]
+            _env_file=None,
+            app_env="local",
+            stream_sources=(
+                "entry-camera=rtsp://localhost:8554/entry-camera,"
+                "classroom-cctv=rtsp://host/classroom"
+            ),
+        ),
+        inference_settings=build_inference_settings(),
+        pipeline_settings=PipelineSettings(_env_file=None),  # type: ignore[call-arg]
+    )
+
+    assert runner.frame_buffer.maxsize == 2
+    assert runner.frame_buffer._per_camera is True  # type: ignore[attr-defined]
+
+
+def test_학습_모델의_탐지_클래스_설정을_detector에_전달한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INFERENCE_TARGET_CLASS_IDS", '{"0":"person"}')
+
+    runner = build_runner(monkeypatch)
+
+    detector = runner._consumer._processor._detector  # type: ignore[attr-defined]
+    assert detector.target_class_ids == {0: "person"}
+
+
+def test_person_클래스_없이_ByteTrack을_켤_수_없다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FASTAPI_URL", raising=False)
+    monkeypatch.setattr(pipeline_main, "Yolo8nDetector", StubDetector)
+    monkeypatch.setattr(pipeline_main, "StreamWorker", StubStreamWorker)
+
+    with pytest.raises(ValueError, match="person 클래스"):
+        pipeline_main.build_runner(
+            stream_settings=StreamSettings(  # type: ignore[call-arg]
+                _env_file=None,
+                app_env="local",
+                stream_sources="camera-01=rtsp://localhost:8554/camera-01",
+            ),
+            inference_settings=InferenceSettings(  # type: ignore[call-arg]
+                _env_file=None,
+                inference_target_class_ids={7: "student"},
+            ),
+            pipeline_settings=PipelineSettings(_env_file=None),  # type: ignore[call-arg]
+        )
 
 
 class MetricsSpy:

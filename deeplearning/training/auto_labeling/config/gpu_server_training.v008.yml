@@ -1,0 +1,26 @@
+# N1 v008의 실제 해시와 학습 조건을 보존한 서버 설정 템플릿입니다.
+# 승인된 서버 절대 경로로 자리표시자만 바꾸며 SSH 정보와 비밀번호는 넣지 않습니다.
+schema_version: 1
+server_root: /absolute/approved/path/classroom-training
+dataset_dir: null
+dataset_archive: /absolute/approved/path/classroom-training/input/colab-export-v008-true-empty-negative17.zip
+archive_sha256: 6efadeac44ac571d1bbc75113d0281e04769b61d926729caf24366a3613066e8
+extract_root: /absolute/approved/path/classroom-training/work/datasets
+output_root: /absolute/approved/path/classroom-training/output/person-detection
+experiment_name: server-n1-yolo11n-v008-true-empty-negative17-seed42
+
+base_model: /absolute/approved/path/classroom-training/input/yolo11n.pt
+base_model_sha256: 0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1
+
+mode: smoke-full
+epochs: 50
+patience: 10
+image_size: 640
+batch: 16
+device: auto
+seed: 42
+workers: 2
+confidence: 0.25
+require_cuda: true
+minimum_cuda_free_gib: 8
+allowed_cuda_devices: [1]

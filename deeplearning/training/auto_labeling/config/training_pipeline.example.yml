@@ -1,0 +1,25 @@
+# Colab에서는 Drive에 있는 ZIP과 출력 경로를 절대 경로로 지정합니다.
+schema_version: 1
+dataset_dir: null
+dataset_archive: /content/drive/MyDrive/classroom_monitoring/datasets/06-colab-export.zip
+# 로컬에서 생성된 06-colab-export.zip.receipt.json의 archive_sha256을 넣습니다.
+archive_sha256: REPLACE_WITH_64_HEX_SHA256
+extract_root: /content/datasets
+output_root: /content/drive/MyDrive/classroom_monitoring/deeplearning/training/runs/person-detection
+experiment_name: n2-yolo11n-v009-seed42
+base_model: yolo11n.pt
+base_model_sha256: null
+
+# smoke-full은 1 epoch 경로 검증 뒤 정식 학습을 자동으로 이어갑니다.
+mode: smoke-full
+epochs: 50
+patience: 10
+image_size: 640
+batch: 16
+device: auto
+seed: 42
+workers: 2
+confidence: 0.25
+require_cuda: true
+minimum_cuda_free_gib: 8
+allowed_cuda_devices: null

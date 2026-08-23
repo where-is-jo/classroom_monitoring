@@ -70,16 +70,17 @@ Claude Code나 Codex는 저장소 안의 규칙 문서를 스스로 읽지만, �
 
 상태: PRESENT(지정 좌석에 있음) / WRONG_SEAT(다른 자리) /
       ABSENT(수업 중 유예 시간 초과 미식별) / UNKNOWN(판정 불가)
-IN_CLASSROOM(좌석엔 없지만 교실 안)은 MVP 범위 밖이다.
+IN_CLASSROOM(좌석엔 없지만 교실 안)도 신원 있는 CCTV track의 MVP 상태다.
 제품 사용자는 관리자 하나다. 학생은 관찰 대상이지 사용자가 아니다.
 
-실행 가능한 코드는 두 곳이다.
+핵심 실행 코드는 세 곳이다.
 - webapps/fastapi : FastAPI + Jinja2. 브라우저의 유일한 진입점.
-                    현재 강의실 좌석 현황 / 실시간 모니터링 / 자연어 검색 세 화면.
-                    인증 없음. 학생 식별·얼굴 등록·상태 판정은 아직 없다
-- worker          : 카메라 → RTSP 수신(stream) → 탐지(inference) → 녹화(recorder).
-                    탐지 결과를 fastapi로 넘기는 경로가 없어 로그로만 나간다
-deeplearning(모델), monitoring(지표), RPAs(업무 자동화)는 아직 코드가 없다.
+                    좌석 현황 / 실시간 모니터링 / 자연어 검색 / 학생·얼굴 등록.
+                    MongoDB 저장, 학생 상태 판정, SSE를 소유한다. 인증·시간표 ABSENT는 없다
+- worker          : RTSP 수신 → 사람 탐지·카메라별 ByteTrack → 입구 얼굴 식별 호출 →
+                    CCTV 신원 인계 → FastAPI 이벤트 전송. recorder는 별도 실행한다
+- deeplearning    : SCRFD·ArcFace 얼굴 검출·갤러리 식별 내부 HTTP 서비스와 학습·평가 도구
+monitoring/internal에는 관측 구성이 있고 RPAs에는 아직 실행 코드가 없다.
 
 ## 최상위 구조
 webapps/ deeplearning/ worker/ monitoring/ docs/ RPAs/ README.md 만 둔다.
@@ -93,8 +94,8 @@ app/shared/{config,errors,dependencies,templating,database}.py
 templates/   Jinja2. app/ 밖에 둔다
 tests/
 
-현재 기능: classrooms, video_monitoring
-추가 예정: students, face_enrollment, student_monitoring
+현재 기능: classrooms, video_monitoring, students, face_enrollment,
+          face_embeddings, student_monitoring
 
 호출 방향: router → service → port ← adapter
 

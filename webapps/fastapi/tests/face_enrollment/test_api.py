@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.face_enrollment.router import delete_face_profile
 from app.main import app
 
 
@@ -29,6 +30,27 @@ def test_consent_is_required() -> None:
         )
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "FACE_CONSENT_REQUIRED"
+
+
+def test_delete_face_profile_removes_gallery_embedding_first() -> None:
+    calls: list[str] = []
+
+    class EnrollmentService:
+        def delete_profile(self, student_id: str) -> None:
+            calls.append(f"profile:{student_id}")
+
+    class EmbeddingService:
+        def delete_for_student(self, student_id: str) -> None:
+            calls.append(f"embedding:{student_id}")
+
+    response = delete_face_profile(
+        "student-delete",
+        service=EnrollmentService(),  # type: ignore[arg-type]
+        embedding_service=EmbeddingService(),  # type: ignore[arg-type]
+    )
+
+    assert response.status_code == 204
+    assert calls == ["embedding:student-delete", "profile:student-delete"]
 
 
 def test_face_enrollment_page_has_camera_controls() -> None:

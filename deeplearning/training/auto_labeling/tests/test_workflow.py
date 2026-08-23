@@ -8,6 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
+import yaml
 
 from auto_labeling.core import (
     CandidateBox,
@@ -116,11 +117,11 @@ def test_full_workflow_is_idempotent(
     assert dataset_dir.name == "person-v0001"
     assert report["status"] == "pilot"
     assert report["frame_count"] == 3
-    assert report["split_counts"] == {"train": 3, "val": 0, "test": 0}
+    assert report["split_counts"] == {"train": 3, "val": 0}
     deduplication_report = report["deduplication"]
     assert isinstance(deduplication_report, dict)
     assert deduplication_report["removed_frame_count"] == 0
-    assert read_json(dataset_dir / "manifest.json")["schema_version"] == 2
+    assert read_json(dataset_dir / "manifest.json")["schema_version"] == 3
     assert (dataset_dir / "deduplication.jsonl").is_file()
 
 
@@ -203,6 +204,14 @@ def test_validate_keeps_schema_v1_compatibility(
         item.pop("duplicate_group_id")
     write_json(legacy_dir / "manifest.json", manifest)
     (legacy_dir / "deduplication.jsonl").unlink()
+    (legacy_dir / "images" / "test").mkdir()
+    (legacy_dir / "labels" / "test").mkdir()
+    data_config = yaml.safe_load((legacy_dir / "data.yaml").read_text(encoding="utf-8"))
+    data_config["test"] = "images/test"
+    (legacy_dir / "data.yaml").write_text(
+        yaml.safe_dump(data_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
     report = validate_dataset(legacy_dir)
 
