@@ -25,8 +25,9 @@ class CameraRole(StrEnum):
     이라는 이유만으로 직전 판정을 UNKNOWN으로 덮는다 — 결정 0020이 남은 일로 적어 둔
     문제다.
 
-    `IDENTITY_ONLY` 카메라의 탐지는 좌석 점유와 좌석 대조에 참여하지 않는다. 그 신원을
-    좌석까지 잇는 방법(카메라 간 인계)은 결정 0025의 3번에서 아직 `결정 필요`다.
+    `IDENTITY_ONLY` 카메라의 탐지는 좌석 점유와 좌석 대조에 참여하지 않는다. worker가
+    입구 신원을 교실 CCTV ByteTrack으로 인계하고, 좌석 판정은 `SEAT_JUDGING` 카메라의
+    보강된 detection만 사용한다(결정 0036).
     """
 
     SEAT_JUDGING = "SEAT_JUDGING"  # 좌석 판정을 한다 (조망 CCTV)

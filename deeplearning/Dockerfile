@@ -1,4 +1,4 @@
-# 얼굴 검출·식별·자세·품질 분석 내부 HTTP 서비스(app.py)를 담는 이미지.
+# 얼굴 검출·자세·품질 분석 내부 HTTP 서비스(app.py)를 담는 이미지.
 #
 # **worker 이미지와 달리 torch가 없다.** 추론은 onnxruntime으로 돌고 app.py가
 # providers=["CPUExecutionProvider"]를 고정하고 있다. CUDA 휠(3.6GB)을 끌어올
@@ -49,8 +49,6 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /deeplearning
 COPY app.py ./app.py
-COPY face_identity.py ./face_identity.py
-COPY face_identification.py ./face_identification.py
 # 지표 정의. app.py가 `import metrics`로 찾는다.
 COPY metrics.py ./metrics.py
 

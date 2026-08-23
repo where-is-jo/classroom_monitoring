@@ -29,7 +29,7 @@ monitoring/internal/grafana/
 
 | 파일 | fastapi target | 비고 |
 | --- | --- | --- |
-| `.docker/prometheus/prometheus.dev.yml` | `100.119.241.93:8076` | dev는 fastapi가 개인 PC에 있어 스크랩이 호스트 경계를 넘는다([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) |
+| `.docker/prometheus/prometheus.dev.yml` | `100.103.0.94:8076` | dev는 fastapi가 개인 PC에 있어 스크랩이 호스트 경계를 넘는다([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) |
 
 `prometheus.local.yml`은 local 스택과 함께 없앴다([결정 0034](../../docs/architecture/decisions.md#0034--local-compose-스택을-없애고-로컬-실행은-소스-직접-구동으로-한정한다)).
 
@@ -82,10 +82,10 @@ monitoring/internal/grafana/
 `inference-worker`와 `deeplearning`은 compose profile로 gate되어 있어(`--profile worker`,
 `--profile face`) 띄우기 전에는 해당 row가 비어 있는 것이 정상이다.
 
-**패널을 만들지 않은 지표가 둘 있다.** `frame_buffer_depth`는 기본 설정
-(`frame_buffer_maxsize=1`)에서 0과 1 사이만 오가 그래프로 볼 값이 아니고,
-`frames_consumed_total`은 `frames_processed_total`과 거의 같은 값이다. 버퍼를 키운
-뒤에는 depth가 의미를 가지므로 그때 추가한다.
+**패널을 만들지 않은 지표가 있다.** `frame_buffer_depth`는 카메라별 최신 프레임 수라
+등록 카메라 대수 안에서만 움직이고, `frames_consumed_total`은
+`frames_processed_total`과 거의 같다. 새 ByteTrack·신원 인계 지표도 아직 실제 카메라
+기준선이 없어 대시보드 임계값을 정하지 않았다. 현장 측정 뒤 패널과 경보를 추가한다.
 
 **임계값의 근거는 셋이 서로 다르다.**
 
@@ -153,10 +153,16 @@ export해서 `grafana/dashboards/` 아래 파일을 갱신해야 한다.
 | `classroom_monitoring_frames_dropped_total` | Counter | `reason` | 추론이 수신을 못 따라간 양 |
 | `classroom_monitoring_frames_consumed_total` | Counter | 없음 | 소비자가 가져간 프레임 수 |
 | `classroom_monitoring_frame_buffer_depth` | Gauge | 없음 | 지금 버퍼에 남은 프레임 수 |
+| `classroom_monitoring_person_tracks_created_total` | Counter | `camera_id` | 카메라별 신규 사람 track이 생기는 빈도 |
+| `classroom_monitoring_person_tracks_expired_total` | Counter | `camera_id` | 가림·이탈 뒤 만료되는 track 빈도 |
+| `classroom_monitoring_person_tracks_active` | Gauge | `camera_id` | 활성·유실 대기 중인 사람 track 수 |
+| `classroom_monitoring_person_track_lifetime_frames` | Histogram | `camera_id` | 사람 track이 몇 처리 프레임 동안 유지되는가 |
+| `classroom_monitoring_identity_handoff_total` | Counter | `outcome` | 입구 신원이 CCTV track에 인계·보류된 이유 |
 
 label 값 종류 수는 `camera_id`가 등록 카메라 대수, `result`가 2(`ok`·`failed`),
-`class_name`이 2(`person`·`cell phone`), `reason`이 2(`dropped`·`skipped`)다.
-카메라 1대·클래스 2종 기준으로 실측한 시계열 수는 46개다(`_created` 제외).
+`class_name`이 2(`person`·`cell phone`), `reason`이 2(`dropped`·`skipped`),
+`outcome`이 4(`accepted`·`no_candidate`·`ambiguous_candidates`·`ambiguous_tracks`)다.
+학생 ID와 track ID는 label에 넣지 않는다.
 
 **신뢰도 분포를 재는 이유**는 지연과 처리량이 시스템이 도는지만 알려주기 때문이다.
 정답 라벨이 없는 운영 환경에서 모델 품질 저하를 잡는 대리 지표가 신뢰도 분포이며,
@@ -181,6 +187,13 @@ rate(classroom_monitoring_frames_dropped_total[5m])
 
 # 파이프라인이 멈추기 직전인가 (한계 기본값은 5)
 classroom_monitoring_inference_consecutive_failures >= 3
+
+# 최근 인계가 성공한 비율 — 실제 기준선 확보 전에는 경보 임계값으로 쓰지 않는다
+sum(rate(classroom_monitoring_identity_handoff_total{outcome="accepted"}[30m]))
+  / sum(rate(classroom_monitoring_identity_handoff_total[30m]))
+
+# 카메라별 만료 track 증가율 — 급증하면 가림·매칭 임계값을 점검한다
+sum by (camera_id) (rate(classroom_monitoring_person_tracks_expired_total[10m]))
 ```
 
 ### 지금 노출하는 지표 — fastapi

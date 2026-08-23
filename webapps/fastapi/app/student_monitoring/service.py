@@ -236,8 +236,8 @@ class StudentMonitoringService:
             #
             # 신원 전용 카메라(입구)는 좌석 판정에 참여하지 않는다(결정 0024의 3번).
             # 좌석을 담지 않는 화각의 이벤트가 "최신"이라는 이유로 직전 판정을 UNKNOWN
-            # 으로 덮는 것을 막는다. 그 신원을 좌석까지 잇는 방법은 결정 0025의 3번에서
-            # 아직 정해지지 않았고, 정해지기 전에 추측으로 이어붙이지 않는다.
+            # 으로 덮는 것을 막는다. 입구 신원은 worker가 문 영역·통과 시각으로 CCTV
+            # ByteTrack에 안전하게 인계하며, FastAPI에는 CCTV 이벤트로 들어온다(0036).
             if saved_event.classroom_id and stream.role is CameraRole.SEAT_JUDGING:
                 classroom_id = saved_event.classroom_id
                 try:

@@ -125,6 +125,49 @@ def test_미확정_얼굴은_track만_보강하고_학생을_붙이지_않는다
     assert person.track_id == "face-4"
 
 
+def test_사람_ByteTrack_ID를_얼굴_track으로_덮어쓰지_않는다() -> None:
+    def post(url: str, **kwargs: Any) -> FakeResponse:
+        del url, kwargs
+        return FakeResponse(
+            {
+                "identities": [
+                    {
+                        "person_index": 0,
+                        "face_bbox": [40, 20, 80, 65],
+                        "track_id": "face-4",
+                        "student_id": "student-001",
+                        "identity_confidence": 0.9,
+                    }
+                ]
+            }
+        )
+
+    original = inference_result()
+    tracked = InferenceResult(
+        original.frame_shape,
+        (
+            original.detections[0],
+            Detection(
+                0,
+                "person",
+                0.9,
+                (20, 10, 120, 115),
+                track_id="person-7",
+            ),
+        ),
+    )
+
+    enriched = HttpFaceIdentifier(
+        "http://deeplearning:8100",
+        timeout_seconds=2,
+        jpeg_quality=90,
+        post=post,  # type: ignore[arg-type]
+    ).enrich(captured(), tracked)
+
+    assert enriched.detections[1].track_id == "person-7"
+    assert enriched.detections[1].student_id == "student-001"
+
+
 def test_중복된_사람_응답은_거부한다() -> None:
     item = {
         "person_index": 0,

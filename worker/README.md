@@ -58,8 +58,13 @@
 실행은 [`pipeline`](./pipeline/README.md) 진입점이다.
 
 ```text
-카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─최신 1장─▶ inference ─▶ 로그 + 선택적 HTTP
-                                 오래된 것 버림
+카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─카메라별 최신 1장─▶ inference
+                                 같은 카메라의 오래된 것 버림        │
+                                                                      ▼
+                           ByteTrack → 입구 얼굴 식별 → CCTV 문 영역 인계
+                                                                      │
+                                                                      ▼
+                                                        로그 + 선택적 FastAPI HTTP
 ```
 
 `recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
@@ -70,8 +75,10 @@ deeplearning의 SCRFD·ArcFace 갤러리 식별을 호출한다. 식별된 학�
 탐지는 `FASTAPI_URL`로 보낸다. 얼굴 식별 서비스 장애는 사람 탐지 전송을 막지 않는다
 ([결정 0035](../docs/architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
 
-아직 없는 것은 입구 얼굴 track을 교실 사람 track으로 넘기는 경로다. 따라서 특정 학생을
-입구 이벤트에서 식별할 수는 있지만, 그 학생이 어느 좌석에 앉았는지는 이어 말할 수 없다.
+사람 탐지에는 카메라별 ByteTrack을 붙인다. 입구에서 확인된 `student_id`는 설정한 시간
+창 안에 CCTV 문 영역에서 **유일하게 새로 생긴 track**에만 인계한다. 후보 학생이나 신규
+track이 둘 이상이면 추측하지 않고 신원 없이 둔다. 인계된 신원은 같은 CCTV track이
+유지되는 동안 좌석 ROI까지 전달된다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 
 ## 워커 사이의 경계
 

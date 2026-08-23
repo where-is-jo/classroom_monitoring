@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 from typing import Self
 
+from inference.identity_handover import (
+    IdentityHandoverRoute,
+    parse_identity_handover_routes,
+)
 from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -81,6 +85,25 @@ class PipelineSettings(BaseSettings):
     face_identity_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     face_identity_jpeg_quality: int = Field(default=95, ge=1, le=100)
 
+    # --- 사람 ByteTrack ---
+    person_tracking_enabled: bool = True
+    # 비우면 STREAM_SOURCES의 모든 카메라에 적용한다. 일부만 추적할 때만 쉼표로 적는다.
+    person_tracking_camera_ids: str = Field(default="")
+    bytetrack_high_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
+    bytetrack_low_confidence_threshold: float = Field(default=0.1, ge=0, le=1)
+    bytetrack_new_track_threshold: float = Field(default=0.6, ge=0, le=1)
+    bytetrack_first_match_iou_threshold: float = Field(default=0.3, ge=0, le=1)
+    bytetrack_second_match_iou_threshold: float = Field(default=0.2, ge=0, le=1)
+    bytetrack_buffer_frames: int = Field(default=30, ge=1, le=600)
+
+    # --- 입구 신원 → 교실 CCTV track 인계 ---
+    # 카메라 ID와 CCTV 문 영역은 배치마다 달라 .env에서 JSON으로 주입한다.
+    identity_handover_routes: str = Field(default="")
+    identity_handover_max_delay_seconds: float = Field(default=8.0, gt=0, le=120)
+    identity_handover_clock_skew_seconds: float = Field(default=0.5, ge=0, le=10)
+    identity_handover_track_stale_seconds: float = Field(default=30.0, gt=0, le=3600)
+    identity_handover_min_confidence: float = Field(default=0.6, ge=0, le=1)
+
     @property
     def parsed_face_identity_camera_ids(self) -> frozenset[str]:
         return frozenset(
@@ -89,11 +112,61 @@ class PipelineSettings(BaseSettings):
             if value.strip()
         )
 
+    @property
+    def parsed_person_tracking_camera_ids(self) -> frozenset[str] | None:
+        parsed = frozenset(
+            value.strip()
+            for value in self.person_tracking_camera_ids.split(",")
+            if value.strip()
+        )
+        return parsed or None
+
+    @property
+    def parsed_identity_handover_routes(self) -> tuple[IdentityHandoverRoute, ...]:
+        return parse_identity_handover_routes(self.identity_handover_routes)
+
     @model_validator(mode="after")
     def _validate_face_identity_contract(self) -> Self:
         if self.face_identity_url.strip() and not self.parsed_face_identity_camera_ids:
             raise ValueError(
                 "FACE_IDENTITY_URL을 설정하면 FACE_IDENTITY_CAMERA_IDS가 필요합니다."
+            )
+        if (
+            self.bytetrack_low_confidence_threshold
+            > self.bytetrack_high_confidence_threshold
+        ):
+            raise ValueError(
+                "BYTETRACK_LOW_CONFIDENCE_THRESHOLD는 HIGH보다 클 수 없습니다."
+            )
+        if (
+            self.bytetrack_new_track_threshold
+            < self.bytetrack_high_confidence_threshold
+        ):
+            raise ValueError(
+                "BYTETRACK_NEW_TRACK_THRESHOLD는 HIGH 이상이어야 합니다."
+            )
+        routes = self.parsed_identity_handover_routes
+        if routes and not self.person_tracking_enabled:
+            raise ValueError("신원 인계를 켜려면 PERSON_TRACKING_ENABLED=true여야 합니다.")
+        if routes and not self.face_identity_url.strip():
+            raise ValueError("신원 인계 route를 설정하면 FACE_IDENTITY_URL이 필요합니다.")
+        missing_entry_ids = {
+            route.entry_camera_id for route in routes
+        } - self.parsed_face_identity_camera_ids
+        if missing_entry_ids:
+            raise ValueError(
+                "신원 인계 route의 입구 카메라는 FACE_IDENTITY_CAMERA_IDS에 있어야 합니다: "
+                + ", ".join(sorted(missing_entry_ids))
+            )
+        if (
+            routes
+            and self.identity_handover_track_stale_seconds
+            <= self.identity_handover_max_delay_seconds
+            + self.identity_handover_clock_skew_seconds
+        ):
+            raise ValueError(
+                "IDENTITY_HANDOVER_TRACK_STALE_SECONDS는 MAX_DELAY와 CLOCK_SKEW의 "
+                "합보다 길어야 합니다."
             )
         return self
 

@@ -6,8 +6,9 @@
 > 현재 상태: SCRFD 얼굴 검출, ArcFace embedding·오픈셋 갤러리 대조, 얼굴 단위 시간
 > 추적과 MediaPipe 자세 분석이 구현됐다. worker가 지정된 입구 카메라 프레임을 내부
 > HTTP로 보내면 FastAPI가 만든 대표 embedding 갤러리와 대조해 `student_id`를 돌려준다.
-> AdaFace 어댑터·고정 split 평가 하네스와 카메라 간 인계 실험 코드는 있으나 운영
-> 경로에는 연결하지 않았다.
+> AdaFace 어댑터·고정 split 평가 하네스와 카메라 간 인계 실험 코드도 있다. 운영
+> 카메라별 사람 ByteTrack과 문 영역·통과 시각 기반 인계는 `worker/inference`가 담당하며,
+> 복장 re-ID는 아직 실험 경로로만 유지한다.
 > 모델 학습용 Jupyter 노트북은 [`training/`](./training/README.md)에 있다
 > ([결정 0029](../docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
 > 성능 수치나 정확도를 측정 없이 이 문서에 기록하지 않는다.
@@ -94,8 +95,8 @@ student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 | Face Detection | SCRFD | 등록·실시간 식별에 구현됨. 모델 버전 확정은 `결정 필요` |
 | Face Recognition | ArcFace(현재), AdaFace R50 | 둘 다 평가 가능. 운영 기본은 기존 등록 embedding과 같은 ArcFace이며 최종 선택은 비교 후 결정 |
 | Head Pose | Landmark/Pose 모델 | `후보`. 얼굴 등록 시점의 각도 보정용 |
-| Tracking | 얼굴 bbox+embedding 시간 추적 구현, 사람 ByteTrack은 실험 코드 | 입구 식별의 얼굴 track은 동작한다. 교실 사람 track과 신원 유지는 아직 핵심 경로에 연결되지 않았다([결정 0025](../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
-| 카메라 간 신원 인계 | 시간·기하·복장 re-ID 실험 구현 | 데모와 진단 코드는 있으나 **운영 방법은 `결정 필요`**다. 실제 카메라 보정 없이 조용히 잘못 잇지 않는다 |
+| Tracking | 얼굴 bbox+embedding 시간 추적 + worker 사람 ByteTrack | 입구·CCTV는 독립 tracker를 쓰며, 얼굴 식별은 사람 track ID를 덮어쓰지 않는다([결정 0025](../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
+| 카메라 간 신원 인계 | CCTV 문 영역+통과 시각 운영 경로, 시간·기하·복장 re-ID 실험 | 운영 경로는 유일 후보일 때만 인계하고 모호하면 미식별로 둔다. re-ID는 실험 코드로 유지한다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)) |
 | Super Resolution | 별도 모델 | **핵심 경로에서 빠졌다.** 얼굴 인식을 입구에서만 한다([결정 0024](../docs/architecture/decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 아래 참고 |
 
 ### 작은 얼굴 문제를 Super Resolution으로 먼저 풀지 않는다

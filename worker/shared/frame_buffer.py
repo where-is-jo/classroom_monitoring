@@ -42,14 +42,23 @@ class FrameBufferStats:
 
 
 class FrameBuffer:
-    """생산자 여럿과 소비자 여럿이 함께 쓸 수 있는, 최신 프레임 우선 버퍼."""
+    """생산자 여럿과 소비자 여럿이 함께 쓸 수 있는, 최신 프레임 우선 버퍼.
 
-    def __init__(self, *, maxsize: int = 1) -> None:
+    ``per_camera=True``이면 카메라마다 최신 프레임 한 장을 따로 보관한다. 여러
+    카메라가 한 버퍼를 공유하는 pipeline에서는 이 모드를 써야 빠른 CCTV가 느린
+    입구 카메라의 프레임을 계속 덮어쓰지 않는다. 소비자는 먼저 대기하기 시작한
+    카메라부터 한 장씩 가져가므로 특정 카메라가 추론을 독점하지 않는다.
+    """
+
+    def __init__(self, *, maxsize: int = 1, per_camera: bool = False) -> None:
         if maxsize < 1:
             raise ValueError("버퍼 크기는 1 이상이어야 합니다.")
 
         self._maxsize = maxsize
+        self._per_camera = per_camera
         self._frames: deque[CapturedFrame] = deque()
+        self._camera_frames: dict[str, CapturedFrame] = {}
+        self._camera_order: deque[str] = deque()
         self._condition = threading.Condition()
         self._is_closed = False
 
@@ -79,7 +88,12 @@ class FrameBuffer:
 
     def __len__(self) -> int:
         with self._condition:
-            return len(self._frames)
+            return (
+                len(self._camera_frames) if self._per_camera else len(self._frames)
+            )
+
+    def _has_frames(self) -> bool:
+        return bool(self._camera_frames) if self._per_camera else bool(self._frames)
 
     def put(self, captured: CapturedFrame) -> bool:
         """프레임을 넣는다. 절대 블로킹하지 않는다.
@@ -93,6 +107,25 @@ class FrameBuffer:
         with self._condition:
             if self._is_closed:
                 return False
+
+            if self._per_camera:
+                camera_id = captured.camera_id
+                if camera_id in self._camera_frames:
+                    # 같은 카메라에서 아직 소비하지 않은 프레임은 최신 장면으로
+                    # 교체한다. 순서는 유지해 빠른 카메라가 큐의 뒤로 계속 밀려나지
+                    # 않게 한다.
+                    self._camera_frames[camera_id] = captured
+                    self._dropped += 1
+                else:
+                    if len(self._camera_frames) >= self._maxsize:
+                        oldest_camera_id = self._camera_order.popleft()
+                        del self._camera_frames[oldest_camera_id]
+                        self._dropped += 1
+                    self._camera_frames[camera_id] = captured
+                    self._camera_order.append(camera_id)
+                self._accepted += 1
+                self._condition.notify()
+                return True
 
             if len(self._frames) >= self._maxsize:
                 self._frames.popleft()
@@ -111,10 +144,16 @@ class FrameBuffer:
         """
         with self._condition:
             is_ready = self._condition.wait_for(
-                lambda: bool(self._frames) or self._is_closed, timeout=timeout
+                lambda: self._has_frames() or self._is_closed, timeout=timeout
             )
             if not is_ready or self._is_closed:
                 return None
+
+            if self._per_camera:
+                camera_id = self._camera_order.popleft()
+                latest = self._camera_frames.pop(camera_id)
+                self._consumed += 1
+                return latest
 
             self._skipped += len(self._frames) - 1
             latest = self._frames[-1]
@@ -133,4 +172,6 @@ class FrameBuffer:
                 return
             self._is_closed = True
             self._frames.clear()
+            self._camera_frames.clear()
+            self._camera_order.clear()
             self._condition.notify_all()

@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 from shared.object_storage import ObjectStorageSettings
 from shared.settings_sources import customise_sources_with_yaml
 
@@ -101,6 +105,15 @@ class InferenceSettings(ObjectStorageSettings):
 
     @model_validator(mode="after")
     def _validate_environment_contract(self) -> Self:
+        if not self.inference_target_class_ids:
+            raise ValueError("INFERENCE_TARGET_CLASS_IDS는 한 클래스 이상이어야 합니다.")
+        if any(
+            class_id < 0 or not class_name.strip()
+            for class_id, class_name in self.inference_target_class_ids.items()
+        ):
+            raise ValueError(
+                "INFERENCE_TARGET_CLASS_IDS의 번호는 0 이상이고 이름은 비어 있지 않아야 합니다."
+            )
         # 스냅샷을 끄면 저장소를 아예 만들지 않으므로 접속 설정을 요구하지 않는다.
         if self.snapshot_enabled:
             self.validate_object_storage(app_env=self.app_env)

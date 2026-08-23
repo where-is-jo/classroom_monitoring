@@ -107,7 +107,7 @@ README.md      이 문서
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
-| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD·ArcFace 식별·얼굴 추적·MediaPipe 자세와 평가 하네스 구현. 교실 사람 tracking·카메라 간 인계는 미연결 |
+| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD·ArcFace 식별·얼굴 추적·MediaPipe 자세와 평가 하네스 구현. worker의 카메라별 사람 ByteTrack·보수적 신원 인계와 연결됨 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | 세 서비스 지표 수집 + Grafana 대시보드 둘(스택 상태·애플리케이션 지표). 알림 규칙은 아직 없음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 
@@ -198,14 +198,14 @@ README.md      이 문서
 - **운영 접근 통제 방식** — 정해지기 전까지 `APP_ENV=prod` 배포를 하지 않는다
 - 얼굴 탐지·인식 모델과 사람 탐지 모델 버전
 - 결석 유예 시간 값과 bbox 중심점 기반 좌석 판정의 조정 여부 — 실제 촬영이 선행되어야 한다
-- **카메라 간 신원 인계 방법** — 입구 track과 CCTV track을 잇는 방법. 두 화각이 겹치지
-  않으므로 CCTV의 문 영역과 통과 시각이 유일한 단서다. 실제 촬영이 선행되어야 한다
-- **입구 카메라 영상을 넣는 방향** — 라즈베리파이가 RTSP 서버를 띄워 worker가 당길지,
-  파이가 GPU 서버 MediaMTX로 밀어 넣을지. 미는 쪽이면 RTSP publish 포트를 다시 열어야 한다
-  (GPU 서버가 CCTV에 닿는 문제는 파이를 subnet router로 세우는 것으로 방법이 정해졌다)
+- **카메라 간 신원 인계 실측값** — 방법은 CCTV 문 영역·통과 시각의 유일 후보 인계로
+  확정·구현됐다(결정 0036). 실제 문 ROI, 시간 창, 시각 오차와 ByteTrack 임계값은 촬영으로
+  보정해야 한다
+- **입구 카메라의 운영 RTSP 경로** — 개발 환경은 개인 PC의 MediaMTX로 통신 중이다.
+  worker가 읽을 실제 path와 운영 시 MediaMTX 배치를 확정해야 한다
 - **실제 CCTV가 어안이 아니라 일반 광각이다** — 결정 0024의 어안 전제와 다르다.
   카메라를 바꿀지 전제를 고칠지 정해야 한다
-- 어안 왜곡 보정 수행 위치와 트래킹 구현 위치
+- 어안 왜곡 보정 수행 위치
 - 카메라 높이·화각·거리와 CCTV 화면상의 문 영역 (대수·역할과 겹침 없음은 결정 0024로 확정)
 - 수업 시간표의 원본 관리 주체
 - 일반 모니터링 SSE의 다중 프로세스 broker·replay와 브라우저 영상 재생 방식

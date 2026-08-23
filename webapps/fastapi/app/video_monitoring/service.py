@@ -33,6 +33,7 @@ from .errors import (
     WhepUnavailableError,
 )
 from .models import (
+    CameraRole,
     DemoStream,
     DemoStreamStatus,
     DemoVideoClip,
@@ -321,6 +322,7 @@ class VideoStreamService:
         classroom_id: str,
         camera_label: str,
         enabled: bool,
+        role: CameraRole = CameraRole.SEAT_JUDGING,
     ) -> VideoStream:
         """실제 카메라 source를 새로 등록한다.
 
@@ -349,6 +351,7 @@ class VideoStreamService:
                 is_demo=False,
                 created_at=now,
                 updated_at=now,
+                role=role,
             )
         )
 

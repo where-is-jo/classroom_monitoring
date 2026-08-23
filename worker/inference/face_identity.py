@@ -93,7 +93,11 @@ class HttpFaceIdentifier:
                 face_bbox=(
                     values["face_bbox"] if values["student_id"] is not None else None
                 ),
-                track_id=values["track_id"],
+                # 사람 ByteTrack이 먼저 붙인 ID가 있으면 그것이 카메라 안에서의
+                # 이동 수명이다. 얼굴 track ID로 덮어쓰면 입구에서 확인한 신원을
+                # 교실 사람 track으로 인계할 기준이 끊긴다. 단독 얼굴 식별 실행에서만
+                # 얼굴 서비스의 track ID를 폴백으로 쓴다.
+                track_id=detection.track_id or values["track_id"],
             )
         return InferenceResult(
             frame_shape=result.frame_shape,

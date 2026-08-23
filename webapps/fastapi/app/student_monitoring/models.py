@@ -28,8 +28,8 @@ class Detection:
     identity_confidence: float | None
     face_bbox: tuple[int, int, int, int] | None
     # 같은 카메라 안에서 같은 사람을 이어 보는 식별자 (결정 0025의 6번).
-    # 트래킹이 아직 구현되지 않아 지금은 항상 None이며, 필드 추가이므로 깨는 변경이
-    # 아니다. FastAPI는 값을 저장하고 되돌려 줄 뿐 아직 판정에 쓰지 않는다.
+    # worker가 사람 ByteTrack과 입구→CCTV 신원 인계를 수행한 뒤 채운다. FastAPI는
+    # track 자체를 다시 계산하지 않고, 같은 detection에 실린 신원을 ROI 판정에 쓴다.
     track_id: str | None = None
 
 
