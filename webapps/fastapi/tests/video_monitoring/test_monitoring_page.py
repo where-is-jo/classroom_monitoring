@@ -162,39 +162,50 @@ def test_monitoring_page_renders_detection_status_text_by_freshness() -> None:
 # ── grid 배치 (MON-003) ─────────────────────────────────────────────────────
 
 
-def test_monitoring_page_two_or_more_cameras_use_two_column_grid(
+def test_monitoring_page_shows_one_camera_with_a_switcher(
     monitoring_client: TestClient,
 ) -> None:
+    """카메라가 둘 이상이면 전환 탭을 두고 첫 대만 보여준다.
+
+    나란히 늘어놓지 않는 이유는 카메라마다 비율이 달라서다. 어안 CCTV는 세로로 길고
+    입구 카메라는 가로형이라, 한 화면에 둘 다 넣으면 양쪽 다 작아진다.
+    """
     response = monitoring_client.get("/monitoring")
 
     assert response.status_code == 200
-    assert 'class="camera-monitoring-grid"' in response.text
-    assert "camera-monitoring-grid--single" not in response.text
+    assert 'class="camera-monitoring-stage"' in response.text
+    assert 'role="tablist"' in response.text
+    # 첫 카드만 보이고 나머지는 hidden으로 시작한다.
+    assert response.text.count("data-real-stream") >= 2
+    assert "hidden>" in response.text or "hidden >" in response.text
 
 
-def test_monitoring_page_single_camera_uses_full_width_grid() -> None:
-    """카메라 한 대는 전체 폭을 사용한다 (MON-003)."""
+def test_monitoring_page_single_camera_has_no_switcher() -> None:
+    """카메라가 한 대면 고를 것이 없으므로 탭을 만들지 않는다."""
     service = _make_service(make_stream(stream_id="stream-01", camera_id="camera-01"))
     with _client_with(service) as client:
         response = client.get("/monitoring")
 
     assert response.status_code == 200
-    assert 'class="camera-monitoring-grid camera-monitoring-grid--single"' in response.text
+    assert 'class="camera-monitoring-stage"' in response.text
+    assert 'role="tablist"' not in response.text
 
 
-def test_monitoring_grid_css_supports_large_two_column_responsive_layout() -> None:
-    """최대 2열(desktop)·1열(900px 이하) 대형 grid와 카메라 비율을 따르는 프레임 CSS."""
+def test_monitoring_stage_css_shows_one_camera_without_shrinking() -> None:
+    """한 대만 보여주고, 세로로 긴 CCTV를 높이 제한으로 줄이지 않는다."""
     css = STATIC_CSS.read_text(encoding="utf-8")
 
-    assert ".camera-monitoring-grid {" in css
-    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
-    assert ".camera-monitoring-grid--single { grid-template-columns: minmax(0, 1fr); }" in css
-    # 900px 이하에서 한 열로 전환한다.
-    media_start = css.index("@media (max-width: 900px)")
-    next_media = css.find("@media", media_start + 1)
-    segment = css[media_start : next_media if next_media != -1 else len(css)]
-    assert ".camera-monitoring-grid" in segment
-    assert "grid-template-columns: minmax(0, 1fr)" in segment
+    assert ".camera-monitoring-stage { display: block; }" in css
+    assert ".camera-monitoring-card[hidden] { display: none; }" in css
+    assert ".camera-switcher {" in css
+    # **높이를 제한하지 않는다.** max-height를 두면 세로 CCTV가 축소되어 뒷줄에 앉은
+    # 사람을 확인할 수 없게 된다.
+    stage_start = css.index(".camera-monitoring-stage")
+    stage_segment = css[stage_start : stage_start + 800]
+    assert "max-height" not in stage_segment
+    # 선택된 탭을 색만으로 구분하지 않는다.
+    assert '.camera-switcher-tab[aria-selected="true"]' in css
+    assert "font-weight: 800" in css
     # 카드 영상 영역의 비율은 카메라를 따라간다. 16:9로 박아 두면 세로가 긴 어안
     # CCTV(1280x1944)가 위아래로 잘려 앞뒷줄 좌석이 화면에서 사라진다.
     assert "aspect-ratio: var(--frame-aspect, 16 / 9)" in css

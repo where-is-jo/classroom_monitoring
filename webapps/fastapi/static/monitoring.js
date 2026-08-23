@@ -314,6 +314,101 @@
 
   /* ── unload 정리 (MON-005) ───────────────────────────────────────────── */
 
+  /** 카드 하나의 재생 자원을 되돌린다.
+   *
+   * 카메라를 전환할 때도 쓴다. 보이지 않는 카메라의 WebRTC와 SSE를 열어 두면
+   * 화면에 없는 영상을 계속 받아 대역과 CPU를 쓰고, playback session도 살아 있는
+   * 채로 쌓인다.
+   */
+  function teardownCard(ctx) {
+    if (ctx.eventSource) {
+      ctx.eventSource.close();
+      ctx.eventSource = null;
+    }
+    if (ctx.pc) {
+      try {
+        ctx.pc.close();
+      } catch (err) {
+        /* 이미 닫힌 connection은 무시한다. */
+      }
+      ctx.pc = null;
+    }
+    if (ctx.videoEl && ctx.videoEl.srcObject) {
+      try {
+        ctx.videoEl.srcObject.getTracks().forEach(function (track) {
+          track.stop();
+        });
+      } catch (err) {
+        /* srcObject 해제 실패는 무시한다. */
+      }
+      ctx.videoEl.srcObject = null;
+    }
+    if (ctx.signalingUrl) {
+      /* DELETE는 idempotent (결정 0014). 실패는 server log/metric 대상이며
+       * local session을 다시 활성화하지 않는다. */
+      try {
+        fetch(ctx.signalingUrl, { method: "DELETE" }).catch(function () {});
+      } catch (err) {
+        /* fetch 실패는 무시한다. */
+      }
+      ctx.signalingUrl = null;
+    }
+    ctx.connected = false;
+  }
+
+  /* ── 카메라 전환 ──────────────────────────────────────────────────────── */
+
+  /** 선택한 카메라만 화면에 두고 재생한다.
+   *
+   * 켜 둔 채 숨기지 않고 실제로 끊는다. 화면에 없는 영상을 계속 받을 이유가 없다.
+   */
+  function activateCamera(cameraId) {
+    document.querySelectorAll("[data-real-stream]").forEach(function (card) {
+      const isTarget = card.dataset.cameraId === cameraId;
+      card.hidden = !isTarget;
+      if (isTarget) return;
+      const ctx = players.get(card.dataset.cameraId);
+      if (ctx) {
+        teardownCard(ctx);
+        players.delete(card.dataset.cameraId);
+      }
+    });
+    document.querySelectorAll("[data-camera-tab]").forEach(function (tab) {
+      const isTarget = tab.dataset.cameraTab === cameraId;
+      tab.setAttribute("aria-selected", isTarget ? "true" : "false");
+      tab.tabIndex = isTarget ? 0 : -1;
+    });
+    const target = document.querySelector(
+      '[data-real-stream][data-camera-id="' + cameraId + '"]'
+    );
+    if (target) initCard(target);
+  }
+
+  function initCameraSwitcher() {
+    const tabs = Array.prototype.slice.call(
+      document.querySelectorAll("[data-camera-tab]")
+    );
+    if (tabs.length === 0) return;
+    tabs.forEach(function (tab, index) {
+      tab.addEventListener("click", function () {
+        activateCamera(tab.dataset.cameraTab);
+      });
+      // role=tablist는 좌우 방향키 이동을 기대한다. 버튼만으로는 Tab 키로만
+      // 옮길 수 있어 탭 목록의 관례와 어긋난다.
+      tab.addEventListener("keydown", function (event) {
+        let next = null;
+        if (event.key === "ArrowRight") next = tabs[(index + 1) % tabs.length];
+        else if (event.key === "ArrowLeft") next = tabs[(index - 1 + tabs.length) % tabs.length];
+        else if (event.key === "Home") next = tabs[0];
+        else if (event.key === "End") next = tabs[tabs.length - 1];
+        if (!next) return;
+        event.preventDefault();
+        activateCamera(next.dataset.cameraTab);
+        next.focus();
+      });
+    });
+  }
+
   function cleanupAll() {
     players.forEach(function (ctx) {
       if (ctx.eventSource) {
@@ -354,8 +449,17 @@
   /* ── 초기화 ───────────────────────────────────────────────────────────── */
 
   function init() {
-    /* 실제 source 카드만 대상 (TASK-003 markup의 data-real-stream). */
-    document.querySelectorAll("[data-real-stream]").forEach(initCard);
+    /* **보이는 카드 하나만 연결한다.** 예전에는 모든 카드를 한꺼번에 열었지만
+     * 이제 화면에 한 대만 나오므로, 나머지까지 WebRTC를 맺으면 보지도 않는 영상을
+     * 받게 된다. 나머지는 탭으로 전환할 때 연결한다. */
+    const visible = Array.prototype.filter.call(
+      document.querySelectorAll("[data-real-stream]"),
+      function (card) {
+        return !card.hidden;
+      }
+    );
+    visible.forEach(initCard);
+    initCameraSwitcher();
     initFullscreenToggle();
   }
 

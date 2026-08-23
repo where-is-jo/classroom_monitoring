@@ -23,13 +23,34 @@
   {% if real_streams %}
     <section aria-labelledby="monitoring-streams-title">
       <div class="section-heading">
-        <div><h2 id="monitoring-streams-title">연결된 카메라 영상</h2><p class="summary">{{ real_streams|length }}대 표시 중</p></div>
+        <div><h2 id="monitoring-streams-title">연결된 카메라 영상</h2><p class="summary">카메라 {{ real_streams|length }}대 중 1대 표시</p></div>
       </div>
-      <div class="camera-monitoring-grid{% if real_streams|length == 1 %} camera-monitoring-grid--single{% endif %}">
+      {% if real_streams|length > 1 %}
+        {# 한 번에 한 화면만 본다. 카메라마다 화각과 비율이 다르고(어안 CCTV는 세로,
+           입구 카메라는 가로) 나란히 놓으면 둘 다 작아진다. #}
+        <div class="camera-switcher" role="tablist" aria-label="카메라 선택">
+          {% for stream in real_streams %}
+            <button class="camera-switcher-tab" type="button" role="tab"
+                    id="camera-tab-{{ stream.camera_id }}"
+                    data-camera-tab="{{ stream.camera_id }}"
+                    aria-controls="camera-panel-{{ stream.camera_id }}"
+                    aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    tabindex="{{ '0' if loop.first else '-1' }}">
+              <span class="camera-switcher-label">{{ stream.camera_label }}</span>
+              <span class="camera-switcher-id">{{ stream.camera_id }}</span>
+            </button>
+          {% endfor %}
+        </div>
+      {% endif %}
+      <div class="camera-monitoring-stage">
         {% for stream in real_streams %}
           {% set source_status = stream_service.get_source_status(stream) %}
           {% set status_value = source_status.value %}
-          <article class="camera-monitoring-card" data-real-stream data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}">
+          <article class="camera-monitoring-card" data-real-stream
+                   id="camera-panel-{{ stream.camera_id }}"
+                   {% if real_streams|length > 1 %}role="tabpanel" aria-labelledby="camera-tab-{{ stream.camera_id }}"{% endif %}
+                   data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}"
+                   {% if not loop.first %}hidden{% endif %}>
             <div class="camera-monitoring-frame">
               <video data-webrtc muted autoplay playsinline aria-label="{{ stream.camera_label }} 실시간 영상"></video>
               <div class="camera-monitoring-error" data-video-error hidden role="alert">영상을 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.</div>

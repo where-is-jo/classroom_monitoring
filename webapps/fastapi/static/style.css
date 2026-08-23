@@ -274,9 +274,31 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 
 /* 연결 카메라 중심 실시간 모니터링 (TASK-003)
    demo/search 화면의 demo-video-* grid와 분리된 페이지 전용 클래스다. */
-.camera-monitoring-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.camera-monitoring-grid--single { grid-template-columns: minmax(0, 1fr); }
+/* **한 번에 한 카메라만 본다.** 예전에는 2열 grid로 전부 늘어놓았는데, 카메라마다
+   비율이 달라(어안 CCTV는 세로 1280x1944, 입구 카메라는 가로) 나란히 두면 둘 다
+   작아진다. 관제는 "지금 무엇이 보이는가"가 중요하므로 하나를 크게 본다. */
+.camera-monitoring-stage { display: block; }
+.camera-monitoring-card[hidden] { display: none; }
+/* **높이를 제한하지 않는다.** 세로로 긴 CCTV를 화면에 우겨넣으려고 줄이면 뒷줄에
+   앉은 사람이 확인할 수 없을 만큼 작아진다. 원본 비율 그대로 두고 페이지가
+   길어지는 쪽을 택한다 — 필요하면 전체화면 버튼을 쓴다. */
 .camera-monitoring-card { overflow: hidden; }
+
+/* 카메라 전환 탭. 색만으로 구분하지 않도록 선택된 탭에 굵기·밑줄을 함께 준다. */
+.camera-switcher { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.camera-switcher-tab {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 9px 14px; color: var(--primary-dark); background: var(--surface);
+  border: 1px solid var(--border); border-bottom: 3px solid transparent;
+  border-radius: 10px; cursor: pointer; text-align: left;
+}
+.camera-switcher-tab:hover { background: var(--primary-soft); }
+.camera-switcher-tab[aria-selected="true"] {
+  background: var(--primary-soft); border-bottom-color: var(--primary);
+  font-weight: 800;
+}
+.camera-switcher-label { font-size: .92rem; }
+.camera-switcher-id { color: #4d6b66; font-size: .72rem; }
 /* 비율을 코드에 박지 않는다. 강의실 CCTV는 어안 세로형(1280x1944)이라 16:9로 두면
    위아래가 잘려 앞뒷줄 좌석이 화면에서 사라진다. monitoring.js가 영상 메타데이터를
    받는 즉시 --frame-aspect를 실제 값으로 덮어쓴다. 기본값은 메타데이터가 오기 전의
@@ -309,7 +331,6 @@ main:fullscreen {
   .nav-enhanced.nav-open .side-nav { display: block; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-form, .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .camera-monitoring-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 560px) {
