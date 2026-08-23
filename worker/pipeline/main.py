@@ -34,6 +34,7 @@ from shared.config_errors import format_validation_error
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
 from shared.metrics import register_frame_buffer, start_metrics_server
+from shared.object_storage import ObjectStorageError
 from shared.object_storage.factory import build_object_storage
 from stream.config import StreamSettings
 from stream.errors import StreamWorkerError
@@ -44,6 +45,49 @@ from .config import PIPELINE_ENV_FILE, PipelineSettings
 from .runner import PipelineRunner
 
 logger = logging.getLogger(__name__)
+
+
+def build_snapshot_handler(settings: InferenceSettings) -> ResultHandler:
+    """스냅샷 적재 핸들러를 만든다. 저장소를 준비하지 못하면 로그 전용으로 낮춘다.
+
+    **저장소가 없다고 파이프라인을 죽이지 않는다.** 이 워커의 본업은 탐지 결과를
+    FastAPI로 넘기는 것이고, 스냅샷은 결정 0028이 기본값을 꺼 둔 부가 기능이다.
+    MinIO가 내려가 있다는 이유로 기동에 실패하면, 있어도 그만인 기능 하나가
+    반드시 돌아야 하는 기능 전체를 멈추는 것이 된다. 실제로 그랬다 —
+    `ensure_bucket()`이 던진 ObjectStorageError를 아무도 잡지 않아 컨테이너가
+    재시작만 반복했다.
+
+    **낮춘 상태는 이번 실행 내내 유지된다.** MinIO가 나중에 올라와도 스냅샷은
+    다시 켜지지 않으므로 워커를 재시작해야 한다. 프레임마다 다시 시도하게 두면
+    접속 timeout(5초)이 추론 소비자 스레드를 그만큼 붙잡아, 살아 있기는 하지만
+    프레임을 계속 버리는 상태가 된다. 조용히 느려지는 것보다 꺼진 것이 낫다.
+    """
+    try:
+        storage = build_object_storage(
+            settings, local_fallback_dir=INFERENCE_DATA_DIR / "snapshots"
+        )
+    except ObjectStorageError as error:
+        logger.warning(
+            "객체 저장소를 준비하지 못해 탐지 스냅샷 적재를 끄고 계속한다: %s. "
+            "탐지와 FastAPI 전송은 그대로 돈다. 스냅샷이 필요하면 저장소를 살린 뒤 "
+            "워커를 재시작한다.",
+            error,
+        )
+        return log_result
+
+    logger.info(
+        "탐지 스냅샷 적재를 켠다. 긴 변 %dpx, 품질 %d, 카메라당 최소 간격 %.0f초. "
+        "영상 원본은 저장하지 않는다(결정 0011).",
+        settings.snapshot_max_long_side_px,
+        settings.snapshot_jpeg_quality,
+        settings.snapshot_min_interval_seconds,
+    )
+    return SnapshotResultHandler(
+        storage=storage,
+        min_interval_seconds=settings.snapshot_min_interval_seconds,
+        max_long_side_px=settings.snapshot_max_long_side_px,
+        jpeg_quality=settings.snapshot_jpeg_quality,
+    )
 
 
 def build_result_handler(
@@ -66,30 +110,16 @@ def build_result_handler(
 
     스냅샷이 꺼져 있으면 저장소를 만들지 않는다. MinIO 접속 정보 없이도 파이프라인이
     돌아야 하고, 저장은 명시적으로 켜는 것이라는 규칙(결정 0011)에 맞춘다.
+    켜져 있는데 저장소가 없는 경우는 `build_snapshot_handler`가 처리한다 —
+    기동에 실패하지 않고 스냅샷만 끈다.
 
     `fastapi_url`이 주어지면(FASTAPI_URL을 설정한 경우) HTTP 전송 핸들러로 감싼다.
     감싼 핸들러는 기존 로그·스냅샷 동작을 먼저 수행하고 그다음 전송하므로, 전송이
     실패해도 탐지 기록은 남는다.
     """
-    if not settings.snapshot_enabled:
-        handler: ResultHandler = log_result
-    else:
-        storage = build_object_storage(
-            settings, local_fallback_dir=INFERENCE_DATA_DIR / "snapshots"
-        )
-        logger.info(
-            "탐지 스냅샷 적재를 켠다. 긴 변 %dpx, 품질 %d, 카메라당 최소 간격 %.0f초. "
-            "영상 원본은 저장하지 않는다(결정 0011).",
-            settings.snapshot_max_long_side_px,
-            settings.snapshot_jpeg_quality,
-            settings.snapshot_min_interval_seconds,
-        )
-        handler = SnapshotResultHandler(
-            storage=storage,
-            min_interval_seconds=settings.snapshot_min_interval_seconds,
-            max_long_side_px=settings.snapshot_max_long_side_px,
-            jpeg_quality=settings.snapshot_jpeg_quality,
-        )
+    handler: ResultHandler = (
+        build_snapshot_handler(settings) if settings.snapshot_enabled else log_result
+    )
 
     if fastapi_url is not None:
         logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
