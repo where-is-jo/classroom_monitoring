@@ -5,7 +5,7 @@ from datetime import datetime
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.errors import PyMongoError
 
-from ...shared.database import MongoDatabase, MongoDocument
+from ...shared.database import MongoDatabase, MongoDocument, document_id
 from ...shared.errors import RepositoryDataError, RepositoryUnavailableError
 from ..models import FaceEmbedding
 
@@ -89,7 +89,7 @@ def _to_domain(document: MongoDocument) -> FaceEmbedding:
         if not isinstance(updated_at, datetime) or updated_at.tzinfo is None:
             raise TypeError
         return FaceEmbedding(
-            id=_string(document, "_id"),
+            id=document_id(document),
             student_id=_string(document, "student_id"),
             student_name=_string(document, "student_name"),
             student_number=_string(document, "student_number"),

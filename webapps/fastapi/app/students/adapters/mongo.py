@@ -7,7 +7,12 @@ from datetime import date, datetime
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from ...shared.database import MongoDatabase, MongoDocument
+from ...shared.database import (
+    MongoDatabase,
+    MongoDocument,
+    document_id,
+    document_id_filter,
+)
 from ...shared.errors import RepositoryDataError, RepositoryUnavailableError
 from ...shared.student_identity import StudentIdentity, StudentIdentityPage
 from ..errors import StudentDuplicateError
@@ -42,7 +47,7 @@ class MongoStudentRepository:
 
     def get_student(self, student_id: str) -> Student | None:
         try:
-            document = self._collection.find_one({"_id": student_id})
+            document = self._collection.find_one(document_id_filter(student_id))
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if document is None else _to_domain(document)
@@ -61,7 +66,7 @@ class MongoStudentRepository:
     ) -> Student | None:
         try:
             document = self._collection.find_one_and_update(
-                {"_id": student_id},
+                document_id_filter(student_id),
                 {
                     "$set": {
                         "face_enrollment_id": enrollment_id,
@@ -113,7 +118,7 @@ def _to_document(student: Student) -> MongoDocument:
 def _to_domain(document: MongoDocument) -> Student:
     try:
         return Student(
-            id=_required_str(document, "_id"),
+            id=document_id(document),
             student_number=_required_str(document, "student_number"),
             name=_required_str(document, "name"),
             birth_date=date.fromisoformat(_required_str(document, "birth_date")),
