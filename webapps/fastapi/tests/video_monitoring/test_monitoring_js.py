@@ -162,6 +162,10 @@ class TestMonitoringJsStatic:
         assert 'det.display_label || "사람"' in source
         assert "det.class_name +" not in source
 
+    def test_bbox_label_includes_track_id_when_available(self) -> None:
+        source = MONITORING_JS.read_text(encoding="utf-8")
+        assert 'det.track_id ? " #" + det.track_id : ""' in source
+
     def test_bundle_implements_fullscreen_toggle(self) -> None:
         """전체화면 토글은 Fullscreen API로 main 영역만 확대/복원한다 (MON-008)."""
         source = MONITORING_JS.read_text(encoding="utf-8")
@@ -205,6 +209,7 @@ class TestMonitoringJsBrowser:
         for name in (
             "bbox-drawn",
             "safe-identification-labels",
+            "track-label-visible",
             "detection-count-updated",
             "last-detection-updated",
         ):

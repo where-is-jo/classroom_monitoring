@@ -225,7 +225,7 @@
             captured_at: "2026-08-14T12:00:00+09:00",
             frame: { width_pixels: 1280, height_pixels: 720 },
             detections: [
-              { class_name: "student", display_label: "김로운", confidence: 0.9, bbox: [10, 20, 100, 200] },
+              { class_name: "student", display_label: "김로운", track_id: "person-17", confidence: 0.9, bbox: [10, 20, 100, 200] },
               { class_name: "student", confidence: 0.8, bbox: [300, 50, 400, 250] }
             ],
             detections_count: 2
@@ -241,6 +241,9 @@
         });
         checkpoint("safe-identification-labels",
           labels[0].indexOf("김로운") !== -1 && labels[1].indexOf("사람") !== -1,
+          JSON.stringify(labels));
+        checkpoint("track-label-visible",
+          labels[0].indexOf("#person-17") !== -1,
           JSON.stringify(labels));
         checkpoint("detection-count-updated", countEl.textContent === "2", countEl.textContent);
         checkpoint("last-detection-updated", lastEl.textContent !== "없음", lastEl.textContent);

@@ -16,7 +16,8 @@
       "bbox": [100, 100, 300, 700],
       "student_id": "synthetic-student-001",
       "identity_confidence": 0.88,
-      "face_bbox": [150, 130, 220, 230]
+      "face_bbox": [150, 130, 220, 230],
+      "track_id": "person-17"
     }
   ]
 }

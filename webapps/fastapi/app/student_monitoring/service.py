@@ -212,6 +212,7 @@ class StudentMonitoringService:
                             "confidence": d.confidence,
                             "bbox": list(d.bbox),
                             "student_id": d.student_id,
+                            "track_id": d.track_id,
                             "display_label": self._safe_detection_label(d),
                         }
                         for d in saved_event.detections
