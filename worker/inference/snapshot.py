@@ -91,7 +91,9 @@ class SnapshotResultHandler:
         self._monotonic = monotonic
 
         self._last_uploaded_count: dict[str, int] = {}
-        self._last_uploaded_at: dict[str, float] = {}
+        # "올린" 시각이 아니라 "시도한" 시각이다. 실패도 시간을 쓰기 때문에
+        # 성공만 기록하면 저장소가 죽어 있는 동안 간격 제한이 걸리지 않는다.
+        self._last_attempt_at: dict[str, float] = {}
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
         # 기존 로그 동작을 먼저 그대로 수행한다. 스냅샷을 켰다고 로그가 사라지면
@@ -109,7 +111,7 @@ class SnapshotResultHandler:
             return
 
         now = self._monotonic()
-        last_at = self._last_uploaded_at.get(camera_id)
+        last_at = self._last_attempt_at.get(camera_id)
         if last_at is not None and now - last_at < self._min_interval_seconds:
             # 탐지가 경계에서 떨릴 때(occupied ↔ vacant 반복) 적재가 폭주하는 것을
             # 막는 유일한 장치다. 용량 계산이 이 상한에 기대고 있다.
@@ -119,6 +121,13 @@ class SnapshotResultHandler:
                 self._min_interval_seconds,
             )
             return
+
+        # **시도 시각은 결과와 무관하게 먼저 남긴다.** 성공했을 때만 남기면,
+        # 저장소가 한 번도 성공하지 못한 동안 last_at이 계속 비어 있어 간격 제한이
+        # 걸리지 않는다. MinIO가 내려가 있으면 개수가 바뀐 프레임마다 접속
+        # timeout(5초)을 그대로 기다리게 되고, 그 시간만큼 추론 소비자 스레드가
+        # 멈춰 프레임이 버려진다. 저장소 장애가 탐지를 갉아먹는 경로다.
+        self._last_attempt_at[camera_id] = now
 
         key = build_object_key(camera_id, captured.captured_at, suffix=SNAPSHOT_SUFFIX)
         try:
@@ -132,13 +141,13 @@ class SnapshotResultHandler:
             )
         except (ObjectStorageError, SnapshotEncodeError) as error:
             # 저장소 장애가 파이프라인을 멈추면 안 된다. 탐지는 계속 돌아야 한다.
-            # 상태를 갱신하지 않으므로 다음 프레임에서 그대로 다시 시도한다.
+            # 개수는 갱신하지 않으므로, 놓친 변화는 다음 간격이 지나면 그대로
+            # 다시 올라간다. 저장소가 살아나면 저절로 이어진다.
             logger.warning("카메라 %s 스냅샷을 올리지 못했다: %s", camera_id, error)
             return
 
-        # 성공했을 때만 갱신한다. 실패를 성공으로 치면 그 변화가 영영 사라진다.
+        # 개수는 성공했을 때만 갱신한다. 실패를 성공으로 치면 그 변화가 영영 사라진다.
         self._last_uploaded_count[camera_id] = count
-        self._last_uploaded_at[camera_id] = now
         logger.info(
             "카메라 %s 스냅샷 적재: %s (%d bytes, 탐지 %d건)",
             camera_id,

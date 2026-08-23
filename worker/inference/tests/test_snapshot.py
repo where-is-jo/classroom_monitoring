@@ -32,9 +32,13 @@ class FakeClock:
 class FakeStorage:
     def __init__(self, *, fail_times: int = 0) -> None:
         self.puts: list[tuple[str, bytes, str]] = []
+        # 성공한 적재(puts)와 따로 센다. 저장소가 죽어 있을 때 몇 번이나 두드렸는지는
+        # 성공 목록으로는 알 수 없는데, 그 횟수가 곧 추론 스레드가 멈춘 시간이다.
+        self.attempts = 0
         self._fail_times = fail_times
 
     def put_bytes(self, key: str, data: bytes, *, content_type: str) -> StoredObject:
+        self.attempts += 1
         if self._fail_times > 0:
             self._fail_times -= 1
             raise ObjectStorageError("적재 실패 대역")
@@ -160,6 +164,38 @@ def test_저장소_장애가_파이프라인을_멈추지_않는다() -> None:
         handler(build_captured(sequence=index), build_result(2))  # 예외가 새지 않는다
 
     assert storage.puts == []
+
+
+def test_저장소가_계속_실패해도_최소_간격_안에서는_다시_두드리지_않는다() -> None:
+    """MinIO가 내려가 있을 때 프레임마다 접속 timeout을 기다리지 않게 한다.
+
+    성공 시각만 기록하면 한 번도 성공하지 못한 카메라는 간격 제한이 영영 걸리지
+    않는다. 그러면 개수가 바뀐 프레임마다 저장소를 다시 두드리고, 그 대기(기본
+    5초)만큼 추론 소비자 스레드가 멈춰 프레임이 버려진다.
+    """
+    storage, clock = FakeStorage(fail_times=100), FakeClock()
+    handler = build_handler(storage, clock, min_interval_seconds=60.0)
+
+    for index in range(5):
+        clock.advance(1)  # 다섯 번 모두 최소 간격 60초 안이다
+        handler(build_captured(sequence=index), build_result(2))
+
+    assert storage.attempts == 1
+
+
+def test_간격이_지나면_실패했던_변화를_다시_올린다() -> None:
+    """두드리는 것을 늦출 뿐 포기하지는 않는다. 저장소가 살아나면 이어져야 한다."""
+    storage, clock = FakeStorage(fail_times=1), FakeClock()
+    handler = build_handler(storage, clock, min_interval_seconds=60.0)
+
+    handler(build_captured(), build_result(2))
+    assert storage.puts == []
+
+    clock.advance(61)
+    handler(build_captured(sequence=1), build_result(2))
+
+    assert storage.attempts == 2
+    assert len(storage.puts) == 1
 
 
 def test_카메라별로_따로_판정한다() -> None:

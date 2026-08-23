@@ -17,6 +17,7 @@ from inference.identity_handover import (
 )
 from inference.snapshot import SnapshotResultHandler
 from inference.tracking import ByteTrackResultHandler
+from shared.object_storage import ObjectStorageError
 from stream.config import StreamSettings
 
 from .. import main as pipeline_main
@@ -154,6 +155,93 @@ def test_FASTAPI_URL_미설정이면_스냅샷_설정은_기존대로_적용된�
     handler = pipeline_main.build_result_handler(settings, fastapi_url=None)
 
     assert isinstance(handler, SnapshotResultHandler)
+
+
+# ============================================================
+# 객체 저장소가 없을 때 (MinIO 미기동)
+# ============================================================
+
+
+def _handler_chain(handler: object) -> list[object]:
+    """`inner`로 이어진 결과 핸들러를 바깥부터 안쪽 순서로 편다."""
+    chain = [handler]
+    while (inner := getattr(chain[-1], "_inner", None)) is not None:
+        chain.append(inner)
+    return chain
+
+
+def _fail_to_build_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MinIO가 내려가 있을 때와 같은 실패를 만든다.
+
+    실제로는 `ensure_bucket()`이 접속에 실패하면서 이 예외가 나온다.
+    """
+
+    def raise_storage_error(*args: object, **kwargs: object) -> object:
+        raise ObjectStorageError("버킷을 확인하지 못했습니다: classroom-snapshots")
+
+    monkeypatch.setattr(pipeline_main, "build_object_storage", raise_storage_error)
+
+
+def test_저장소를_준비하지_못하면_스냅샷만_끄고_계속한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MinIO가 없다고 파이프라인을 멈추지 않는다.
+
+    스냅샷은 결정 0028이 기본값을 꺼 둔 부가 기능이다. 그것 하나 때문에 탐지가
+    통째로 멈추면 안 된다.
+    """
+    _fail_to_build_storage(monkeypatch)
+    settings = build_inference_settings(snapshot_enabled=True)
+
+    handler = pipeline_main.build_result_handler(settings, fastapi_url=None)
+
+    assert handler is log_result
+
+
+def test_저장소가_없어도_FastAPI_전송은_그대로_남는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """이 워커의 본업은 전송이다. 저장소 장애가 본업을 건드리면 안 된다."""
+    _fail_to_build_storage(monkeypatch)
+    settings = build_inference_settings(snapshot_enabled=True)
+
+    handler = pipeline_main.build_result_handler(
+        settings, fastapi_url="http://fastapi:8000"
+    )
+
+    assert isinstance(handler, FastAPIResultHandler)
+    assert handler._inner is log_result  # type: ignore[attr-defined]
+
+
+def test_저장소가_없어도_파이프라인_조립이_성공한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """되돌아온 회귀 자체를 고정한다.
+
+    전에는 ObjectStorageError가 build_runner를 그대로 뚫고 나가 main()의
+    except (ImportError, OSError)에도 걸리지 않았다. 컨테이너는 traceback을 남기고
+    죽은 뒤 재시작만 반복했다.
+    """
+    _fail_to_build_storage(monkeypatch)
+    monkeypatch.delenv("FASTAPI_URL", raising=False)
+    monkeypatch.setattr(pipeline_main, "Yolo8nDetector", StubDetector)
+    monkeypatch.setattr(pipeline_main, "StreamWorker", StubStreamWorker)
+
+    runner = pipeline_main.build_runner(
+        stream_settings=StreamSettings(  # type: ignore[call-arg]
+            _env_file=None,
+            app_env="local",
+            stream_sources="camera-01=rtsp://localhost:8554/camera-01",
+        ),
+        inference_settings=build_inference_settings(snapshot_enabled=True),
+        pipeline_settings=PipelineSettings(_env_file=None),  # type: ignore[call-arg]
+    )
+
+    # 핸들러는 여러 겹으로 감싸이므로(ByteTrack 등) 안쪽까지 풀어서 본다.
+    # 보는 것은 둘이다 — 조립이 예외 없이 끝났는가, 스냅샷 핸들러가 빠졌는가.
+    chain = _handler_chain(runner._consumer._result_handler)  # type: ignore[attr-defined]
+    assert not any(isinstance(handler, SnapshotResultHandler) for handler in chain)
+    assert chain[-1] is log_result
 
 
 def test_조립_시_FASTAPI_URL_설정이면_FastAPIResultHandler가_주입된다(
