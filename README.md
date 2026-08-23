@@ -32,7 +32,7 @@
 
 ## 현재 단계
 
-실행 코드가 있는 곳은 두 곳이다.
+핵심 실행 코드는 `webapps/fastapi`, `worker`, `deeplearning` 세 곳에 있다.
 
 - **`webapps/fastapi`** — 강의실 좌석 현황, 실시간 모니터링, 탐지 스냅샷, 자연어
   탐지 검색, 데모 영상 검색 화면과 그 API. worker가 식별한 학생을 카메라별 좌석 ROI와
@@ -72,13 +72,16 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 `deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석, ArcFace 갤러리 식별
 내부 서비스와 모델 학습·얼굴 식별 평가용 Jupyter/CLI 도구가 있다
 ([결정 0029](./docs/architecture/decisions.md#0029--deeplearning에-모델-학습용-jupyter-노트북-도구를-둔다)).
-`monitoring`, `RPAs`에는 아직 실행 코드가 없다.
-입구 카메라의 얼굴 track과 특정 학생 식별은 연결됐다. 그러나 **입구 카메라와 CCTV
-사이의 신원 인계**, 교실 사람 트래킹, 시간표 기반 `ABSENT`는 구현되지 않았다. 신원
-인계가 현재 가장 큰 미해결 항목이며 방법 자체가 아직 `결정 필요`다
-([결정 0025](./docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)).
-학생 식별 필드를 받은 뒤 ROI와 좌석 지정으로 상태를 판정하고 화면을 갱신하는 기반은
-구현됐지만, 입구 신원을 좌석까지 전달하기 전에는 둘이 이어지지 않는다.
+`monitoring/internal`에는 Prometheus·Grafana·Loki·Alloy 구성이 있고, `RPAs`에는 아직
+실행 코드가 없다.
+
+입구 카메라의 얼굴 track과 특정 학생 식별, 카메라별 사람 ByteTrack, 문 영역·통과
+시각을 이용한 입구→CCTV 신원 인계가 코드와 합성 테스트로 연결됐다
+([결정 0036](./docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
+CCTV detection의 `student_id`와 `track_id`는 FastAPI의 ROI·좌석 판정을 거쳐 저장·SSE·
+화면까지 전달된다. 다만 **실제 입구 카메라와 CCTV를 동시에 사용한 종단 간 검증**, 현장
+문 영역·인계 시간 창 보정, 시간표 기반 `ABSENT`는 남아 있다. 실제 영상 검증 전에는
+특정 학생이 좌석까지 안정적으로 추적된다고 완료 판정하지 않는다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -201,8 +204,8 @@ README.md      이 문서
 - **카메라 간 신원 인계 실측값** — 방법은 CCTV 문 영역·통과 시각의 유일 후보 인계로
   확정·구현됐다(결정 0036). 실제 문 ROI, 시간 창, 시각 오차와 ByteTrack 임계값은 촬영으로
   보정해야 한다
-- **입구 카메라의 운영 RTSP 경로** — 개발 환경은 개인 PC의 MediaMTX로 통신 중이다.
-  worker가 읽을 실제 path와 운영 시 MediaMTX 배치를 확정해야 한다
+- **입구 카메라의 운영 RTSP 경로** — 현재 송출을 사용할 수 없다. GPU worker가 읽을
+  경로와 운영 시 MediaMTX 배치를 확정하고 실제 입력으로 검증해야 한다
 - **실제 CCTV가 어안이 아니라 일반 광각이다** — 결정 0024의 어안 전제와 다르다.
   카메라를 바꿀지 전제를 고칠지 정해야 한다
 - 어안 왜곡 보정 수행 위치

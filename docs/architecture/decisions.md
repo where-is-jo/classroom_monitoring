@@ -101,7 +101,7 @@
 | [0034](#0034--local-compose-스택을-없애고-로컬-실행은-소스-직접-구동으로-한정한다) | local compose 스택을 없애고 로컬 실행은 소스 직접 구동으로 한정한다 | 확정 |
 | [0035](#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다) | 입구 얼굴 식별은 worker에서 deeplearning 내부 HTTP로 호출한다 | 확정 |
 | [0036](#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다) | 문 영역과 통과 시각으로 입구 신원을 CCTV ByteTrack에 보수적으로 인계한다 | 확정 |
-| [0037](#0037--개인-pc-mediamtx를-입구와-cctv의-카메라-게이트웨이로-사용한다) | 개인 PC MediaMTX를 입구와 CCTV의 카메라 게이트웨이로 사용한다 | 확정 |
+| [0037](#0037--개인-pc-publisher가-cctv를-gpu-서버-mediamtx로-송출한다) | 개인 PC publisher가 CCTV를 GPU 서버 MediaMTX로 송출한다 | 확정 |
 
 
 ---
@@ -618,9 +618,13 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
 - `deeplearning`을 별도 프로세스로 띄울지 라이브러리로 import할지는 이 항목이
   정하지 않는다. 경계가 지켜지면 나중에 어느 쪽으로도 갈 수 있다.
 
-**현재 코드는 이 결정을 아직 만족하지 않는다.** `worker/inference`가 ultralytics를
-직접 부르고 `deeplearning`에는 코드가 없다. 이는 `deeplearning` 구현 전의 잠정
-상태이며, 구현 시 모델 호출을 그쪽으로 옮긴다.
+**작성 당시 코드는 이 결정을 만족하지 않았다.** `worker/inference`가 ultralytics를
+직접 부르고 `deeplearning`에는 코드가 없었다. 이는 `deeplearning` 구현 전의 잠정
+상태였다.
+
+> **2026-08-23 구현 갱신**: SCRFD·ArcFace 얼굴 식별은 `deeplearning` 내부 HTTP
+> 서비스로 구현됐고 worker는 호출과 실패 처리만 맡는다. 사람 YOLO는 기존 worker가
+> 여전히 직접 로딩하므로 이 결정의 경계를 부분적으로만 만족한다.
 
 **대안**:
 
@@ -634,15 +638,11 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
   에이전트는 지시가 없으면 자기가 보고 있는 디렉터리에 모델 코드를 만든다.
 
 **결과**: 새 모델을 붙일 때 "`deeplearning`에 넣는다"는 답이 고정된다. 모델 없이도
-`worker/inference`의 수명 관리와 실패 처리를 테스트할 수 있고, 실제로 지금 그렇게
-테스트하고 있다. 대신 `deeplearning` 구현 전까지 경계를 어기는 코드가 남아 있고,
-호출 방식(라이브러리 / 별도 프로세스)이 정해질 때까지 그 사이의 계약이 임시다.
+`worker/inference`의 수명 관리와 실패 처리를 테스트할 수 있다. 작성 당시에는
+`deeplearning` 구현 전까지 경계를 어기는 코드와 임시 호출 계약이 남아 있었다.
 
-**남은 일**: `deeplearning` 구현과 `worker/inference`의 모델 호출 이관. 사용할
-얼굴 탐지·인식 모델 확정(SCRFD·AdaFace·ArcFace가 `후보`이며 비교가 필요하다).
-`deeplearning` 호출 방식 확정. 현재 `worker/inference`가 탐지하는 `cell phone`
-클래스는 이전 주제(통화 판정)에서 온 것으로 새 주제에서 쓰이지 않으며, 모델 이관
-때 함께 정리한다.
+**남은 일**: worker가 직접 로딩하는 사람 YOLO를 경계에 맞게 이관할지 결정한다. 현재
+얼굴 탐지·인식은 SCRFD·ArcFace와 내부 HTTP 호출로 확정됐다([0035](#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
 
 ---
 
@@ -2398,8 +2398,9 @@ PC로 옮기면서 그 전제가 무너졌다. **`local` 스택과 `dev`의 개�
     `IDENTITY_ONLY` 카메라의 탐지는 좌석 점유와 좌석 대조에 참여하지 않는다. 기본값은
     `SEAT_JUDGING`이고 역할이 없는 기존 문서도 그렇게 읽는다.
 
-11. **탐지 이벤트 스키마에 `track_id`를 더한다**(0025의 6번). 트래킹은 아직 구현되지
-    않았고 판정에도 쓰지 않는다. 값을 잃지 않고 저장·복원하는 경로만 먼저 연다.
+11. **탐지 이벤트 스키마에 `track_id`를 더한다**(0025의 6번). 이 결정 당시에는 값을
+    잃지 않고 저장·복원하는 경로만 먼저 열었고, 이후 worker의 카메라별 ByteTrack과
+    신원 인계까지 구현됐다([0036](#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 
 12. **판정 기준점은 bbox 중심으로 둔다.** 프레임 경계를 넘는 bbox는 버리지 않고 잘라낸
     뒤 그 중심으로 판정한다. 하단으로 바꿀지는 실제 촬영 뒤에 정한다(0019의 5번,
@@ -2594,32 +2595,30 @@ RTSP 프레임을 수신할 수 있게 됐고, 입구 카메라는 MediaMTX RTSP
 
 ---
 
-## 0037 · 개인 PC MediaMTX를 입구와 CCTV의 카메라 게이트웨이로 사용한다
+## 0037 · 개인 PC publisher가 CCTV를 GPU 서버 MediaMTX로 송출한다
 
 **상태**: 확정
 
 **배경**: [0033](#0033--cctv에는-라즈베리파이-tailscale-subnet-router로-닿는다)은
-입구 카메라용 라즈베리파이를 CCTV의 Tailscale subnet router로도 사용하기로 했지만,
-실제 입구 카메라는 개인 PC의 MediaMTX `camera-01` 경로로 이미 송출되고 있었다. 개인
-PC는 CCTV의 사설망과 Tailnet 양쪽에 연결돼 있고, GPU 서버의 사설 LAN도 `192.168.0.x`라
-CCTV의 `/32` route를 광고하면 같은 주소 대역과 충돌할 위험이 있다.
+입구 카메라용 라즈베리파이를 CCTV의 Tailscale subnet router로도 사용하기로 했다.
+그러나 GPU 서버의 LAN이 CCTV 사설망과 같은 주소 대역을 사용해 `/32` route보다 직결
+route가 우선하며, 개인 PC는 CCTV 사설망과 Tailnet 양쪽에 이미 연결돼 있다.
 
-실측에서 개인 PC는 CCTV의 HEVC 스트림을 읽을 수 있고 MediaMTX는 Tailnet 주소의 RTSP
-listener를 제공했다. 따라서 사설 IP route 자체를 GPU 서버에 넘기지 않고, 개인 PC에서
-영상 프로토콜 경계를 끝내는 편이 현재 장비 구성에 맞는다.
+실측에서 개인 PC는 CCTV의 HEVC 스트림을 읽고 H.264로 변환할 수 있었다. GPU 서버가
+CCTV를 pull하게 만들기보다 개인 PC가 GPU 서버의 MediaMTX로 publish하면 충돌하는 사설
+route 없이 공식 GPU 스택의 worker와 WebRTC 경로를 그대로 사용할 수 있다.
 
 **결정**:
 
-1. 개인 PC의 MediaMTX를 두 카메라의 게이트웨이로 사용한다. 입구 카메라는 기존
-   `camera-01`, CCTV는 `classroom-cctv`라는 서로 다른 RTSP 경로를 사용한다.
-2. 개인 PC의 별도 FFmpeg compose 서비스가 자격 증명이 포함된 CCTV RTSP를 pull하고,
-   HEVC를 H.264로 변환해 같은 MediaMTX의 `classroom-cctv` 경로로 publish한다. 입력
-   자격 증명은 gitignore 대상 `.docker/env/camera-gateway.dev.env`에만 둔다.
-3. GPU 서버의 worker는 두 카메라 모두 개인 PC의 Tailscale RTSP listener에서 pull한다.
-   CCTV 사설 주소와 subnet route를 알지 않는다. FastAPI의 ROI 기준 프레임 캡처도 같은
-   두 MediaMTX 경로를 사용해 worker와 camera ID를 맞춘다.
-4. MediaMTX의 기존 입구 publish 과정과 CCTV 변환 publisher의 수명은 독립시킨다. CCTV
-   연결이나 디코딩이 실패해도 입구 경로까지 재시작하지 않는다.
+1. 개인 PC의 공식 `.docker/compose.publisher.dev.pc.yml` 서비스가 CCTV RTSP를 pull하고,
+   HEVC를 H.264로 변환해 GPU 서버 MediaMTX의 `classroom-cctv` 경로로 publish한다.
+2. CCTV 입력 자격 증명은 gitignore 대상 `.docker/env/publisher.dev.env`에만 둔다. 로컬
+   테스트용 compose나 실제 주소를 저장소 설정에 합치지 않는다.
+3. GPU 서버의 worker는 같은 compose network의 MediaMTX에서 `classroom-cctv`를 pull한다.
+   CCTV 사설 주소와 subnet route를 알지 않는다. FastAPI의 ROI 기준 프레임도 이 경로와
+   camera ID를 맞춘다.
+4. 입구 카메라의 RTSP 전달 경로는 이 결정에 포함하지 않는다. 실제 송출을 사용할 수
+   있게 된 뒤 GPU worker가 읽을 경로를 별도로 확정한다.
 5. 이 결정은 [0033](#0033--cctv에는-라즈베리파이-tailscale-subnet-router로-닿는다)을
    대체한다. 라즈베리파이 subnet route와 GPU 서버의 `--accept-routes`는 요구하지 않는다.
 
@@ -2628,21 +2627,22 @@ listener를 제공했다. 따라서 사설 IP route 자체를 GPU 서버에 넘�
 - **0033의 라즈베리파이 subnet router 유지** — 상시 장비를 경유할 수 있지만 아직
   라우터가 구성되지 않았고 GPU 서버의 같은 사설 대역과 route 충돌 위험이 있다.
 - **worker를 개인 PC에서 실행** — CCTV에 직접 닿지만 학습 YOLO의 CUDA 추론을 쓸 수 없다.
-- **CCTV를 GPU 서버 MediaMTX로 직접 push** — GPU 측 입력을 한곳에 모을 수 있지만 개인
-  PC에서 GPU 서버의 인증 없는 RTSP publish 포트를 새로 열어야 한다.
+- **개인 PC MediaMTX를 중간 게이트웨이로 두고 GPU worker가 pull** — 로컬 검증은 쉽지만
+  공식 GPU 스택의 MediaMTX와 다른 경로가 생기고 개인 PC Docker가 두 카메라의 단일
+  의존점이 된다.
 - **CCTV 원본 HEVC를 그대로 relay** — 트랜스코딩 비용은 줄지만 브라우저와 일부 소비자가
   HEVC를 디코딩하지 못한다. H.264로 정규화하면 worker와 WebRTC 소비 경로가 같아진다.
 
-**결과**: 실제 장비에서 `classroom-cctv`가 H.264 1280×1944, 20fps로 열리고 연속 프레임
-디코딩까지 확인됐다. worker의 두 `STREAM_SOURCES`는 같은 Tailnet 호스트를 사용하므로
-사설망 route와 카메라 자격 증명이 GPU 서버에 필요하지 않다.
+**결과**: 실제 장비에서 CCTV H.264 경로의 연속 프레임 디코딩까지 확인됐다. GPU worker는
+사설망 route와 카메라 자격 증명 없이 GPU MediaMTX 경로만 읽는다. 대신 개인 PC publisher가
+내려가면 CCTV 입력이 끊기고 HEVC→H.264 변환에 개인 PC CPU를 지속적으로 사용한다.
 
-대신 개인 PC와 그 MediaMTX가 두 카메라의 단일 가용성 의존점이 된다. 노트북이 절전되거나
-Docker Desktop이 내려가면 입구·CCTV 입력이 함께 끊기며, HEVC→H.264 변환에 개인 PC의 CPU를
-지속적으로 사용한다.
+입구 카메라 송출은 현재 사용할 수 없으므로, 두 실제 스트림을 동시에 사용한 얼굴 식별→
+CCTV 신원 인계 종단 간 검증은 아직 완료되지 않았다.
 
 **남은 일**:
 
 - CCTV 입력의 손상 프레임 경고 빈도와 FFmpeg CPU 사용량을 장시간 관측한다.
-- 개인 PC 재부팅 뒤 MediaMTX publisher와 카메라 게이트웨이가 자동 복구되는지 확인한다.
+- 개인 PC 재부팅 뒤 CCTV publisher가 자동 복구되는지 확인한다.
+- 입구 카메라의 GPU worker 입력 경로를 확정하고 실제 송출로 검증한다.
 - worker가 두 실제 스트림과 학습 가중치를 함께 처리하는 처리량을 GPU 서버에서 측정한다.

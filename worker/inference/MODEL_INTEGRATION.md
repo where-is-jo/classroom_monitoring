@@ -111,4 +111,5 @@ python -m pytest tests/student_monitoring/test_monitoring_integration_foundation
 모델과 worker payload에는 `student_name`, `student_no`, `classroom_id`, `seat_id`,
 `current_seat_id`, `PRESENT`, `WRONG_SEAT`, `UNKNOWN`, `ABSENT`, `IN_CLASSROOM`을 넣지
 않는다. ROI 매핑, `seat_assignments` 대조, 활성 학생 이름 보강, stale 판단과 상태 SSE는
-FastAPI 책임이다. 현 범위에서는 tracking과 시간표 기반 `ABSENT`가 아직 구현되지 않았다.
+FastAPI 책임이다. 카메라별 사람 ByteTrack과 보수적 입구→CCTV 신원 인계는 worker에
+구현돼 있다. 시간표 기반 `ABSENT`는 아직 구현되지 않았다.

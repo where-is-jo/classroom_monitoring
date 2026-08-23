@@ -99,7 +99,7 @@ flowchart LR
     subgraph PC["개인 PC"]
         FASTAPI["fastapi<br/>API · 관리자 화면"]
         N8N["n8n"]
-        CAMGW["MediaMTX 카메라 게이트웨이<br/>입구 RTSP · CCTV H.264 변환"]
+        PUBLISHER["CCTV publisher<br/>HEVC → H.264"]
     end
     subgraph GPUSRV["GPU 서버"]
         WORKER["inference-worker"]
@@ -112,20 +112,22 @@ flowchart LR
     CLOUD[("MongoDB Atlas")]
 
     PC <-->|"Tailscale"| GPUSRV
-    CAMGW -->|"RTSP · Tailscale"| WORKER
+    PUBLISHER -->|"RTSP publish · Tailscale"| MTX
+    MTX -->|"RTSP pull"| WORKER
+    WORKER -->|"탐지 이벤트"| FASTAPI
     FASTAPI --> CLOUD
 ```
 
 | 호스트 | 올라가는 것 |
 | --- | --- |
-| 개인 PC | `fastapi`(관리자 화면 포함), `n8n`, 입구·CCTV MediaMTX 카메라 게이트웨이 |
+| 개인 PC | `fastapi`(관리자 화면 포함), `n8n`, CCTV H.264 publisher |
 | GPU 서버 | `inference-worker`, `deeplearning`, `llama-server`, `mediamtx`, `minio`, 모니터링 4종 |
 | 클라우드 | MongoDB Atlas |
 
 **두 호스트는 Tailscale로 잇는다.** GPU 서버는 공인 IP가 있지만 개인 PC는 없고,
-worker가 탐지 이벤트를 fastapi로 보내는 방향과 개인 PC MediaMTX에서 두 RTSP를 받는
-방향이 필요하다. CCTV 사설망을 GPU 서버에 route하지 않는 근거는
-[결정 0037](./decisions.md#0037--개인-pc-mediamtx를-입구와-cctv의-카메라-게이트웨이로-사용한다)에 있다.
+worker가 탐지 이벤트를 fastapi로 보내는 방향과 개인 PC의 CCTV publisher가 GPU 서버
+MediaMTX로 영상을 보내는 방향이 필요하다. CCTV 사설망을 GPU 서버에 route하지 않는
+근거는 [결정 0037](./decisions.md#0037--개인-pc-publisher가-cctv를-gpu-서버-mediamtx로-송출한다)에 있다.
 
 **이 분리로 fastapi의 거의 모든 프로세스 밖 호출이 네트워크 경계를 넘는다.** 어떤 호출이
 넘고 어떤 호출이 넘지 않는지는 [0026의 3번 표](./decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)가 정본이다. 특히 얼굴 등록의
@@ -338,7 +340,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 외부 시스템 | 관계 | 상태 |
 | --- | --- | --- |
 | 광각 CCTV | 강의실 전체 조망 영상 공급 | RTSP 정지 프레임 수신 확인. 문 영역·좌석 ROI 실측 보정 필요 |
-| 입구 카메라 | 입구 영상 공급과 얼굴 학습 데이터 수집 | 현재 개인 PC의 MediaMTX로 RTSP 통신 중. worker용 실제 URL·path 설정 필요 |
+| 입구 카메라 | 입구 영상 공급과 얼굴 학습 데이터 수집 | 현재 송출을 사용할 수 없음. GPU worker가 읽을 RTSP 경로 확정·검증 필요 |
 | Jetson | 엣지 추론 | `예정`. 적용 범위 `결정 필요` |
 | MongoDB | 운영 메타데이터 보관 | 구현됨 |
 | MinIO | 영상·얼굴 이미지 보관 | `worker/recorder`가 영상을 적재·삭제한다. 얼굴 이미지는 `예정` |
@@ -396,12 +398,12 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 서 있는 사람과 앉은 사람의 구분 | **결정 필요.** 지나가는 사람의 bbox 중심이 옆자리 앉은 사람과 같은 높이라 좌석 ROI에 들어갈 수 있다. 현재 구분 수단이 없다 | fastapi, worker |
 | 전체 조망 카메라가 좌석 판정을 덮어쓰는 문제 | **해소됨.** 카메라 역할(`SEAT_JUDGING` / `IDENTITY_ONLY`)을 `VideoStream`에 넣어 구현했다([0032](./decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)의 10번). `POST /api/v1/video-streams`에서 역할을 지정해 등록할 수 있다 | fastapi |
 | ROI를 그릴 기준 화면 확보 방법 | 확정([0031](./decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)). fastapi가 RTSP에서 정지 프레임 한 장을 캡처한다. 실시간 영상 위에 그리지 않는다 | fastapi |
-| **GPU 서버가 카메라 사설망에 닿는가** | **사설망 route가 필요 없도록 해소됨.** 개인 PC MediaMTX가 입구와 CCTV를 모두 Tailnet RTSP로 제공하고 GPU worker가 두 경로를 pull한다([0037](./decisions.md#0037--개인-pc-mediamtx를-입구와-cctv의-카메라-게이트웨이로-사용한다)). CCTV H.264 재송출과 연속 디코딩을 실측했다 | worker, monitoring |
-| 입구 카메라 영상을 넣는 방향 | 개인 PC MediaMTX의 `camera-01`을 worker가 pull하는 것으로 확정·실측됨([0037](./decisions.md#0037--개인-pc-mediamtx를-입구와-cctv의-카메라-게이트웨이로-사용한다)) | worker |
-| 실제 CCTV의 화각과 코덱 | 입력은 HEVC(H.265), 개인 PC 게이트웨이 출력은 H.264 1280×1944 20fps로 실측. **어안이 아닌 일반 광각**이라 0024의 어안 전제와 다르다 — 카메라를 바꿀지 전제를 고칠지는 `결정 필요` | worker, deeplearning |
+| **GPU 서버가 카메라 사설망에 닿는가** | 사설망 route 대신 개인 PC publisher가 CCTV를 H.264로 바꿔 GPU 서버 MediaMTX로 송출한다([0037](./decisions.md#0037--개인-pc-publisher가-cctv를-gpu-서버-mediamtx로-송출한다)). 공식 dev compose가 이 방향을 사용하며 CCTV 연속 디코딩은 실측했다 | worker, monitoring |
+| 입구 카메라 영상을 넣는 방향 | 현재 송출을 사용할 수 없어 `결정 필요`. 로컬 테스트용 MediaMTX 경로를 공식 배치로 간주하지 않는다 | worker |
+| 실제 CCTV의 화각과 코덱 | 입력은 HEVC(H.265), GPU MediaMTX에 송출되는 경로는 H.264로 변환한다. **어안이 아닌 일반 광각**이라 0024의 어안 전제와 다르다 — 카메라를 바꿀지 전제를 고칠지는 `결정 필요` | worker, deeplearning |
 | 고정 화각 기반 ROI 자동 생성 | 후보: 배치도 `seat.geometry` + 카메라 기준점 호모그래피. 판정 기준점 변경 여부와 함께 결정 | fastapi |
 | 수업 시간표의 원본 관리 주체 | 결정 필요 | fastapi |
-| 카메라 대수와 역할 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 어안 CCTV 1대 + 입구 카메라 1대. 좌우 좌석 라인 2대 구성은 폐기했다 | worker, fastapi |
+| 카메라 대수와 역할 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 전체 조망 CCTV 1대 + 입구 카메라 1대. 현재 CCTV는 일반 광각으로 실측돼 0024의 어안 전제는 재검토가 필요하다 | worker, fastapi |
 | 두 화각의 겹침 | 겹치지 않는다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 7번). 입구 카메라를 문쪽만 보게 두기 때문이며, 이 때문에 겹침 기반 신원 인계를 쓸 수 없다 | worker, deeplearning |
 | 카메라 높이·화각·거리와 CCTV 화면상의 문 영역 | 결정 필요. 실제 촬영으로 확정한다. **문 영역이 신원 인계의 유일한 공간적 단서다** | worker, deeplearning |
 | 입구 차폐 구간의 좌석 처리 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 6번). ROI를 등록하지 않아 `UNKNOWN`으로 둔다. 차폐 범위는 실제 촬영으로 확인한다 | fastapi |
