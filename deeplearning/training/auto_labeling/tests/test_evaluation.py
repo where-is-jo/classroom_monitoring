@@ -22,7 +22,7 @@ from auto_labeling.evaluation import (
 def _write_video(path: Path) -> None:
     writer = cv2.VideoWriter(
         str(path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
+        cv2.VideoWriter_fourcc(*"mp4v"),  # type: ignore[attr-defined]
         10.0,
         (64, 48),
     )

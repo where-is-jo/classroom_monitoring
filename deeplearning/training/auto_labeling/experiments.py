@@ -397,7 +397,7 @@ def render_result_video(
         intermediate = Path(temp) / "annotated.mp4"
         writer = cv2.VideoWriter(
             str(intermediate),
-            cv2.VideoWriter_fourcc(*"mp4v"),
+            cv2.VideoWriter_fourcc(*"mp4v"),  # type: ignore[attr-defined]
             fps,
             (width, height),
         )
@@ -505,7 +505,7 @@ def render_comparison_video(
         intermediate = Path(temp) / "comparison.mp4"
         writer = cv2.VideoWriter(
             str(intermediate),
-            cv2.VideoWriter_fourcc(*"mp4v"),
+            cv2.VideoWriter_fourcc(*"mp4v"),  # type: ignore[attr-defined]
             fps,
             (width * 2, height),
         )

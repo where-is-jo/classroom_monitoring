@@ -466,7 +466,7 @@ def _write_synthetic_video(path: Path) -> None:
     width, height, fps = 160, 120, 2.0
     writer = cv2.VideoWriter(
         str(path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
+        cv2.VideoWriter_fourcc(*"mp4v"),  # type: ignore[attr-defined]
         fps,
         (width, height),
     )
