@@ -192,9 +192,17 @@ class IdentityHandoverResultHandler:
             result = self._observe_classroom(route, result, observed_at)
         self._inner(captured, result)
 
-    def _expire(self, state: _RouteState, observed_at: float) -> None:
+    def _expire(self, state: _RouteState, observed_at: float) -> bool:
+        """오래된 후보를 버리고 인계 입력 집합이 바뀌었는지 돌려준다.
+
+        모호한 후보가 시간 만료로 하나만 남으면 다시 매칭해야 한다. 만료 여부를
+        호출자에게 돌려주지 않으면 새 track이나 새 얼굴 식별이 들어오기 전까지
+        인계가 영구히 멈춘다.
+        """
         state.watermark = max(state.watermark, observed_at)
         now = state.watermark
+        pending_count = len(state.pending)
+        unmatched_count = len(state.unmatched_classroom_tracks)
         state.pending = {
             track_id: identity
             for track_id, identity in state.pending.items()
@@ -221,6 +229,10 @@ class IdentityHandoverResultHandler:
             for track_id, identity in state.active_identities.items()
             if now - identity.last_seen_at <= self._track_stale_seconds
         }
+        return (
+            len(state.pending) != pending_count
+            or len(state.unmatched_classroom_tracks) != unmatched_count
+        )
 
     def _observe_entry(
         self,
@@ -229,7 +241,7 @@ class IdentityHandoverResultHandler:
         observed_at: float,
     ) -> None:
         state = self._states[route]
-        self._expire(state, observed_at)
+        match_inputs_expired = self._expire(state, observed_at)
         changed = False
         for _, detection in _person_detections(result):
             if (
@@ -257,7 +269,7 @@ class IdentityHandoverResultHandler:
                 max(existing.observed_at, observed_at) if existing else observed_at,
             )
             changed = True
-        if changed:
+        if changed or match_inputs_expired:
             self._try_match(state)
 
     def _observe_classroom(
@@ -267,7 +279,7 @@ class IdentityHandoverResultHandler:
         observed_at: float,
     ) -> InferenceResult:
         state = self._states[route]
-        self._expire(state, observed_at)
+        match_inputs_expired = self._expire(state, observed_at)
         people = _person_detections(result)
         new_in_entry_zone: list[str] = []
         for _, detection in people:
@@ -289,9 +301,11 @@ class IdentityHandoverResultHandler:
                 new_in_entry_zone.append(track_id)
 
         if new_in_entry_zone:
-            self._try_match(state)
             if len(new_in_entry_zone) > 1:
                 IDENTITY_HANDOFF_TOTAL.labels(outcome="ambiguous_tracks").inc()
+
+        if new_in_entry_zone or match_inputs_expired:
+            self._try_match(state)
 
         enriched = list(result.detections)
         for index, detection in people:

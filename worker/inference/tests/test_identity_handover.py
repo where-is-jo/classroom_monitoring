@@ -191,6 +191,47 @@ def test_후보_학생이_둘이면_가까운_track에_추측해_붙이지_않�
     assert handled[-1][1].detections[0].student_id is None
 
 
+def test_모호한_후보가_만료되어_하나만_남으면_다시_인계한다() -> None:
+    active, handled = handler()
+    active(
+        captured("entry-camera", 1),
+        result(
+            person(
+                "person-1",
+                (60, 5, 140, 98),
+                student_id="student-001",
+                identity_confidence=0.9,
+            )
+        ),
+    )
+    active(
+        captured("entry-camera", 4),
+        result(
+            person(
+                "person-2",
+                (60, 5, 140, 98),
+                student_id="student-002",
+                identity_confidence=0.92,
+            )
+        ),
+    )
+    active(
+        captured("classroom-cctv", 5),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+    assert handled[-1][1].detections[0].student_id is None
+
+    # 첫 후보만 8초 창을 벗어났다. 새 track이나 새 얼굴 결과가 없어도 남은
+    # 유일 후보를 기존 CCTV track에 다시 매칭해야 한다.
+    active(
+        captured("classroom-cctv", 10),
+        result(person("person-12", (20, 5, 70, 95))),
+    )
+
+    assert handled[-1][1].detections[0].student_id == "student-002"
+    assert handled[-1][1].detections[0].identity_confidence == 0.92
+
+
 def test_문_영역에_신규_track이_둘이면_인계하지_않는다() -> None:
     active, handled = handler()
     active(
