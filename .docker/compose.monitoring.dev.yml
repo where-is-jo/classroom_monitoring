@@ -43,8 +43,14 @@ services:
       # 데이터소스·대시보드 정의는 monitoring/internal이 관리한다(그 README의 책임).
       - ../monitoring/internal/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../monitoring/internal/grafana/dashboards:/etc/grafana/dashboards:ro
-    # 호스트에 포트를 열지 않는다. 운영자 도구라 SSH 터널로 본다:
-    #   ssh -L 3000:localhost:3000 <서버>   ← 아래에 ports를 임시로 되살린 뒤
+    ports:
+      # **팀원이 브라우저로 직접 보는 유일한 관측 서비스다.** 전에는 SSH 터널을 뚫어
+      # 봤지만, 대시보드는 여럿이 수시로 보는 것이라 터널이 병목이 됐다.
+      #
+      # **0.0.0.0에 열면 안 된다.** 공인 IP를 가진 공용 장비이고 Grafana admin 계정은
+      # env/grafana.dev.env의 값을 그대로 쓴다(운영 전환 전 재발급 필요).
+      # 호스트 번호는 5자리 규칙에 따라 13000이다.
+      - "100.85.0.72:13000:3000"
     networks:
       - backend
     depends_on:

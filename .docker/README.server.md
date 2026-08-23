@@ -63,8 +63,9 @@ docker compose -f .docker/compose.llm.dev.yml down
 
 **`.pc.yml`을 여기서 실행하지 않는다** — 개인 PC 쪽 절반이다.
 
-**먼저 `tailscale status`로 tailnet 연결을 확인한다.** 이 스택은 포트 넷을 Tailscale
-주소(`100.85.0.72`)에 bind하므로, 인터페이스가 없으면 기동에 실패한다. 조용히 뜨는
+**먼저 `tailscale status`로 tailnet 연결을 확인한다.** 이 스택은 포트 넷을(모니터링
+스택까지 세면 Grafana를 더해 다섯) Tailscale 주소(`100.85.0.72`)에 bind하므로,
+인터페이스가 없으면 기동에 실패한다. 조용히 뜨는
 것보다 낫다 — 떠 있어도 개인 PC가 닿지 못한다.
 
 ## 포트
@@ -100,6 +101,7 @@ n8n 5678, llama-server 8008). **그 방식을 쓰지 않는다** — 공용 서�
 | **100.85.0.72:19000** | `minio:9000` | 개인 PC의 fastapi — 스냅샷 읽기 |
 | **100.85.0.72:18889** | `mediamtx:8889` | 개인 PC의 fastapi — WHEP 시그널링 중계 |
 | **100.85.0.72:18008** | `llama-server:8008` | 개인 PC의 fastapi — 검색 계획 |
+| **100.85.0.72:13000** | `grafana:3000` | **팀원의 브라우저** — 관측 대시보드. 서비스가 아니라 사람이 부르는 유일한 포트다 |
 | **18189** (UDP·TCP) | `mediamtx:18189` | 브라우저. **WebRTC 미디어.** UDP 기반 ICE라 프록시할 수 없어 직통한다. **외부에 열리는 유일한 포트다** |
 
 **Tailscale이 내려가 있으면 기동에 실패한다.** 없는 주소에는 bind할 수 없다.
@@ -127,12 +129,14 @@ n8n 5678, llama-server 8008). **그 방식을 쓰지 않는다** — 공용 서�
 | mediamtx RTSP | 8554 | **닫혀 있다.** 지금은 워커가 외부 카메라에서 당겨온다. 카메라가 서버로 직접 송출하는 방식이 되면 다시 열어야 한다 |
 | minio | 9000 / 9001 | S3 API는 Tailscale 주소에 열려 있다(`100.85.0.72:19000`). 콘솔(9001)은 SSH 터널 |
 | llama-server | 8008 | **Tailscale 주소에 열려 있다**(`100.85.0.72:18008`). 개인 PC의 fastapi가 부른다 |
-| prometheus / grafana / loki / alloy | 9090 / 3000 / 3100 / 12345 | SSH 터널 |
+| grafana | 3000 | **Tailscale 주소에 열려 있다**(`http://100.85.0.72:13000`). 팀원이 브라우저로 바로 본다 |
+| prometheus / loki / alloy | 9090 / 3100 / 12345 | SSH 터널. Grafana가 backend network로 대신 조회하므로 평소에는 볼 일이 없다 |
 
-운영자 도구를 볼 때는 해당 서비스의 `ports`를 임시로 되살리고 터널을 판다:
+Grafana 말고 다른 운영자 도구를 볼 때는 해당 서비스의 `ports`를 임시로 되살리고
+터널을 판다:
 
 ```bash
-ssh -L 3000:localhost:3000 <서버>   # Grafana
+ssh -L 9090:localhost:9090 <서버>   # Prometheus
 ssh -L 9001:localhost:9001 <서버>   # MinIO 콘솔
 ```
 

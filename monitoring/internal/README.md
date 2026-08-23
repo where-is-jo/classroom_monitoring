@@ -8,7 +8,7 @@
 
 > 현재 상태: **세 서비스가 모두 지표를 노출한다.** `worker`의 조립 실행
 > (`python -m pipeline.main`)·`fastapi`·`deeplearning`이 각각 `/metrics`를 열고, 로컬
-> docker 스택의 Prometheus가 세 job을 긁는다.
+> dev(공용 GPU 서버) 스택의 Prometheus가 세 job을 긁는다.
 > Grafana 데이터소스·대시보드 provisioning은 이 디렉터리에서 관리하며,
 > 애플리케이션 지표 대시보드가 하나 있다.
 > **알림 규칙은 아직 없다** — 알림 채널이 `결정 필요`이고, 임계값의 근거가 될
@@ -29,41 +29,53 @@ monitoring/internal/grafana/
 
 | 파일 | fastapi target | 비고 |
 | --- | --- | --- |
-| `.docker/prometheus/prometheus.dev.yml` | `100.103.0.94:8076` | dev는 fastapi가 개인 PC에 있어 스크랩이 호스트 경계를 넘는다([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) |
+| `.docker/prometheus/prometheus.dev.yml` | `100.119.241.93:8076` | dev는 fastapi가 개인 PC에 있어 스크랩이 호스트 경계를 넘는다([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)) |
 
 `prometheus.local.yml`은 local 스택과 함께 없앴다([결정 0034](../../docs/architecture/decisions.md#0034--local-compose-스택을-없애고-로컬-실행은-소스-직접-구동으로-한정한다)).
 
 **dev에서 fastapi target이 `up=0`인 것은 장애가 아닐 수 있다.** 개인 PC가 노트북이라
 꺼져 있을 수 있다. 이 구분을 어떻게 다룰지는 `결정 필요`다.
 
-### dev 서버의 `deeplearning`·`inference-worker` target은 지금 `down`이다
+### dev 서버의 `deeplearning` target은 지금도 `down`이다
 
-2026-08-22 실측이다. **코드는 맞는데 서버에 올라간 이미지가 낡았다.**
+2026-08-23 실측이다. **코드는 맞는데 서버에 올라간 이미지가 낡았다.**
 
-| target | 증상 | 서버 이미지 빌드 | 지표가 들어온 커밋 |
-| --- | --- | --- | --- |
-| `deeplearning:8100` | `/metrics` 404 (OpenAPI에 경로 없음) | 2026-08-18 05:06 | `748ca7f` (2026-08-18) |
-| `inference-worker:9101` | connection refused (listen 안 함) | 2026-08-12 | `34c5d98` (2026-08-18) |
+| target | 상태 | 증상 |
+| --- | --- | --- |
+| `deeplearning:8100` | `down` | `/metrics` 404. 서버 이미지가 지표를 넣은 커밋(`748ca7f`, 2026-08-18) 이전이다 |
+| `inference-worker:9101` | `up` | 이미지를 `local-20260823`으로 올려 해소됐다 |
+| `fastapi` | `up` | 개인 PC가 켜져 있을 때만이다 |
 
-**이미지를 다시 빌드해 올려야 해소된다.** worker는 크기 때문에 CI가 자동 빌드하지
-않으므로([결정 0014](../../docs/architecture/decisions.md#0014--github-actions로-develop-병합-시-ci-검증과-ghcr-이미지-자동-빌드))
+**deeplearning 이미지를 다시 빌드해 올려야 해소된다.** worker는 크기 때문에 CI가 자동
+빌드하지 않으므로([결정 0014](../../docs/architecture/decisions.md#0014--github-actions로-develop-병합-시-ci-검증과-ghcr-이미지-자동-빌드))
 손으로 밀어야 한다.
 
 ### 대시보드
 
 | 파일 | uid | 내용 |
 | --- | --- | --- |
-| `grafana/dashboards/stack-status.json` | `smart-office-stack` | 컨테이너 로그 발생량·오류 로그·로그 원문(Loki)과 스크랩 타겟 상태(Prometheus `up`) |
+| `grafana/dashboards/stack-status.json` | `classroom-monitoring-stack` | 컨테이너 로그 발생량·오류 로그·로그 원문(Loki)과 스크랩 타겟 상태(Prometheus `up`) |
 | `grafana/dashboards/application-metrics.json` | `classroom-monitoring-app` | 세 서비스의 애플리케이션 지표(Prometheus). 서비스별 row 넷 |
+
+**보는 곳은 dev(공용 GPU 서버)의 Grafana다** — <http://100.85.0.72:13000>. tailnet 안에
+있는 기계에서만 닿는다. 계정은 `.docker/env/grafana.dev.env`에 있고, 포트를 여는 이유와
+`0.0.0.0`에 열지 않는 이유는 [`.docker/compose.monitoring.dev.yml`](../../.docker/compose.monitoring.dev.yml)의
+`grafana` 주석에 있다.
 
 **두 대시보드는 보는 대상이 다르다.** `stack-status`는 "스택이 살아 있는가"(컨테이너
 로그·스크랩)를 보고, `application-metrics`는 "서비스가 제 일을 하고 있는가"를 본다.
 로그 패널을 애플리케이션 대시보드에 복사하지 않는다.
 
-`stack-status`의 `uid`와 그 안의 `project` label 값은 이전 주제 이름을 쓴다. 저장된
-대시보드의 `uid`를 바꾸면 기존 링크와 즐겨찾기가 끊기므로, 저장소 이름 변경과 함께
-다룬다. **새로 만드는 대시보드는 그 제약이 없으므로 현재 이름(`classroom-monitoring-`)을
-쓴다.**
+**두 대시보드 모두 현재 이름(`classroom-monitoring-`)을 쓴다.** `stack-status`가 들고
+있던 이전 주제 이름(`smart-office-stack`, `project="smart-office-monitoring"`)은
+2026-08-23에 정리했다. Grafana 폴더 이름도 `Smart Office`에서 `Classroom Monitoring`으로
+바꿨다.
+
+**로그 패널은 `project`가 아니라 `stack` label로 거른다.** Alloy는 같은 docker daemon의
+모든 컨테이너를 수집하면서 `project="classroom-monitoring-dev"`를 **상수로** 붙이므로,
+공용 GPU 서버에서 함께 도는 남의 컨테이너까지 그 label을 달고 들어온다. 구분이 되는
+것은 compose project에서 오는 `stack`뿐이라 셀렉터를
+`{stack=~"classroom-monitoring-dev.*"}`로 둔다.
 
 **지금 존재하는 데이터만 쓴다.** `application-metrics`의 모든 패널은 코드에 실제로
 정의된 지표만 참조한다 — 검증 절차는 [아래](#대시보드-검증)에 있다. 빈 패널을 미리
@@ -351,17 +363,18 @@ sum by (result) (rate(classroom_monitoring_face_embedding_requests_total[30m]))
 
 ### 대시보드 검증
 
-`monitoring/internal`은 Grafana를 직접 실행하지 않는다. 실행 수단은 컨테이너 스택이며,
-그 구성은 아직 개인 로컬 전용이다(공식 실행 수단은 `결정 필요`).
-아래는 그 스택에서 실제로 확인한 명령이다. 관리자 자격 증명은 외부에서 주입한다.
+`monitoring/internal`은 Grafana를 직접 실행하지 않는다. 실행 수단은 컨테이너 스택
+(`.docker/compose.monitoring.dev.yml`)이며 dev 서버에서 돈다.
+아래는 그 스택에서 실제로 확인한 명령이다. 관리자 자격 증명은 외부에서 주입하고,
+`$GF`는 tailnet 안에서 `http://100.85.0.72:13000`이다.
 
 ```bash
 # 대시보드 JSON 문법
 python -c "import json;json.load(open('monitoring/internal/grafana/dashboards/stack-status.json',encoding='utf-8'))"
 
 # provisioning 반영 확인 (데이터소스 uid, 대시보드 등록 여부)
-curl -s -u "$GF_USER:$GF_PW" http://127.0.0.1:3000/api/datasources
-curl -s -u "$GF_USER:$GF_PW" 'http://127.0.0.1:3000/api/search?type=dash-db'
+curl -s -u "$GF_USER:$GF_PW" "$GF/api/datasources"
+curl -s -u "$GF_USER:$GF_PW" "$GF/api/search?type=dash-db"
 ```
 
 **패널이 그려지는지는 JSON 문법과 별개다.** 데이터소스 프록시로 각 패널의 쿼리를
@@ -369,8 +382,8 @@ curl -s -u "$GF_USER:$GF_PW" 'http://127.0.0.1:3000/api/search?type=dash-db'
 
 ```bash
 curl -s -u "$GF_USER:$GF_PW" --get \
-  'http://127.0.0.1:3000/api/datasources/proxy/uid/loki/loki/api/v1/query' \
-  --data-urlencode 'query=sum by (container) (rate({project="smart-office-monitoring"}[5m]))'
+  "$GF/api/datasources/proxy/uid/loki/loki/api/v1/query" \
+  --data-urlencode 'query=sum by (container) (rate({stack=~"classroom-monitoring-dev.*"}[5m]))'
 ```
 
 #### Grafana 없이 확인할 수 있는 것

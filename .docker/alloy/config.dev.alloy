@@ -1,6 +1,10 @@
-// 공용 GPU 서버(dev) 스택용 로그 수집 설정. 로컬용 config.local.alloy와 project label만 다르다.
+// 공용 GPU 서버(dev) 스택용 로그 수집 설정. local 판본은 없다(결정 0034).
 // 같은 docker daemon의 모든 컨테이너 로그를 Docker API로 읽어 Loki로 보낸다.
 // compose 스택이 셋으로 나뉘어 있어도 daemon 하나라 한 번에 다 잡힌다.
+//
+// **공용 장비라 우리 것이 아닌 컨테이너도 함께 들어온다.** 아래 project label은 모든
+// 타겟에 상수로 붙어 구분에 쓸 수 없다. 우리 스택만 보려면 compose project에서 오는
+// stack label로 걸러야 한다 — Grafana 대시보드가 그렇게 한다.
 
 discovery.docker "containers" {
   host = "unix:///var/run/docker.sock"
