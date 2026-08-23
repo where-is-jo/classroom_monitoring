@@ -197,11 +197,10 @@ sudo tailscale up --accept-routes
 
 앱 설정 파일의 변수 목록 기준은 각각
 [`webapps/fastapi/.env.example`](../webapps/fastapi/.env.example)과
-[`worker/pipeline/.env.example`](../worker/pipeline/.env.example),
-[`deeplearning/.env.example`](../deeplearning/.env.example)이다. 여기 복사하지 않는다.
+[`worker/pipeline/.env.example`](../worker/pipeline/.env.example)이다. 여기 복사하지 않는다.
 타임아웃·판정 임계값처럼 환경 무관한 값은 이미지 안의 `config/settings.yml`에 있다.
 
-### 이 서버에 두는 값 파일은 넷뿐이다
+### 이 서버에 두는 값 파일은 셋뿐이다
 
 **`fastapi.dev.env`와 `n8n.dev.env`를 여기 두지 않는다.** 두 서비스가 개인 PC로
 갔으므로(결정 0026) 이 서버에서는 읽히지 않는데, `fastapi.dev.env`에는 MongoDB Atlas
@@ -210,7 +209,6 @@ sudo tailscale up --accept-routes
 | 파일 | 읽는 곳 |
 | --- | --- |
 | `worker.dev.env` | `compose.main.dev.gpu.yml`의 inference-worker |
-| `deeplearning.dev.env` | `compose.main.dev.gpu.yml`의 deeplearning. 얼굴 식별을 켤 때 MongoDB 읽기 전용 URL과 평가 임계값을 둔다 |
 | `minio.dev.env` | `compose.main.dev.gpu.yml`의 minio·minio-init |
 | `grafana.dev.env` | `compose.monitoring.dev.yml`의 grafana |
 
