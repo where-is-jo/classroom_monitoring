@@ -1,7 +1,7 @@
 {
   "uid": "classroom-monitoring-app",
   "title": "애플리케이션 지표 — 추론·검색·얼굴 분석",
-  "description": "세 서비스가 노출하는 애플리케이션 지표. 스택이 살아 있는지(컨테이너 로그·스크랩)는 '스택 상태' 대시보드가 본다. inference-worker와 deeplearning은 compose profile로 gate되어 있어 띄우기 전에는 패널이 비어 있는 것이 정상이다.",
+  "description": "세 서비스가 노출하는 애플리케이션 지표. 스택이 살아 있는지(컨테이너 로그·스크랩)는 '스택 상태' 대시보드가 본다. 2026-08-23 기준 deeplearning은 서버 이미지가 낡아 /metrics가 404라서 얼굴 분석 row가 비어 있다.",
   "tags": ["classroom-monitoring", "application"],
   "timezone": "browser",
   "editable": true,
@@ -23,7 +23,7 @@
       "id": 1,
       "type": "stat",
       "title": "지표 수집 상태",
-      "description": "각 job의 up 값. **패널이 비어 있을 때 여기부터 본다** — 타겟이 죽은 것과 지표가 아직 없는 것은 다르다. inference-worker와 deeplearning은 compose profile로 gate되어 있어(--profile worker / --profile face) 띄우기 전에는 DOWN이 정상이다.",
+      "description": "각 job의 up 값. **패널이 비어 있을 때 여기부터 본다** — 타겟이 죽은 것과 지표가 아직 없는 것은 다르다. dev에서 fastapi는 개인 PC에 있어 노트북이 꺼져 있으면 DOWN이고, 이는 장애가 아닐 수 있다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

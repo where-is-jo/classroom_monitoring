@@ -1,8 +1,8 @@
 {
-  "uid": "smart-office-stack",
+  "uid": "classroom-monitoring-stack",
   "title": "스택 상태 — 로그와 스크랩",
-  "description": "로컬 docker 스택이 실제로 살아 있는지 확인하는 대시보드. 지금 존재하는 데이터(Alloy가 수집한 컨테이너 로그, Prometheus의 up)만 쓴다. fastapi가 /metrics를 노출하면 애플리케이션 지표 패널을 별도 대시보드로 추가한다.",
-  "tags": ["smart-office", "infra"],
+  "description": "dev(공용 GPU 서버) 스택이 실제로 살아 있는지 확인하는 대시보드. Alloy가 수집한 컨테이너 로그와 Prometheus의 up만 쓴다. 서비스가 제 일을 하고 있는지는 '애플리케이션 지표' 대시보드가 본다.",
+  "tags": ["classroom-monitoring", "infra"],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 39,
@@ -28,7 +28,7 @@
         "query": {
           "label": "container",
           "refId": "LokiVariableQueryEditor-VariableQuery",
-          "stream": "",
+          "stream": "{stack=~\"classroom-monitoring-dev.*\"}",
           "type": 1
         },
         "refresh": 2,
@@ -49,7 +49,7 @@
       "id": 1,
       "type": "stat",
       "title": "Prometheus 스크랩 타겟",
-      "description": "Prometheus가 스크랩하는 타겟의 up 값. 지금은 Prometheus 자기 자신뿐이다 — fastapi가 /metrics를 노출하면 prometheus.yml에 job을 추가해야 여기에 나타난다.",
+      "description": "Prometheus가 스크랩하는 타겟의 up 값. prometheus·fastapi·deeplearning·inference-worker 네 job이 대상이다. dev에서 fastapi는 개인 PC에 있어 노트북이 꺼져 있으면 up=0이 되는데, 이는 장애가 아닐 수 있다.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -143,7 +143,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "count(count by (container) (count_over_time({project=\"smart-office-monitoring\"}[$__range])))",
+          "expr": "count(count by (container) (count_over_time({stack=~\"classroom-monitoring-dev.*\"}[$__range])))",
           "queryType": "instant",
           "instant": true,
           "range": false
@@ -203,7 +203,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({project=\"smart-office-monitoring\"} |~ `(?i)(error|exception|traceback|panic|fatal)` [5m]))",
+          "expr": "sum(count_over_time({stack=~\"classroom-monitoring-dev.*\"} |~ `(?i)(error|exception|traceback|panic|fatal)` [5m]))",
           "queryType": "instant",
           "instant": true,
           "range": false
@@ -267,7 +267,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (container) (rate({project=\"smart-office-monitoring\", container=~\"$container\"}[$__rate_interval]))",
+          "expr": "sum by (container) (rate({stack=~\"classroom-monitoring-dev.*\", container=~\"$container\"}[$__rate_interval]))",
           "queryType": "range",
           "legendFormat": "{{container}}"
         }
@@ -319,7 +319,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (container) (rate({project=\"smart-office-monitoring\", container=~\"$container\"} |~ `(?i)(error|exception|traceback|panic|fatal)` [$__rate_interval]))",
+          "expr": "sum by (container) (rate({stack=~\"classroom-monitoring-dev.*\", container=~\"$container\"} |~ `(?i)(error|exception|traceback|panic|fatal)` [$__rate_interval]))",
           "queryType": "range",
           "legendFormat": "{{container}}"
         }
@@ -371,7 +371,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{project=\"smart-office-monitoring\", container=~\"$container\"}",
+          "expr": "{stack=~\"classroom-monitoring-dev.*\", container=~\"$container\"}",
           "queryType": "range"
         }
       ],
