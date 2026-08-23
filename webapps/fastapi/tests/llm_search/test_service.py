@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.models import Classroom
 from app.llm_search.errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
 from app.llm_search.ports import PlanPrompt, QueryPlanner
 from app.llm_search.service import LlmSearchService
@@ -93,6 +95,17 @@ def _stream(camera_id: str, classroom_id: str, *, enabled: bool = True) -> Video
     )
 
 
+def _classroom(classroom_id: str, code: str, name: str) -> Classroom:
+    return Classroom(
+        id=classroom_id,
+        code=code,
+        name=name,
+        location=code,
+        is_active=True,
+        created_at=_NOW,
+    )
+
+
 def _event(
     camera_id: str, minute: int, people: int, *, student_ids: tuple[str, ...] = ()
 ) -> DetectionEvent:
@@ -129,6 +142,7 @@ def _build(
     planner: QueryPlanner | None = None,
     events: list[DetectionEvent] | None = None,
     streams: list[VideoStream] | None = None,
+    classrooms: list[Classroom] | None = None,
     snapshot_keys: list[str] | None = None,
     snapshot_fails: bool = False,
     scan_limit: int = 500,
@@ -140,6 +154,10 @@ def _build(
     stream_repository = MemoryVideoStreamRepository()
     for stream in streams if streams is not None else [_stream("camera-01", "A101")]:
         stream_repository.save(stream)
+
+    classroom_repository = InMemoryClassroomRepository()
+    for classroom in classrooms or []:
+        classroom_repository.create_classroom(classroom)
 
     default_plan = {
         "intent": "detection_search",
@@ -153,6 +171,7 @@ def _build(
         planner or FakePlanner(default_plan),
         detections,
         stream_repository,
+        classroom_repository,
         SnapshotService(FakeStorage(snapshot_keys, fails=snapshot_fails)),
         max_span_days=7,
         scan_limit=scan_limit,
@@ -374,3 +393,189 @@ def test_LLM에_닿지_못하면_재시도하지_않고_그대로_전달한다()
         _build(planner=planner).search("오늘", limit=20)
 
     assert planner.calls == 1
+
+
+def test_강의실을_부르는_이름을_프롬프트에_함께_싣는다() -> None:
+    """`classroom_id`가 UUID라 이름이 없으면 모델이 질문과 이을 근거가 없다.
+
+    2026-08-23 실측: 목록에 UUID만 있는 상태에서 "A111 강의실에 오늘 몇 명
+    있었어?"에 모델이 `classroom_id="A111"`을 냈고 0건이 나왔다.
+    """
+    planner = FakePlanner(
+        {
+            "intent": "detection_search",
+            "camera_id": None,
+            "classroom_id": None,
+            "from": _FROM,
+            "to": _TO,
+            "limit": 20,
+        }
+    )
+
+    _build(
+        planner=planner,
+        streams=[_stream("camera-01", "room-a101")],
+        classrooms=[_classroom("room-a101", "A101", "1강의실")],
+    ).search("오늘 누가 왔어?", limit=20)
+
+    assert planner.last_prompt is not None
+    assert "classroom_id=room-a101 (A101 1강의실)" in planner.last_prompt.system
+
+
+def test_모델이_강의실_코드를_내도_같은_강의실을_찾는다() -> None:
+    """프롬프트가 목록에 코드를 실어 주므로 보통은 UUID가 온다.
+
+    그래도 **결과를 그것 하나에 걸지 않는다.** 코드를 그대로 받아도 등록을 되짚어
+    같은 강의실을 찾는다. 이 방어층이 없으면 모델이 한 번 흔들릴 때마다 사용자는
+    "등록되지 않은 강의실"이라는 틀린 안내를 받는다.
+    """
+    plan = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": "A101",  # UUID가 아니라 사람이 부르는 코드
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+    }
+
+    outcome = _build(
+        planner=FakePlanner(plan),
+        events=[_event("camera-01", 0, 2)],
+        streams=[_stream("camera-01", "room-a101")],
+        classrooms=[_classroom("room-a101", "A101", "1강의실")],
+    ).search("A101에 몇 명 있었어?", limit=20)
+
+    assert [hit.event_id for hit in outcome.hits] == ["camera-01-0"]
+    assert outcome.query.notes == ()
+
+
+def test_대상을_사람이_읽는_이름으로_적는다() -> None:
+    """화면이 UUID를 그대로 보여주면 어느 강의실인지 알 수 없다."""
+    plan = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": "room-a101",
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+    }
+
+    outcome = _build(
+        planner=FakePlanner(plan),
+        events=[_event("camera-01", 0, 2)],
+        streams=[_stream("camera-01", "room-a101")],
+        classrooms=[_classroom("room-a101", "A101", "1강의실")],
+    ).search("A101에 몇 명 있었어?", limit=20)
+
+    assert outcome.target_label == "A101 1강의실"
+    assert outcome.hits[0].resolved_classroom_label == "A101 1강의실"
+    # 식별자는 그대로 남는다. 호출자가 다른 API에 이어 쓰는 값이다.
+    assert outcome.hits[0].resolved_classroom_id == "room-a101"
+
+
+def test_강의실_등록을_찾지_못하면_식별자를_그대로_보여준다() -> None:
+    """빈칸으로 두면 **어느 강의실인지 모른다는 사실 자체가 화면에서 사라진다.**"""
+    plan = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": "room-a101",
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+    }
+
+    outcome = _build(
+        planner=FakePlanner(plan),
+        events=[_event("camera-01", 0, 2)],
+        streams=[_stream("camera-01", "room-a101")],
+    ).search("A101에 몇 명 있었어?", limit=20)
+
+    assert outcome.target_label == "강의실 room-a101"
+    assert outcome.hits[0].resolved_classroom_label == "강의실 room-a101"
+
+
+def test_없는_강의실을_물으면_들은_이름으로_안내한다() -> None:
+    """등록되지 않은 곳은 정상적인 0건이다. **왜 0건인지**가 안내에 남아야 한다."""
+    plan = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": "B203",
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+    }
+
+    outcome = _build(
+        planner=FakePlanner(plan),
+        events=[_event("camera-01", 0, 2)],
+        streams=[_stream("camera-01", "room-a101")],
+        classrooms=[_classroom("room-a101", "A101", "1강의실")],
+    ).search("B203에 몇 명 있었어?", limit=20)
+
+    assert outcome.hits == ()
+    assert outcome.target_label == "강의실 B203"
+    assert any("B203" in note for note in outcome.query.notes)
+
+
+def test_카메라를_콕_집으면_카메라_이름으로_적는다() -> None:
+    plan = {
+        "intent": "detection_search",
+        "camera_id": "camera-01",
+        "classroom_id": None,
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+    }
+
+    outcome = _build(
+        planner=FakePlanner(plan),
+        events=[_event("camera-01", 0, 2)],
+        streams=[_stream("camera-01", "room-a101")],
+        classrooms=[_classroom("room-a101", "A101", "1강의실")],
+    ).search("camera-01에 몇 명 있었어?", limit=20)
+
+    assert outcome.target_label == "카메라 room-a101 카메라 (camera-01)"
+
+
+def test_같은_강의실을_여러_카메라가_가리켜도_한_번만_조회한다() -> None:
+    """카메라가 늘 때마다 강의실 조회가 늘면 검색 한 번의 왕복이 카메라 수만큼 는다."""
+
+    class CountingClassrooms(InMemoryClassroomRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def get_classroom(self, classroom_id: str) -> Classroom | None:
+            self.calls += 1
+            return super().get_classroom(classroom_id)
+
+    classrooms = CountingClassrooms()
+    classrooms.create_classroom(_classroom("room-a101", "A101", "1강의실"))
+
+    detections = MemoryDetectionEventRepository()
+    stream_repository = MemoryVideoStreamRepository()
+    for stream in (_stream("camera-01", "room-a101"), _stream("camera-02", "room-a101")):
+        stream_repository.save(stream)
+
+    service = LlmSearchService(
+        FakePlanner(
+            {
+                "intent": "detection_search",
+                "camera_id": None,
+                "classroom_id": None,
+                "from": _FROM,
+                "to": _TO,
+                "limit": 20,
+            }
+        ),
+        detections,
+        stream_repository,
+        classrooms,
+        SnapshotService(FakeStorage()),
+        max_span_days=7,
+        scan_limit=500,
+        clock=lambda: _NOW,
+    )
+    service.search("오늘 누가 왔어?", limit=20)
+
+    assert classrooms.calls == 1

@@ -79,6 +79,9 @@ class DetectionHitResponse(BaseModel):
     resolved_classroom_id: str = Field(
         description="카메라 등록 정보로 지금 기준에서 되짚은 강의실. 탐지 시점의 값이 아니다."
     )
+    resolved_classroom_label: str = Field(
+        description="같은 강의실을 사람이 읽는 이름으로 적은 값. 등록을 찾지 못하면 식별자 그대로다."
+    )
     captured_at: datetime
     detection_count: int
     identified: list[IdentifiedStudentResponse] = Field(
@@ -94,6 +97,7 @@ class DetectionHitResponse(BaseModel):
             event_id=hit.event_id,
             camera_id=hit.camera_id,
             resolved_classroom_id=hit.resolved_classroom_id,
+            resolved_classroom_label=hit.resolved_classroom_label,
             captured_at=hit.captured_at,
             detection_count=hit.detection_count,
             identified=[IdentifiedStudentResponse.from_domain(s) for s in hit.identified],
@@ -110,6 +114,9 @@ class DetectionHitResponse(BaseModel):
 class LlmSearchResponse(BaseModel):
     question: str
     plan: SearchPlanResponse
+    target_label: str = Field(
+        description="이번 검색이 대상으로 삼은 곳을 사람이 읽는 한 문장으로 적은 값."
+    )
     items: list[DetectionHitResponse]
     total: int = Field(
         description="돌려준 건수다. 조건에 맞는 전체 건수가 아니다 — truncated를 함께 본다."
@@ -126,6 +133,7 @@ class LlmSearchResponse(BaseModel):
         return cls(
             question=question,
             plan=SearchPlanResponse.from_domain(outcome.query),
+            target_label=outcome.target_label,
             items=items,
             total=len(items),
             limit=outcome.query.limit,

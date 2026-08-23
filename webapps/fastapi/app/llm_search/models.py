@@ -18,12 +18,23 @@ class CameraChoice:
 
     프롬프트에 실제 등록된 식별자를 넣어야 모델이 없는 강의실을 지어내지 않는다.
     `video_monitoring`의 `VideoStream`을 그대로 쓰지 않는 이유는 프롬프트 조립이
-    순수 함수로 남아야 하기 때문이다. 필요한 세 값만 옮겨 담는다.
+    순수 함수로 남아야 하기 때문이다. 필요한 값만 옮겨 담는다.
+
+    **`classroom_code`와 `classroom_name`이 없으면 모델은 사람이 부르는 이름을
+    식별자로 옮길 수 없다.** `classroom_id`는 UUID라 질문에 등장하지 않는다.
+    2026-08-23 실측: 목록에 UUID만 있는 상태에서 "A111 강의실에 오늘 몇 명
+    있었어?"를 물으면 모델이 `classroom_id="A111"`을 그대로 내고, 서버는 등록되지
+    않은 강의실로 판정해 0건을 돌려줬다.
+
+    강의실이 `classrooms`에 없으면 둘 다 `None`이다. 스트림에는 `classroom_id`만
+    담겨 있어 등록이 지워져도 스트림은 남는다.
     """
 
     camera_id: str
     classroom_id: str
     label: str
+    classroom_code: str | None
+    classroom_name: str | None
 
 
 @dataclass(frozen=True)
@@ -70,6 +81,11 @@ class DetectionHit:
     강의실이 담기지 않아 카메라 등록 정보로 되짚는다. 카메라를 다른 강의실로 옮기면
     과거 이벤트도 새 강의실로 보인다.
 
+    `resolved_classroom_label`은 같은 강의실을 **사람이 읽는 이름**으로 적은 것이다.
+    식별자가 UUID라 화면에 그대로 내보내면 아무 정보가 되지 못한다. 둘을 함께 두는
+    이유는 API 응답이 식별자를 계속 돌려줘야 하기 때문이다 — 호출자가 다른 API에
+    이어 쓰는 값이다.
+
     `snapshot_key`는 저장소에 실제로 있는 키이거나 `None`이다. 계산만 하고 존재를
     확인하지 않은 키는 여기 담지 않는다.
     """
@@ -77,6 +93,7 @@ class DetectionHit:
     event_id: str
     camera_id: str
     resolved_classroom_id: str
+    resolved_classroom_label: str
     captured_at: datetime
     detection_count: int
     identified: tuple[IdentifiedStudent, ...]
@@ -91,9 +108,15 @@ class SearchOutcome:
     `truncated`와 `snapshot_lookup_failed`를 결과와 함께 돌려주는 이유는 화면이
     "없음"과 "못 봤음"을 구분해야 하기 때문이다. 둘을 같게 보여주면 운영자가
     데이터가 없다고 판단한다.
+
+    `target_label`은 이번 검색이 무엇을 대상으로 삼았는지 한 문장으로 적은 값이다.
+    "카메라를 콕 집었는가 / 강의실인가 / 전체인가"의 판정과 UUID를 이름으로 바꾸는
+    일을 **서비스에서 끝내려고** 둔다. 템플릿이 식별자를 보고 분기하면 같은 판정이
+    화면마다 복사되고, 강의실 이름을 붙이려면 템플릿이 저장소를 알아야 한다.
     """
 
     query: SearchQuery
+    target_label: str
     hits: tuple[DetectionHit, ...]
     truncated: bool
     snapshot_lookup_failed: bool
