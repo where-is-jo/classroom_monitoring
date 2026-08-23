@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import numpy as np
 import requests
+
 from shared.types import CapturedFrame
 
 from ..handler import FastAPIResultHandler, build_event_id, build_event_payload
@@ -161,6 +162,7 @@ def test_식별_탐지는_승인된_handoff_fixture와_같은_payload를_만든�
                 student_id="synthetic-student-001",
                 identity_confidence=0.88,
                 face_bbox=(150, 130, 220, 230),
+                track_id="person-17",
             ),
         ),
     )

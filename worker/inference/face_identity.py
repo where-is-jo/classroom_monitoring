@@ -10,6 +10,7 @@ from typing import Any
 
 import cv2
 import requests
+
 from shared.types import CapturedFrame
 
 from .consumer import ResultHandler
@@ -66,7 +67,7 @@ class HttpFaceIdentifier:
         try:
             response = self._post(
                 self._url,
-                content=bytes(buffer.tobytes()),
+                data=bytes(buffer.tobytes()),
                 headers={
                     "Content-Type": "image/jpeg",
                     "X-Camera-ID": captured.camera_id,

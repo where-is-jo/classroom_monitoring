@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pytest
 import requests
+
 from shared.types import CapturedFrame
 
 from ..face_identity import (
@@ -58,8 +59,16 @@ def inference_result() -> InferenceResult:
 def test_등록_학생_식별을_사람_탐지에_보강한다() -> None:
     requests_seen: list[dict[str, Any]] = []
 
-    def post(url: str, **kwargs: Any) -> FakeResponse:
-        requests_seen.append({"url": url, **kwargs})
+    def post(
+        url: str,
+        *,
+        data: bytes,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> FakeResponse:
+        requests_seen.append(
+            {"url": url, "data": data, "headers": headers, "timeout": timeout}
+        )
         return FakeResponse(
             {
                 "identities": [
@@ -91,7 +100,7 @@ def test_등록_학생_식별을_사람_탐지에_보강한다() -> None:
     assert result.detections[0].student_id is None
     assert requests_seen[0]["headers"]["X-Camera-ID"] == "entry-camera"
     assert requests_seen[0]["headers"]["X-Person-Bboxes"] == "[[20,10,120,115]]"
-    assert requests_seen[0]["content"] != captured().frame.tobytes()
+    assert requests_seen[0]["data"] != captured().frame.tobytes()
 
 
 def test_미확정_얼굴은_track만_보강하고_학생을_붙이지_않는다() -> None:
