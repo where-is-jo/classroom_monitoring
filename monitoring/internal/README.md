@@ -57,6 +57,11 @@ monitoring/internal/grafana/
 | `grafana/dashboards/stack-status.json` | `classroom-monitoring-stack` | 컨테이너 로그 발생량·오류 로그·로그 원문(Loki)과 스크랩 타겟 상태(Prometheus `up`) |
 | `grafana/dashboards/application-metrics.json` | `classroom-monitoring-app` | 세 서비스의 애플리케이션 지표(Prometheus). 서비스별 row 넷 |
 
+**보는 곳은 dev(공용 GPU 서버)의 Grafana다** — <http://100.85.0.72:13000>. tailnet 안에
+있는 기계에서만 닿는다. 계정은 `.docker/env/grafana.dev.env`에 있고, 포트를 여는 이유와
+`0.0.0.0`에 열지 않는 이유는 [`.docker/compose.monitoring.dev.yml`](../../.docker/compose.monitoring.dev.yml)의
+`grafana` 주석에 있다.
+
 **두 대시보드는 보는 대상이 다르다.** `stack-status`는 "스택이 살아 있는가"(컨테이너
 로그·스크랩)를 보고, `application-metrics`는 "서비스가 제 일을 하고 있는가"를 본다.
 로그 패널을 애플리케이션 대시보드에 복사하지 않는다.
@@ -358,17 +363,18 @@ sum by (result) (rate(classroom_monitoring_face_embedding_requests_total[30m]))
 
 ### 대시보드 검증
 
-`monitoring/internal`은 Grafana를 직접 실행하지 않는다. 실행 수단은 컨테이너 스택이며,
-그 구성은 아직 개인 로컬 전용이다(공식 실행 수단은 `결정 필요`).
-아래는 그 스택에서 실제로 확인한 명령이다. 관리자 자격 증명은 외부에서 주입한다.
+`monitoring/internal`은 Grafana를 직접 실행하지 않는다. 실행 수단은 컨테이너 스택
+(`.docker/compose.monitoring.dev.yml`)이며 dev 서버에서 돈다.
+아래는 그 스택에서 실제로 확인한 명령이다. 관리자 자격 증명은 외부에서 주입하고,
+`$GF`는 tailnet 안에서 `http://100.85.0.72:13000`이다.
 
 ```bash
 # 대시보드 JSON 문법
 python -c "import json;json.load(open('monitoring/internal/grafana/dashboards/stack-status.json',encoding='utf-8'))"
 
 # provisioning 반영 확인 (데이터소스 uid, 대시보드 등록 여부)
-curl -s -u "$GF_USER:$GF_PW" http://127.0.0.1:3000/api/datasources
-curl -s -u "$GF_USER:$GF_PW" 'http://127.0.0.1:3000/api/search?type=dash-db'
+curl -s -u "$GF_USER:$GF_PW" "$GF/api/datasources"
+curl -s -u "$GF_USER:$GF_PW" "$GF/api/search?type=dash-db"
 ```
 
 **패널이 그려지는지는 JSON 문법과 별개다.** 데이터소스 프록시로 각 패널의 쿼리를
@@ -376,7 +382,7 @@ curl -s -u "$GF_USER:$GF_PW" 'http://127.0.0.1:3000/api/search?type=dash-db'
 
 ```bash
 curl -s -u "$GF_USER:$GF_PW" --get \
-  'http://127.0.0.1:3000/api/datasources/proxy/uid/loki/loki/api/v1/query' \
+  "$GF/api/datasources/proxy/uid/loki/loki/api/v1/query" \
   --data-urlencode 'query=sum by (container) (rate({stack=~"classroom-monitoring-dev.*"}[5m]))'
 ```
 
