@@ -30,6 +30,8 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from datetime import datetime
 
+from ..classrooms.models import Classroom
+from ..classrooms.ports import ClassroomRepository
 from ..snapshots.errors import SnapshotStorageUnavailableError
 from ..snapshots.models import build_snapshot_key
 from ..snapshots.service import SnapshotService
@@ -55,6 +57,7 @@ class LlmSearchService:
         planner: QueryPlanner,
         detection_repository: DetectionEventRepository,
         stream_repository: VideoStreamRepository,
+        classroom_repository: ClassroomRepository,
         snapshot_service: SnapshotService,
         *,
         max_span_days: int,
@@ -64,6 +67,7 @@ class LlmSearchService:
         self._planner = planner
         self._detections = detection_repository
         self._streams = stream_repository
+        self._classrooms = classroom_repository
         self._snapshots = snapshot_service
         self._max_span_days = max_span_days
         self._scan_limit = scan_limit
@@ -95,14 +99,15 @@ class LlmSearchService:
     def _run_search(self, question: str, *, limit: int) -> SearchOutcome:
         now = self._clock()
         streams = self._streams.find_all_enabled()
+        classrooms = self._load_classrooms(streams)
 
         # 호출자가 요청한 상한이 곧 모델에게 알리는 상한이다. 지시문과 검증이 다른
         # 수를 쓰면 모델은 규격을 지켰는데 결과만 조용히 줄어든다.
         ceiling = min(limit, MAX_LIMIT)
-        choices = [_to_choice(stream) for stream in streams]
+        choices = [_to_choice(stream, classrooms.get(stream.classroom_id)) for stream in streams]
         query = self._plan(question, now=now, cameras=choices, ceiling=ceiling)
 
-        targets, notes = self._resolve_targets(query, streams)
+        targets, notes, target_label = self._resolve_targets(query, streams, classrooms)
         events, scan_truncated = self._collect_events(query, targets)
 
         changes = [event for target in targets for event in _keep_changes(events.get(target, []))]
@@ -112,10 +117,11 @@ class LlmSearchService:
         truncated = scan_truncated or len(changes) > len(limited)
 
         classroom_by_camera = {stream.camera_id: stream.classroom_id for stream in targets}
-        hits, snapshot_lookup_failed = self._to_hits(limited, classroom_by_camera)
+        hits, snapshot_lookup_failed = self._to_hits(limited, classroom_by_camera, classrooms)
 
         return SearchOutcome(
             query=replace(query, notes=query.notes + tuple(notes)),
+            target_label=target_label,
             hits=tuple(hits),
             truncated=truncated,
             snapshot_lookup_failed=snapshot_lookup_failed,
@@ -186,10 +192,28 @@ class LlmSearchService:
         record_plan_attempt(retry=retry, outcome="success", started_at=started_at)
         return query
 
+    def _load_classrooms(self, streams: Sequence[VideoStream]) -> dict[str, Classroom]:
+        """스트림이 가리키는 강의실만 식별자로 모은다.
+
+        전체 목록을 읽지 않는 이유는 상한이 필요해지기 때문이다. 강의실이 늘면
+        `list_classrooms`는 페이지를 잘라 주고, 잘린 뒤쪽 강의실은 이름이 붙지 않은
+        채로 화면에 UUID가 다시 나타난다. 같은 강의실을 여러 카메라가 가리켜도
+        `dict.fromkeys`가 중복을 지워 조회는 강의실 수만큼만 일어난다.
+        """
+        found: dict[str, Classroom] = {}
+        for classroom_id in dict.fromkeys(stream.classroom_id for stream in streams):
+            classroom = self._classrooms.get_classroom(classroom_id)
+            if classroom is not None:
+                found[classroom_id] = classroom
+        return found
+
     def _resolve_targets(
-        self, query: SearchQuery, enabled: Sequence[VideoStream]
-    ) -> tuple[list[VideoStream], list[str]]:
-        """계획이 가리키는 카메라를 실제 등록 정보로 좁힌다.
+        self,
+        query: SearchQuery,
+        enabled: Sequence[VideoStream],
+        classrooms: dict[str, Classroom],
+    ) -> tuple[list[VideoStream], list[str], str]:
+        """계획이 가리키는 카메라를 실제 등록 정보로 좁히고, 대상을 한 문장으로 적는다.
 
         찾지 못해도 오류로 만들지 않는다. "그런 강의실은 없다"는 정상적인 0건이고,
         다만 **왜 0건인지**를 사용자가 알아야 하므로 사유를 남긴다.
@@ -198,26 +222,46 @@ class LlmSearchService:
         옮기라고만 요구한다(`prompts.py`). 모델이 "목록에 없으니 null"이라고 판단해
         버리면 없는 강의실을 물은 사람과 아무 곳도 말하지 않은 사람이 구분되지 않아,
         아래 사유들이 영영 나가지 못한다.
+
+        표시 문장도 여기서 만든다. 대상이 카메라인지 강의실인지 전체인지의 판정이
+        이미 여기 있고, 같은 분기를 템플릿이 다시 하면 강의실 이름을 붙이기 위해
+        템플릿이 저장소를 알아야 한다.
         """
         if query.camera_id is not None:
             # 카메라를 콕 집었을 때는 비활성 카메라도 찾는다. 지금 꺼져 있어도
             # 과거 이력은 남아 있고, 사용자가 물은 것은 과거다.
             stream = self._streams.find_by_camera_id(query.camera_id)
             if stream is None:
-                return [], [f"등록되지 않은 카메라({query.camera_id})라 결과를 찾지 못했습니다."]
-            return [stream], []
+                return (
+                    [],
+                    [f"등록되지 않은 카메라({query.camera_id})라 결과를 찾지 못했습니다."],
+                    f"등록되지 않은 카메라 {query.camera_id}",
+                )
+            return [stream], [], f"카메라 {stream.camera_label} ({stream.camera_id})"
 
         if query.classroom_id is not None:
             matched = [stream for stream in enabled if stream.classroom_id == query.classroom_id]
+            classroom = classrooms.get(query.classroom_id)
             if not matched:
-                return [], [
-                    f"{query.classroom_id} 강의실에 사용 중인 카메라가 없어 결과를 찾지 못했습니다."
-                ]
-            return matched, []
+                # 모델이 UUID 대신 사람이 부르는 코드를 냈을 수 있다. 프롬프트가
+                # 목록에 코드를 함께 실어 주므로 보통은 UUID가 오지만, 그것 하나에
+                # 결과를 걸지 않는다 — 코드를 그대로 받아도 같은 강의실을 찾는다.
+                by_code = self._classrooms.get_classroom_by_code(query.classroom_id)
+                if by_code is not None:
+                    matched = [stream for stream in enabled if stream.classroom_id == by_code.id]
+                    classroom = by_code
+            label = _classroom_label(classroom, query.classroom_id)
+            if not matched:
+                return (
+                    [],
+                    [f"{label}에 사용 중인 카메라가 없어 결과를 찾지 못했습니다."],
+                    label,
+                )
+            return matched, [], label
 
         if not enabled:
-            return [], ["사용 중인 카메라가 없어 결과를 찾지 못했습니다."]
-        return list(enabled), []
+            return [], ["사용 중인 카메라가 없어 결과를 찾지 못했습니다."], "사용 중인 카메라 없음"
+        return list(enabled), [], "사용 중인 카메라 전체"
 
     def _collect_events(
         self, query: SearchQuery, targets: Sequence[VideoStream]
@@ -243,7 +287,10 @@ class LlmSearchService:
         return collected, truncated
 
     def _to_hits(
-        self, events: Sequence[DetectionEvent], classroom_by_camera: dict[str, str]
+        self,
+        events: Sequence[DetectionEvent],
+        classroom_by_camera: dict[str, str],
+        classrooms: dict[str, Classroom],
     ) -> tuple[list[DetectionHit], bool]:
         """결과 줄을 만들고 스냅샷 키가 실재하는지 확인한다.
 
@@ -263,11 +310,20 @@ class LlmSearchService:
                 if detection.student_id
             )
             key = build_snapshot_key(event.camera_id, event.captured_at)
+            classroom_id = classroom_by_camera.get(event.camera_id, "")
             hits.append(
                 DetectionHit(
                     event_id=event.event_id,
                     camera_id=event.camera_id,
-                    resolved_classroom_id=classroom_by_camera.get(event.camera_id, ""),
+                    resolved_classroom_id=classroom_id,
+                    # 강의실을 되짚지 못한 이벤트는 빈칸으로 남긴다. 화면이 이
+                    # 값의 유무로 표시 여부를 정하므로, "강의실 "만 남은 문자열을
+                    # 넘기면 이름 없는 꼬리표가 붙는다.
+                    resolved_classroom_label=(
+                        _classroom_label(classrooms.get(classroom_id), classroom_id)
+                        if classroom_id
+                        else ""
+                    ),
                     captured_at=event.captured_at,
                     detection_count=len(event.detections),
                     identified=identified,
@@ -294,12 +350,31 @@ class LlmSearchService:
         return frozenset(keys), False
 
 
-def _to_choice(stream: VideoStream) -> CameraChoice:
+def _to_choice(stream: VideoStream, classroom: Classroom | None) -> CameraChoice:
     return CameraChoice(
         camera_id=stream.camera_id,
         classroom_id=stream.classroom_id,
         label=stream.camera_label,
+        classroom_code=classroom.code if classroom is not None else None,
+        classroom_name=classroom.name if classroom is not None else None,
     )
+
+
+def _classroom_label(classroom: Classroom | None, fallback: str) -> str:
+    """강의실을 사람이 읽는 이름으로 적는다.
+
+    등록을 찾으면 코드와 이름을 잇는다. 이 이름 자체가 대개 "강의실"로 끝나므로
+    **호출부에서 "강의실"을 덧붙이지 않는다.** 붙이면 "A111 4A 강의실 강의실"이
+    된다(2026-08-23 실측). 대신 등록을 찾지 못했을 때만 앞에 붙여, 그 문자열이
+    강의실을 가리킨다는 것을 잃지 않는다.
+
+    등록이 없으면 `fallback`을 쓴다. 대개 UUID라 읽기 어렵지만, 빈칸으로 두면
+    **어느 강의실인지 모른다는 사실 자체가 화면에서 사라진다.**
+    """
+    if classroom is None:
+        return f"강의실 {fallback}"
+    parts = [part for part in (classroom.code, classroom.name) if part]
+    return " ".join(parts) if parts else f"강의실 {classroom.id}"
 
 
 def _keep_changes(events: Sequence[DetectionEvent]) -> list[DetectionEvent]:

@@ -31,6 +31,7 @@ _HIT = DetectionHit(
     event_id="event-1",
     camera_id="camera-01",
     resolved_classroom_id="A101",
+    resolved_classroom_label="A101 1강의실",
     captured_at=datetime(2026, 8, 14, 6, 30, tzinfo=UTC),
     detection_count=2,
     identified=(IdentifiedStudent(student_id="student-1", identity_confidence=0.9),),
@@ -58,6 +59,7 @@ def _outcome(
 ) -> SearchOutcome:
     return SearchOutcome(
         query=_QUERY,
+        target_label="A101 1강의실",
         hits=hits,
         truncated=truncated,
         snapshot_lookup_failed=snapshot_failed,
@@ -123,6 +125,7 @@ def test_스냅샷이_없으면_이미지_경로도_없다(client: TestClient) -
         event_id="event-2",
         camera_id="camera-01",
         resolved_classroom_id="A101",
+        resolved_classroom_label="A101 1강의실",
         captured_at=datetime(2026, 8, 14, 7, 0, tzinfo=UTC),
         detection_count=0,
         identified=(),
@@ -220,6 +223,7 @@ def test_화면이_이미지_확인_실패를_결과와_함께_알린다(client:
         event_id="event-3",
         camera_id="camera-01",
         resolved_classroom_id="A101",
+        resolved_classroom_label="A101 1강의실",
         captured_at=datetime(2026, 8, 14, 8, 0, tzinfo=UTC),
         detection_count=1,
         identified=(),
@@ -243,6 +247,44 @@ def test_화면이_해석한_계획과_조정_사유를_보여준다(client: Tes
     assert "이렇게 이해했습니다" in response.text
     assert "마지막 7일만 찾았습니다" in response.text
     assert "이것이 전부가 아닙니다" in response.text
+
+
+def test_화면은_해석한_기간을_한국_시각으로_보여준다(client: TestClient) -> None:
+    """질문은 한국 시각으로 들어온다. UTC로 보여주면 대조하려고 9시간을 암산해야 한다.
+
+    **잘못 해석된 구간을 알아챌 수 있는 유일한 자리다.** 오전·오후를 밝히지 않은
+    질문은 오후로 읽는데(`prompts.py`), 사용자가 오전을 뜻했다면 여기서 보고
+    질문을 고친다.
+    """
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.get("/llm-search", params={"q": "오늘 A101"})
+
+    # 계획의 기간: UTC 00:00 -> KST 09:00
+    assert "2026-08-14 09:00:00 KST" in response.text
+    # 결과 줄의 시각: UTC 06:30 -> KST 15:30
+    assert "2026-08-14 15:30:00 KST" in response.text
+    assert "UTC" not in response.text
+
+
+def test_화면은_강의실을_사람이_읽는_이름으로_보여준다(client: TestClient) -> None:
+    """`classroom_id`는 UUID라 그대로 내보내면 아무 정보가 되지 못한다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.get("/llm-search", params={"q": "오늘 A101"})
+
+    assert "A101 1강의실" in response.text
+
+
+def test_결과가_없으면_기간_확인을_먼저_안내한다(client: TestClient) -> None:
+    """0건의 가장 흔한 원인이 오전·오후 오해다. 저장 여부부터 의심하게 두지 않는다."""
+    _override(FakeService(_outcome()))
+
+    response = client.get("/llm-search", params={"q": "오늘 3시부터 4시"})
+
+    assert "탐지 기록이 없습니다" in response.text
+    assert "물어보신 시각과 같은지" in response.text
+    assert "오전 3시" in response.text
 
 
 def test_기능을_끈_환경에서는_API가_503이다(client: TestClient) -> None:

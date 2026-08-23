@@ -600,6 +600,7 @@ def _query_planner(settings: Settings) -> QueryPlanner:
 def get_llm_search_service(
     detection_repository: DetectionEventRepository = Depends(get_detection_event_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    classroom_repository: ClassroomRepository = Depends(get_classroom_repository),
     snapshot_service: SnapshotService = Depends(get_snapshot_service),
     settings: Settings = Depends(get_settings),
 ) -> LlmSearchService | None:
@@ -622,6 +623,7 @@ def get_llm_search_service(
         _query_planner(settings),
         detection_repository,
         stream_repository,
+        classroom_repository,
         snapshot_service,
         max_span_days=settings.llm_search_max_span_days,
         scan_limit=settings.llm_search_scan_limit,

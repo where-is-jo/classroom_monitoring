@@ -27,7 +27,7 @@ def test_현재_시각을_한국_시각으로만_알려준다() -> None:
     assert "2026-08-14T00:30:00Z" not in prompt
 
 
-def test_시각을_계산하지_말라고_지시한다() -> None:
+def test_시각대를_변환하지_말라고_지시한다() -> None:
     """9시간 빼기는 작은 모델이 자주 틀리고, 틀려도 검증이 잡지 못한다.
 
     형식상 완벽한 ISO 8601이라 그대로 통과하고 사용자는 조용히 빈 결과를 받는다.
@@ -35,22 +35,101 @@ def test_시각을_계산하지_말라고_지시한다() -> None:
     prompt = _prompt([])
 
     assert "+09:00" in prompt
-    assert "계산하지 마라" in prompt
+    assert "시각대를 변환하지 마라" in prompt
+
+
+def test_오전을_밝히지_않은_시각은_오후로_읽으라고_지시한다() -> None:
+    """한국어 "3시"에는 오전·오후가 담기지 않는다. **검증이 잡지 못하는 실패다.**
+
+    03:00도 형식상 완벽한 시각이라 `planning.py`를 그대로 통과하고, 사용자는
+    "그 시간에 아무도 없었다"는 답을 받는다(2026-08-23 실측). 강의실을 쓰는
+    시간대가 낮이라 오후로 읽는 편이 거의 언제나 맞다.
+    """
+    prompt = _prompt([])
+
+    assert "오후로 읽는다" in prompt
     # 예시의 날짜는 프롬프트의 "오늘"과 같아야 한다. 다른 날짜를 예로 들면
     # 모델이 그 날짜를 그대로 베낀다.
-    assert "2026-08-14T06:00:00+09:00" in prompt
+    assert "2026-08-14T15:00:00+09:00" in prompt
+    # 오전을 밝혔을 때의 예시도 함께 준다. 한쪽만 주면 모델이 언제나 그쪽으로 쏠린다.
+    assert "2026-08-14T03:00:00+09:00" in prompt
+
+
+def test_강의실을_부르는_이름을_식별자와_함께_알려준다() -> None:
+    """`classroom_id`는 UUID라 질문에 등장하지 않는다.
+
+    코드와 이름이 같은 줄에 없으면 모델은 "A101"을 식별자로 옮길 근거가 없어,
+    들은 이름을 그대로 `classroom_id`에 적는다. 그러면 등록된 강의실을 물어도
+    등록되지 않은 곳으로 판정된다(2026-08-23 실측).
+    """
+    prompt = _prompt(
+        [
+            CameraChoice(
+                camera_id="camera-01",
+                classroom_id="room-a101",
+                label="A101 앞문",
+                classroom_code="A101",
+                classroom_name="1강의실",
+            )
+        ]
+    )
+
+    assert "classroom_id=room-a101 (A101 1강의실)" in prompt
+    assert "괄호 앞의 classroom_id를 쓴다" in prompt
+
+
+def test_강의실_등록을_찾지_못하면_식별자만_알려준다() -> None:
+    """스트림에는 `classroom_id`만 담겨 있어 강의실 등록이 지워져도 스트림은 남는다."""
+    prompt = _prompt(
+        [
+            CameraChoice(
+                camera_id="camera-01",
+                classroom_id="room-a101",
+                label="A101 앞문",
+                classroom_code=None,
+                classroom_name=None,
+            )
+        ]
+    )
+
+    assert "classroom_id=room-a101 / A101 앞문" in prompt
+
+
+def test_기간을_말하지_않았을_때의_두_날짜를_모두_알려준다() -> None:
+    """ "다음날"이라고만 말하면 모델이 그 한 걸음을 건너뛴다.
+
+    2026-08-23 실측: "A111 강의실에 오늘 몇 명 있었어?"에 from과 to를 둘 다 같은 날
+    00:00으로 냈고, `EMPTY_RANGE`로 거절돼 사용자는 아무 잘못 없이 질문을 고치라는
+    안내를 받았다. 날짜 계산은 이 파일의 다른 규칙과 마찬가지로 우리가 한다.
+    """
+    prompt = _prompt([])
+
+    assert "2026-08-14T00:00:00+09:00" in prompt
+    assert "2026-08-15T00:00:00+09:00" in prompt
 
 
 def test_등록된_카메라_식별자를_그대로_알려준다() -> None:
     prompt = _prompt(
         [
-            CameraChoice(camera_id="camera-01", classroom_id="A101", label="A101 앞문"),
-            CameraChoice(camera_id="camera-02", classroom_id="B203", label="B203 뒷문"),
+            CameraChoice(
+                camera_id="camera-01",
+                classroom_id="room-a101",
+                label="A101 앞문",
+                classroom_code="A101",
+                classroom_name="1강의실",
+            ),
+            CameraChoice(
+                camera_id="camera-02",
+                classroom_id="room-b203",
+                label="B203 뒷문",
+                classroom_code="B203",
+                classroom_name="2강의실",
+            ),
         ]
     )
 
     assert "camera_id=camera-01" in prompt
-    assert "classroom_id=B203" in prompt
+    assert "classroom_id=room-b203" in prompt
     assert "지어내지 마라" in prompt
 
 
@@ -76,14 +155,36 @@ def test_목록에_없는_곳도_들은_이름을_적으라고_지시한다() ->
     엉뚱한 전체 결과를 받는다. 등록 여부 판정과 안내 문구는 service.py의
     `_resolve_targets`가 갖고 있고, 모델이 미리 판단해 버리면 그 경로에 닿지 못한다.
     """
-    prompt = _prompt([CameraChoice(camera_id="camera-01", classroom_id="A101", label="A101 앞문")])
+    prompt = _prompt(
+        [
+            CameraChoice(
+                camera_id="camera-01",
+                classroom_id="room-a101",
+                label="A101 앞문",
+                classroom_code="A101",
+                classroom_name="1강의실",
+            )
+        ]
+    )
 
-    assert "그대로 옮겨 적는다" in prompt
+    assert "들은 이름을 그대로 classroom_id에 적는다" in prompt
     assert "안내는 서버가 한다" in prompt
+    # 등록된 곳이 하나뿐일 때 모델이 그쪽으로 끌리는 것을 막으려는 문장이다.
+    assert "목록에 하나만 있어도 그것으로 바꾸지 마라" in prompt
 
 
 def test_아무_곳도_말하지_않았을_때만_null이라고_지시한다() -> None:
     """ "없으면 null"과 "말하지 않았으면 null"은 다르다. 둘을 섞으면 위 구분이 무너진다."""
-    prompt = _prompt([CameraChoice(camera_id="camera-01", classroom_id="A101", label="A101 앞문")])
+    prompt = _prompt(
+        [
+            CameraChoice(
+                camera_id="camera-01",
+                classroom_id="room-a101",
+                label="A101 앞문",
+                classroom_code="A101",
+                classroom_name="1강의실",
+            )
+        ]
+    )
 
     assert "아무 곳도 말하지 않았을 때만 null이다" in prompt
