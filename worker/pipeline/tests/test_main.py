@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from inference.config import InferenceSettings
 from inference.consumer import log_result
-from inference.face_identity import FaceIdentityResultHandler
+from inference.face_identity import FastAPIEntryIdentityEventHandler
 from inference.handler import FastAPIResultHandler
 from inference.identity_handover import (
     IdentityHandoverResultHandler,
@@ -105,19 +105,23 @@ def build_runner(
 def test_FASTAPI_URL_미설정이면_log_result를_그대로_쓴다() -> None:
     settings = build_inference_settings()
 
-    handler = pipeline_main.build_result_handler(settings, fastapi_url=None)
+    handler, entry_handler = pipeline_main.build_result_handlers(
+        settings, fastapi_url=None
+    )
 
     assert handler is log_result
+    assert entry_handler is None
 
 
 def test_FASTAPI_URL_설정이면_FastAPIResultHandler로_감싼다() -> None:
     settings = build_inference_settings()
 
-    handler = pipeline_main.build_result_handler(
+    handler, entry_handler = pipeline_main.build_result_handlers(
         settings, fastapi_url="http://fastapi:8000"
     )
 
     assert isinstance(handler, FastAPIResultHandler)
+    assert entry_handler is None
     # 감싼 핸들러는 기존 로그 동작을 먼저 수행한다. 전송이 실패해도 기록이 남는다.
     assert handler._inner is log_result  # type: ignore[attr-defined]
 
@@ -126,7 +130,7 @@ def test_FASTAPI_URL_설정이어도_스냅샷_핸들러를_감싼다() -> None:
     """기존 스냅샷 적재 동작을 해치지 않고 그 위에 전송만 얹는다."""
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler = pipeline_main.build_result_handler(
+    handler, _ = pipeline_main.build_result_handlers(
         settings, fastapi_url="http://fastapi:8000"
     )
 
@@ -134,25 +138,24 @@ def test_FASTAPI_URL_설정이어도_스냅샷_핸들러를_감싼다() -> None:
     assert isinstance(handler._inner, SnapshotResultHandler)  # type: ignore[attr-defined]
 
 
-def test_FACE_IDENTITY_URL_설정이면_기존_전송_앞에서_식별을_보강한다() -> None:
+def test_FACE_IDENTITY_URL_설정이면_입구_관측_전용_핸들러를_분리한다() -> None:
     settings = build_inference_settings()
 
-    handler = pipeline_main.build_result_handler(
+    handler, entry_handler = pipeline_main.build_result_handlers(
         settings,
         fastapi_url="http://fastapi:8000",
         face_identity_url="http://deeplearning:8100",
-        face_identity_camera_ids=frozenset({"entry-camera"}),
     )
 
-    assert isinstance(handler, FaceIdentityResultHandler)
-    assert isinstance(handler._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
+    assert isinstance(handler, FastAPIResultHandler)
+    assert isinstance(entry_handler, FastAPIEntryIdentityEventHandler)
 
 
 def test_FASTAPI_URL_미설정이면_스냅샷_설정은_기존대로_적용된다() -> None:
     """fastapi_url을 안 준다고 스냅샷이 꺼지면 안 된다."""
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler = pipeline_main.build_result_handler(settings, fastapi_url=None)
+    handler, _ = pipeline_main.build_result_handlers(settings, fastapi_url=None)
 
     assert isinstance(handler, SnapshotResultHandler)
 
@@ -193,7 +196,7 @@ def test_저장소를_준비하지_못하면_스냅샷만_끄고_계속한다(
     _fail_to_build_storage(monkeypatch)
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler = pipeline_main.build_result_handler(settings, fastapi_url=None)
+    handler, _ = pipeline_main.build_result_handlers(settings, fastapi_url=None)
 
     assert handler is log_result
 
@@ -205,7 +208,7 @@ def test_저장소가_없어도_FastAPI_전송은_그대로_남는다(
     _fail_to_build_storage(monkeypatch)
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler = pipeline_main.build_result_handler(
+    handler, _ = pipeline_main.build_result_handlers(
         settings, fastapi_url="http://fastapi:8000"
     )
 
@@ -279,26 +282,27 @@ def test_조립_시_FASTAPI_URL_빈_문자열이면_전송을_켜지_않는다(
     assert handler._inner is log_result  # type: ignore[attr-defined]
 
 
-def test_ByteTrack_얼굴식별_인계_FastAPI_순서로_핸들러를_조립한다() -> None:
+def test_CCTV와_입구_핸들러가_공유_인계_coordinator로_조립된다() -> None:
     settings = build_inference_settings()
     route = IdentityHandoverRoute(
         "entry-camera", "classroom-cctv", (0.0, 0.0, 0.3, 1.0)
     )
 
-    handler = pipeline_main.build_result_handler(
+    handler, entry_handler = pipeline_main.build_result_handlers(
         settings,
         fastapi_url="http://fastapi:8000",
         face_identity_url="http://deeplearning:8100",
-        face_identity_camera_ids=frozenset({"entry-camera"}),
         person_tracking_config=pipeline_main.ByteTrackConfig(),
+        person_tracking_camera_ids=frozenset({"classroom-cctv"}),
         identity_handover_routes=(route,),
     )
 
     assert isinstance(handler, ByteTrackResultHandler)
-    assert isinstance(handler._inner, FaceIdentityResultHandler)  # type: ignore[attr-defined]
-    handover = handler._inner._inner  # type: ignore[attr-defined]
+    handover = handler._inner  # type: ignore[attr-defined]
     assert isinstance(handover, IdentityHandoverResultHandler)
     assert isinstance(handover._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
+    assert isinstance(entry_handler, FastAPIEntryIdentityEventHandler)
+    assert entry_handler._inner == handover.observe_entry  # type: ignore[attr-defined]
 
 
 def test_다중_카메라_조립은_카메라마다_최신_프레임을_보존한다(
@@ -397,6 +401,7 @@ def test_얼굴_카메라가_STREAM_SOURCES에_없으면_기동하지_않는다(
             inference_settings=build_inference_settings(),
             pipeline_settings=PipelineSettings(  # type: ignore[call-arg]
                 _env_file=None,
+                fastapi_url="http://fastapi:8000",
                 face_identity_url="http://deeplearning:8100",
                 face_identity_camera_ids="entry-camera",
             ),

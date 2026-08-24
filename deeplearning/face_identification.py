@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import time
-from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,7 +20,6 @@ try:
         FaceGallery,
         FaceIdentityEngine,
         GalleryEntry,
-        IdentityStatus,
         IdentityThresholds,
         MultiFaceIdentityTracker,
         TrackedIdentity,
@@ -32,14 +30,12 @@ except ImportError:  # app.py를 `uvicorn app:app`으로 실행하는 컨테이�
         FaceGallery,
         FaceIdentityEngine,
         GalleryEntry,
-        IdentityStatus,
         IdentityThresholds,
         MultiFaceIdentityTracker,
         TrackedIdentity,
         normalize_embedding,
     )
 
-BBox = tuple[int, int, int, int]
 GalleryRevision = tuple[tuple[str, str], ...]
 
 
@@ -199,7 +195,6 @@ class FaceIdentificationConfig:
     tracker_history_size: int = 12
     tracker_minimum_observations: int = 4
     tracker_stale_frames: int = 30
-    minimum_face_coverage: float = 0.8
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.similarity_threshold <= 1.0:
@@ -208,74 +203,6 @@ class FaceIdentificationConfig:
             raise ValueError("실시간 식별 margin 임계값은 0과 2 사이여야 합니다.")
         if self.gallery_refresh_seconds <= 0:
             raise ValueError("gallery refresh 주기는 0보다 커야 합니다.")
-        if not 0.0 <= self.minimum_face_coverage <= 1.0:
-            raise ValueError("얼굴 포함률 임계값은 0과 1 사이여야 합니다.")
-
-
-@dataclass(frozen=True)
-class PersonIdentity:
-    person_index: int
-    face_bbox: BBox
-    track_id: int
-    student_id: str | None
-    similarity: float | None
-
-
-def _area(bbox: BBox) -> int:
-    return max(0, bbox[2] - bbox[0]) * max(0, bbox[3] - bbox[1])
-
-
-def _face_coverage(face: BBox, person: BBox) -> float:
-    left = max(face[0], person[0])
-    top = max(face[1], person[1])
-    right = min(face[2], person[2])
-    bottom = min(face[3], person[3])
-    intersection = max(0, right - left) * max(0, bottom - top)
-    return intersection / max(1, _area(face))
-
-
-def associate_identities_to_people(
-    people: Sequence[BBox],
-    identities: Sequence[TrackedIdentity],
-    *,
-    minimum_face_coverage: float,
-) -> tuple[PersonIdentity, ...]:
-    """얼굴 중심·포함률로 일대일 연결하며 모호한 연결은 모두 버린다."""
-    candidates_by_face: list[list[int]] = []
-    for identity in identities:
-        center_x = (identity.bbox[0] + identity.bbox[2]) / 2.0
-        center_y = (identity.bbox[1] + identity.bbox[3]) / 2.0
-        candidates_by_face.append(
-            [
-                index
-                for index, person in enumerate(people)
-                if person[0] <= center_x <= person[2]
-                and person[1] <= center_y <= person[3]
-                and _face_coverage(identity.bbox, person) >= minimum_face_coverage
-            ]
-        )
-
-    unique_owner_counts = Counter(
-        candidates[0] for candidates in candidates_by_face if len(candidates) == 1
-    )
-    matches: list[PersonIdentity] = []
-    for identity, candidates in zip(identities, candidates_by_face, strict=True):
-        if len(candidates) != 1 or unique_owner_counts[candidates[0]] != 1:
-            continue
-        is_registered = (
-            identity.status is IdentityStatus.REGISTERED
-            and identity.student_id is not None
-        )
-        matches.append(
-            PersonIdentity(
-                person_index=candidates[0],
-                face_bbox=identity.bbox,
-                track_id=identity.track_id,
-                student_id=identity.student_id if is_registered else None,
-                similarity=identity.similarity if is_registered else None,
-            )
-        )
-    return tuple(matches)
 
 
 class FaceIdentificationRuntime:
@@ -368,8 +295,7 @@ class FaceIdentificationRuntime:
         *,
         camera_id: str,
         image_bgr: np.ndarray,
-        person_bboxes: Sequence[BBox],
-    ) -> tuple[PersonIdentity, ...]:
+    ) -> tuple[TrackedIdentity, ...]:
         engine = self._refresh_gallery()
         faces = engine.identify(image_bgr)
         tracker = self._trackers.get(camera_id)
@@ -381,9 +307,4 @@ class FaceIdentificationRuntime:
                 stale_frames=self._config.tracker_stale_frames,
             )
             self._trackers[camera_id] = tracker
-        identities = tracker.update(faces)
-        return associate_identities_to_people(
-            person_bboxes,
-            identities,
-            minimum_face_coverage=self._config.minimum_face_coverage,
-        )
+        return tracker.update(faces)

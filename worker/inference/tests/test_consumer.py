@@ -10,7 +10,12 @@ from shared.frame_buffer import FrameBuffer
 from shared.types import CapturedFrame, Frame
 
 from ..consumer import InferenceConsumer
-from ..types import Detection, InferenceResult
+from ..types import (
+    Detection,
+    EntryFaceObservationBatch,
+    EntryIdentityProcessingStatus,
+    InferenceResult,
+)
 
 
 def make_captured(sequence: int, *, camera_id: str = "camera-01") -> CapturedFrame:
@@ -201,3 +206,59 @@ def test_기본_결과_처리는_예외를_내지_않는다() -> None:
 
     log_result(make_captured(0), make_result(2))
     log_result(make_captured(1), InferenceResult(frame_shape=(2, 2, 3), detections=()))
+
+
+def test_입구_카메라는_YOLO를_호출하지_않고_얼굴_processor만_호출한다() -> None:
+    class FakeEntryProcessor:
+        def __init__(self) -> None:
+            self.calls: list[CapturedFrame] = []
+
+        def process(self, captured: CapturedFrame) -> EntryFaceObservationBatch:
+            self.calls.append(captured)
+            return EntryFaceObservationBatch(
+                frame_shape=captured.frame.shape,
+                processing_status=EntryIdentityProcessingStatus.SUCCEEDED,
+                observations=(),
+            )
+
+    person_processor = FakeProcessor([make_result()])
+    entry_processor = FakeEntryProcessor()
+    handled: list[EntryFaceObservationBatch] = []
+    consumer = InferenceConsumer(
+        frame_buffer=FrameBuffer(maxsize=1),
+        processor=person_processor,  # type: ignore[arg-type]
+        shutdown_event=threading.Event(),
+        entry_processor=entry_processor,
+        entry_camera_ids=frozenset({"entry-camera"}),
+        entry_result_handler=lambda _captured, batch: handled.append(batch),
+    )
+
+    consumer._process(make_captured(1, camera_id="entry-camera"))
+
+    assert person_processor.calls == []
+    assert len(entry_processor.calls) == 1
+    assert handled[0].processing_status is EntryIdentityProcessingStatus.SUCCEEDED
+
+
+def test_CCTV는_얼굴_processor를_호출하지_않고_YOLO만_호출한다() -> None:
+    class UnexpectedEntryProcessor:
+        def process(self, captured: CapturedFrame) -> EntryFaceObservationBatch:
+            del captured
+            raise AssertionError("CCTV에서 얼굴 서비스를 호출하면 안 됩니다.")
+
+    person_processor = FakeProcessor([make_result()])
+    handled: list[InferenceResult] = []
+    consumer = InferenceConsumer(
+        frame_buffer=FrameBuffer(maxsize=1),
+        processor=person_processor,  # type: ignore[arg-type]
+        shutdown_event=threading.Event(),
+        result_handler=lambda _captured, result: handled.append(result),
+        entry_processor=UnexpectedEntryProcessor(),
+        entry_camera_ids=frozenset({"entry-camera"}),
+        entry_result_handler=lambda _captured, _batch: None,
+    )
+
+    consumer._process(make_captured(1, camera_id="classroom-cctv"))
+
+    assert len(person_processor.calls) == 1
+    assert handled == [make_result()]

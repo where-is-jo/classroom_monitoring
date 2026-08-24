@@ -50,12 +50,12 @@ MVP의 범위, 도메인 구조, 계약, 완료 조건을 정한다.
 | 좌석 관측 | batch 전체 선검증, event ID 멱등 처리, 오래된 관측은 현재 상태를 되돌리지 않음 |
 | 모니터링·검색 | `DEMO_MODE_ENABLED=true`인 local/dev의 고정 합성 데이터. 실제 스트림·의미 검색이 아니다 |
 | `worker/stream` | 다중 RTSP 수신·재연결·프레임 샘플링 |
-| `worker/inference` | 카메라별 최신 프레임을 학습 YOLO로 탐지하고 사람 ByteTrack을 부여. 입구 얼굴 식별을 CCTV track에 인계한 뒤 `FASTAPI_URL`로 전달 |
+| `worker/inference` | 입구는 얼굴 관측만, CCTV는 학습 YOLO·사람 ByteTrack만 실행. 입구 얼굴 신원을 CCTV track에 인계한 뒤 역할별 이벤트를 `FASTAPI_URL`로 전달 |
 | `worker/recorder` | FFmpeg 세그먼트를 객체 저장소에 적재하고 보존 기간 경과분 삭제 |
 | `deeplearning` | SCRFD·ArcFace 오픈셋 식별, 얼굴 track, MongoDB 대표 embedding 갤러리, MediaPipe 자세와 모델 비교 평가 하네스 구현 |
 | 학생·얼굴·좌석 연동 | 입구 식별→CCTV ByteTrack→좌석 ROI 코드 경로 구현. 실제 문 ROI·가중치 배포 검증과 시간표 기반 `ABSENT`는 남음 |
 
-입구 카메라 안에서는 사람 ByteTrack에 `student_id`와 식별 신뢰도를 채운다([0035](../architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+입구 카메라 안에서는 얼굴 track에 `student_id`와 ArcFace similarity를 채운다([0040](../architecture/decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)).
 worker는 CCTV 문 영역에서 유일하게 새로 생긴 ByteTrack에만 그 신원을 인계하고, 같은
 track이 유지되는 동안 좌석 ROI까지 전달한다([0036](../architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 동시 입장처럼 후보가 모호하면 잘못 잇지 않고 `UNKNOWN`으로 둔다.
@@ -165,17 +165,18 @@ MVP는 역할이 다른 카메라 2대를 쓴다([결정 0024](../architecture/d
 
 ```text
 입구 카메라                              어안 CCTV
-  사람 탐지 → ByteTrack → track_id        사람 탐지 → ByteTrack → track_id
+  얼굴 탐지 → 얼굴 track                    사람 탐지 → ByteTrack → track_id
        ↓                                        ↑
   얼굴 인식 → student_id                        │
        ↓                                        │
-  track_id에 student_id를 붙인다 ──인계──────────┘
+  얼굴 track에 student_id를 붙인다 ──인계────────┘
                                     ↑
                      문 영역 + 통과 시각의 유일 후보
 ```
 
 - **신원은 학생이 아니라 track에 붙는다.** track이 유지되는 동안만 신원이 유지된다.
-- **두 카메라는 화각이 달라 좌표계를 공유하지 않으므로 각각 독립적으로 트래킹한다.**
+- **두 카메라는 추적 대상도 다르다.** 입구는 얼굴 track, CCTV는 사람 ByteTrack을 쓰고
+  좌표계나 track ID 공간을 공유하지 않는다.
 - **인계는 CCTV 문 영역과 입구 통과 시각을 함께 쓴다.** "문 앞에서 t에 식별된 학생"과
   "t 직후 CCTV 문 영역에서 처음 생긴 track"이 각각 하나일 때만 연결한다.
 - **여러 명이 짧은 간격으로 들어오면 인계하지 않는다.** 후보 학생이나 신규 track이
@@ -482,7 +483,7 @@ POST /internal/inference/events
 3. **얼굴 등록** — 품질 판정 규칙과 등록 흐름. embedding 생성은 `deeplearning`에 위임한다.
 4. **모델 비교** — 얼굴 탐지기와 인식 모델 후보를 같은 조건으로 비교하고 결정을 기록한다.
 5. **`worker` → `deeplearning` 연결** — 모델 호출을 이관한다.
-5-1. **트래킹 실측** — 구현된 카메라별 ByteTrack의 ID switch·유실 구간을 실제 영상으로 측정한다.
+5-1. **트래킹 실측** — 구현된 CCTV ByteTrack의 ID switch·유실 구간을 실제 영상으로 측정한다.
 5-2. **카메라 간 신원 인계 보정** — CCTV 문 ROI와 시간 창을 실제 통과 영상으로 확정하고 동시 입장 실패율을 측정한다.
 6. **탐지 결과 → `fastapi` 연결** — 전달 방식을 확정하고 수신 API를 만든다.
 7. **좌석 대조** — 위치와 좌석 ROI로 현재 좌석을 정한다.

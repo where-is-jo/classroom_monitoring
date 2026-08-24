@@ -11,20 +11,18 @@
   camera-02 스레드 ─┼─put─▶ FrameBuffer ─get_latest─▶ inference-consumer 스레드
   camera-03 스레드 ─┘        (오래된 것 버림)              │
                                                           ▼
-                                                      학습 YOLO
-                                                          │
-                                                          ▼
-                                              카메라별 ByteTrack
-                                                          │
-                              지정 입구 카메라만           ▼
-                              deeplearning HTTP ◀── 사람 bbox + JPEG
-                                      │             (SCRFD · ArcFace · 갤러리)
-                                      └──────────▶ student_id 보강
-                                                          │
-                                      CCTV 문 영역·시각으로 track 인계
-                                                          │
-                                                          ▼
-                                            FastAPI HTTP 또는 탐지 결과 로그
+                     입구 카메라 ──JPEG──▶ deeplearning(SCRFD → ArcFace → 얼굴 track)
+                           │                          │
+                           │                          └── 얼굴 관측·식별 결과
+                           │                                      │
+                           │                         FastAPI 7일 메타데이터 저장
+                           │                                      │
+                           └──────── 신원 후보 ───────────────────┤
+                                                                  ▼
+                     CCTV ──▶ 학습 YOLO(person) ──▶ ByteTrack ──▶ 문 ROI 인계
+                                                                  │
+                                                                  ▼
+                                                    FastAPI 탐지 이벤트·좌석 판정
 ```
 
 설정을 읽고 객체를 조립하는 코드를 여기 한 곳에 모은다. 워커 안에서 서로를
@@ -55,7 +53,7 @@ python -m pipeline.main
 > **직접 확인한 것**: 필수 환경변수가 없을 때 종료 코드 1로 멈추는 것,
 > ultralytics가 없을 때 무엇을 설치해야 하는지 알리고 멈추는 것,
 > 수신 → 샘플링 → 버퍼 → 소비자까지 실제 컴포넌트로 잇는 통합 테스트.
-> 얼굴 식별 보강·대상 카메라 제한·장애 시 원본 탐지 통과, 카메라별 ByteTrack,
+> 입구 얼굴 관측·대상 카메라 제한·장애 격리, CCTV ByteTrack,
 > 역순 프레임을 포함한 입구→CCTV 인계와 좌석까지 신원 유지는 대역으로 검증했다.
 > **확인하지 못한 것**: 실제 학습 YOLO·얼굴 인식 가중치를 함께 띄운 end-to-end 동작.
 > 장비와 모델이 있는 사람이 확인한 뒤 이 문단을 갱신한다.
@@ -78,13 +76,12 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
 | `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
-| `PERSON_TRACKING_CAMERA_IDS` | ByteTrack 대상 camera ID | 비우면 모든 `STREAM_SOURCES` |
+| `PERSON_TRACKING_CAMERA_IDS` | YOLO·ByteTrack 대상 CCTV camera ID | 비우면 `STREAM_SOURCES`에서 얼굴 전용 camera를 뺀 나머지. 얼굴 전용 목록과 겹치면 기동 실패 |
 | `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | FastAPI 설정을 처음 읽기 전과 장애 시 사용할 정적 초기·fallback 값 |
 | `bytetrack_*` | 두 단계 매칭·track buffer 기준 | `config/settings.yml` |
 | `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도와 동적 설정 on/off·갱신 주기·timeout | `config/settings.yml` |
 | `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |
 | `face_identity_jpeg_quality` | 얼굴 식별 요청 JPEG 품질 | 기본 95 |
-| `face_identity_min_person_confidence` | 얼굴 서비스로 보낼 사람 bbox 최소 신뢰도 | 기본 0.5. ByteTrack 저신뢰도 bbox는 추적에만 사용 |
 | `metrics_enabled` | 지표 노출 여부 | 기본 `true` |
 | `metrics_host` | 지표 서버 바인딩 주소 | 기본 `0.0.0.0` |
 | `metrics_port` | 지표 서버 포트 | 기본 9101 |
@@ -167,7 +164,8 @@ curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
 | ultralytics 미설치·가중치 없음 | 무엇을 설치할지 알리고 종료 코드 1 |
 | 카메라 한 대 연결 실패 | 그 카메라만 재연결을 반복한다. 다른 카메라는 계속 돈다 |
 | 추론 1회 실패 | 스택을 로그로 남기고 다음 프레임으로 넘어간다 |
-| 얼굴 식별 HTTP·응답 실패 | 경고를 남기고 신원 없는 원래 사람 탐지를 FastAPI로 보낸다 |
+| 얼굴 식별 HTTP·응답 실패 | 처리 실패 상태와 빈 관측을 저장하고 CCTV 사람 탐지는 계속한다 |
+| 입구 관측 저장 실패 | 제한 재시도 후 오류를 남긴다. 이미 반영한 메모리 신원 인계는 취소하지 않는다 |
 | YOLO 임계값이 ByteTrack high 이상 | 저신뢰도 2단계 매칭이 사라지므로 시작 시 종료 |
 | 얼굴 식별 camera ID가 STREAM_SOURCES에 없음 | 호출이 영원히 0건인 상태를 막기 위해 시작 시 종료 |
 | 인계 후보 학생 또는 문 영역 신규 track이 여러 명 | 신원을 붙이지 않고 각 CCTV track을 미식별로 둔다 |

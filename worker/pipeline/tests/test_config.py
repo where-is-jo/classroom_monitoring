@@ -32,12 +32,6 @@ def test_fastapi_url_은_문자열로_로드한다() -> None:
     assert isinstance(settings.fastapi_url, str)
 
 
-def test_얼굴_식별_사람_최소_신뢰도를_설정한다() -> None:
-    settings = build_settings(face_identity_min_person_confidence=0.5)
-
-    assert settings.face_identity_min_person_confidence == 0.5
-
-
 def test_신원_인계는_얼굴_서비스가_확정한_학생을_다시_탈락시키지_않는다() -> None:
     settings = build_settings()
 
@@ -93,6 +87,29 @@ def test_인계_route의_입구_카메라는_얼굴_식별_대상이어야_한�
         build_settings(
             face_identity_url="http://deeplearning:8100",
             face_identity_camera_ids="different-entry",
+            identity_handover_routes=(
+                '[{"entry_camera_id":"entry-camera",'
+                '"classroom_camera_id":"classroom-cctv",'
+                '"classroom_entry_zone":[0,0,0.3,1]}]'
+            ),
+        )
+
+
+def test_얼굴_전용과_사람_추적_카메라는_겹칠_수_없다() -> None:
+    with pytest.raises(ValueError, match="겹칠 수 없습니다"):
+        build_settings(
+            face_identity_url="http://deeplearning:8100",
+            face_identity_camera_ids="entry-camera",
+            person_tracking_camera_ids="entry-camera,classroom-cctv",
+        )
+
+
+def test_인계_route의_교실_카메라는_사람_추적_대상이어야_한다() -> None:
+    with pytest.raises(ValueError, match="교실 카메라"):
+        build_settings(
+            face_identity_url="http://deeplearning:8100",
+            face_identity_camera_ids="entry-camera",
+            person_tracking_camera_ids="different-cctv",
             identity_handover_routes=(
                 '[{"entry_camera_id":"entry-camera",'
                 '"classroom_camera_id":"classroom-cctv",'

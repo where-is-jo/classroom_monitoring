@@ -146,6 +146,7 @@ def validate(docker_root: Path) -> list[str]:
         "FASTAPI_URL",
         "FACE_IDENTITY_URL",
         "FACE_IDENTITY_CAMERA_IDS",
+        "PERSON_TRACKING_CAMERA_IDS",
     )
     if worker_env_exists:
         for key in required_worker_keys:
@@ -194,10 +195,16 @@ def validate(docker_root: Path) -> list[str]:
         for item in worker_env.get("PERSON_TRACKING_CAMERA_IDS", "").split(",")
         if item.strip()
     }
-    if tracking_ids:
-        required_tracking_ids = face_camera_ids | {"classroom-cctv"}
-        if not required_tracking_ids <= tracking_ids:
-            errors.append("PERSON_TRACKING_CAMERA_IDS에 입구와 classroom-cctv가 모두 필요합니다.")
+    missing_tracking_cameras = tracking_ids - camera_ids
+    if missing_tracking_cameras:
+        errors.append("PERSON_TRACKING_CAMERA_IDS가 STREAM_SOURCES에 모두 포함되지 않습니다.")
+    if face_camera_ids & tracking_ids:
+        errors.append("입구 얼굴 카메라와 사람 탐지 카메라 역할은 겹칠 수 없습니다.")
+    if "classroom-cctv" not in tracking_ids:
+        errors.append("PERSON_TRACKING_CAMERA_IDS에 classroom-cctv가 필요합니다.")
+    unassigned_cameras = camera_ids - face_camera_ids - tracking_ids
+    if unassigned_cameras:
+        errors.append("모든 STREAM_SOURCES는 얼굴 전용 또는 사람 탐지 역할이어야 합니다.")
 
     raw_routes = worker_env.get("IDENTITY_HANDOVER_ROUTES", "").strip()
     if raw_routes:
@@ -213,7 +220,7 @@ def validate(docker_root: Path) -> list[str]:
                 zone = route.get("classroom_entry_zone")
                 if (
                     entry_id not in face_camera_ids
-                    or classroom_id not in camera_ids
+                    or classroom_id not in tracking_ids
                     or not isinstance(zone, list)
                     or len(zone) != 4
                     or any(

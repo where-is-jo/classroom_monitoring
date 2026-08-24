@@ -31,6 +31,12 @@ from ..classrooms.ports import (
 )
 from ..classrooms.service import ClassroomService
 from ..demo_seed import seed_demo_data, seed_roi_test_data, seed_video_streams
+from ..entry_identity_events.adapters.memory import (
+    InMemoryEntryIdentityEventRepository,
+)
+from ..entry_identity_events.adapters.mongo import MongoEntryIdentityEventRepository
+from ..entry_identity_events.ports import EntryIdentityEventRepository
+from ..entry_identity_events.service import EntryIdentityEventService
 from ..face_embeddings.adapters.http_analyzer import HttpFaceEmbeddingAnalyzer
 from ..face_embeddings.adapters.local_dataset import LocalFaceDatasetReader
 from ..face_embeddings.adapters.memory import InMemoryFaceEmbeddingRepository
@@ -159,6 +165,11 @@ def _video_stream_repository() -> MemoryVideoStreamRepository:
 
 
 @lru_cache
+def _entry_identity_event_repository() -> InMemoryEntryIdentityEventRepository:
+    return InMemoryEntryIdentityEventRepository(clock=utc_now)
+
+
+@lru_cache
 def _playback_session_repository() -> MemoryPlaybackSessionRepository:
     return MemoryPlaybackSessionRepository()
 
@@ -271,6 +282,11 @@ def _mongo_video_stream_repository() -> MongoVideoStreamRepository:
 
 
 @lru_cache
+def _mongo_entry_identity_event_repository() -> MongoEntryIdentityEventRepository:
+    return MongoEntryIdentityEventRepository(_mongo_database())
+
+
+@lru_cache
 def _mongo_playback_session_repository() -> MongoPlaybackSessionRepository:
     return MongoPlaybackSessionRepository(_mongo_database())
 
@@ -364,6 +380,14 @@ def get_video_stream_repository(
     if settings.database_mode == "memory":
         return _video_stream_repository()
     return _mongo_video_stream_repository()
+
+
+def get_entry_identity_event_repository(
+    settings: Settings = Depends(get_settings),
+) -> EntryIdentityEventRepository:
+    if settings.database_mode == "memory":
+        return _entry_identity_event_repository()
+    return _mongo_entry_identity_event_repository()
 
 
 def get_playback_session_repository(
@@ -773,6 +797,20 @@ def get_video_stream_service(
     )
 
 
+def get_entry_identity_event_service(
+    repository: EntryIdentityEventRepository = Depends(get_entry_identity_event_repository),
+    stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    settings: Settings = Depends(get_settings),
+) -> EntryIdentityEventService:
+    return EntryIdentityEventService(
+        repository,
+        stream_repository,
+        retention_days=settings.entry_identity_event_retention_days,
+        page_size_max=settings.page_size_max,
+        clock=utc_now,
+    )
+
+
 def get_playback_session_service(
     session_repository: PlaybackSessionRepository = Depends(get_playback_session_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
@@ -854,6 +892,7 @@ def initialize_data_store() -> None:
                 MongoVideoSegmentRepository.ensure_indexes,
                 MongoStudentStateRepository.ensure_indexes,
                 MongoVideoStreamRepository.ensure_indexes,
+                MongoEntryIdentityEventRepository.ensure_indexes,
                 MongoPlaybackSessionRepository.ensure_indexes,
                 MongoStudentRepository.ensure_indexes,
                 MongoRoiConnectionRepository.ensure_indexes,
@@ -905,6 +944,8 @@ def close_data_store() -> None:
     _mongo_student_state_repository.cache_clear()
     _mongo_video_segment_repository.cache_clear()
     _mongo_video_stream_repository.cache_clear()
+    _mongo_entry_identity_event_repository.cache_clear()
+    _entry_identity_event_repository.cache_clear()
     _mongo_playback_session_repository.cache_clear()
     _mongo_student_repository.cache_clear()
     _mongo_face_embedding_repository.cache_clear()

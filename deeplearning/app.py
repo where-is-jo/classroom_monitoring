@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import mediapipe as mp
@@ -77,16 +77,21 @@ class EmbeddingResponse(BaseModel):
     preprocessing_version: str
 
 
-class PersonIdentityResponse(BaseModel):
-    person_index: int
+class FaceObservationResponse(BaseModel):
+    face_track_id: str
     face_bbox: tuple[int, int, int, int]
-    track_id: str
+    detection_confidence: float
+    identity_status: Literal["REGISTERED", "UNKNOWN", "UNCERTAIN"]
     student_id: str | None = None
-    identity_confidence: float | None = None
+    similarity: float | None = None
+    margin: float | None = None
+    quality: float
+    observation_count: int
+    rejected_reason: str | None = None
 
 
 class FaceIdentificationResponse(BaseModel):
-    identities: list[PersonIdentityResponse]
+    observations: list[FaceObservationResponse]
 
 
 @dataclass(frozen=True)
@@ -248,9 +253,6 @@ def _build_face_identification_runtime(
         ),
         tracker_stale_frames=int(
             os.environ.get("FACE_IDENTITY_TRACK_STALE_FRAMES", "30")
-        ),
-        minimum_face_coverage=float(
-            os.environ.get("FACE_PERSON_COVERAGE_THRESHOLD", "0.8")
         ),
     )
     return FaceIdentificationRuntime(
@@ -556,39 +558,12 @@ async def _create_embedding(
     )
 
 
-def _person_bboxes(request: Request) -> tuple[tuple[int, int, int, int], ...]:
-    raw_value = request.headers.get("X-Person-Bboxes")
-    if raw_value is None:
-        raise HTTPException(status_code=400, detail="사람 bbox 목록이 필요합니다.")
-    try:
-        values = json.loads(raw_value)
-        if not isinstance(values, list) or len(values) > 100:
-            raise ValueError
-        if any(
-            not isinstance(value, list)
-            or len(value) != 4
-            or any(
-                not isinstance(item, int) or isinstance(item, bool) for item in value
-            )
-            for value in values
-        ):
-            raise ValueError
-        bboxes = tuple((value[0], value[1], value[2], value[3]) for value in values)
-        if any(bbox[0] >= bbox[2] or bbox[1] >= bbox[3] for bbox in bboxes):
-            raise ValueError
-        return bboxes
-    except (TypeError, ValueError, json.JSONDecodeError):
-        raise HTTPException(
-            status_code=400, detail="사람 bbox 목록이 올바르지 않습니다."
-        ) from None
-
-
 @app.post(
     "/internal/face-identifications",
     response_model=FaceIdentificationResponse,
 )
 async def identify_faces(request: Request) -> FaceIdentificationResponse:
-    """사람 bbox가 있는 JPEG에서 등록 학생 신원만 안전하게 보강한다."""
+    """입구 카메라 JPEG에서 얼굴을 검출·추적하고 오픈셋 신원을 판정한다."""
     runtime: FaceIdentificationRuntime | None = getattr(
         request.app.state, "face_identification_runtime", None
     )
@@ -597,7 +572,6 @@ async def identify_faces(request: Request) -> FaceIdentificationResponse:
     camera_id = request.headers.get("X-Camera-ID", "").strip()
     if not camera_id or len(camera_id) > 128:
         raise HTTPException(status_code=400, detail="카메라 ID가 필요합니다.")
-    person_bboxes = _person_bboxes(request)
     content = await request.body()
     image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
@@ -606,7 +580,6 @@ async def identify_faces(request: Request) -> FaceIdentificationResponse:
         identities = runtime.identify(
             camera_id=camera_id,
             image_bgr=image,
-            person_bboxes=person_bboxes,
         )
     except FaceGalleryUnavailable:
         # DB 주소나 embedding 값은 응답과 로그에 싣지 않는다.
@@ -614,17 +587,18 @@ async def identify_faces(request: Request) -> FaceIdentificationResponse:
             status_code=503, detail="얼굴 갤러리를 사용할 수 없습니다."
         ) from None
     return FaceIdentificationResponse(
-        identities=[
-            PersonIdentityResponse(
-                person_index=identity.person_index,
-                face_bbox=identity.face_bbox,
-                track_id=f"face-{identity.track_id}",
+        observations=[
+            FaceObservationResponse(
+                face_track_id=f"face-{identity.track_id}",
+                face_bbox=identity.bbox,
+                detection_confidence=identity.detection_confidence,
+                identity_status=identity.status.name,
                 student_id=identity.student_id,
-                identity_confidence=(
-                    None
-                    if identity.similarity is None
-                    else max(0.0, min(1.0, identity.similarity))
-                ),
+                similarity=identity.similarity,
+                margin=identity.margin,
+                quality=identity.quality,
+                observation_count=identity.observation_count,
+                rejected_reason=identity.rejected_reason,
             )
             for identity in identities
         ]

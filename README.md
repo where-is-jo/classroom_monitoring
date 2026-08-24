@@ -50,8 +50,10 @@
   ([결정 0028](./docs/architecture/decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)).
   세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
   `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
-  전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 deeplearning의
-  SCRFD·ArcFace 갤러리 식별로 `student_id`를 보강한다. FastAPI의 `/identity-handover`
+  전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 그 카메라는 YOLO 없이
+  deeplearning의 SCRFD→ArcFace→얼굴 track만 실행한다. CCTV는 YOLO 사람 탐지와
+  ByteTrack만 실행한다. 입구 얼굴 관측은 FastAPI에 7일 메타데이터로 저장한다.
+  FastAPI의 `/identity-handover`
   화면에서 저장한 CCTV 문 ROI를 주기적으로 읽어 입구 신원을 CCTV ByteTrack으로
   넘기며, 설정 조회가 잠시 실패하면 마지막 정상값을 유지한다. 기본값은 꺼져 있다.
 
@@ -77,9 +79,10 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 `monitoring/internal`에는 Prometheus·Grafana·Loki·Alloy 구성이 있고, `RPAs`에는 아직
 실행 코드가 없다.
 
-입구 카메라의 얼굴 track과 특정 학생 식별, 카메라별 사람 ByteTrack, 문 영역·통과
+입구 카메라의 얼굴 track과 특정 학생 식별, CCTV 사람 ByteTrack, 문 영역·통과
 시각을 이용한 입구→CCTV 신원 인계가 코드와 합성 테스트로 연결됐다
-([결정 0036](./docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
+([결정 0036](./docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다),
+[0040](./docs/architecture/decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)).
 CCTV detection의 `student_id`와 `track_id`는 FastAPI의 ROI·좌석 판정을 거쳐 저장·SSE·
 화면까지 전달된다. `/identity-handover`에서 CCTV 현재 화면에 문 영역을 겹쳐 보고 다시
 그리면 worker가 재시작 없이 반영한다. 입구 사람 track ID가 바뀌더라도 활성 학생 하나를
@@ -113,7 +116,7 @@ README.md      이 문서
 | --- | --- | --- |
 | [webapps/fastapi](./webapps/fastapi/README.md) | FastAPI 웹 애플리케이션. API와 Jinja2 화면을 제공하는 유일한 외부 진입점. 학생 상태 판정을 소유한다. | 세 화면까지 동작 |
 | [worker](./worker/README.md) | 영상 파이프라인 워커 묶음(`stream`·`inference`·`recorder`). | 동작 |
-| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | SCRFD·ArcFace 식별·얼굴 추적·MediaPipe 자세와 평가 하네스 구현. worker의 카메라별 사람 ByteTrack·보수적 신원 인계와 연결됨 |
+| [deeplearning](./deeplearning/README.md) | 사람 탐지, 얼굴 탐지, 얼굴 인식 모델. 모델을 아는 유일한 곳. | 입구 SCRFD·ArcFace 식별·얼굴 추적·MediaPipe 자세와 평가 하네스 구현. worker의 CCTV 사람 ByteTrack·보수적 신원 인계와 연결됨 |
 | [monitoring/internal](./monitoring/internal/README.md) | **내부 모니터링.** 운영자가 서비스 자체를 보는 Prometheus·Grafana 설정. | 세 서비스 지표 수집 + Grafana 대시보드 둘(스택 상태·애플리케이션 지표). 알림 규칙은 아직 없음 |
 | [monitoring/external](./monitoring/external/README.md) | **외부 모니터링.** 사용자에게 제품으로 제공하는 실시간 영상. | 코드 없음. 경계 미확정 |
 

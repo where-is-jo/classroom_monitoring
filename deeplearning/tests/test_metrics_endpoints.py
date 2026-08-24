@@ -20,7 +20,7 @@ pytest.importorskip("insightface", reason="모델 의존성이 없는 환경에�
 import cv2
 import metrics
 import numpy as np
-from face_identification import PersonIdentity
+from face_identity import IdentityStatus, TrackedIdentity
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
@@ -284,20 +284,23 @@ def test_embedding_요청은_걸린_시간을_남긴다(client: TestClient) -> N
     assert value("face_embedding_duration_seconds_count") == before + 1
 
 
-def test_얼굴_식별_API는_embedding_없이_학생_ID와_bbox만_돌려준다(
+def test_얼굴_식별_API는_embedding_없이_얼굴_관측만_돌려준다(
     client: TestClient,
 ) -> None:
     class Runtime:
-        def identify(self, **kwargs: Any) -> tuple[PersonIdentity, ...]:
+        def identify(self, **kwargs: Any) -> tuple[TrackedIdentity, ...]:
             assert kwargs["camera_id"] == "entry-camera"
-            assert kwargs["person_bboxes"] == ((10, 5, 120, 115),)
             return (
-                PersonIdentity(
-                    person_index=0,
-                    face_bbox=(30, 20, 80, 75),
+                TrackedIdentity(
                     track_id=3,
+                    bbox=(30, 20, 80, 75),
+                    detection_confidence=0.94,
+                    status=IdentityStatus.REGISTERED,
                     student_id="student-a",
                     similarity=0.86,
+                    margin=0.31,
+                    quality=0.81,
+                    observation_count=4,
                 ),
             )
 
@@ -306,21 +309,23 @@ def test_얼굴_식별_API는_embedding_없이_학생_ID와_bbox만_돌려준다
     response = client.post(
         "/internal/face-identifications",
         content=jpeg(160, 120),
-        headers={
-            "X-Camera-ID": "entry-camera",
-            "X-Person-Bboxes": "[[10,5,120,115]]",
-        },
+        headers={"X-Camera-ID": "entry-camera"},
     )
 
     assert response.status_code == 200
     assert response.json() == {
-        "identities": [
+        "observations": [
             {
-                "person_index": 0,
+                "face_track_id": "face-3",
                 "face_bbox": [30, 20, 80, 75],
-                "track_id": "face-3",
+                "detection_confidence": 0.94,
+                "identity_status": "REGISTERED",
                 "student_id": "student-a",
-                "identity_confidence": 0.86,
+                "similarity": 0.86,
+                "margin": 0.31,
+                "quality": 0.81,
+                "observation_count": 4,
+                "rejected_reason": None,
             }
         ]
     }
