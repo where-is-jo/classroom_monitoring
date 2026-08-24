@@ -8,7 +8,8 @@
 시간표·유예 시간·카메라 건강도가 필요한 `ABSENT`도 후속 구현 시 이 서비스가 소유한다
 ([결정 0008](../../docs/architecture/decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)).
 
-> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색, 학생 등록과 합성 학생 상태 연동이다.**
+> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색, 학생 등록, 입구 얼굴
+> 관측 이력과 학생 상태 연동이다.**
 > 학생 원장은 memory 또는 MongoDB의 `students` 컬렉션에 저장된다. 얼굴 데이터 수집은 별도 프로필로 구현되어 있다.
 > 현재 좌석 상태는 "자리가 찼는지"를 뜻하며 "누가 앉았는지"가 아니다.
 > 앞으로 만들 도메인과 계약은 [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md)에 있다.
@@ -145,17 +146,20 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `DELETE` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP resource 종료·세션 CLOSED (idempotent) |
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detection-events` | SSE 실시간 탐지 이벤트 구독 |
+| `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events` | 입구 얼굴 관측 이벤트 조회. 상태·학생·시간·limit·cursor 필터, 기본 최신 50건 |
 | `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
 | `POST` | `/api/v1/video-searches` | 부작용 없는 데모 catalog 검색 실행 (규칙 기반) |
 | `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
 | `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
+| `POST` | `/internal/entry-identity-events` | worker 입구 얼굴 관측 이벤트 수신. 신규 201, 동일 재전송 200, 충돌 409 |
 | `GET` | `/internal/identity-handover-routes` | 활성 강의실의 인계 route를 worker 형식으로 조회. worker가 기본 5초마다 갱신 |
 | `POST` | `/internal/video-segments` | worker 영상 세그먼트 수신 (멱등) |
 | `GET` | `/health` | 프로세스 기동 상태 |
 | `GET` | `/health/ready` | 현재 저장소 준비 상태 |
 
-**내부 쓰기 API가 있다.** worker가 탐지 이벤트(`/internal/inference/events`)와
-영상 세그먼트(`/internal/video-segments`)를 보낼 수 있다. 로그인, 사용자 관리,
+**내부 쓰기 API가 있다.** worker가 CCTV 탐지 이벤트(`/internal/inference/events`), 입구
+얼굴 관측 이벤트(`/internal/entry-identity-events`)와 영상 세그먼트
+(`/internal/video-segments`)를 보낼 수 있다. 로그인, 사용자 관리,
 알림, 관리자 대시보드는 현재 구현되어 있지 않다.
 
 ### 좌석 상태 표기
@@ -213,6 +217,7 @@ app/
 ├─ students/            학생 원장 등록·조회와 memory/MongoDB 저장소
 ├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
 ├─ face_enrollment/     능동형 얼굴 등록 세션·품질·pose 완료 판정
+├─ entry_identity_events/ 입구 얼굴 관측 이벤트 저장·관리 조회
 ├─ student_monitoring/  탐지 이벤트 수신·SSE·영상 세그먼트 메타데이터
 ├─ llm_search/          자연어 질문 → 검증된 검색 조건 → 탐지 기록 조회
 ├─ shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마
@@ -252,9 +257,9 @@ REST·SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인
 - **`ABSENT`는 지정 좌석이 비어 있는 것을 유예 시간 동안 계속 본 경우에만 나온다.**
   카메라가 죽거나 ROI가 없어 관측이 끊기면 `UNKNOWN`이다 — 미관측은 부재가 아니다.
 
-**얼굴 인식 모델은 아직 없다.** worker가 `student_id`·`identity_confidence`를 채우지
-않으므로 지금은 모든 학생이 `UNKNOWN`이고 좌석 점유만 판정된다. 모델이 나와 worker가
-그 값을 보내기 시작하면 fastapi 쪽에 고칠 것 없이 상태가 흐른다 —
+입구 SCRFD·ArcFace 결과는 좌석 탐지와 분리된 얼굴 관측 이벤트로 저장되고, worker가
+CCTV 문 ROI의 유일한 ByteTrack에 인계한 `student_id`·`identity_confidence`만 학생 상태
+판정으로 들어온다. 세부 계약은
 [worker/inference/MODEL_INTEGRATION.md](../../worker/inference/MODEL_INTEGRATION.md)를 본다.
 `students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
 `/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
@@ -337,6 +342,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `student_identity_hold_seconds` | 마지막 식별 뒤 직전 판정을 이어받는 시간 | 기본 15. **실측 근거 없는 기본값이다** |
 | `student_absent_grace_seconds` | 지정 좌석이 비어 있는 것을 이만큼 계속 본 뒤 `ABSENT` | 기본 300. **팀 합의값이 아니다** |
 | `student_state_history_limit` | 상태 전이 이력 조회 개수 | 기본 50. 최대 200 |
+| `entry_identity_event_retention_days` | 입구 얼굴 관측 메타데이터 보존일 | 기본 7일. MongoDB TTL과 memory 지연 만료에 동일 적용 |
 | `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
 | `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다. **호출 한 번의 상한이다** — 모델이 규격을 벗어나면 한 번 더 물으므로 최악의 경우 두 배까지 걸린다 |
 | `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |

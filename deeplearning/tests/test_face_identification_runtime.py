@@ -13,13 +13,8 @@ from deeplearning.face_identification import (
     FaceIdentificationRuntime,
     FaceModelMetadata,
     MongoFaceGalleryLoader,
-    associate_identities_to_people,
 )
-from deeplearning.face_identity import (
-    GalleryEntry,
-    IdentityStatus,
-    TrackedIdentity,
-)
+from deeplearning.face_identity import GalleryEntry
 
 
 def _vector(index: int) -> np.ndarray:
@@ -177,18 +172,17 @@ def runtime(loader: GalleryLoader, clock: list[float]) -> FaceIdentificationRunt
     )
 
 
-def test_갤러리_학생을_사람_bbox에_연결한다() -> None:
+def test_갤러리_학생을_얼굴_track으로_반환한다() -> None:
     loader = GalleryLoader()
     active = runtime(loader, [0.0])
 
     identities = active.identify(
         camera_id="entry-camera",
         image_bgr=np.zeros((120, 160, 3), dtype=np.uint8),
-        person_bboxes=((10, 5, 120, 115),),
     )
 
     assert len(identities) == 1
-    assert identities[0].person_index == 0
+    assert identities[0].bbox == (30, 20, 80, 75)
     assert identities[0].student_id == "student-a"
     assert identities[0].similarity == 1.0
 
@@ -198,15 +192,10 @@ def test_갤러리_revision이_같으면_모델과_track을_유지한다() -> No
     clock = [0.0]
     active = runtime(loader, clock)
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
-    person = ((10, 5, 120, 115),)
 
-    first = active.identify(
-        camera_id="entry-camera", image_bgr=frame, person_bboxes=person
-    )[0]
+    first = active.identify(camera_id="entry-camera", image_bgr=frame)[0]
     clock[0] = 11.0
-    second = active.identify(
-        camera_id="entry-camera", image_bgr=frame, person_bboxes=person
-    )[0]
+    second = active.identify(camera_id="entry-camera", image_bgr=frame)[0]
 
     assert loader.load_count == 2
     assert second.track_id == first.track_id
@@ -241,24 +230,3 @@ def test_잘못된_갤러리는_refresh_시간을_갱신하지_않아_즉시_재
     active.ensure_ready()
 
     assert loader.load_count == 2
-
-
-def test_두_사람에_걸친_얼굴은_연결하지_않는다() -> None:
-    identity = TrackedIdentity(
-        track_id=3,
-        bbox=(40, 20, 80, 75),
-        status=IdentityStatus.REGISTERED,
-        student_id="student-a",
-        similarity=0.9,
-        margin=0.2,
-        quality=0.8,
-        observation_count=4,
-    )
-
-    matches = associate_identities_to_people(
-        ((10, 5, 100, 115), (20, 5, 120, 115)),
-        (identity,),
-        minimum_face_coverage=0.8,
-    )
-
-    assert matches == ()

@@ -10,17 +10,23 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from shared.frame_buffer import FrameBuffer
 from shared.types import CapturedFrame
 
 from .metrics import CONSECUTIVE_FAILURES, FRAMES_PROCESSED_TOTAL
 from .processor import InferenceProcessor
-from .types import InferenceResult
+from .types import EntryFaceObservationBatch, InferenceResult
 
 logger = logging.getLogger(__name__)
 
 ResultHandler = Callable[[CapturedFrame, InferenceResult], None]
+EntryResultHandler = Callable[[CapturedFrame, EntryFaceObservationBatch], None]
+
+
+class EntryProcessor(Protocol):
+    def process(self, captured: CapturedFrame) -> EntryFaceObservationBatch: ...
 
 
 @dataclass(frozen=True)
@@ -68,13 +74,23 @@ class InferenceConsumer:
         poll_timeout_seconds: float = 0.5,
         max_consecutive_failures: int = 5,
         result_handler: ResultHandler = log_result,
+        entry_processor: EntryProcessor | None = None,
+        entry_camera_ids: frozenset[str] = frozenset(),
+        entry_result_handler: EntryResultHandler | None = None,
     ) -> None:
+        if bool(entry_camera_ids) != bool(entry_processor and entry_result_handler):
+            raise ValueError(
+                "입구 얼굴 카메라·processor·result handler는 함께 설정해야 합니다."
+            )
         self._frame_buffer = frame_buffer
         self._processor = processor
         self._shutdown_event = shutdown_event
         self._poll_timeout_seconds = poll_timeout_seconds
         self._max_consecutive_failures = max_consecutive_failures
         self._result_handler = result_handler
+        self._entry_processor = entry_processor
+        self._entry_camera_ids = entry_camera_ids
+        self._entry_result_handler = entry_result_handler
 
         self._processed = 0
         self._failed = 0
@@ -106,7 +122,13 @@ class InferenceConsumer:
 
     def _process(self, captured: CapturedFrame) -> None:
         try:
-            result = self._processor.process(captured.frame)
+            if captured.camera_id in self._entry_camera_ids:
+                assert self._entry_processor is not None
+                entry_result = self._entry_processor.process(captured)
+                result = None
+            else:
+                entry_result = None
+                result = self._processor.process(captured.frame)
         except Exception:
             # 모델 호출은 프레임 형태·장치 상태·가중치 문제 등으로 여러 예외를 낸다.
             # 프레임 한 장 때문에 파이프라인 전체를 죽이지는 않되, 조용히 넘기지도
@@ -137,4 +159,9 @@ class InferenceConsumer:
         CONSECUTIVE_FAILURES.set(0)
         self._processed += 1
         FRAMES_PROCESSED_TOTAL.labels(camera_id=captured.camera_id, result="ok").inc()
-        self._result_handler(captured, result)
+        if entry_result is not None:
+            assert self._entry_result_handler is not None
+            self._entry_result_handler(captured, entry_result)
+        else:
+            assert result is not None
+            self._result_handler(captured, result)
