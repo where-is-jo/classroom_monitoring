@@ -51,6 +51,10 @@ max_retry: 3
 | 소스에서 직접 실행 (개발자 PC) | `<서비스>/.env.local` |
 | 컨테이너로 실행 (로컬 compose 검증, dev·prod 서버) | `.docker/env/<서비스>.<환경>.env` |
 
+`deeplearning`의 소스 직접 실행만 파일명이 예외다. 기존 도구와 실행 명령이
+`deeplearning/.env`를 기준으로 하므로 `.env.local` 대신 그 파일을 읽는다. Docker는 예외
+없이 `.docker/env/deeplearning.<환경>.env`를 사용하며 두 실제 파일 모두 커밋하지 않는다.
+
 컨테이너 쪽이 서비스 디렉터리 밖에 있는 이유는 **서버에 서비스 소스가 없기** 때문이다.
 서버는 GHCR 이미지를 pull하고 `.docker/`만 받는다 ([결정 0017](../architecture/decisions.md)).
 

@@ -1054,6 +1054,12 @@ fastapi가 공용으로 쓰는 상태(2026-08-12 결정)와 Grafana admin 비밀
 재발급이 필요하다.** `deeplearning`은 이번 범위 밖이라 여전히 순수 `os.environ`을 쓰고,
 `FACE_DETECTION_MODEL_PATH`·`FACE_LANDMARKER_MODEL_PATH`는 어떤 `.env.example`에도 없다.
 
+> **2026-08-24 구현 갱신**: 위 deeplearning 남은 일은 완료됐다. `app.py`는 OS 환경변수를
+> 우선해 로컬 `deeplearning/.env`를 읽고, Compose는 기존 원칙대로
+> `.docker/env/deeplearning.<환경>.env`를 주입한다. 두 실제 파일은 Git에서 제외하고 로컬
+> `.env`는 Docker 빌드 컨텍스트에서도 제외한다. 변수 기준은
+> `deeplearning/.env.example`이다.
+
 ## 0018 · docker compose 구성을 저장소에 커밋하고 local/dev 파일을 나눈다
 
 **상태**: 확정. 단 두 가지가 바뀌었다. 실행 호스트가 둘로 나뉘면서 파일 분할 축에

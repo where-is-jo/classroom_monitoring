@@ -6,6 +6,7 @@ opencv-python-headless
 numpy
 mediapipe==1.0.0
 pymongo>=4.8
+python-dotenv>=1.0
 
 # Prometheus 지표를 노출한다(/metrics). 순수 파이썬이라 가볍고, 없으면 app.py가
 # import 단계에서 죽으므로 선택 의존이 아니다.

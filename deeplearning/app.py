@@ -15,6 +15,7 @@ from typing import Any
 import cv2
 import mediapipe as mp
 import numpy as np
+from dotenv import load_dotenv
 from face_identification import (
     FaceGalleryUnavailable,
     FaceIdentificationConfig,
@@ -38,6 +39,11 @@ from metrics import (
     render_metrics,
 )
 from pydantic import BaseModel
+
+# 로컬 직접 실행은 deeplearning/.env를 읽는다. 컨테이너에서는 별도의 Docker env 파일을
+# Compose가 먼저 주입하므로 override=False가 그 값을 보존한다. 로컬 .env는 이미지 안에
+# 복사하지 않는다(Dockerfile·.dockerignore).
+load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
 FACE_MODEL_METADATA = FaceModelMetadata(
     model_name="arcface",

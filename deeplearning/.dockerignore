@@ -1,0 +1,12 @@
+# 실제 값과 자격 증명은 빌드 컨텍스트에도 싣지 않는다. Dockerfile이 현재 소스 파일만
+# 명시적으로 COPY하더라도 이후 COPY 범위가 넓어질 때 비밀값이 이미지 레이어에 들어가는
+# 회귀를 막는다.
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.models/
+training/data/
+training/runs/

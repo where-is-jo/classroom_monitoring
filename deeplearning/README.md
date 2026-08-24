@@ -173,6 +173,16 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 ## 환경변수
 
 값의 취급과 명명 규칙은 [환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
+로컬 직접 실행 값은 `deeplearning/.env.example`을 복사한 `deeplearning/.env`에 채운다.
+OS에서 먼저 주입한 값이 있으면 그 값이 `.env`보다 우선한다. Docker Compose는 이 파일을
+읽지 않고 `.docker/env/deeplearning.dev.env`를 주입한다. 두 실제 파일 모두 Git에서
+제외하고, 로컬 `.env`는 Docker 빌드 컨텍스트에서도 제외한다.
+
+```bash
+cd deeplearning
+cp .env.example .env
+python -m uvicorn app:app --port 8100
+```
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
