@@ -364,6 +364,10 @@ docker compose -f .docker/compose.main.dev.gpu.yml up -d
 python .docker/scripts/verify_face_handover_runtime.py
 ```
 
+worker는 YOLO·GPU 모델과 카메라 파이프라인 조립을 마친 뒤 `/metrics`를 연다. 위 검증은
+컨테이너가 막 생성된 정상 기동을 실패로 오판하지 않도록 기본 120초 동안 2초 간격으로
+준비 완료를 기다린다. 제한 시간은 `--worker-readiness-timeout-seconds`로 조정할 수 있다.
+
 deeplearning healthcheck는 모델 파일 존재만이 아니라 MongoDB 갤러리가 비어 있지 않고
 ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deeplearning이 healthy가 된
 뒤 시작한다. GPU 배포 workflow도 서버에서 같은 사전점검을 실행하므로 env·모델·임계값이
