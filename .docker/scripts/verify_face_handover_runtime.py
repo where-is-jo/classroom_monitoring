@@ -17,6 +17,19 @@ DEFAULT_WORKER_READINESS_TIMEOUT_SECONDS = 120.0
 WORKER_READINESS_RETRY_INTERVAL_SECONDS = 2.0
 _LABEL_PATTERN = re.compile(r'(\w+)="((?:\\.|[^"\\])*)"')
 
+# docker compose exec로 넘기는 코드는 이 파일과 별도로 다시 Python parser를 거친다.
+# 문자열 안의 ``\n``을 그대로 쓰면 바깥 parser가 실제 줄바꿈으로 바꿔 내부 코드의
+# 따옴표를 끊는다. 빈 줄은 별도 print로 출력해 probe 자체가 SyntaxError가 되지 않게 한다.
+WORKER_METRICS_PROBE_CODE = """
+import os
+import urllib.request
+
+with urllib.request.urlopen("http://127.0.0.1:9101/metrics", timeout=5) as response:
+    print(response.read().decode("utf-8"), end="")
+print()
+print("__FACE_CAMERAS__=" + os.environ.get("FACE_IDENTITY_CAMERA_IDS", ""))
+"""
+
 
 def parse_metric_samples(
     text: str, metric_name: str
@@ -192,14 +205,14 @@ print("cuda-ok")
 
     def worker_metrics(self) -> tuple[str, set[str]]:
         """모델 초기화 뒤 열리는 worker metrics를 제한 시간 동안 기다린다."""
-        code = """
-import os
-import urllib.request
+        # 이 코드는 현재 프로세스의 일부로 실행되지 않고 컨테이너의 `python -c`가
+        # 다시 파싱한다. 배포 서버에서 120초 재시도하기 전에 문법 오류를 즉시 드러낸다.
+        try:
+            compile(WORKER_METRICS_PROBE_CODE, "<worker-metrics-probe>", "exec")
+        except SyntaxError:
+            self.errors.append("worker /metrics 검증 코드에 문법 오류가 있습니다.")
+            return "", set()
 
-with urllib.request.urlopen("http://127.0.0.1:9101/metrics", timeout=5) as response:
-    print(response.read().decode("utf-8"), end="")
-print("\n__FACE_CAMERAS__=" + os.environ.get("FACE_IDENTITY_CAMERA_IDS", ""))
-"""
         command = [
             *self._compose,
             "exec",
@@ -207,7 +220,7 @@ print("\n__FACE_CAMERAS__=" + os.environ.get("FACE_IDENTITY_CAMERA_IDS", ""))
             "inference-worker",
             "python",
             "-c",
-            code,
+            WORKER_METRICS_PROBE_CODE,
         ]
         deadline = time.monotonic() + self._worker_readiness_timeout_seconds
         attempts = 0

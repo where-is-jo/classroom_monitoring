@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import verify_face_handover_runtime as runtime_module
 from verify_face_handover_runtime import (
+    WORKER_METRICS_PROBE_CODE,
     RuntimeVerifier,
     metric_sum,
     parse_metric_samples,
@@ -53,6 +54,12 @@ def test_필요한_label의_metric만_합산한다() -> None:
 
 def test_없는_metric은_0이다() -> None:
     assert metric_sum(METRICS, "missing_metric") == 0.0
+
+
+def test_worker_metrics_probe는_python_c에서_다시_파싱할_수_있다() -> None:
+    """바깥 문자열 escape가 내부 `python -c` 문법을 깨뜨리지 않아야 한다."""
+    compile(WORKER_METRICS_PROBE_CODE, "<worker-metrics-probe>", "exec")
+    assert 'print("__FACE_CAMERAS__="' in WORKER_METRICS_PROBE_CODE
 
 
 def install_docker_fake(
