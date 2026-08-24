@@ -10,6 +10,10 @@ from fastapi.responses import Response
 from ..shared.dependencies import get_roi_connection_service
 from ..shared.templating import templates
 from .schemas import (
+    AutoRoiResponse,
+    ConfirmAutoRoiRequest,
+    ConfirmAutoRoiResponse,
+    GenerateAutoRoiRequest,
     ReferenceImageResponse,
     RoiConnectionListResponse,
     RoiConnectionResponse,
@@ -117,6 +121,43 @@ def list_roi_connections(
             RoiConnectionResponse.from_domain(item)
             for item in service.list_connections(classroom_id, camera_id)
         ]
+    )
+
+
+@api_router.post(
+    "/classrooms/{classroom_id}/roi-connections/auto",
+    response_model=AutoRoiResponse,
+)
+def generate_auto_roi_connections(
+    classroom_id: str,
+    payload: GenerateAutoRoiRequest,
+    service: RoiConnectionService = Depends(get_roi_connection_service),
+) -> AutoRoiResponse:
+    """좌석 구역 네 모서리에서 좌석 ROI를 한 번에 만든다.
+
+    `dry_run=true`면 계산 결과만 돌려주고 저장하지 않는다. 화면은 먼저 이 결과를 겹쳐
+    보여주고, 관리자가 확인한 뒤에 `dry_run=false`로 다시 호출한다.
+
+    저장하더라도 자동 생성분은 확정 전까지 `needs_review`라 좌석 판정에 쓰이지 않는다.
+    그래서 201이 아니라 200이다 — 이 호출만으로는 관측에 쓰이는 자원이 서지 않는다.
+    """
+    return AutoRoiResponse.from_domain(
+        service.generate_auto_connections(payload.to_command(classroom_id))
+    )
+
+
+@api_router.post(
+    "/classrooms/{classroom_id}/roi-connections/auto/confirm",
+    response_model=ConfirmAutoRoiResponse,
+)
+def confirm_auto_roi_connections(
+    classroom_id: str,
+    payload: ConfirmAutoRoiRequest,
+    service: RoiConnectionService = Depends(get_roi_connection_service),
+) -> ConfirmAutoRoiResponse:
+    """자동 생성한 ROI를 관리자가 확인했다고 표시해 좌석 판정에 넣는다."""
+    return ConfirmAutoRoiResponse.from_domain(
+        service.confirm_auto_connections(payload.to_command(classroom_id))
     )
 
 

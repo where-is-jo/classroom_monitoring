@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
@@ -12,6 +13,7 @@ from ..classrooms.service import ClassroomService
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
 from ..video_monitoring.models import VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
+from .auto_layout import MIN_AUTO_POLYGON_AREA, SeatGridCell, plan_auto_roi
 from .errors import (
     CameraFrameUnavailableError,
     RoiConnectionConflictError,
@@ -19,6 +21,12 @@ from .errors import (
     RoiConnectionNotFoundError,
 )
 from .models import (
+    AutoRoiOutcome,
+    AutoRoiResult,
+    AutoRoiSeatResult,
+    ConfirmAutoRoiCommand,
+    ConfirmAutoRoiResult,
+    GenerateAutoRoiCommand,
     Point,
     ReferenceImage,
     RoiCameraOption,
@@ -310,6 +318,130 @@ class RoiConnectionService:
             connection = self._repository.save(connection)
         return RoiConnectionView(connection=connection, needs_review=False)
 
+    def generate_auto_connections(self, command: GenerateAutoRoiCommand) -> AutoRoiResult:
+        """좌석 격자를 캡처 화면 위로 사영해 좌석마다 ROI를 만든다.
+
+        `dry_run`이면 계산만 하고 저장하지 않는다. 관리자가 겹쳐 보고 확인한 뒤 저장하게
+        하려는 것이다 — 격자와 실제 배치가 어긋났는지는 화면에 얹어 보기 전에는 알 수 없다.
+
+        저장하는 경우에도 `auto_generated=True`로 남아 `needs_review`가 되므로 좌석 판정에
+        들어가지 않는다. 확정은 `confirm_auto_connections`가 따로 받는다
+        (결정 0020의 6번).
+        """
+        self._required_camera(command.classroom_id, command.camera_id)
+        seats = [seat for seat in self.list_seats(command.classroom_id) if seat.is_active]
+        if not seats:
+            raise RoiConnectionNotFoundError("강의실에 활성 좌석이 없습니다.")
+        if all(seat.row is None or seat.column is None for seat in seats):
+            raise RoiConnectionInputError(
+                "좌석에 행·열 좌표가 없어 자동 생성을 할 수 없습니다. "
+                "좌석 관리 화면에서 좌석 배치를 먼저 등록해 주세요."
+            )
+        labels = {seat.id: seat.label for seat in seats}
+        with self._lock:
+            image = self._images.get((command.classroom_id, command.camera_id))
+            if image is None:
+                raise RoiConnectionConflictError("기준 화면을 먼저 캡처해 주세요.")
+            if image.revision != command.reference_image_revision:
+                raise RoiConnectionConflictError(
+                    "기준 화면이 변경되었습니다. 화면을 새로고침해 주세요."
+                )
+            # 사람이 만든 ROI만 지킨다. 앞서 자동으로 만든 것은 다시 계산해 덮어쓴다 —
+            # 모서리나 좌석 크기를 고쳐 다시 만드는 것이 정상적인 사용 방식이다.
+            preserved = frozenset(
+                connection.seat_id
+                for connection in self._repository.list_by_camera(
+                    command.classroom_id, command.camera_id
+                )
+                if not connection.auto_generated
+            )
+            plan = plan_auto_roi(
+                cells=[
+                    SeatGridCell(seat_id=seat.id, row=seat.row, column=seat.column)
+                    for seat in seats
+                ],
+                corners=command.corners,
+                preserved_seat_ids=preserved,
+                seat_fill_ratio=command.seat_fill_ratio,
+                min_polygon_area=MIN_AUTO_POLYGON_AREA,
+            )
+            results: list[AutoRoiSeatResult] = []
+            for candidate in plan.candidates:
+                outcome = candidate.outcome
+                polygon = candidate.polygon
+                if outcome is AutoRoiOutcome.GENERATED and polygon is not None:
+                    try:
+                        # 사람이 그린 ROI와 같은 규칙을 통과해야 저장한다. 계산으로 만든
+                        # 좌표라고 검사를 건너뛰면 판정이 쓰지 못할 도형이 들어갈 수 있다.
+                        _validate_polygon(polygon)
+                    except RoiConnectionInputError:
+                        outcome, polygon = AutoRoiOutcome.INVALID_POLYGON, None
+                    else:
+                        if not command.dry_run:
+                            self._repository.save(
+                                RoiConnection(
+                                    classroom_id=command.classroom_id,
+                                    camera_id=command.camera_id,
+                                    seat_id=candidate.seat_id,
+                                    # 학생 배정의 정본은 seat_assignments다(결정 0019의 6번).
+                                    # 자동 생성은 자리만 만들고 사람을 정하지 않는다.
+                                    student_id=None,
+                                    polygon=polygon,
+                                    reference_image_revision=image.revision,
+                                    updated_at=self._clock(),
+                                    auto_generated=True,
+                                )
+                            )
+                results.append(
+                    AutoRoiSeatResult(
+                        seat_id=candidate.seat_id,
+                        seat_label=labels.get(candidate.seat_id, candidate.seat_id),
+                        outcome=outcome,
+                        polygon=polygon,
+                    )
+                )
+        return AutoRoiResult(
+            classroom_id=command.classroom_id,
+            camera_id=command.camera_id,
+            dry_run=command.dry_run,
+            grid_rows=plan.grid_rows,
+            grid_columns=plan.grid_columns,
+            seat_fill_ratio=command.seat_fill_ratio,
+            reference_image_revision=image.revision,
+            seats=tuple(results),
+        )
+
+    def confirm_auto_connections(self, command: ConfirmAutoRoiCommand) -> ConfirmAutoRoiResult:
+        """자동 생성분을 관리자가 확인했다고 표시해 좌석 판정에 넣는다.
+
+        기준 화면이 그사이 다시 캡처됐다면 확정하지 않는다. 그 좌표는 다른 화각의 것이라
+        확정해 봐야 `needs_review`로 남고, 조용히 지나가면 관리자는 확정된 줄 안다.
+        """
+        self._required_camera(command.classroom_id, command.camera_id)
+        with self._lock:
+            image = self._images.get((command.classroom_id, command.camera_id))
+            targets = [
+                connection
+                for connection in self._repository.list_by_camera(
+                    command.classroom_id, command.camera_id
+                )
+                if connection.auto_generated
+                and (command.seat_ids is None or connection.seat_id in command.seat_ids)
+            ]
+            if not targets:
+                raise RoiConnectionNotFoundError("확정할 자동 생성 ROI가 없습니다.")
+            confirmed = 0
+            stale = 0
+            for connection in targets:
+                if image is None or image.revision != connection.reference_image_revision:
+                    stale += 1
+                    continue
+                self._repository.save(
+                    replace(connection, auto_generated=False, updated_at=self._clock())
+                )
+                confirmed += 1
+        return ConfirmAutoRoiResult(confirmed_count=confirmed, stale_count=stale)
+
     def _required_camera(self, classroom_id: str, camera_id: str) -> VideoStream:
         self.get_classroom(classroom_id)
         stream = self._streams.find_by_camera_id(camera_id)
@@ -324,6 +456,9 @@ class RoiConnectionService:
 
     def _needs_review(self, connection: RoiConnection) -> bool:
         if connection.camera_id is None:
+            return True
+        if connection.auto_generated:
+            # 계산으로 만든 좌표다. 관리자가 확정하기 전에는 좌석 판정에 넣지 않는다.
             return True
         if connection.reference_image_revision == 0:
             return False
