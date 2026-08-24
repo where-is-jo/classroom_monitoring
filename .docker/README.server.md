@@ -292,6 +292,17 @@ test 결과를 보고 임계값을 다시 고르지 않는다. 생성된 파일�
 `.docker/models/face/config/thresholds.json`으로 복사한다. 얼굴 이미지, embedding,
 MongoDB 자격 증명, JSON 산출물은 Git에 커밋하지 않는다.
 
+개인 PC에서 실행하는 FastAPI의 `.docker/env/fastapi.dev.env`에는 생성된 JSON의
+`similarity_threshold`와 같은 값을 넣고 FastAPI를 재기동한다.
+
+```dotenv
+STUDENT_IDENTITY_CONFIDENCE_THRESHOLD=<thresholds.json의 similarity_threshold>
+```
+
+deeplearning은 similarity와 margin을 모두 통과한 신원만 반환하지만 FastAPI의 기본값
+`0.5`가 더 높으면 확정된 신원이 학생 상태 판정에서 다시 빠질 수 있다. 두 값은 임의로
+고르는 서로 다른 임계값이 아니라 같은 평가 결과로 맞춘다.
+
 ### 2. GPU 서버 환경과 모델 배치
 
 `.docker/env/deeplearning.dev.env`에는 아래 두 비밀값만 필수로 둔다. MongoDB 계정은
@@ -306,15 +317,15 @@ FACE_GALLERY_DATABASE_NAME=<DB 이름>
 FastAPI 카메라 설정 및 인계 ROI 설정의 ID와 정확히 같아야 한다.
 
 ```dotenv
-STREAM_SOURCES=entry-camera=rtsp://mediamtx:8554/entry-camera,classroom-cctv=rtsp://mediamtx:8554/classroom-cctv
+STREAM_SOURCES=camera-01=rtsp://mediamtx:8554/camera-01,classroom-cctv=rtsp://mediamtx:8554/classroom-cctv
 MODEL_PATH=/models/person-yolo11n-n1-v008.pt
 INFERENCE_DEVICE=cuda
 INFERENCE_TARGET_CLASS_IDS={"0":"person"}
 FASTAPI_URL=http://<개인-PC-Tailscale-IP>:8076
 FACE_IDENTITY_URL=http://deeplearning:8100
-FACE_IDENTITY_CAMERA_IDS=entry-camera
-PERSON_TRACKING_CAMERA_IDS=entry-camera,classroom-cctv
-IDENTITY_HANDOVER_ROUTES=[{"entry_camera_id":"entry-camera","classroom_camera_id":"classroom-cctv","classroom_entry_zone":[0.0,0.0,0.25,1.0]}]
+FACE_IDENTITY_CAMERA_IDS=camera-01
+PERSON_TRACKING_CAMERA_IDS=camera-01,classroom-cctv
+IDENTITY_HANDOVER_ROUTES=[{"entry_camera_id":"camera-01","classroom_camera_id":"classroom-cctv","classroom_entry_zone":[0.0,0.0,0.25,1.0]}]
 ```
 
 `INFERENCE_CONFIDENCE_THRESHOLD`는 환경파일에서 제거해 이미지의 검증값 0.25를 쓰거나,
@@ -358,7 +369,7 @@ ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deep
 
 ### 4. 실제 인계 확인
 
-1. FastAPI `/identity-handover`에서 `entry-camera → classroom-cctv` route와 실제 문 바닥
+1. FastAPI `/identity-handover`에서 `camera-01 → classroom-cctv` route와 실제 문 바닥
    ROI를 저장한다. env의 route는 첫 조회 전·장애 시 fallback이다.
 2. `docker compose -f .docker/compose.main.dev.gpu.yml ps`에서 deeplearning이 `healthy`,
    inference-worker가 `Up`인지 확인한다.
