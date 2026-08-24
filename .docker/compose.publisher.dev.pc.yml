@@ -41,7 +41,15 @@ services:
     environment:
       # 송출 대상. 자격 증명이 없으므로 여기 직접 적는다(결정 0018).
       # MediaMTX는 인증을 걸지 않았고 Tailscale 주소에만 열려 있다.
-      PUBLISH_TARGET_URL: rtsp://100.85.0.72:18554/camera-01
+      #
+      # **경로 이름이 곧 camera_id다.** worker의 STREAM_SOURCES와 fastapi에 등록된
+      # video-stream의 camera_id가 이 이름과 같아야 한다. 다르면 탐지 이벤트가
+      # 그 source를 찾지 못해 404로 거절된다.
+      #
+      # 전에는 camera-01로 보냈는데, fastapi에는 camera-01이 입구 카메라
+      # (IDENTITY_ONLY)로 등록돼 있어 **CCTV 영상이 좌석 판정에서 조용히 제외됐다**.
+      # 결정 0037이 정한 이름은 처음부터 classroom-cctv였다.
+      PUBLISH_TARGET_URL: rtsp://100.85.0.72:18554/classroom-cctv
     # 이미지의 entrypoint가 ffmpeg 자체라 그대로 두면 env_file 값을 펼칠 수 없다.
     # compose의 ${} 치환은 env_file이 아니라 셸 환경과 .env만 본다 — 그래서 컨테이너
     # 안의 셸에게 펼치게 한다.
