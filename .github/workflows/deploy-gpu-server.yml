@@ -412,7 +412,11 @@ jobs:
               fi
               docker compose -f ".docker/$stack" ps
               if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
-                python3 .docker/scripts/verify_face_handover_runtime.py
+                # worker는 YOLO·GPU 모델과 카메라 파이프라인을 조립한 뒤에야
+                # /metrics를 연다. 컨테이너 생성 직후 한 번만 확인하면 정상 기동도
+                # 실패로 오판하므로 준비 완료를 제한 시간 동안 기다린다.
+                python3 .docker/scripts/verify_face_handover_runtime.py \
+                  --worker-readiness-timeout-seconds 120
               fi
             else
               echo "== $stack: 실행 중인 컨테이너가 없어 건너뛴다"

@@ -113,6 +113,57 @@ def test_live_인계가_아직_없으면_실패_이유를_남긴다(
     assert "성공한 CCTV 신원 인계가 아직 없습니다." in verifier.errors
 
 
+def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    attempts = 0
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        del kwargs
+        attempts += 1
+        if attempts < 3:
+            raise subprocess.CalledProcessError(1, command)
+        output = METRICS + "\n__FACE_CAMERAS__=entry-camera"
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(runtime_module.subprocess, "run", run)
+    monkeypatch.setattr(runtime_module.time, "sleep", lambda _seconds: None)
+    verifier = RuntimeVerifier(
+        tmp_path / "compose.yml",
+        worker_readiness_timeout_seconds=30,
+    )
+
+    metrics, camera_ids = verifier.worker_metrics()
+
+    assert attempts == 3
+    assert metrics.strip() == METRICS.strip()
+    assert camera_ids == {"entry-camera"}
+    assert verifier.errors == []
+
+
+def test_worker_metrics가_제한_시간_안에_열리지_않으면_실패한다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(runtime_module.subprocess, "run", run)
+    verifier = RuntimeVerifier(
+        tmp_path / "compose.yml",
+        worker_readiness_timeout_seconds=0,
+    )
+
+    metrics, camera_ids = verifier.worker_metrics()
+
+    assert metrics == ""
+    assert camera_ids == set()
+    assert verifier.errors == [
+        "worker /metrics가 0초 안에 준비되지 않았습니다. (1회 시도)"
+    ]
+
+
 def test_GPU_배포_workflow가_재기동_후_runtime을_검증한다() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     workflow = (
@@ -125,6 +176,7 @@ def test_GPU_배포_workflow가_재기동_후_runtime을_검증한다() -> None:
     )
 
     assert verify_position > apply_position
+    assert "--worker-readiness-timeout-seconds 120" in workflow
 
 
 def test_GPU_배포_workflow가_현재_소스로_latest_두_개를_함께_갱신한다() -> None:
