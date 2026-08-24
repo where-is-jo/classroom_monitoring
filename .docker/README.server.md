@@ -346,15 +346,18 @@ YOLO 출력에서 이미 사라지며 이제 worker가 기동을 거부한다.
 
 ### 3. GPU 서버에서 현재 소스로 이미지 빌드와 기동
 
-Compose는 얼굴 식별·동적 인계 코드가 없는 오래된 registry `:latest`를 사용하지 않는다.
-병합된 `develop`을 받은 뒤 서버 로컬의 고정된 `:local` 이름으로 두 이미지를 다시 빌드한다.
-같은 이름으로 빌드하므로 태그가 새 image ID를 가리키며 이미지 이름이 계속 늘어나지 않는다.
+Compose는 GHCR에 남은 오래된 `:latest`를 pull하지 않는다. `develop`에 병합되면 GPU
+배포 workflow가 해당 커밋의 추적 소스만 GPU 서버로 보내 candidate 두 개를 빌드한다.
+두 빌드와 사전검사가 모두 성공한 뒤 아래의 고정된 GHCR 형식 `:latest` 이름을 함께
+새 image ID로 옮긴다. 같은 이름을 계속 덮어쓰므로 배포마다 이미지 이름이 늘어나지 않는다.
+
+워크플로를 쓸 수 없을 때 GPU 서버의 저장소 checkout에서 수동 복구하는 절차는 다음과 같다.
 
 ```bash
 git switch develop
 git pull --ff-only
-docker build -t classroom-monitoring-deeplearning:local deeplearning
-docker build -t classroom-monitoring-worker:local worker
+docker build -t ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest deeplearning
+docker build -t ghcr.io/where-is-jo/classroom-monitoring-worker:latest worker
 python .docker/scripts/validate_face_handover_deployment.py
 docker compose -f .docker/compose.main.dev.gpu.yml config --quiet
 docker compose -f .docker/compose.main.dev.gpu.yml up -d
@@ -365,8 +368,8 @@ deeplearning healthcheck는 모델 파일 존재만이 아니라 MongoDB 갤러�
 ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deeplearning이 healthy가 된
 뒤 시작한다. GPU 배포 workflow도 서버에서 같은 사전점검을 실행하므로 env·모델·임계값이
 빠진 Compose를 자동 재적용하지 않는다. 실행 중인 main GPU 스택을 재적용한 뒤에는 기본
-런타임 검증도 자동 실행한다. 두 이미지는 CI가 빌드하지 않으므로 **같은 `:local` 태그를
-현재 소스로 다시 빌드한 뒤** Compose를 재적용한다.
+런타임 검증도 자동 실행한다. 실패하면 설정과 두 `:latest` 태그를 모두 이전 상태로
+되돌린다.
 
 ### 4. 실제 인계 확인
 
@@ -392,24 +395,24 @@ python .docker/scripts/verify_face_handover_runtime.py --require-live-handoff
 ## 이미지
 
 **환경마다 이미지를 따로 유지한다**(결정 0018). fastapi dev는 CI가 만든 GHCR 이미지를
-pull한다. worker와 deeplearning은 CI 대상이 아니므로, 현재 얼굴 인계 배포에서는 GPU
-서버가 병합된 소스로 직접 빌드한 고정 태그를 쓴다.
+pull한다. worker와 deeplearning은 GitHub hosted runner의 GHCR 빌드 대상은 아니며, GPU
+배포 workflow가 GPU 서버에서 병합된 소스를 직접 빌드한 고정 태그를 쓴다.
 
 | 서비스 | dev 이미지 | local 이미지 (build) |
 | --- | --- | --- |
 | fastapi | `ghcr.io/where-is-jo/classroom-monitoring-fastapi:develop` | `classroom-monitoring-fastapi:local` |
-| inference worker | `classroom-monitoring-worker:local` (GPU 서버에서 같은 이름으로 재빌드) | `classroom-monitoring-worker:local` |
-| deeplearning | `classroom-monitoring-deeplearning:local` (GPU 서버에서 같은 이름으로 재빌드) | `classroom-monitoring-deeplearning:local` |
+| inference worker | `ghcr.io/where-is-jo/classroom-monitoring-worker:latest` (GPU 서버에서 같은 이름으로 재빌드) | `classroom-monitoring-worker:local` |
+| deeplearning | `ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest` (GPU 서버에서 같은 이름으로 재빌드) | `classroom-monitoring-deeplearning:local` |
 
 **fastapi만 `:develop`을 본다.** CI가 develop 병합마다 `develop`·`sha-*`로 올리고
 `latest`는 붙이지 않기 때문이다(결정 0014). `:latest`를 보면 병합해도 서버가 갱신되지
 않는다 — 실제로 2026-08-12에 손으로 올린 이미지가 계속 돌아 그 뒤에 들어온 탐지
 수신(`/internal/inference/events`)과 ROI 매핑이 서버에 없었다.
 
-**worker와 deeplearning은 CI가 만들지 않으며 `:latest`도 최신이라는 보장이 없다.**
-코드를 고쳤으면 GPU 서버에서 Compose에 적힌 `:local` 태그로 다시 빌드해야 한다.
-`pull_policy: never`라 로컬 태그가 없으면 기동에 실패하고 registry의 다른 이미지를
-조용히 받지 않는다.
+**worker와 deeplearning의 `:latest`는 GPU 서버에서 현재 develop으로 직접 만든다.**
+배포 workflow가 candidate 두 개를 모두 성공시킨 뒤 두 `:latest` 태그를 함께 덮어쓴다.
+`pull_policy: never`라 서버 로컬 태그가 없으면 기동에 실패하고 registry의 오래된
+`latest`를 조용히 받지 않는다.
 
 > GHCR org는 `whereisjo`가 아니라 `where-is-jo`(하이픈)다. 2026-08-12에 fastapi와
 > worker를 `:latest`로 push한 기록이 있다.
@@ -741,8 +744,10 @@ proxy를 아예 두지 않기로 한 뒤로도 **다시 확인하지 않았다.*
 | `deeplearning:latest` | 2026-08-18 05:06 | `/metrics`가 404. OpenAPI에 경로 자체가 없다. 지표는 같은 날 커밋 `748ca7f`로 들어왔다 |
 
 **CLAUDE.md와 `monitoring/internal/README.md`는 둘 다 지표를 노출한다고 적고 있다.**
-소스는 맞지만 **서버에 올라간 이미지가 그 커밋 이전이다.** worker 이미지는 CI가 자동
-빌드하지 않으므로(결정 0014, 크기 때문) 손으로 다시 빌드해 올려야 한다.
+소스는 맞지만 **서버에 올라간 이미지가 그 커밋 이전이었다.** 이 문제 때문에 GPU 배포
+workflow가 worker와 deeplearning을 서버에서 현재 커밋으로 빌드하고, 두 `:latest`를 함께
+덮어쓴 뒤 강제 재생성하도록 바꿨다. GitHub hosted runner에서 14.9GB worker 이미지를
+빌드하지 않는 결정 0014의 제약은 그대로다.
 
 ## 정하지 않고 남긴 것
 

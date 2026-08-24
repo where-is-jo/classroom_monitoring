@@ -78,9 +78,9 @@ services:
   # 고정하고 있어 GPU를 줘도 쓰지 않는다. 그래서 inference-worker와 달리
   # 드라이버 조건이 없고 GPU가 없는 호스트에서도 뜬다.
   deeplearning:
-    # CI가 이 이미지를 만들지 않으므로 서버에서 현재 소스로 빌드한다. 같은 :local
-    # 이름으로 다시 빌드해 기존 태그를 덮어쓰며, registry에서 받지 않는다.
-    image: classroom-monitoring-deeplearning:local
+    # 서버에서 현재 develop 소스로 빌드한 :latest를 같은 이름으로 덮어쓴다.
+    # registry에서 받지 않고 GPU 서버가 방금 빌드한 image ID만 사용한다.
+    image: ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
     pull_policy: never
     env_file:
       # MongoDB URL·DB 이름만 서버에서 주입한다. 변수 기준은 deeplearning/.env.example.
@@ -115,10 +115,10 @@ services:
     # fastapi로 보내는 코드(FASTAPI_URL / inference.handler)가 아예 없어서, 추론은
     # 도는데 이벤트가 한 건도 도달하지 않았다.
     #
-    # 같은 :local 이름으로 다시 빌드하면 기존 태그가 새 image ID를 가리킨다. registry의
-    # 오래된 :latest로 돌아가지 않도록 pull도 금지한다.
-    #   빌드: docker build -t classroom-monitoring-worker:local worker
-    image: classroom-monitoring-worker:local
+    # 같은 :latest 이름으로 다시 빌드하면 기존 태그가 새 image ID를 가리킨다.
+    # registry의 오래된 이미지로 돌아가지 않도록 pull도 금지한다.
+    #   빌드: docker build -t ghcr.io/where-is-jo/classroom-monitoring-worker:latest worker
+    image: ghcr.io/where-is-jo/classroom-monitoring-worker:latest
     pull_policy: never
     env_file:
       # 변수 목록의 기준은 worker/pipeline/.env.example이다(조립 실행이라 pipeline 것을 쓴다).

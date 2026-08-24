@@ -119,13 +119,15 @@ def test_YOLO_임계값이_ByteTrack_high_이상이면_실패한다(
     assert any("ByteTrack high" in error for error in errors)
 
 
-def test_GPU_compose는_재빌드할_때_덮어쓰는_local_이미지명을_쓴다() -> None:
+def test_GPU_compose는_재빌드할_때_덮어쓰는_latest_이미지명을_쓴다() -> None:
     compose_path = Path(__file__).resolve().parents[2] / "compose.main.dev.gpu.yml"
     compose = compose_path.read_text(encoding="utf-8")
 
     for image in (
-        "classroom-monitoring-deeplearning:local",
-        "classroom-monitoring-worker:local",
+        "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest",
+        "ghcr.io/where-is-jo/classroom-monitoring-worker:latest",
     ):
         assert f"    image: {image}\n    pull_policy: never\n" in compose
     assert "local-202" not in compose
+    assert "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:local" not in compose
+    assert "ghcr.io/where-is-jo/classroom-monitoring-worker:local" not in compose

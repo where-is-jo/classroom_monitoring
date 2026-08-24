@@ -119,9 +119,69 @@ def test_GPU_배포_workflow가_재기동_후_runtime을_검증한다() -> None:
         repository_root / ".github" / "workflows" / "deploy-gpu-server.yml"
     ).read_text(encoding="utf-8")
 
-    apply_position = workflow.index('docker compose -f ".docker/$stack" up -d')
+    apply_position = workflow.index("up -d --force-recreate")
     verify_position = workflow.index(
         "python3 .docker/scripts/verify_face_handover_runtime.py"
     )
 
     assert verify_position > apply_position
+
+
+def test_GPU_배포_workflow가_현재_소스로_latest_두_개를_함께_갱신한다() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    workflow = (
+        repository_root / ".github" / "workflows" / "deploy-gpu-server.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "- 'worker/**'" in workflow
+    assert "- 'deeplearning/**'" in workflow
+    assert "git archive --format=tar HEAD:worker" in workflow
+    assert "git archive --format=tar HEAD:deeplearning" in workflow
+    assert "org.opencontainers.image.revision=$GITHUB_SHA" in workflow
+    assert (
+        "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:candidate-$GITHUB_SHA"
+    ) in workflow
+    assert (
+        "ghcr.io/where-is-jo/classroom-monitoring-worker:candidate-$GITHUB_SHA"
+    ) in workflow
+
+    deep_build = workflow.index("HEAD:deeplearning")
+    worker_build = workflow.index("HEAD:worker")
+    config_validation = workflow.index("서버에서 compose 검증 (실패 시 롤백)")
+    deep_latest = workflow.index(
+        'docker image tag "$DEEP_CANDIDATE" '
+        "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest"
+    )
+    worker_latest = workflow.index(
+        'docker image tag "$WORKER_CANDIDATE" '
+        "ghcr.io/where-is-jo/classroom-monitoring-worker:latest"
+    )
+    force_recreate = workflow.index("up -d --force-recreate")
+
+    assert deep_build < config_validation < deep_latest < force_recreate
+    assert worker_build < config_validation < worker_latest < force_recreate
+
+
+def test_GPU_배포_workflow는_실패하면_이전_latest_image_ID를_복구한다() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    workflow = (
+        repository_root / ".github" / "workflows" / "deploy-gpu-server.yml"
+    ).read_text(encoding="utf-8")
+
+    backup_position = workflow.index("$backup_dir/$STAMP.images")
+    activation_position = workflow.index("candidate를 latest 이미지로 전환")
+    rollback_position = workflow.index("rollback()")
+    restore_deep = workflow.index(
+        'docker image tag "$deep_id" '
+        "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest",
+        rollback_position,
+    )
+    restore_worker = workflow.index(
+        'docker image tag "$worker_id" '
+        "ghcr.io/where-is-jo/classroom-monitoring-worker:latest",
+        rollback_position,
+    )
+
+    assert backup_position < activation_position < rollback_position
+    assert restore_deep > rollback_position
+    assert restore_worker > rollback_position
