@@ -24,6 +24,8 @@ prometheus-client>=0.20
 
 # 테스트
 pytest
+# worker ByteTrack부터 FastAPI 학생 상태까지 잇는 합성 통합 테스트에서 쓴다.
+numpy>=1.26
 
 # 린트·타입 검사
 ruff
