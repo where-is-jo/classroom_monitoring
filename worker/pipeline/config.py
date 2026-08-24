@@ -88,7 +88,7 @@ class PipelineSettings(BaseSettings):
     # ByteTrack은 낮은 신뢰도 bbox도 연결에 쓰지만, 겹친 오탐 bbox를 얼굴 서비스에
     # 함께 보내면 안전한 일대일 연결 규칙이 얼굴을 미식별로 둔다. 얼굴 연결에만 쓸
     # 최소 사람 신뢰도를 별도로 둔다.
-    face_identity_min_person_confidence: float = Field(default=0.0, ge=0, le=1)
+    face_identity_min_person_confidence: float = Field(default=0.5, ge=0, le=1)
 
     # --- 사람 ByteTrack ---
     person_tracking_enabled: bool = True
@@ -112,7 +112,10 @@ class PipelineSettings(BaseSettings):
     identity_handover_max_delay_seconds: float = Field(default=8.0, gt=0, le=120)
     identity_handover_clock_skew_seconds: float = Field(default=0.5, ge=0, le=10)
     identity_handover_track_stale_seconds: float = Field(default=30.0, gt=0, le=3600)
-    identity_handover_min_confidence: float = Field(default=0.6, ge=0, le=1)
+    # deeplearning이 similarity + margin threshold를 모두 통과시킨 경우에만 student_id를
+    # 돌려준다. 여기서 임의의 cosine 임계값을 다시 적용하면 정상 식별을 버리므로 기본은
+    # 추가 필터 없음이다. 운영에서 별도 정책이 필요할 때만 0보다 크게 올린다.
+    identity_handover_min_confidence: float = Field(default=0.0, ge=0, le=1)
 
     @property
     def parsed_face_identity_camera_ids(self) -> frozenset[str]:

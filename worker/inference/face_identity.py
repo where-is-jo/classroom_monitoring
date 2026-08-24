@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -14,6 +15,10 @@ import requests
 from shared.types import CapturedFrame
 
 from .consumer import ResultHandler
+from .metrics import (
+    FACE_IDENTIFICATION_DURATION_SECONDS,
+    FACE_IDENTIFICATION_REQUESTS_TOTAL,
+)
 from .types import InferenceResult
 
 logger = logging.getLogger(__name__)
@@ -69,6 +74,7 @@ class HttpFaceIdentifier:
         if not encoded:
             raise FaceIdentificationError("얼굴 식별용 JPEG를 만들지 못했습니다.")
 
+        started_at = time.perf_counter()
         try:
             response = self._post(
                 self._url,
@@ -82,12 +88,22 @@ class HttpFaceIdentifier:
             )
             response.raise_for_status()
             payload = response.json()
+            matches = self._parse_matches(payload, person_count=len(person_positions))
         except requests.RequestException as error:
+            FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
             raise FaceIdentificationError(
                 "얼굴 식별 서비스 호출에 실패했습니다."
             ) from error
+        except FaceIdentificationError:
+            FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
+            raise
+        else:
+            FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="ok").inc()
+        finally:
+            FACE_IDENTIFICATION_DURATION_SECONDS.observe(
+                time.perf_counter() - started_at
+            )
 
-        matches = self._parse_matches(payload, person_count=len(person_positions))
         enriched = list(result.detections)
         for person_index, values in matches.items():
             detection_index = person_positions[person_index]

@@ -123,9 +123,12 @@ class HttpIdentityHandoverRouteProvider:
         payload = response.json()
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
             raise TypeError("인계 설정 응답에는 items 배열이 필요합니다.")
-        return parse_identity_handover_routes(
-            json.dumps(payload["items"], ensure_ascii=False)
-        )
+        items = payload["items"]
+        # 관리자가 마지막 route를 삭제한 정상 상태다. 환경변수 parser는 오타인 `[]`을
+        # 거부하지만, API의 빈 목록은 실행 중 인계를 끄라는 명시적 설정으로 취급한다.
+        if not items:
+            return ()
+        return parse_identity_handover_routes(json.dumps(items, ensure_ascii=False))
 
 
 class RefreshingIdentityHandoverResultHandler:
@@ -145,7 +148,8 @@ class RefreshingIdentityHandoverResultHandler:
         maximum_delay_seconds: float = 8.0,
         clock_skew_seconds: float = 0.5,
         track_stale_seconds: float = 30.0,
-        minimum_identity_confidence: float = 0.6,
+        minimum_identity_confidence: float = 0.0,
+        available_camera_ids: frozenset[str] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if refresh_seconds <= 0:
@@ -158,6 +162,7 @@ class RefreshingIdentityHandoverResultHandler:
         self._clock_skew_seconds = clock_skew_seconds
         self._track_stale_seconds = track_stale_seconds
         self._minimum_identity_confidence = minimum_identity_confidence
+        self._available_camera_ids = available_camera_ids
         self._monotonic = monotonic
         self._last_refresh = float("-inf")
         self._active = self._build(initial_routes)
@@ -176,6 +181,7 @@ class RefreshingIdentityHandoverResultHandler:
         self._last_refresh = now
         try:
             routes = self._provider.load()
+            self._validate_camera_ids(routes)
         except (requests.RequestException, ValueError, TypeError) as error:
             logger.warning(
                 "신원 인계 설정을 갱신하지 못해 직전 설정을 유지합니다: %s",
@@ -187,6 +193,23 @@ class RefreshingIdentityHandoverResultHandler:
         self._routes = routes
         self._active = self._build(routes)
         logger.info("신원 인계 route 동적 설정 %d개를 적용했습니다.", len(routes))
+
+    def _validate_camera_ids(
+        self, routes: tuple[IdentityHandoverRoute, ...]
+    ) -> None:
+        if self._available_camera_ids is None:
+            return
+        route_camera_ids = {
+            camera_id
+            for route in routes
+            for camera_id in (route.entry_camera_id, route.classroom_camera_id)
+        }
+        missing = route_camera_ids - self._available_camera_ids
+        if missing:
+            raise ValueError(
+                "동적 신원 인계 route의 카메라가 STREAM_SOURCES에 없습니다: "
+                + ", ".join(sorted(missing))
+            )
 
     def _build(
         self, routes: tuple[IdentityHandoverRoute, ...]
@@ -272,7 +295,7 @@ class IdentityHandoverResultHandler:
         maximum_delay_seconds: float = 8.0,
         clock_skew_seconds: float = 0.5,
         track_stale_seconds: float = 30.0,
-        minimum_identity_confidence: float = 0.6,
+        minimum_identity_confidence: float = 0.0,
     ) -> None:
         if not routes:
             raise ValueError("신원 인계 route가 하나 이상 필요합니다.")

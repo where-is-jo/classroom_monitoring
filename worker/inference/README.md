@@ -255,8 +255,8 @@ python -m pipeline.main
 
 ## 노출하는 지표
 
-정의는 [`metrics.py`](./metrics.py) 한곳에 모으고, 계측은 `processor.py`(모델 호출
-한 번)와 `consumer.py`(루프 한 바퀴) 두 자리에서만 한다. 노출 경로와 포트는
+정의는 [`metrics.py`](./metrics.py) 한곳에 모으고, 모델·루프·추적·얼굴 호출·인계
+경계에서 계측한다. 노출 경로와 포트는
 [조립 진입점](../pipeline/README.md#지표-노출)이 연다.
 
 | 지표 | 타입 | label |
@@ -266,6 +266,8 @@ python -m pipeline.main
 | `classroom_monitoring_inference_consecutive_failures` | Gauge | 없음 |
 | `classroom_monitoring_detections_total` | Counter | `class_name` |
 | `classroom_monitoring_detection_confidence` | Histogram | `class_name` |
+| `classroom_monitoring_face_identification_requests_total` | Counter | `outcome` (`ok`, `error`) |
+| `classroom_monitoring_face_identification_duration_seconds` | Histogram | 없음 |
 
 **실패한 추론의 시간은 지연 분포에 넣지 않는다.** 즉시 터진 호출이 "아주 빠른 추론"
 으로 섞이면 분포가 거짓말을 한다. 실패는 `frames_processed_total{result="failed"}`가
