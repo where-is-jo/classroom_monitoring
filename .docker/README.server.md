@@ -10,6 +10,12 @@
 `.docker/`는 커밋된다([결정 0018](../docs/architecture/decisions.md#0018--docker-compose-구성을-저장소에-커밋하고-localdev-파일을-나눈다)).
 단 `env/`(비밀값)와 `models/`(가중치)는 제외이므로 **서버에는 그 둘을 따로 올려야 한다.**
 
+**커밋되는 파일은 CI가 이 서버에 반영한다**([결정 0038](../docs/architecture/decisions.md#0038--gpu-서버의-compose-설정을-github-actions가-ssh로-반영한다)).
+`.docker/`를 고쳐 `develop`에 병합하면 `.github/workflows/deploy-gpu-server.yml`이 파일을
+옮기고, **그때 떠 있던 스택만** `up -d`로 다시 올린다. 내려 둔 스택은 켜지 않는다.
+**서버가 꺼져 있으면 배포는 실패가 아니라 건너뛴다** — 서버를 켠 뒤 Actions 탭에서
+`Run workflow`로 다시 돌린다. `env/`와 `models/`는 전송 대상이 아니라 여전히 사람이 올린다.
+
 ## 파일
 
 | 파일 | project name | 담는 것 |
