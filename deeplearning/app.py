@@ -630,6 +630,23 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/health/ready")
+def readiness(request: Request) -> dict[str, str]:
+    """모델과, 활성화된 경우 MongoDB 얼굴 갤러리까지 사용할 수 있는지 확인한다."""
+    runtime: FaceIdentificationRuntime | None = getattr(
+        request.app.state, "face_identification_runtime", None
+    )
+    if runtime is None:
+        return {"status": "ready", "face_identification": "disabled"}
+    try:
+        runtime.ensure_ready()
+    except FaceGalleryUnavailable:
+        raise HTTPException(
+            status_code=503, detail="얼굴 갤러리를 사용할 수 없습니다."
+        ) from None
+    return {"status": "ready", "face_identification": "ready"}
+
+
 # **끄면 라우트 자체를 만들지 않는다.** 404를 돌려주는 경로를 남기면 "지표가 있는데
 # 지금 실패한 것"과 "이 배포에는 없는 것"이 구분되지 않는다. 값은 기동 시점에 읽는다.
 if os.environ.get("METRICS_ENABLED", "true").strip().lower() != "false":

@@ -11,6 +11,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from threading import RLock
 from typing import Any, Protocol
 
 import numpy as np
@@ -297,53 +298,70 @@ class FaceIdentificationRuntime:
         self._engine: FaceIdentityEngine | None = None
         self._gallery_revision: GalleryRevision | None = None
         self._gallery_loaded_at: float | None = None
+        self._gallery_lock = RLock()
         self._trackers: dict[str, MultiFaceIdentityTracker] = {}
 
     def _refresh_gallery(self) -> FaceIdentityEngine:
-        now = self._clock()
-        if (
-            self._engine is not None
-            and self._gallery_loaded_at is not None
-            and now - self._gallery_loaded_at < self._config.gallery_refresh_seconds
-        ):
+        # readiness는 FastAPI의 sync endpoint라 thread pool에서 실행될 수 있고, 실제
+        # 식별 endpoint는 event loop에서 이 메서드를 부른다. 둘이 동시에 갤러리를
+        # 교체하면 engine과 revision이 서로 다른 snapshot을 가리킬 수 있으므로 한 번에
+        # 하나만 갱신한다.
+        with self._gallery_lock:
+            now = self._clock()
+            if (
+                self._engine is not None
+                and self._gallery_loaded_at is not None
+                and now - self._gallery_loaded_at
+                < self._config.gallery_refresh_seconds
+            ):
+                return self._engine
+
+            snapshot = self._gallery_loader.load()
+            if self._engine is not None and snapshot.revision == self._gallery_revision:
+                self._gallery_loaded_at = now
+                return self._engine
+
+            try:
+                gallery = FaceGallery.from_entries(snapshot.entries)
+            except ValueError:
+                raise FaceGalleryUnavailable(
+                    "얼굴 갤러리 구성이 올바르지 않습니다."
+                ) from None
+            self._engine = FaceIdentityEngine(
+                detector=self._detector,
+                recognizer=self._recognizer,
+                gallery=gallery,
+                thresholds=IdentityThresholds(
+                    self._config.similarity_threshold,
+                    self._config.margin_threshold,
+                ),
+                detection_threshold=self._config.detection_threshold,
+                identity_min_detection_confidence=(
+                    self._config.identity_min_detection_confidence
+                ),
+                minimum_face_size=self._config.minimum_face_size,
+                preferred_face_size=self._config.preferred_face_size,
+                minimum_blur_score=self._config.minimum_blur_score,
+                preferred_blur_score=self._config.preferred_blur_score,
+                uncertain_quality_threshold=self._config.uncertain_quality_threshold,
+                use_flip_tta=self._config.use_flip_tta,
+                tta_similarity_band=self._config.tta_similarity_band,
+                tta_margin_band=self._config.tta_margin_band,
+            )
+            self._gallery_revision = snapshot.revision
+            self._gallery_loaded_at = now
+            # 학생 추가·수정·삭제 뒤에는 이전 갤러리에서 쌓은 증거를 재사용하지 않는다.
+            self._trackers.clear()
             return self._engine
 
-        snapshot = self._gallery_loader.load()
-        self._gallery_loaded_at = now
-        if self._engine is not None and snapshot.revision == self._gallery_revision:
-            return self._engine
+    def ensure_ready(self) -> None:
+        """현재 MongoDB 갤러리를 실제 엔진으로 만들 수 있는지 확인한다.
 
-        try:
-            gallery = FaceGallery.from_entries(snapshot.entries)
-        except ValueError:
-            raise FaceGalleryUnavailable(
-                "얼굴 갤러리 구성이 올바르지 않습니다."
-            ) from None
-        self._engine = FaceIdentityEngine(
-            detector=self._detector,
-            recognizer=self._recognizer,
-            gallery=gallery,
-            thresholds=IdentityThresholds(
-                self._config.similarity_threshold,
-                self._config.margin_threshold,
-            ),
-            detection_threshold=self._config.detection_threshold,
-            identity_min_detection_confidence=(
-                self._config.identity_min_detection_confidence
-            ),
-            minimum_face_size=self._config.minimum_face_size,
-            preferred_face_size=self._config.preferred_face_size,
-            minimum_blur_score=self._config.minimum_blur_score,
-            preferred_blur_score=self._config.preferred_blur_score,
-            uncertain_quality_threshold=self._config.uncertain_quality_threshold,
-            use_flip_tta=self._config.use_flip_tta,
-            tta_similarity_band=self._config.tta_similarity_band,
-            tta_margin_band=self._config.tta_margin_band,
-        )
-        self._gallery_revision = snapshot.revision
-        # 학생 추가·수정·삭제 뒤에는 이전 갤러리에서 쌓은 증거를 재사용하지 않는다.
-        self._trackers.clear()
-        return self._engine
+        모델 파일 존재만 보는 `/health`와 달리 readiness에서 호출한다. 갤러리가
+        비었거나 현재 ArcFace metadata와 다르면 요청이 들어오기 전에 배포를 unhealthy로
+        표시한다.
+        """
+        self._refresh_gallery()
 
     def identify(
         self,

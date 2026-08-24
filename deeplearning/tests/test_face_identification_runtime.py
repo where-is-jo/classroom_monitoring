@@ -212,6 +212,37 @@ def test_갤러리_revision이_같으면_모델과_track을_유지한다() -> No
     assert second.track_id == first.track_id
 
 
+def test_readiness가_첫_식별_전에_갤러리를_검증하고_주기_안에는_재사용한다() -> None:
+    loader = GalleryLoader()
+    active = runtime(loader, [0.0])
+
+    active.ensure_ready()
+    active.ensure_ready()
+
+    assert loader.load_count == 1
+
+
+def test_잘못된_갤러리는_refresh_시간을_갱신하지_않아_즉시_재시도한다() -> None:
+    class RecoveringLoader(GalleryLoader):
+        def load(self) -> FaceGallerySnapshot:
+            self.load_count += 1
+            if self.load_count == 1:
+                return FaceGallerySnapshot(entries=(), revision=())
+            return FaceGallerySnapshot(
+                entries=(GalleryEntry("student-a", _vector(0)),),
+                revision=(("student-a", "2"),),
+            )
+
+    loader = RecoveringLoader()
+    active = runtime(loader, [0.0])
+
+    with pytest.raises(FaceGalleryUnavailable):
+        active.ensure_ready()
+    active.ensure_ready()
+
+    assert loader.load_count == 2
+
+
 def test_두_사람에_걸친_얼굴은_연결하지_않는다() -> None:
     identity = TrackedIdentity(
         track_id=3,

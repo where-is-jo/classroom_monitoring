@@ -66,7 +66,8 @@ EXPOSE 8100
 
 # start-period가 긴 것은 lifespan에서 ONNX 모델 셋을 올리기 때문이다.
 # 그전에 죽은 것으로 판정하면 기동에 성공한 컨테이너가 계속 재시작된다.
-HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=5 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
+# MongoDB 조회 timeout 기본값이 5초이므로 healthcheck timeout은 그보다 길어야 한다.
+HEALTHCHECK --interval=10s --timeout=8s --start-period=90s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/ready', timeout=7)" || exit 1
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8100"]

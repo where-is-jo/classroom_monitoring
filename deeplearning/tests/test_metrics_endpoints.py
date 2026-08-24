@@ -193,6 +193,52 @@ def test_metrics_경로가_지표를_돌려준다(client: TestClient) -> None:
     assert f"{metrics.METRIC_PREFIX}face_analysis_requests_total" in response.text
 
 
+def test_readiness는_얼굴_식별이_꺼져_있으면_기본_분석만_ready로_본다(
+    client: TestClient,
+) -> None:
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "face_identification": "disabled",
+    }
+
+
+def test_readiness는_활성_갤러리를_실제로_확인한다(client: TestClient) -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.ready_calls = 0
+
+        def ensure_ready(self) -> None:
+            self.ready_calls += 1
+
+    runtime = Runtime()
+    app_module.app.state.face_identification_runtime = runtime
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "face_identification": "ready",
+    }
+    assert runtime.ready_calls == 1
+
+
+def test_readiness는_갤러리를_읽지_못하면_503이다(client: TestClient) -> None:
+    class Runtime:
+        def ensure_ready(self) -> None:
+            raise app_module.FaceGalleryUnavailable("database unavailable")
+
+    app_module.app.state.face_identification_runtime = Runtime()
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "얼굴 갤러리를 사용할 수 없습니다."}
+
+
 def test_embedding_이미지를_해석하지_못하면_따로_센다(client: TestClient) -> None:
     use_detector()
     before = value("face_embedding_requests_total", result="bad_image")

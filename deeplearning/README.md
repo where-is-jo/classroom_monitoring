@@ -188,6 +188,11 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 | `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 유사도·margin 임계값 | 식별을 켤 때 파일 또는 아래 두 값이 필수 |
 | `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD` | 임계값 파일을 쓰지 않을 때의 값 | 근거 없는 기본값 없음 |
 
+`GET /health`는 프로세스 liveness만 확인한다. Docker와 배포 검증은
+`GET /health/ready`를 사용한다. 식별이 켜진 배포에서는 이 경로가 MongoDB 갤러리를 실제로
+읽고, 비어 있거나 현재 ArcFace metadata와 다른 embedding이 있으면 503을 반환한다.
+식별이 꺼진 배포에서는 `face_identification=disabled`로 200을 반환한다.
+
 갤러리의 누구인지 결정하는 유사도·margin 임계값은 `deeplearning` 설정이다. 식별된
 결과를 학생 상태 근거로 받아들일지 정하는 `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`는
 `webapps/fastapi` 설정이다. 목적이 다르므로 하나로 합치지 않는다.
