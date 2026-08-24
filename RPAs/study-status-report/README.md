@@ -49,7 +49,7 @@
 
 Slack 앱 권한은 `.xlsx` 파일 업로드를 위해 `files:write`가 필요하다. 채널 ID를 자동으로 조회하려면 추가로 `channels:read` 또는 대상 채널 유형에 맞는 조회 권한이 필요하지만, 운영에서는 `SLACK_CHANNEL_ID`를 명시하는 방식을 기본으로 한다.
 
-Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` 형태라면 마지막 경로 값이 채널 ID다. 현재 입력 문서의 채널 URL 기준 채널 ID는 `C0BMM4X8BJT`다.
+Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` 형태라면 마지막 경로 값이 채널 ID다. 현재 대상 채널은 `https://app.slack.com/client/T0BMM4ZFGUB/C0BRSFJ6SSK`(채널 ID `C0BRSFJ6SSK`)다 — 값은 각자 `.env`에 넣고 이 문서에는 채널 ID까지만 남긴다.
 
 ## 출력
 
