@@ -234,6 +234,9 @@ jobs:
               failed="$failed $stack"
             fi
           done
+          if ! python3 .docker/scripts/validate_face_handover_deployment.py; then
+            failed="$failed face-handover-inputs"
+          fi
           if [ -n "$failed" ]; then
             echo "검증 실패:$failed — 백업으로 되돌린다" >&2
             tar xzf "$REMOTE_PATH/.deploy-backups/$STAMP.tar.gz" -C "$REMOTE_PATH"
