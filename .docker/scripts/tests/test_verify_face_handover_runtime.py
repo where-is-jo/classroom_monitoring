@@ -111,3 +111,17 @@ def test_live_인계가_아직_없으면_실패_이유를_남긴다(
     verifier.verify_metrics(require_live_handoff=True)
 
     assert "성공한 CCTV 신원 인계가 아직 없습니다." in verifier.errors
+
+
+def test_GPU_배포_workflow가_재기동_후_runtime을_검증한다() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    workflow = (
+        repository_root / ".github" / "workflows" / "deploy-gpu-server.yml"
+    ).read_text(encoding="utf-8")
+
+    apply_position = workflow.index('docker compose -f ".docker/$stack" up -d')
+    verify_position = workflow.index(
+        "python3 .docker/scripts/verify_face_handover_runtime.py"
+    )
+
+    assert verify_position > apply_position
