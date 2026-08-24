@@ -14,6 +14,18 @@ from typing import Any
 
 
 SLACK_API = "https://slack.com/api"
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def api_call(method: str, token: str, fields: dict[str, str]) -> dict[str, Any]:
@@ -85,6 +97,7 @@ def post_webhook(webhook_url: str, text: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    load_env_file(ENV_FILE)
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=Path, required=True)
     parser.add_argument("--title", required=True)
