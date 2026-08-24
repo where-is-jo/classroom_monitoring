@@ -4,19 +4,20 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
+
 from shared.types import CapturedFrame
 
 from ..identity_handover import (
+    HttpIdentityHandoverRouteProvider,
     IdentityHandoverResultHandler,
     IdentityHandoverRoute,
+    RefreshingIdentityHandoverResultHandler,
     parse_identity_handover_routes,
 )
 from ..types import Detection, InferenceResult
 
 STARTED_AT = datetime(2026, 8, 22, 9, 0, tzinfo=UTC)
-ROUTE = IdentityHandoverRoute(
-    "entry-camera", "classroom-cctv", (0.0, 0.0, 0.3, 1.0)
-)
+ROUTE = IdentityHandoverRoute("entry-camera", "classroom-cctv", (0.0, 0.0, 0.3, 1.0))
 
 
 def captured(camera_id: str, seconds: float, sequence: int = 0) -> CapturedFrame:
@@ -168,6 +169,122 @@ def test_문_영역_밖에서_생긴_track에는_신원을_붙이지_않는다()
     assert handled[-1][1].detections[0].student_id is None
 
 
+def test_문_영역_밖에서_생긴_track이_안으로_진입하면_신원을_인계한다() -> None:
+    active, handled = handler()
+    active(
+        captured("entry-camera", 1),
+        result(
+            person(
+                "person-4",
+                (60, 5, 140, 98),
+                student_id="student-001",
+                identity_confidence=0.91,
+            )
+        ),
+    )
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (120, 5, 190, 95))),
+    )
+
+    active(
+        captured("classroom-cctv", 3, sequence=1),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+
+    entered = handled[-1][1].detections[0]
+    assert entered.track_id == "person-12"
+    assert entered.student_id == "student-001"
+    assert entered.identity_confidence == 0.91
+
+
+def test_인계된_track이_문_영역에_재진입해도_다른_신원으로_바꾸지_않는다() -> None:
+    active, handled = handler()
+    active(
+        captured("entry-camera", 1),
+        result(
+            person(
+                "person-4",
+                (60, 5, 140, 98),
+                student_id="student-001",
+                identity_confidence=0.91,
+            )
+        ),
+    )
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+    active(
+        captured("classroom-cctv", 3, sequence=1),
+        result(person("person-12", (120, 5, 190, 95))),
+    )
+    active(
+        captured("entry-camera", 4, sequence=1),
+        result(
+            person(
+                "person-5",
+                (60, 5, 140, 98),
+                student_id="student-002",
+                identity_confidence=0.94,
+            )
+        ),
+    )
+
+    active(
+        captured("classroom-cctv", 5, sequence=2),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+
+    reentered = handled[-1][1].detections[0]
+    assert reentered.student_id == "student-001"
+    assert reentered.identity_confidence == 0.91
+
+
+def test_입구_track_ID가_바뀌어도_같은_학생을_두_CCTV_track에_인계하지_않는다() -> None:
+    active, handled = handler()
+    active(
+        captured("entry-camera", 1),
+        result(
+            person(
+                "face-12",
+                (60, 5, 140, 98),
+                student_id="student-001",
+                identity_confidence=0.91,
+            )
+        ),
+    )
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-5", (0, 5, 50, 95))),
+    )
+    assert handled[-1][1].detections[0].student_id == "student-001"
+
+    # 같은 실제 사람이 다음 프레임에서 ByteTrack ID를 받아도 새 입장으로 보지 않는다.
+    active(
+        captured("entry-camera", 3, sequence=1),
+        result(
+            person(
+                "person-12",
+                (60, 5, 140, 98),
+                student_id="student-001",
+                identity_confidence=0.93,
+            )
+        ),
+    )
+    active(
+        captured("classroom-cctv", 4, sequence=1),
+        result(
+            person("person-5", (120, 5, 190, 95)),
+            person("person-22", (0, 5, 50, 95)),
+        ),
+    )
+
+    by_track = {d.track_id: d for d in handled[-1][1].detections}
+    assert by_track["person-5"].student_id == "student-001"
+    assert by_track["person-22"].student_id is None
+
+
 def test_후보_학생이_둘이면_가까운_track에_추측해_붙이지_않는다() -> None:
     active, handled = handler()
     for index, student_id in enumerate(("student-001", "student-002"), start=1):
@@ -285,3 +402,73 @@ def test_track_stale은_시간창과_시각오차의_합보다_길어야_한다(
             clock_skew_seconds=2,
             track_stale_seconds=9,
         )
+
+
+class FakeRouteResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return {
+            "items": [
+                {
+                    "entry_camera_id": "entry-camera",
+                    "classroom_camera_id": "classroom-cctv",
+                    "classroom_entry_zone": [0.0, 0.0, 0.3, 1.0],
+                }
+            ]
+        }
+
+
+def test_FastAPI_관리_화면의_route를_읽는다() -> None:
+    requests_seen: list[tuple[str, float]] = []
+
+    def get(url: str, *, timeout: float) -> FakeRouteResponse:
+        requests_seen.append((url, timeout))
+        return FakeRouteResponse()
+
+    routes = HttpIdentityHandoverRouteProvider(
+        "http://fastapi:8001/",
+        timeout_seconds=2,
+        get=get,  # type: ignore[arg-type]
+    ).load()
+
+    assert requests_seen == [
+        ("http://fastapi:8001/internal/identity-handover-routes", 2)
+    ]
+    assert routes == (ROUTE,)
+
+
+def test_관리_화면_route를_실행_중에_반영한다() -> None:
+    class Provider:
+        def load(self) -> tuple[IdentityHandoverRoute, ...]:
+            return (ROUTE,)
+
+    handled: list[tuple[CapturedFrame, InferenceResult]] = []
+    active = RefreshingIdentityHandoverResultHandler(
+        (),
+        provider=Provider(),
+        inner=lambda frame, value: handled.append((frame, value)),
+        refresh_seconds=5,
+        maximum_delay_seconds=8,
+        clock_skew_seconds=0.5,
+        track_stale_seconds=30,
+        monotonic=lambda: 0,
+    )
+    active(
+        captured("entry-camera", 1),
+        result(
+            person(
+                "person-4",
+                (60, 5, 140, 98),
+                student_id="student-001",
+                identity_confidence=0.91,
+            )
+        ),
+    )
+    active(
+        captured("classroom-cctv", 3),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+
+    assert handled[-1][1].detections[0].student_id == "student-001"

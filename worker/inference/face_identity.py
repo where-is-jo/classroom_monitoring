@@ -34,15 +34,19 @@ class HttpFaceIdentifier:
         *,
         timeout_seconds: float,
         jpeg_quality: int,
+        minimum_person_confidence: float = 0.0,
         post: Callable[..., requests.Response] = requests.post,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("얼굴 식별 timeout은 0보다 커야 합니다.")
         if not 1 <= jpeg_quality <= 100:
             raise ValueError("얼굴 식별 JPEG 품질은 1과 100 사이여야 합니다.")
+        if not 0.0 <= minimum_person_confidence <= 1.0:
+            raise ValueError("얼굴 식별 사람 신뢰도는 0과 1 사이여야 합니다.")
         self._url = base_url.rstrip("/") + IDENTIFICATION_PATH
         self._timeout_seconds = timeout_seconds
         self._jpeg_quality = jpeg_quality
+        self._minimum_person_confidence = minimum_person_confidence
         self._post = post
 
     def enrich(
@@ -52,6 +56,7 @@ class HttpFaceIdentifier:
             index
             for index, detection in enumerate(result.detections)
             if detection.class_name.casefold() == "person"
+            and detection.confidence >= self._minimum_person_confidence
         ]
         if not person_positions:
             return result

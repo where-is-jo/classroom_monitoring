@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}인계 ROI · 학습 모니터링{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', path='/identity-handover.css') }}">{% endblock %}
+{% block content %}
+<section
+  id="handover-editor"
+  class="handover-editor"
+  data-classroom-id="{{ classroom.id if classroom else '' }}"
+>
+  <header class="page-header handover-heading">
+    <div>
+      <p class="eyebrow">Identity handover</p>
+      <h1>입구 → CCTV 인계 ROI</h1>
+      <p>입구 카메라에서 얼굴로 확인한 신원을 CCTV의 동일 인원 track에 연결할 문 영역을 설정합니다.</p>
+    </div>
+    <span class="handover-live-badge"><span aria-hidden="true"></span> worker 자동 반영</span>
+  </header>
+
+  <div class="handover-toolbar" aria-label="인계 ROI 설정">
+    <label>강의실
+      <select id="handover-classroom"{% if not classrooms %} disabled{% endif %}>
+        {% for item in classrooms %}<option value="{{ item.id }}"{% if classroom and classroom.id == item.id %} selected{% endif %}>{{ item.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>얼굴 식별 입구캠
+      <select id="handover-entry-camera"{% if not entry_cameras %} disabled{% endif %}>
+        {% if not entry_cameras %}<option value="">IDENTITY_ONLY 카메라 없음</option>{% endif %}
+        {% for camera in entry_cameras %}<option value="{{ camera.camera_id }}">{{ camera.camera_label }} · {{ camera.camera_id }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>추적 CCTV
+      <select id="handover-classroom-camera"{% if not classroom_cameras %} disabled{% endif %}>
+        {% if not classroom_cameras %}<option value="">SEAT_JUDGING 카메라 없음</option>{% endif %}
+        {% for camera in classroom_cameras %}<option value="{{ camera.camera_id }}" data-capture-available="{{ 'true' if camera.capture_available else 'false' }}">{{ camera.camera_label }} · {{ camera.camera_id }}{% if not camera.capture_available %} (캡처 연결 없음){% endif %}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="handover-layout">
+    <div class="handover-canvas-card">
+      <div class="handover-actions">
+        <button id="handover-capture" type="button"{% if not classroom_cameras %} disabled{% endif %}>CCTV 현재 화면 캡처</button>
+        <button id="handover-draw" type="button" class="secondary" disabled>영역 다시 그리기</button>
+        <button id="handover-save" type="button" disabled>설정 저장</button>
+        <button id="handover-delete" type="button" class="danger" disabled>설정 삭제</button>
+      </div>
+      <div id="handover-stage" class="handover-stage" data-state="empty">
+        <img id="handover-reference-image" alt="인계 ROI를 그릴 CCTV 현재 화면" hidden>
+        <div id="handover-placeholder" class="handover-placeholder" role="status">
+          <strong>CCTV 기준 화면이 없습니다</strong>
+          <span>현재 화면을 캡처하면 저장된 인계 위치를 겹쳐 보여줍니다.</span>
+        </div>
+        <svg id="handover-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="CCTV 인계 영역">
+          <rect id="handover-saved-zone" class="handover-zone saved" hidden></rect>
+          <rect id="handover-draft-zone" class="handover-zone draft" hidden></rect>
+          <text id="handover-zone-label" x="0" y="0" hidden>인계 ROI</text>
+        </svg>
+      </div>
+      <p id="handover-status" class="handover-status" role="status" aria-live="polite"></p>
+    </div>
+
+    <aside class="handover-details" aria-label="현재 인계 설정">
+      <section class="detail-card">
+        <p class="eyebrow">How it works</p>
+        <h2>판정 기준</h2>
+        <p>사람 bbox의 <strong>하단 중앙점</strong>이 이 영역으로 들어오는 순간, 시간 창 안의 유일한 입구 신원과 연결합니다.</p>
+        <p>문 바닥 경계만 좁게 포함해야 동시에 여러 track이 후보가 되는 것을 줄일 수 있습니다.</p>
+      </section>
+      <section class="detail-card">
+        <p class="eyebrow">Current zone</p>
+        <h2>현재 좌표</h2>
+        <dl id="handover-coordinates" class="handover-coordinates">
+          <div><dt>왼쪽</dt><dd>—</dd></div><div><dt>위</dt><dd>—</dd></div>
+          <div><dt>오른쪽</dt><dd>—</dd></div><div><dt>아래</dt><dd>—</dd></div>
+        </dl>
+        <p id="handover-updated-at" class="muted">저장된 설정이 없습니다.</p>
+      </section>
+      <section class="detail-card">
+        <p class="eyebrow">Worker fallback</p>
+        <h2>적용 값 확인</h2>
+        <p>worker는 이 화면의 저장값을 주기적으로 읽습니다. 아래 값은 장애 시 정적 환경변수로도 사용할 수 있습니다.</p>
+        <code id="handover-worker-value" class="handover-worker-value">설정 없음</code>
+      </section>
+    </aside>
+  </div>
+
+  {% if not classrooms %}<div class="empty" role="status"><strong>등록된 강의실이 없습니다.</strong></div>{% endif %}
+  {% if classroom and (not entry_cameras or not classroom_cameras) %}<div class="notice" role="status">이 강의실에는 IDENTITY_ONLY 입구 카메라와 SEAT_JUDGING CCTV가 각각 하나 이상 필요합니다.</div>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/identity-handover.js') }}" defer></script>{% endblock %}

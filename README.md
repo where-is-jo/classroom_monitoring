@@ -51,7 +51,9 @@
   세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
   `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
   전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 deeplearning의
-  SCRFD·ArcFace 갤러리 식별로 `student_id`를 보강한다. 기본값은 꺼져 있다.
+  SCRFD·ArcFace 갤러리 식별로 `student_id`를 보강한다. FastAPI의 `/identity-handover`
+  화면에서 저장한 CCTV 문 ROI를 주기적으로 읽어 입구 신원을 CCTV ByteTrack으로
+  넘기며, 설정 조회가 잠시 실패하면 마지막 정상값을 유지한다. 기본값은 꺼져 있다.
 
 ```bash
 cd webapps/fastapi
@@ -79,9 +81,10 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 시각을 이용한 입구→CCTV 신원 인계가 코드와 합성 테스트로 연결됐다
 ([결정 0036](./docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 CCTV detection의 `student_id`와 `track_id`는 FastAPI의 ROI·좌석 판정을 거쳐 저장·SSE·
-화면까지 전달된다. 다만 **실제 입구 카메라와 CCTV를 동시에 사용한 종단 간 검증**, 현장
-문 영역·인계 시간 창 보정, 시간표 기반 `ABSENT`는 남아 있다. 실제 영상 검증 전에는
-특정 학생이 좌석까지 안정적으로 추적된다고 완료 판정하지 않는다.
+화면까지 전달된다. `/identity-handover`에서 CCTV 현재 화면에 문 영역을 겹쳐 보고 다시
+그리면 worker가 재시작 없이 반영한다. 입구 사람 track ID가 바뀌더라도 활성 학생 하나를
+CCTV track 하나에만 인계한다. 다만 배포 환경별 실제 입구 카메라·CCTV 종단 간 검증,
+문 영역·인계 시간 창 보정, 시간표 기반 `ABSENT`는 남아 있다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 
 ## 디렉터리 구조
@@ -202,8 +205,9 @@ README.md      이 문서
 - 얼굴 탐지·인식 모델과 사람 탐지 모델 버전
 - 결석 유예 시간 값과 bbox 중심점 기반 좌석 판정의 조정 여부 — 실제 촬영이 선행되어야 한다
 - **카메라 간 신원 인계 실측값** — 방법은 CCTV 문 영역·통과 시각의 유일 후보 인계로
-  확정·구현됐다(결정 0036). 실제 문 ROI, 시간 창, 시각 오차와 ByteTrack 임계값은 촬영으로
-  보정해야 한다
+  확정·구현됐다(결정 0036). 문 ROI는 `/identity-handover`에서 현재 CCTV 화면에 겹쳐
+  저장하고 worker가 동적으로 읽는다. 최종 좌표, 시간 창, 시각 오차와 ByteTrack 임계값은
+  등록 학생의 실제 입장 촬영으로 보정해야 한다
 - **입구 카메라의 운영 RTSP 경로** — 현재 송출을 사용할 수 없다. GPU worker가 읽을
   경로와 운영 시 MediaMTX 배치를 확정하고 실제 입력으로 검증해야 한다
 - **실제 CCTV가 어안이 아니라 일반 광각이다** — 결정 0024의 어안 전제와 다르다.

@@ -95,6 +95,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
 | `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
 | `/roi-connections` | 강의실 카메라의 **현재 화면을 캡처**해 그 위에 좌석별 다각형 ROI를 그리고 MongoDB에 저장. 이미 등록된 ROI를 좌석 이름과 함께 겹쳐 보여주고, 클릭해서 다시 그리거나 지울 수 있다. 캡처에는 `CAMERA_RTSP_SOURCES`가 필요하다([결정 0031](../../docs/architecture/decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)) |
+| `/identity-handover` | 입구 얼굴 신원을 CCTV 사람 track에 넘길 **CCTV 문 사각형 ROI** 관리. 현재 CCTV 화면을 캡처해 저장 영역을 겹쳐 보고 다시 그리며, 저장값은 worker가 주기적으로 읽어 재시작 없이 반영한다 |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
 | `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
@@ -128,6 +129,11 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
 | `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection?camera_id=...` | 좌석 하나의 ROI를 삭제. 그 카메라는 해당 좌석을 관측하지 않게 된다. 지울 것이 없으면 404 |
 | `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | `camera_id`·좌석·legacy 학생 연결과 ROI를 기준 이미지 없이 저장(`revision=0`). **화면은 더 이상 이 경로를 쓰지 않는다** |
+| `GET` | `/api/v1/classrooms/{classroom_id}/identity-handover-routes` | 강의실의 입구→CCTV 인계 route와 저장 좌표 조회 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/identity-handover-routes/{classroom_camera_id}` | `IDENTITY_ONLY` 입구 카메라와 `SEAT_JUDGING` CCTV 사이의 정규화 사각형 문 ROI 저장 |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/identity-handover-routes/{classroom_camera_id}` | CCTV 인계 route 삭제. 다음 worker 갱신부터 새 인계를 중단 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/identity-handover-reference-image/capture?camera_id=...` | CCTV 현재 RTSP 프레임을 인계 ROI 전용 기준 이미지로 캡처. 좌석 ROI 기준 이미지 revision에는 영향을 주지 않는다 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/identity-handover-reference-image?camera_id=...` | 캡처한 인계 ROI 기준 JPEG 조회 |
 | `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
 | `POST` | `/api/v1/video-streams` | 실제 카메라 source 등록. MongoDB mode에는 seed가 없어 이 경로로 넣으며, 입구 카메라는 `role=IDENTITY_ONLY`로 등록한다 |
 | `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태. 목록의 `id`로 조회하며 `camera_id`도 받는다 |
@@ -141,6 +147,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `POST` | `/api/v1/video-searches` | 부작용 없는 데모 catalog 검색 실행 (규칙 기반) |
 | `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
 | `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
+| `GET` | `/internal/identity-handover-routes` | 활성 강의실의 인계 route를 worker 형식으로 조회. worker가 기본 5초마다 갱신 |
 | `POST` | `/internal/video-segments` | worker 영상 세그먼트 수신 (멱등) |
 | `GET` | `/health` | 프로세스 기동 상태 |
 | `GET` | `/health/ready` | 현재 저장소 준비 상태 |
@@ -393,9 +400,11 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
   [`worker/inference` 계약 fixture](../../worker/inference/MODEL_INTEGRATION.md)를 사용한다.
 - `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정한 worker는 deeplearning의 얼굴 식별
   결과로 `student_id`를 채운다. 문 영역·통과 시간 route가 설정되면 신원을 CCTV
-  ByteTrack에 보수적으로 인계한다. 응답과 화면은 값을 그대로 통과시켜 이름과
-  `track_id`를 보여주며, 미식별이면 "식별 미연동"으로 표시한다. 실제 카메라에서는
-  얼굴 가중치·갤러리·문 영역·인계 시간 창을 별도로 검증해야 한다.
+  ByteTrack에 보수적으로 인계한다. route는 `/identity-handover`에서 관리하며 worker가
+  `/internal/identity-handover-routes`를 주기적으로 읽는다. 조회 장애 때는 마지막 정상
+  설정을 유지하고, 정상 응답이 빈 목록이면 새 인계를 끈다. 응답과 화면은 값을 그대로
+  통과시켜 이름과 `track_id`를 보여주며, 미식별이면 "식별 미연동"으로 표시한다. 실제
+  카메라에서는 얼굴 가중치·갤러리·문 영역·인계 시간 창을 별도로 검증해야 한다.
 
 ## 지표 노출
 

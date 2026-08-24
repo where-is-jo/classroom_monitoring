@@ -17,6 +17,9 @@ from .classrooms.router import api_router as classroom_api_router
 from .classrooms.router import page_router as classroom_page_router
 from .face_enrollment.router import api_router as face_enrollment_api_router
 from .face_enrollment.router import page_router as face_enrollment_page_router
+from .identity_handover.router import api_router as identity_handover_api_router
+from .identity_handover.router import internal_router as identity_handover_internal_router
+from .identity_handover.router import page_router as identity_handover_page_router
 from .llm_search.router import api_router as llm_search_api_router
 from .llm_search.router import page_router as llm_search_page_router
 from .roi_connections.router import api_router as roi_connection_api_router
@@ -92,6 +95,7 @@ app.include_router(face_enrollment_page_router, include_in_schema=False)
 app.include_router(student_page_router, include_in_schema=False)
 app.include_router(snapshot_page_router, include_in_schema=False)
 app.include_router(roi_connection_page_router, include_in_schema=False)
+app.include_router(identity_handover_page_router, include_in_schema=False)
 app.include_router(llm_search_page_router, include_in_schema=False)
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -112,6 +116,8 @@ app.include_router(student_internal_router, responses=_ERROR_RESPONSES)
 app.include_router(student_api_router, responses=_ERROR_RESPONSES)
 app.include_router(snapshot_api_router, responses=_ERROR_RESPONSES)
 app.include_router(roi_connection_api_router, responses=_ERROR_RESPONSES)
+app.include_router(identity_handover_api_router, responses=_ERROR_RESPONSES)
+app.include_router(identity_handover_internal_router, responses=_ERROR_RESPONSES)
 app.include_router(students_api_router, responses=_ERROR_RESPONSES)
 app.include_router(llm_search_api_router, responses=_ERROR_RESPONSES)
 

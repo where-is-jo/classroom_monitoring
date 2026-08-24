@@ -32,8 +32,11 @@ HTTP 계약만 호출한다. 사람 탐지는 아직 `model.py`가 ultralytics�
 
 `pipeline`은 사람 탐지에 카메라별 ByteTrack을 먼저 붙인다. `FACE_IDENTITY_URL`과 입구
 카메라 ID를 설정하면 해당 프레임만 deeplearning에 보내 `student_id`·식별 신뢰도·얼굴
-bbox를 사람 track에 보강한다. 인계 route가 있으면 그 신원을 CCTV 문 영역의 신규
-ByteTrack으로 넘겨 같은 track이 좌석까지 이동하는 동안 유지한다.
+bbox를 사람 track에 보강한다. 인계 route가 있으면 CCTV 사람 track의 하단 중앙점이 문
+영역에 처음 들어오는 순간 그 신원을 넘겨 같은 track이 좌석까지 이동하는 동안 유지한다.
+track이 문 영역 밖에서 먼저 만들어진 경우도 이후 경계 진입을 감지한다.
+입구 detector confidence 변화로 같은 사람이 `face-*` fallback과 `person-*` track으로
+달라져도, 활성 학생 한 명은 CCTV track 하나에만 인계한다.
 얼굴 서비스가 실패하면 원래 사람 탐지를 그대로 FastAPI에 보내 좌석 점유 경로를
 멈추지 않는다. `FASTAPI_URL`을 설정하면 최종 결과를 `/internal/inference/events`로
 전송하며, 설정하지 않으면 로그만 출력한다. track 생성·만료·활성 수와 수명, 인계 결과
@@ -56,7 +59,7 @@ ByteTrack으로 넘겨 같은 track이 좌석까지 이동하는 동안 유지�
 | `handler.py` | 결과를 FastAPI 내부 API 계약으로 직렬화하고 제한 재시도 |
 | `face_identity.py` | 입구 프레임을 deeplearning에 보내 얼굴 식별 결과를 사람 탐지에 보강. 실패하면 원본 탐지를 통과시킴 |
 | `tracking.py` | 사람 bbox를 카메라별 ByteTrack 두 단계 매칭으로 이어 `person-<번호>` 부여 |
-| `identity_handover.py` | 입구 신원을 CCTV 문 영역의 유일한 신규 track에 인계하고 track 수명 동안 유지 |
+| `identity_handover.py` | FastAPI route를 주기적으로 읽고 입구 신원을 CCTV 문 영역에 진입한 유일한 track에 인계해 track 수명 동안 유지 |
 | `metrics.py` | 추론·ByteTrack·신원 인계 Prometheus 지표 정의 |
 | `fixtures/` | 얼굴·영상 없는 모델 연동 계약 fixture |
 | `main.py` | 이미지 파일 한 장을 검사하는 진입점 |

@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import numpy as np
+
 from shared.types import CapturedFrame
 
 from ..face_identity import FaceIdentityResultHandler
@@ -57,7 +58,7 @@ def test_입구_얼굴_신원이_CCTV_ByteTrack을_따라_좌석_이벤트까지
             IdentityHandoverRoute(
                 "entry-camera",
                 "classroom-cctv",
-                (0.0, 0.0, 0.3, 1.0),
+                (0.45, 0.0, 0.65, 1.0),
             ),
         ),
         inner=lambda frame, result: handled.append((frame, result)),
@@ -88,13 +89,25 @@ def test_입구_얼굴_신원이_CCTV_ByteTrack을_따라_좌석_이벤트까지
         _captured("entry-camera", 1, 0),
         _raw_person((50, 2, 150, 98)),
     )
+    # CCTV track은 인계 ROI 밖에서 먼저 만들어진다. 실제 카메라에서 이미 보이던
+    # person-N이 문 영역으로 걸어 들어오는 경우를 재현한다.
     pipeline(
-        _captured("classroom-cctv", 3, 0),
-        _raw_person((0, 5, 50, 95)),
+        _captured("classroom-cctv", 2, 0),
+        _raw_person((130, 5, 180, 95)),
     )
-    for sequence, left in enumerate((20, 40, 60, 80, 100, 120), start=1):
+    for sequence, left in enumerate((110,), start=1):
         pipeline(
-            _captured("classroom-cctv", 3 + sequence, sequence),
+            _captured("classroom-cctv", 2 + sequence, sequence),
+            _raw_person((left, 5, left + 50, 95)),
+        )
+    before_entry = handled[-1][1].detections[0]
+    assert before_entry.track_id == "person-1"
+    assert before_entry.student_id is None
+
+    # bbox 발 중심이 ROI 안으로 교차한 순간 같은 ByteTrack에 입구 신원이 잠긴다.
+    for sequence, left in enumerate((90, 70, 50, 30, 10), start=2):
+        pipeline(
+            _captured("classroom-cctv", 2 + sequence, sequence),
             _raw_person((left, 5, left + 50, 95)),
         )
 

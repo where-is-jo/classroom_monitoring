@@ -32,6 +32,12 @@ def test_fastapi_url_은_문자열로_로드한다() -> None:
     assert isinstance(settings.fastapi_url, str)
 
 
+def test_얼굴_식별_사람_최소_신뢰도를_설정한다() -> None:
+    settings = build_settings(face_identity_min_person_confidence=0.5)
+
+    assert settings.face_identity_min_person_confidence == 0.5
+
+
 def test_지표_노출_기본값은_켜짐이다() -> None:
     """저장 기능과 달리 개인정보가 나가지 않아 기본으로 켠다."""
     settings = build_settings()

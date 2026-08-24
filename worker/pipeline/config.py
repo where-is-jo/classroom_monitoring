@@ -6,15 +6,16 @@ import os
 from pathlib import Path
 from typing import Self
 
-from inference.identity_handover import (
-    IdentityHandoverRoute,
-    parse_identity_handover_routes,
-)
 from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
+)
+
+from inference.identity_handover import (
+    IdentityHandoverRoute,
+    parse_identity_handover_routes,
 )
 from shared.settings_sources import customise_sources_with_yaml
 
@@ -84,6 +85,10 @@ class PipelineSettings(BaseSettings):
     face_identity_camera_ids: str = Field(default="")
     face_identity_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     face_identity_jpeg_quality: int = Field(default=95, ge=1, le=100)
+    # ByteTrack은 낮은 신뢰도 bbox도 연결에 쓰지만, 겹친 오탐 bbox를 얼굴 서비스에
+    # 함께 보내면 안전한 일대일 연결 규칙이 얼굴을 미식별로 둔다. 얼굴 연결에만 쓸
+    # 최소 사람 신뢰도를 별도로 둔다.
+    face_identity_min_person_confidence: float = Field(default=0.0, ge=0, le=1)
 
     # --- 사람 ByteTrack ---
     person_tracking_enabled: bool = True
@@ -99,6 +104,11 @@ class PipelineSettings(BaseSettings):
     # --- 입구 신원 → 교실 CCTV track 인계 ---
     # 카메라 ID와 CCTV 문 영역은 배치마다 달라 .env에서 JSON으로 주입한다.
     identity_handover_routes: str = Field(default="")
+    # FastAPI 관리 화면의 저장값을 주기적으로 읽어 실행 중에 ROI를 바꾼다. 조회가
+    # 실패하면 위 정적 route를 포함한 직전 정상 설정을 계속 사용한다.
+    identity_handover_dynamic_config_enabled: bool = True
+    identity_handover_config_refresh_seconds: float = Field(default=5.0, gt=0, le=300)
+    identity_handover_config_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     identity_handover_max_delay_seconds: float = Field(default=8.0, gt=0, le=120)
     identity_handover_clock_skew_seconds: float = Field(default=0.5, ge=0, le=10)
     identity_handover_track_stale_seconds: float = Field(default=30.0, gt=0, le=3600)
@@ -142,14 +152,16 @@ class PipelineSettings(BaseSettings):
             self.bytetrack_new_track_threshold
             < self.bytetrack_high_confidence_threshold
         ):
-            raise ValueError(
-                "BYTETRACK_NEW_TRACK_THRESHOLD는 HIGH 이상이어야 합니다."
-            )
+            raise ValueError("BYTETRACK_NEW_TRACK_THRESHOLD는 HIGH 이상이어야 합니다.")
         routes = self.parsed_identity_handover_routes
         if routes and not self.person_tracking_enabled:
-            raise ValueError("신원 인계를 켜려면 PERSON_TRACKING_ENABLED=true여야 합니다.")
+            raise ValueError(
+                "신원 인계를 켜려면 PERSON_TRACKING_ENABLED=true여야 합니다."
+            )
         if routes and not self.face_identity_url.strip():
-            raise ValueError("신원 인계 route를 설정하면 FACE_IDENTITY_URL이 필요합니다.")
+            raise ValueError(
+                "신원 인계 route를 설정하면 FACE_IDENTITY_URL이 필요합니다."
+            )
         missing_entry_ids = {
             route.entry_camera_id for route in routes
         } - self.parsed_face_identity_camera_ids
