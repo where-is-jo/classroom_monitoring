@@ -76,3 +76,42 @@ def test_review_state_is_not_signalled_by_colour_alone() -> None:
 
     assert "재검토" in source
     assert "stroke-dasharray" in style
+
+
+def test_auto_generation_previews_before_saving() -> None:
+    """계산 결과를 화면에 얹어 보기 전에 저장하면, 격자가 어긋난 것을 알 방법이 없다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "roi-connections/auto" in source
+    assert "dry_run: dryRun" in source
+    assert "const startAutoPreview" in source
+    # 좌석 구역은 네 모서리로 정해진다.
+    assert "points.length === 4" in source
+
+
+def test_auto_generated_rois_need_an_explicit_confirmation() -> None:
+    """확정 없이 판정에 들어가면 계산 오차가 그대로 출결 기록이 된다(결정 0020의 6번)."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "roi-connections/auto`}/confirm" in source or "/confirm" in source
+    assert "const confirmAutoRoi" in source
+    assert "auto_generated" in source
+    assert "window.confirm" in source
+
+
+def test_skipped_seats_are_explained_not_silently_dropped() -> None:
+    """건너뛴 좌석을 알리지 않으면 관리자는 등록된 줄 안다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "NO_GRID_POSITION" in source
+    assert "TOO_SMALL" in source
+    assert "EXISTING_KEPT" in source
+
+
+def test_preview_is_not_signalled_by_colour_alone() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
+
+    assert "미리보기" in source
+    assert "#roi-auto-preview polygon" in style
+    assert "stroke-dasharray: 3 4" in style

@@ -27,6 +27,15 @@
 #roi-saved-shapes polygon:hover { fill: rgba(56, 132, 255, .3); }
 /* 재검토 대상은 색만이 아니라 점선으로도 구분한다 — 색각 차이와 흑백 출력에서도 보여야 한다. */
 #roi-saved-shapes polygon.needs-review { fill: rgba(214, 138, 8, .18); stroke: #d68a08; stroke-dasharray: 8 5; }
+/* 아직 저장하지 않은 자동 생성 미리보기. 저장된 ROI와 헷갈리면 안 되므로 색과 함께
+   굵은 점선으로 구분한다 — 색각 차이와 흑백 출력에서도 보여야 한다. */
+#roi-auto-preview polygon { fill: rgba(124, 77, 255, .16); stroke: #7c4dff; stroke-width: 2; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.roi-saved-label.roi-preview-label { background: rgba(60, 32, 128, .86); }
+.roi-saved-label.roi-preview-label .review-mark { color: #24123f; background: #c7a8ff; }
+.roi-seat-fill input { width: 72px; }
+#roi-auto:not(:disabled) { color: #fff; background: #5b3fbe; border-color: #5b3fbe; }
+#roi-auto-save:not(:disabled) { color: #fff; background: #087f6d; border-color: #087f6d; }
+#roi-auto:disabled { cursor: not-allowed; opacity: .45; }
 #roi-saved-shapes polygon.is-selected { fill: rgba(56, 132, 255, .42); stroke-width: 4; }
 #roi-saved-shapes polygon.needs-review.is-selected { fill: rgba(214, 138, 8, .42); }
 .roi-saved-labels { position: absolute; inset: 0; pointer-events: none; z-index: 4; }

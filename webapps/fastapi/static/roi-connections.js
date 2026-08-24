@@ -7,6 +7,7 @@
   const polygon = document.querySelector("#roi-live-polygon");
   const pointGroup = document.querySelector("#roi-live-points");
   const savedShapes = document.querySelector("#roi-saved-shapes");
+  const previewShapes = document.querySelector("#roi-auto-preview");
   const savedLabels = document.querySelector("#roi-saved-labels");
   const savedSummary = document.querySelector("#roi-saved-summary");
   const captureButton = document.querySelector("#roi-capture");
@@ -16,6 +17,10 @@
   const cancelButton = document.querySelector("#roi-cancel");
   const redrawButton = document.querySelector("#roi-redraw");
   const deleteButton = document.querySelector("#roi-delete");
+  const autoButton = document.querySelector("#roi-auto");
+  const autoSaveButton = document.querySelector("#roi-auto-save");
+  const autoConfirmButton = document.querySelector("#roi-auto-confirm");
+  const seatFillInput = document.querySelector("#roi-seat-fill");
   const classroomSelect = document.querySelector("#roi-classroom-select");
   const cameraSelect = document.querySelector("#roi-camera-select");
   const dialog = document.querySelector("#roi-student-dialog");
@@ -34,6 +39,19 @@
   let selectedSeatId = null;
   // 다시 그리기 중이면 그 좌석 id. 저장할 때 좌석을 다시 고르지 않게 한다.
   let redrawSeatId = null;
+  // 자동 생성에서 좌석 구역 네 모서리를 찍는 중인지. 같은 클릭 동작을 쓰지만 찍은
+  // 좌표의 의미가 다르다 — ROI 하나가 아니라 격자를 얹을 사각형이다.
+  let autoPicking = false;
+  // 아직 저장하지 않은 자동 생성 결과. 관리자가 겹쳐 보고 판단하는 대상이다.
+  let previewSeats = [];
+  let previewCorners = [];
+
+  // 좌석 칸을 얼마나 채울지. 서버 기본값과 같은 값에서 시작한다.
+  const seatFillRatio = () => {
+    const percent = Number(seatFillInput?.value);
+    if (!Number.isFinite(percent)) return 0.8;
+    return Math.min(1, Math.max(0.3, percent / 100));
+  };
 
   const selectedClassroomId = () => classroomSelect?.value || editor.dataset.classroomId;
   const selectedCameraId = () => cameraSelect?.value || "";
@@ -104,12 +122,41 @@
       }
       labels.push(label);
     }
+    // 아직 저장하지 않은 자동 생성 결과를 위에 겹쳐 그린다. 어느 좌석이 어디로
+    // 갔는지 보지 않고는 격자가 실제 배치와 맞는지 알 수 없다.
+    const previewNodes = [];
+    for (const seat of previewSeats) {
+      if (!seat.polygon) continue;
+      const shape = document.createElementNS(SVG_NS, "polygon");
+      shape.setAttribute("points", seat.polygon.map((p) => `${p.x},${p.y}`).join(" "));
+      shape.dataset.seatId = seat.seat_id;
+      previewNodes.push(shape);
+
+      const center = centerOf(seat.polygon);
+      const label = document.createElement("span");
+      label.className = "roi-saved-label roi-preview-label";
+      label.style.left = `${center.x * 100}%`;
+      label.style.top = `${center.y * 100}%`;
+      label.textContent = seat.seat_label;
+      const mark = document.createElement("span");
+      mark.className = "review-mark";
+      mark.textContent = "미리보기";
+      label.append(mark);
+      labels.push(label);
+    }
+    previewShapes.replaceChildren(...previewNodes);
     savedShapes.replaceChildren(...shapes);
     savedLabels.replaceChildren(...labels);
 
     const review = savedConnections.filter((item) => item.needs_review).length;
+    const auto = savedConnections.filter((item) => item.auto_generated).length;
     if (savedConnections.length === 0) {
       savedSummary.textContent = "등록된 ROI가 없습니다.";
+    } else if (auto > 0) {
+      savedSummary.textContent =
+        `등록된 ROI ${savedConnections.length}개 중 ${auto}개가 자동 생성분입니다. ` +
+        "확인 전에는 좌석 판정에 쓰이지 않습니다. 어긋난 좌석은 다시 그리거나 지운 뒤 " +
+        "‘자동 생성 확정’을 눌러 주세요.";
     } else if (review === 0) {
       savedSummary.textContent = `등록된 ROI ${savedConnections.length}개. 폴리곤을 클릭하면 다시 그리거나 지울 수 있습니다.`;
     } else {
@@ -117,7 +164,38 @@
         `등록된 ROI ${savedConnections.length}개 중 ${review}개가 재검토 대상입니다. ` +
         "기준 화면이 바뀌어 좌표를 믿을 수 없으므로 좌석 판정에서 빠집니다. 다시 그려 주세요.";
     }
+    autoConfirmButton.hidden = auto === 0;
+    autoConfirmButton.textContent = `자동 생성 확정 (${auto})`;
     updateSelectionButtons();
+  };
+
+  const clearPreview = () => {
+    previewSeats = [];
+    previewCorners = [];
+    autoSaveButton.hidden = true;
+    renderSaved();
+  };
+
+  // 건너뛴 좌석을 이유와 함께 알린다. 조용히 빠지면 관리자는 좌석이 등록된 줄 안다.
+  const SKIP_REASONS = {
+    EXISTING_KEPT: "이미 ROI가 있어 그대로 뒀습니다",
+    NO_GRID_POSITION: "좌석에 행·열 좌표가 없습니다",
+    TOO_SMALL: "화면에서 너무 작게 잡혔습니다",
+    INVALID_POLYGON: "만들어진 좌표가 ROI 규칙을 통과하지 못했습니다",
+  };
+
+  const describeAutoResult = (body) => {
+    const skipped = body.seats.filter((seat) => seat.outcome !== "GENERATED");
+    const grouped = new Map();
+    for (const seat of skipped) {
+      const reason = SKIP_REASONS[seat.outcome] || seat.outcome;
+      grouped.set(reason, (grouped.get(reason) || 0) + 1);
+    }
+    const detail = [...grouped].map(([reason, count]) => `${reason} ${count}개`).join(", ");
+    const grid = `${body.grid_rows}행 ${body.grid_columns}열 격자`;
+    return skipped.length === 0
+      ? `${grid}에서 좌석 ${body.generated_count}개를 만들었습니다.`
+      : `${grid}에서 좌석 ${body.generated_count}개를 만들고 ${skipped.length}개는 건너뛰었습니다 (${detail}).`;
   };
 
   const updateSelectionButtons = () => {
@@ -158,8 +236,11 @@
   const finishRegistration = () => {
     points.length = 0;
     redrawSeatId = null;
+    autoPicking = false;
     renderPolygon();
     stage.classList.remove("is-registering");
+    autoButton.disabled = referenceRevision === null;
+    autoButton.textContent = "자동 생성";
     startButton.disabled = referenceRevision === null;
     startButton.textContent = "등록 시작";
     startButton.classList.remove("is-registering");
@@ -173,8 +254,12 @@
   // 화각의 ROI를 저장하게 되므로 함께 지운다.
   const discardReference = (title, message) => {
     referenceRevision = null;
+    previewSeats = [];
+    previewCorners = [];
+    autoSaveButton.hidden = true;
     finishRegistration();
     startButton.disabled = true;
+    autoButton.disabled = true;
     stage.dataset.state = "empty";
     showPlaceholder(title, message);
   };
@@ -235,6 +320,7 @@
       stage.dataset.state = "captured";
       referenceRevision = body.revision;
       finishRegistration();
+      clearPreview();
       await loadConnections();
       status.textContent = `${selectedCameraLabel()}의 현재 화면을 캡처했습니다. ‘등록 시작’을 눌러 ROI를 그리세요.`;
     } catch (reason) {
@@ -286,6 +372,111 @@
     renderSaved();
   };
 
+  const autoRoiPath = () =>
+    `/api/v1/classrooms/${encodeURIComponent(selectedClassroomId())}/roi-connections/auto`;
+
+  // 좌석 격자를 캡처 화면 위로 사영해 좌석마다 ROI를 만든다. dry_run이면 계산만 받아
+  // 겹쳐 보여주고, 관리자가 확인한 뒤에 같은 좌표로 다시 불러 저장한다.
+  const requestAutoRoi = async (dryRun) => {
+    if (previewCorners.length !== 4 || referenceRevision === null) return;
+    const button = dryRun ? autoButton : autoSaveButton;
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = dryRun ? "계산 중" : "저장 중";
+    try {
+      const response = await fetch(autoRoiPath(), {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          camera_id: selectedCameraId(),
+          corners: previewCorners,
+          reference_image_revision: referenceRevision,
+          seat_fill_ratio: seatFillRatio(),
+          dry_run: dryRun,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "좌석 ROI를 만들지 못했습니다.");
+      if (dryRun) {
+        previewSeats = body.seats.filter((seat) => seat.polygon);
+        autoSaveButton.hidden = previewSeats.length === 0;
+        renderSaved();
+        status.textContent =
+          `${describeAutoResult(body)} 좌석 이름이 맞는 자리에 있는지 확인한 뒤 ` +
+          "‘미리보기 저장’을 눌러 주세요. 어긋났다면 ‘자동 생성’을 다시 눌러 모서리를 다시 찍습니다.";
+      } else {
+        clearPreview();
+        await loadConnections();
+        status.textContent =
+          `${describeAutoResult(body)} 자동 생성분은 확인 전까지 좌석 판정에 쓰이지 않습니다.`;
+      }
+    } catch (reason) {
+      console.error("좌석 ROI 자동 생성 실패", reason);
+      status.textContent = reason instanceof Error ? reason.message : "좌석 ROI를 만들지 못했습니다.";
+      if (!dryRun) autoSaveButton.hidden = false;
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+      if (dryRun) autoButton.disabled = referenceRevision === null;
+    }
+  };
+
+  const confirmAutoRoi = async () => {
+    const auto = savedConnections.filter((item) => item.auto_generated).length;
+    if (auto === 0) return;
+    const proceed = window.confirm(
+      `자동 생성한 ROI ${auto}개를 좌석 판정에 사용합니다.\n` +
+      "계산으로 만든 좌표라 격자와 실제 배치가 어긋나면 다른 좌석으로 기록됩니다.\n\n" +
+      "화면에서 자리를 확인하셨나요?",
+    );
+    if (!proceed) return;
+    autoConfirmButton.disabled = true;
+    try {
+      const response = await fetch(`${autoRoiPath()}/confirm`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({camera_id: selectedCameraId()}),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "자동 생성분을 확정하지 못했습니다.");
+      await loadConnections();
+      status.textContent = body.stale_count
+        ? `${body.confirmed_count}개를 확정했습니다. ${body.stale_count}개는 기준 화면이 바뀌어 확정하지 않았습니다 — 다시 만들어 주세요.`
+        : `${body.confirmed_count}개를 확정했습니다. 이제 좌석 판정에 사용됩니다.`;
+    } catch (reason) {
+      console.error("자동 생성 ROI 확정 실패", reason);
+      status.textContent = reason instanceof Error ? reason.message : "자동 생성분을 확정하지 못했습니다.";
+    } finally {
+      autoConfirmButton.disabled = false;
+    }
+  };
+
+  const startAutoPreview = () => {
+    previewCorners = points.map((point) => ({x: point.x, y: point.y}));
+    finishRegistration();
+    status.textContent = "좌석 자리를 계산하는 중입니다.";
+    void requestAutoRoi(true);
+  };
+
+  autoButton?.addEventListener("click", () => {
+    if (referenceRevision === null) {
+      status.textContent = "먼저 ‘현재 화면 캡처’로 기준 화면을 가져와 주세요.";
+      return;
+    }
+    clearPreview();
+    autoPicking = true;
+    redrawSeatId = null;
+    selectedSeatId = null;
+    beginRegistration(
+      "좌석 구역의 네 모서리를 찍어 주세요. 1행 1열 좌석의 바깥 모서리에서 시작해 " +
+      "이웃한 순서로 돌면 됩니다. 통로는 좌석 관리 화면에서 빈 칸으로 두어야 자리가 맞습니다.",
+    );
+    autoButton.textContent = "모서리 지정 중";
+    renderSaved();
+  });
+  autoSaveButton?.addEventListener("click", () => requestAutoRoi(false));
+  autoConfirmButton?.addEventListener("click", confirmAutoRoi);
+
   savedShapes?.addEventListener("click", (event) => {
     const shape = event.target.closest("polygon");
     if (!shape || isRegistering()) return;
@@ -321,6 +512,7 @@
     }
     redrawSeatId = null;
     selectedSeatId = null;
+    clearPreview();
     beginRegistration("캡처된 화면 위를 클릭해 ROI 꼭짓점을 3개 이상 지정해 주세요.");
     renderSaved();
   });
@@ -336,6 +528,8 @@
     points.push(point);
     renderPolygon();
     console.log("ROI 좌표 선택", {index: points.length, ...point});
+    // 좌석 구역은 네 모서리로 정해진다. 다 찍히면 바로 미리보기를 받는다.
+    if (autoPicking && points.length === 4) startAutoPreview();
   });
   resetButton?.addEventListener("click", () => {
     if (!isRegistering()) return;
@@ -354,6 +548,14 @@
   };
   cancelButton?.addEventListener("click", cancelRegistration);
   finishButton?.addEventListener("click", () => {
+    if (autoPicking) {
+      if (points.length !== 4) {
+        status.textContent = "좌석 구역의 네 모서리를 모두 찍어 주세요.";
+        return;
+      }
+      startAutoPreview();
+      return;
+    }
     if (points.length < 3) {
       status.textContent = "ROI 꼭짓점을 3개 이상 선택해 주세요.";
       return;
