@@ -222,7 +222,7 @@ sudo tailscale up --accept-routes
 [`worker/pipeline/.env.example`](../worker/pipeline/.env.example)이다. 여기 복사하지 않는다.
 타임아웃·판정 임계값처럼 환경 무관한 값은 이미지 안의 `config/settings.yml`에 있다.
 
-### 이 서버에 두는 값 파일은 셋뿐이다
+### 이 서버에 두는 값 파일은 넷뿐이다
 
 **`fastapi.dev.env`와 `n8n.dev.env`를 여기 두지 않는다.** 두 서비스가 개인 PC로
 갔으므로(결정 0026) 이 서버에서는 읽히지 않는데, `fastapi.dev.env`에는 MongoDB Atlas
@@ -230,6 +230,7 @@ sudo tailscale up --accept-routes
 
 | 파일 | 읽는 곳 |
 | --- | --- |
+| `deeplearning.dev.env` | `compose.main.dev.gpu.yml`의 deeplearning. MongoDB 갤러리 읽기 전용 접속 정보 |
 | `worker.dev.env` | `compose.main.dev.gpu.yml`의 inference-worker |
 | `minio.dev.env` | `compose.main.dev.gpu.yml`의 minio·minio-init |
 | `grafana.dev.env` | `compose.monitoring.dev.yml`의 grafana |
@@ -254,26 +255,138 @@ chmod 600 .docker/env/*.env
 - **MinIO root 키를 worker와 fastapi가 공용으로 쓴다.** Grafana admin 비밀번호와 함께
   **운영 전환 전에 재발급이 필요하다.**
 
+## 얼굴 식별 → 객체 추적 인계 배포
+
+이 경로에는 서로 다른 두 종류의 데이터가 필요하다.
+
+- MongoDB `face_embeddings`: 얼굴 등록 때 FastAPI가 저장한 학생별 대표 embedding이다.
+- `thresholds.json`: 별도의 known/unknown validation으로 허용 오인식률에 맞춰 고른
+  similarity·margin 기준이다. **등록 embedding을 JSON으로 덤프한 파일이 아니다.**
+
+### 1. 평가 실행 호스트에서 thresholds.json 생성
+
+로컬 또는 GPU 서버 중 모델 파일과 held-out 평가 이미지 네 묶음이 있는 한 곳에서만
+실행하면 된다. `deeplearning/training/.env`에는 실행 호스트에 실제로 존재하는 절대경로를
+쓴다. 로컬 Windows에서 `/home/...` 경로를 쓰면 안 된다.
+
+```dotenv
+FACE_EVAL_GALLERY_SOURCE=mongodb
+MONGODB_URI=<등록 embedding MongoDB URI>
+MONGODB_DATABASE=<DB 이름>
+FACE_EMBEDDING_COLLECTION=face_embeddings
+FACE_EVAL_KNOWN_VALIDATION_DIR=<student_id/*.jpg 루트>
+FACE_EVAL_UNKNOWN_VALIDATION_DIR=<미등록 validation 이미지 루트>
+FACE_EVAL_KNOWN_TEST_DIR=<student_id/*.jpg 루트>
+FACE_EVAL_UNKNOWN_TEST_DIR=<미등록 test 이미지 루트>
+FACE_DETECTION_MODEL_PATH=<scrfd_10g_bnkps.onnx 절대경로>
+FACE_RECOGNITION_MODEL_PATH=<w600k_r50.onnx 절대경로>
+FACE_EVAL_THRESHOLD_OUTPUT=<thresholds.json 출력 절대경로>
+```
+
+```bash
+python -m pip install -r deeplearning/training/requirements.txt
+python -m deeplearning.training.face_identification_eval
+```
+
+test 결과를 보고 임계값을 다시 고르지 않는다. 생성된 파일을 GPU 서버의
+`.docker/models/face/config/thresholds.json`으로 복사한다. 얼굴 이미지, embedding,
+MongoDB 자격 증명, JSON 산출물은 Git에 커밋하지 않는다.
+
+### 2. GPU 서버 환경과 모델 배치
+
+`.docker/env/deeplearning.dev.env`에는 아래 두 비밀값만 필수로 둔다. MongoDB 계정은
+가능하면 `face_embeddings` 읽기 권한만 부여한다.
+
+```dotenv
+FACE_GALLERY_DATABASE_URL=<MongoDB URI>
+FACE_GALLERY_DATABASE_NAME=<DB 이름>
+```
+
+`.docker/env/worker.dev.env`에는 입구와 교실 CCTV가 모두 있어야 한다. 아래 camera ID는
+FastAPI 카메라 설정 및 인계 ROI 설정의 ID와 정확히 같아야 한다.
+
+```dotenv
+STREAM_SOURCES=entry-camera=rtsp://mediamtx:8554/entry-camera,classroom-cctv=rtsp://mediamtx:8554/classroom-cctv
+MODEL_PATH=/models/person-yolo11n-n1-v008.pt
+INFERENCE_DEVICE=cuda
+INFERENCE_TARGET_CLASS_IDS={"0":"person"}
+FASTAPI_URL=http://<개인-PC-Tailscale-IP>:8076
+FACE_IDENTITY_URL=http://deeplearning:8100
+FACE_IDENTITY_CAMERA_IDS=entry-camera
+PERSON_TRACKING_CAMERA_IDS=entry-camera,classroom-cctv
+IDENTITY_HANDOVER_ROUTES=[{"entry_camera_id":"entry-camera","classroom_camera_id":"classroom-cctv","classroom_entry_zone":[0.0,0.0,0.25,1.0]}]
+```
+
+`INFERENCE_CONFIDENCE_THRESHOLD`는 환경파일에서 제거해 이미지의 검증값 0.25를 쓰거나,
+직접 둘 경우 반드시 ByteTrack high 0.5보다 낮게 둔다. 0.5이면 2단계 매칭용 탐지가
+YOLO 출력에서 이미 사라지며 이제 worker가 기동을 거부한다.
+
+필수 파일은 다음과 같다.
+
+```text
+.docker/models/
+├── person-yolo11n-n1-v008.pt
+└── face/
+    ├── scrfd/scrfd_10g_bnkps.onnx
+    ├── mediapipe/face_landmarker.task
+    ├── buffalo_l/w600k_r50.onnx
+    └── config/thresholds.json
+```
+
+### 3. GPU 서버에서 현재 소스로 이미지 빌드와 기동
+
+Compose는 얼굴 식별·동적 인계 코드가 없는 오래된 `:latest`를 사용하지 않는다. 병합된
+`develop`을 받은 뒤 현재 Compose와 같은 고정 태그로 두 이미지를 빌드한다.
+
+```bash
+git switch develop
+git pull --ff-only
+docker build -t classroom-monitoring-deeplearning:local-20260824-face-handover deeplearning
+docker build -t classroom-monitoring-worker:local-20260824-face-handover worker
+python .docker/scripts/validate_face_handover_deployment.py
+docker compose -f .docker/compose.main.dev.gpu.yml config --quiet
+docker compose -f .docker/compose.main.dev.gpu.yml up -d
+```
+
+deeplearning healthcheck는 모델 파일 존재만이 아니라 MongoDB 갤러리가 비어 있지 않고
+ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deeplearning이 healthy가 된
+뒤 시작한다. GPU 배포 workflow도 서버에서 같은 사전점검을 실행하므로 env·모델·임계값이
+빠진 Compose를 자동 재적용하지 않는다. 두 이미지는 CI가 빌드하지 않으므로 **새 태그를
+먼저 서버에서 빌드한 뒤** Compose 변경을 `develop`에 병합한다.
+
+### 4. 실제 인계 확인
+
+1. FastAPI `/identity-handover`에서 `entry-camera → classroom-cctv` route와 실제 문 바닥
+   ROI를 저장한다. env의 route는 첫 조회 전·장애 시 fallback이다.
+2. `docker compose -f .docker/compose.main.dev.gpu.yml ps`에서 deeplearning이 `healthy`,
+   inference-worker가 `Up`인지 확인한다.
+3. 입구 카메라에 등록 학생 한 명만 지나가게 하고, 이어 CCTV 문 ROI로 들어오게 한다.
+4. worker `/metrics`에서 `face_identification_requests_total{outcome="ok"}`와
+   `identity_handoff_total{outcome="accepted"}`가 증가하는지 확인한다. 학생 ID나 얼굴
+   embedding은 지표·로그에 출력하지 않는다.
+5. FastAPI 수신 이벤트에서 같은 CCTV `track_id`에 `student_id`가 유지되고 좌석 ROI에
+   들어갔을 때 학생 상태로 반영되는지 확인한다.
+
 ## 이미지
 
-**환경마다 이미지를 따로 유지한다**(결정 0018). dev는 GHCR에서 pull만 하고,
-local은 소스에서 빌드해 `:local` 태그를 붙인다 — 로컬 빌드가 서버가 받는 태그를
-덮어쓰지 않게 하려는 것이다.
+**환경마다 이미지를 따로 유지한다**(결정 0018). fastapi dev는 CI가 만든 GHCR 이미지를
+pull한다. worker와 deeplearning은 CI 대상이 아니므로, 현재 얼굴 인계 배포에서는 GPU
+서버가 병합된 소스로 직접 빌드한 고정 태그를 쓴다.
 
-| 서비스 | dev 이미지 (pull) | local 이미지 (build) |
+| 서비스 | dev 이미지 | local 이미지 (build) |
 | --- | --- | --- |
 | fastapi | `ghcr.io/where-is-jo/classroom-monitoring-fastapi:develop` | `classroom-monitoring-fastapi:local` |
-| inference worker | `ghcr.io/where-is-jo/classroom-monitoring-worker:latest` | `classroom-monitoring-worker:local` |
-| deeplearning | `ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest` | `classroom-monitoring-deeplearning:local` |
+| inference worker | `classroom-monitoring-worker:local-20260824-face-handover` (GPU 서버 build) | `classroom-monitoring-worker:local` |
+| deeplearning | `classroom-monitoring-deeplearning:local-20260824-face-handover` (GPU 서버 build) | `classroom-monitoring-deeplearning:local` |
 
 **fastapi만 `:develop`을 본다.** CI가 develop 병합마다 `develop`·`sha-*`로 올리고
 `latest`는 붙이지 않기 때문이다(결정 0014). `:latest`를 보면 병합해도 서버가 갱신되지
 않는다 — 실제로 2026-08-12에 손으로 올린 이미지가 계속 돌아 그 뒤에 들어온 탐지
 수신(`/internal/inference/events`)과 ROI 매핑이 서버에 없었다.
 
-**worker와 deeplearning은 CI가 만들지 않아 `:latest`가 곧 최신이다.** 사람이 빌드해
-push하므로, 코드를 고쳤으면 이미지도 다시 올려야 한다. 잊으면 fastapi와 달리
-아무 신호 없이 옛 코드가 계속 돈다.
+**worker와 deeplearning은 CI가 만들지 않으며 `:latest`도 최신이라는 보장이 없다.**
+코드를 고쳤으면 GPU 서버에서 Compose에 적힌 태그로 다시 빌드해야 한다. 태그가 없으면
+기동 실패하므로 옛 이미지로 조용히 돌아가는 것보다 원인이 분명하다.
 
 > GHCR org는 `whereisjo`가 아니라 `where-is-jo`(하이픈)다. 2026-08-12에 fastapi와
 > worker를 `:latest`로 push한 기록이 있다.
