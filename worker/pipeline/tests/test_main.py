@@ -358,6 +358,51 @@ def test_person_클래스_없이_ByteTrack을_켤_수_없다(
         )
 
 
+def test_YOLO_임계값이_ByteTrack_high와_같으면_기동하지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FASTAPI_URL", raising=False)
+    monkeypatch.setattr(pipeline_main, "Yolo8nDetector", StubDetector)
+    monkeypatch.setattr(pipeline_main, "StreamWorker", StubStreamWorker)
+
+    with pytest.raises(ValueError, match="2단계 매칭"):
+        pipeline_main.build_runner(
+            stream_settings=StreamSettings(  # type: ignore[call-arg]
+                _env_file=None,
+                app_env="local",
+                stream_sources="camera-01=rtsp://localhost:8554/camera-01",
+            ),
+            inference_settings=InferenceSettings(  # type: ignore[call-arg]
+                _env_file=None,
+                inference_confidence_threshold=0.5,
+            ),
+            pipeline_settings=PipelineSettings(_env_file=None),  # type: ignore[call-arg]
+        )
+
+
+def test_얼굴_카메라가_STREAM_SOURCES에_없으면_기동하지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FASTAPI_URL", raising=False)
+    monkeypatch.setattr(pipeline_main, "Yolo8nDetector", StubDetector)
+    monkeypatch.setattr(pipeline_main, "StreamWorker", StubStreamWorker)
+
+    with pytest.raises(ValueError, match="FACE_IDENTITY_CAMERA_IDS"):
+        pipeline_main.build_runner(
+            stream_settings=StreamSettings(  # type: ignore[call-arg]
+                _env_file=None,
+                app_env="local",
+                stream_sources="classroom-cctv=rtsp://localhost:8554/classroom-cctv",
+            ),
+            inference_settings=build_inference_settings(),
+            pipeline_settings=PipelineSettings(  # type: ignore[call-arg]
+                _env_file=None,
+                face_identity_url="http://deeplearning:8100",
+                face_identity_camera_ids="entry-camera",
+            ),
+        )
+
+
 class MetricsSpy:
     """지표 등록·서버 기동 호출을 기록한다. 전역 레지스트리를 건드리지 않는다."""
 

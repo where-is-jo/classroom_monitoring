@@ -803,6 +803,11 @@ OpenCV로 받아, 영상과 프레임을 로컬에 저장하는 흐름 전체가
 빌드·테스트 대기 없이 병합할 수 있다. 검증은 자동화되지만 worker 이미지 배포는 여전히
 사람이 기억해야 하는 수동 작업으로 남는다 — 이 결정이 감수하는 부분이다.
 
+> **2026-08-24 갱신:** [0038](#0038--gpu-서버의-compose-설정을-github-actions가-ssh로-반영한다)이
+> GPU 서버 배포 때 worker와 deeplearning을 그 서버에서 직접 빌드하도록 수동 작업을
+> 대체했다. GitHub hosted runner에서 무거운 worker 이미지를 빌드하거나 GHCR에 push하지
+> 않는다는 이 결정의 범위는 그대로다.
+
 `latest` 태그를 더 이상 갱신하지 않으므로 `.docker/compose.main.yml`의 기본값
 `:latest`는 **2026-08-12에 수동으로 push한 이미지에 고정된 채로 남는다.** 자동 빌드
 결과를 서버에 반영하려면 `FASTAPI_IMAGE` 환경변수로 `:develop`이나 `:sha-<해시>`를
@@ -1053,6 +1058,12 @@ llama-server는 추론 워커와 같은 GPU를 쓴다. 인증이 없는 상태(�
 fastapi가 공용으로 쓰는 상태(2026-08-12 결정)와 Grafana admin 비밀번호는 **운영 전환 전
 재발급이 필요하다.** `deeplearning`은 이번 범위 밖이라 여전히 순수 `os.environ`을 쓰고,
 `FACE_DETECTION_MODEL_PATH`·`FACE_LANDMARKER_MODEL_PATH`는 어떤 `.env.example`에도 없다.
+
+> **2026-08-24 구현 갱신**: 위 deeplearning 남은 일은 완료됐다. `app.py`는 OS 환경변수를
+> 우선해 로컬 `deeplearning/.env`를 읽고, Compose는 기존 원칙대로
+> `.docker/env/deeplearning.<환경>.env`를 주입한다. 두 실제 파일은 Git에서 제외하고 로컬
+> `.env`는 Docker 빌드 컨텍스트에서도 제외한다. 변수 기준은
+> `deeplearning/.env.example`이다.
 
 ## 0018 · docker compose 구성을 저장소에 커밋하고 local/dev 파일을 나눈다
 
@@ -2666,7 +2677,8 @@ CCTV 신원 인계 종단 간 검증은 아직 완료되지 않았다.
 1. `.github/workflows/deploy-gpu-server.yml`을 `ci.yml`과 **별도 워크플로우**로 둔다.
    `ci.yml`은 병합 게이트라 필수 상태 체크와 엮여 있고, 배포는 서버 상태에 따라 스킵되는
    성질이 달라 같은 워크플로우에 섞으면 게이트 판정이 흐려진다.
-2. 트리거는 `.docker/**` 변경이 `develop`에 들어올 때와 `workflow_dispatch` 둘이다.
+2. 트리거는 `.docker/**`·`worker/**`·`deeplearning/**` 변경이 `develop`에 들어올 때와
+   `workflow_dispatch` 둘이다.
    여기서는 `paths` 필터를 써도 안전하다 — 0014가 `paths-ignore`를 피한 이유는 필수 체크가
    "대기 중"으로 남는 함정 때문인데, 이 워크플로우는 필수 체크가 아니다.
 3. **서버에 닿지 못하면 배포를 건너뛰고 워크플로우는 성공으로 끝낸다.** 선행 job이
@@ -2683,16 +2695,24 @@ CCTV 신원 인계 종단 간 검증은 아직 완료되지 않았다.
    위해서다. 저장소에서 파일을 지웠을 때 서버에서도 지우는 일은 사람이 판단한다.
 6. **검증을 두 번 한다.** 러너에서는 `env_file` 참조를 빈 파일로 채워 YAML 구조만 보고,
    서버에서는 실제 값까지 포함해 `docker compose config`를 돌린다. 서버 검증이 실패하면
-   배포 직전에 뜬 백업(`~/.deploy-backups/<타임스탬프>.tar.gz`, 최근 10개 유지)으로
+   배포 직전에 뜬 설정 백업(`.deploy-backups/<타임스탬프>.tar.gz`, 최근 10개 유지)으로
    되돌린 뒤 job을 실패시킨다. 깨진 설정을 서버에 남겨 두지 않는다.
-7. **재적용은 이미 떠 있는 스택에만 한다.** 내려 둔 스택을 CI가 켜지 않는다 — 모니터링
+7. `worker`와 `deeplearning`의 Git 추적 소스를 `git archive`로 GPU 서버의 Docker에
+   전달해 두 candidate 이미지를 빌드한다. 두 이미지의 revision label이 현재 커밋과
+   일치할 때만 각각
+   `ghcr.io/where-is-jo/classroom-monitoring-{worker,deeplearning}:latest`로 함께 태그한다.
+   Compose는 `pull_policy: never`를 사용해 registry의 오래된 동명 이미지를 받지 않는다.
+   GitHub hosted runner에서 빌드하거나 GHCR에 push하는 경로는 추가하지 않는다.
+8. **재적용은 이미 떠 있는 스택에만 한다.** 내려 둔 스택을 CI가 켜지 않는다 — 모니터링
    스택은 MVP에서 일부러 띄우지 않고 있다. 파일은 이미 갱신됐으므로 사람이 다음에
-   `up` 할 때 반영된다. 순서는 `main.gpu`가 먼저다(그 스택이 backend network를 만든다).
-8. 인증은 **배포 전용 SSH 키**를 쓴다. 서버 계정 비밀번호를 CI에 넣지 않는다 — 비밀번호는
+   `up` 할 때 반영된다. main GPU 스택은 두 추론 서비스를 `--force-recreate`하고 기본
+   런타임 검증까지 실행한다. 실패하면 백업한 설정과 이전 두 image ID의 `:latest` 태그를
+   복구하고 원래 떠 있던 스택을 다시 적용한다.
+9. 인증은 **배포 전용 SSH 키**를 쓴다. 서버 계정 비밀번호를 CI에 넣지 않는다 — 비밀번호는
    회수하려면 계정 자체를 바꿔야 하지만 키는 서버에서 지우면 즉시 끊긴다. 호스트 키는
    `GPU_SERVER_KNOWN_HOSTS` 시크릿이 있으면 그것을 쓰고, 없으면 `ssh-keyscan` 결과를
    신뢰하되 경고를 남긴다.
-9. **서버 주소·계정·배포 경로를 워크플로우에 하드코딩하지 않는다.** 시크릿
+10. **서버 주소·계정·배포 경로를 워크플로우에 하드코딩하지 않는다.** 시크릿
    (`GPU_SERVER_HOST`·`GPU_SERVER_USER`·`GPU_SERVER_SSH_KEY`, 선택적으로
    `GPU_SERVER_PORT`·`GPU_SERVER_KNOWN_HOSTS`)과 저장소 변수
    (`GPU_SERVER_DEPLOY_PATH`, 기본 `~/classroom-monitoring`)로 받는다.
@@ -2711,17 +2731,19 @@ CCTV 신원 인계 종단 간 검증은 아직 완료되지 않았다.
 - **`up -d` 없이 파일만 옮기기** — 서비스 중단 위험이 없지만 반영이 여전히 수동으로
   남아 이 결정의 목적 자체가 사라진다.
 
-**결과**: `.docker/`의 compose·수집 설정 변경이 `develop` 병합만으로 서버에 반영된다.
-서버가 꺼져 있으면 조용히 건너뛰고, 켠 뒤 `Run workflow`로 다시 돌리면 된다.
+**결과**: `.docker/`의 compose·수집 설정과 worker·deeplearning 소스 변경이 `develop`
+병합만으로 서버에 반영된다. 두 추론 이미지의 이름은 GHCR 형식 `:latest`로 고정되지만,
+실제 image ID는 현재 커밋으로 함께 교체된다. 서버가 꺼져 있으면 조용히 건너뛰고, 켠 뒤
+`Run workflow`로 다시 돌리면 된다.
 
 **실제 서버에 반영하는 데까지 확인했다.** 러너 쪽(YAML 파싱, 모든 스텝의 셸 문법,
 도달성 판정, 사전 검증)에 더해, `workflow_dispatch` 실행으로 SSH 접속·백업·`rsync` 전송·
 서버 compose 검증이 모두 통과했다. 이때 서버의 `alloy/config.dev.alloy`가 저장소보다
 뒤처져 있던 것이 실제로 갱신됐다 — 이 결정이 막으려던 어긋남이 이미 있었다는 뜻이다.
 
-**아직 실행되지 않은 경로가 둘 있다.** `up -d` 재적용은 서버에 떠 있는 컨테이너가 없어
-세 스택 모두 건너뛰었고, 롤백은 서버 검증이 실패한 적이 없어 돌지 않았다. 스택을 실제로
-운영하기 시작하면 전자는 자연히 검증된다.
+위 실측은 설정만 전송하던 최초 버전에 대한 것이다. 2026-08-24에 추가한 두 image
+candidate 빌드·`latest` 교체·강제 재생성·image ID 롤백 경로는 GPU 서버에서 첫 배포를
+지켜봐야 한다.
 
 **첫 배포는 실패했고, 그 실패가 설계대로였다.** 병합 시점에 공개키가 아직 서버에
 등록되지 않아 전제 확인 스텝에서 멈췄다. 파일 전송·백업·`up -d`는 모두 스킵됐고 서버는
@@ -2729,8 +2751,8 @@ CCTV 신원 인계 종단 간 검증은 아직 완료되지 않았다.
 
 **남은 일**:
 
-- `up -d` 재적용 경로는 아직 한 번도 돌지 않았다. 스택을 올린 뒤 첫 배포는 지켜본다.
-- 롤백 경로도 실행된 적이 없다. 서버 검증이 실패하는 상황을 만들어 확인할지 정한다.
+- candidate 빌드와 `latest` 교체, `--force-recreate` 경로의 첫 GPU 배포를 지켜본다.
+- 설정·image ID 통합 롤백 경로도 실행된 적이 없다. 실패 주입으로 확인할지 정한다.
 - 개인 PC 쪽 `.pc.yml` 스택의 반영은 이 결정에 포함하지 않았다. 노트북이라 더 자주
   꺼져 있고 인바운드 SSH를 열 것인지부터 정해야 한다.
 - 저장소에서 지운 파일을 서버에서도 지우는 절차가 없다. 지금은 사람이 한다.

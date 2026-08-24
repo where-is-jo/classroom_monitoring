@@ -169,6 +169,8 @@ export해서 `grafana/dashboards/` 아래 파일을 갱신해야 한다.
 | `classroom_monitoring_person_tracks_expired_total` | Counter | `camera_id` | 가림·이탈 뒤 만료되는 track 빈도 |
 | `classroom_monitoring_person_tracks_active` | Gauge | `camera_id` | 활성·유실 대기 중인 사람 track 수 |
 | `classroom_monitoring_person_track_lifetime_frames` | Histogram | `camera_id` | 사람 track이 몇 처리 프레임 동안 유지되는가 |
+| `classroom_monitoring_face_identification_requests_total` | Counter | `outcome` | worker가 deeplearning 얼굴 식별을 호출한 성공·실패 수 |
+| `classroom_monitoring_face_identification_duration_seconds` | Histogram | 없음 | 얼굴 식별 HTTP 호출과 응답 검증 지연 |
 | `classroom_monitoring_identity_handoff_total` | Counter | `outcome` | 입구 신원이 CCTV track에 인계·보류된 이유 |
 
 label 값 종류 수는 `camera_id`가 등록 카메라 대수, `result`가 2(`ok`·`failed`),

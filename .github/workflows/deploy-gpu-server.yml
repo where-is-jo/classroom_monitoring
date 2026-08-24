@@ -1,8 +1,8 @@
 name: GPU 서버 배포
 
-# 서버에 올라가는 docker compose·수집 설정을 저장소 상태로 맞춘다.
-# 지금까지는 .docker/*.yml을 고칠 때마다 사람이 SSH로 붙어 파일을 옮기고 up -d를
-# 다시 쳤다. 그 과정이 빠지면 서버와 저장소가 조용히 어긋난다.
+# 서버에 올라가는 docker compose·수집 설정과 서버 로컬 추론 이미지를 저장소 상태로
+# 맞춘다. 설정만 옮기고 worker·deeplearning을 다시 빌드하지 않으면 같은 :latest 태그가
+# 오래된 image ID를 계속 가리키므로 두 이미지를 현재 커밋으로 함께 갱신한다.
 #
 # 배포 대상은 커밋되는 파일뿐이다. .docker/env/(비밀값)와 .docker/models/(가중치)는
 # 저장소에 없고 서버 로컬에만 있으므로 이 워크플로우는 그 둘을 절대 건드리지 않는다
@@ -17,6 +17,10 @@ on:
     paths:
       - '.docker/**'
       - '!.docker/**/*.md'
+      - 'worker/**'
+      - '!worker/**/*.md'
+      - 'deeplearning/**'
+      - '!deeplearning/**/*.md'
       - '.github/workflows/deploy-gpu-server.yml'
   workflow_dispatch:
 
@@ -190,23 +194,66 @@ jobs:
             docker compose -f ".docker/$stack" config --quiet
           done
 
-      # 검증이 실패하면 되돌릴 수 있어야 한다. models/(5GB대 가중치)와 env/(비밀값)는
-      # 우리가 건드리지 않으므로 백업에서도 뺀다.
-      - name: 서버의 현재 .docker 백업
+      # 검증이나 재기동이 실패하면 설정뿐 아니라 latest 이미지 태그도 되돌린다.
+      # models/(5GB대 가중치)와 env/(비밀값)는 건드리지 않으므로 백업에서 뺀다.
+      - name: 서버의 현재 설정과 이미지 태그 백업
         run: |
           set -euo pipefail
           stamp=$(date -u +%Y%m%dT%H%M%SZ)
           echo "BACKUP_STAMP=$stamp" >> "$GITHUB_ENV"
-          ssh $SSH_OPTS "$TARGET" "REMOTE_PATH='$REMOTE_PATH' STAMP='$stamp' bash -s" <<'REMOTE'
+          ssh $SSH_OPTS "$TARGET" "REMOTE_PATH='$REMOTE_PATH' STAMP='$stamp' STACKS='$SERVER_STACKS' bash -s" <<'REMOTE'
           set -euo pipefail
           backup_dir="$REMOTE_PATH/.deploy-backups"
           mkdir -p "$backup_dir"
           tar czf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH" \
             --exclude='.docker/models' --exclude='.docker/env' .docker
+          deep_id=$(docker image inspect --format '{{.Id}}' ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest 2>/dev/null || :)
+          worker_id=$(docker image inspect --format '{{.Id}}' ghcr.io/where-is-jo/classroom-monitoring-worker:latest 2>/dev/null || :)
+          printf 'deeplearning=%s\nworker=%s\n' "$deep_id" "$worker_id" \
+            > "$backup_dir/$STAMP.images"
+          : > "$backup_dir/$STAMP.running"
+          for stack in $STACKS; do
+            if [ -n "$(docker compose -f "$REMOTE_PATH/.docker/$stack" ps -q)" ]; then
+              echo "$stack" >> "$backup_dir/$STAMP.running"
+            fi
+          done
           echo "백업: $backup_dir/$STAMP.tar.gz"
           # 오래된 백업은 정리한다. 디스크를 공용으로 쓰는 서버다.
-          { ls -1t "$backup_dir"/*.tar.gz 2>/dev/null || :; } | tail -n +11 | xargs -r rm -f
+          { ls -1t "$backup_dir"/*.tar.gz 2>/dev/null || :; } | tail -n +11 \
+            | while IFS= read -r archive; do
+                prefix=${archive%.tar.gz}
+                rm -f "$archive" "$prefix.images" "$prefix.running"
+              done
           REMOTE
+
+      # checkout의 추적 소스만 tar로 보내므로 로컬 .env·모델·얼굴 데이터는 빌드 context에
+      # 들어가지 않는다. candidate 둘이 모두 성공하기 전에는 :latest 태그를 바꾸지
+      # 않아 한쪽만 새 버전이 되는 배포를 막는다.
+      - name: 현재 커밋으로 추론 이미지 candidate 빌드
+        run: |
+          set -euo pipefail
+          deep_candidate="ghcr.io/where-is-jo/classroom-monitoring-deeplearning:candidate-$GITHUB_SHA"
+          worker_candidate="ghcr.io/where-is-jo/classroom-monitoring-worker:candidate-$GITHUB_SHA"
+          echo "DEEP_CANDIDATE=$deep_candidate" >> "$GITHUB_ENV"
+          echo "WORKER_CANDIDATE=$worker_candidate" >> "$GITHUB_ENV"
+
+          build_candidates() {
+            echo "== deeplearning candidate 빌드"
+            git archive --format=tar HEAD:deeplearning \
+              | ssh $SSH_OPTS "$TARGET" \
+                  "docker build --label 'org.opencontainers.image.revision=$GITHUB_SHA' -t '$deep_candidate' -" \
+              || return
+            echo "== worker candidate 빌드"
+            git archive --format=tar HEAD:worker \
+              | ssh $SSH_OPTS "$TARGET" \
+                  "docker build --label 'org.opencontainers.image.revision=$GITHUB_SHA' -t '$worker_candidate' -" \
+              || return
+          }
+          if ! build_candidates 2>&1 | tee /tmp/build.log; then
+            ssh $SSH_OPTS "$TARGET" \
+              "docker image rm '$deep_candidate' '$worker_candidate' >/dev/null 2>&1 || :"
+            exit 1
+          fi
 
       # git이 추적하는 파일만 목록으로 넘긴다. --delete를 쓰지 않는 이유가 여기 있다 —
       # 서버에만 있는 env/·models/·data/를 지울 위험을 아예 만들지 않는다.
@@ -214,18 +261,32 @@ jobs:
       - name: 커밋된 .docker 파일 전송
         run: |
           set -euo pipefail
-          git ls-files -z .docker \
-            | rsync -rlt --no-owner --no-group --from0 --files-from=- \
-                --itemize-changes \
-                -e "ssh $SSH_OPTS" \
-                ./ "$TARGET:$REMOTE_PATH/" | tee /tmp/rsync.log
+          rollback_transfer() {
+            ssh $SSH_OPTS "$TARGET" \
+              "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" <<'REMOTE'
+          set -uo pipefail
+          tar xzf "$REMOTE_PATH/.deploy-backups/$STAMP.tar.gz" -C "$REMOTE_PATH" || :
+          docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+          REMOTE
+          }
+          if ! git ls-files -z .docker \
+              | rsync -rlt --no-owner --no-group --from0 --files-from=- \
+                  --itemize-changes \
+                  -e "ssh $SSH_OPTS" \
+                  ./ "$TARGET:$REMOTE_PATH/" \
+              | tee /tmp/rsync.log; then
+            rollback_transfer || :
+            exit 1
+          fi
 
       # 서버의 실제 env 값까지 포함한 검증이다. 실패하면 방금 올린 파일을 백업으로
       # 되돌린 뒤 job을 실패시킨다. 깨진 설정을 서버에 남겨 두지 않는다.
       - name: 서버에서 compose 검증 (실패 시 롤백)
         run: |
           set -euo pipefail
-          ssh $SSH_OPTS "$TARGET" "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' STACKS='$SERVER_STACKS' bash -s" <<'REMOTE'
+          ssh $SSH_OPTS "$TARGET" \
+            "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' STACKS='$SERVER_STACKS' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" \
+            <<'REMOTE'
           set -uo pipefail
           cd "$REMOTE_PATH"
           failed=""
@@ -234,13 +295,55 @@ jobs:
               failed="$failed $stack"
             fi
           done
+          if ! python3 .docker/scripts/validate_face_handover_deployment.py; then
+            failed="$failed face-handover-inputs"
+          fi
           if [ -n "$failed" ]; then
             echo "검증 실패:$failed — 백업으로 되돌린다" >&2
             tar xzf "$REMOTE_PATH/.deploy-backups/$STAMP.tar.gz" -C "$REMOTE_PATH"
+            docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
             echo "롤백 완료" >&2
             exit 1
           fi
           echo "세 스택 모두 검증 통과"
+          REMOTE
+
+      # 두 candidate의 revision label을 확인한 뒤에만 :latest 이름을 함께 옮긴다. 같은
+      # 이름을 다시 지정하므로 다음 빌드가 이전 latest 태그를 덮어쓴다.
+      - name: candidate를 latest 이미지로 전환
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$TARGET" \
+            "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' SHA='$GITHUB_SHA' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          activate() {
+            deep_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$DEEP_CANDIDATE")
+            worker_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$WORKER_CANDIDATE")
+            [ "$deep_revision" = "$SHA" ]
+            [ "$worker_revision" = "$SHA" ]
+            docker image tag "$DEEP_CANDIDATE" ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+            docker image tag "$WORKER_CANDIDATE" ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+          }
+          if ! activate; then
+            echo "latest 전환 실패 — 설정과 이미지 태그를 되돌린다" >&2
+            backup_dir="$REMOTE_PATH/.deploy-backups"
+            tar xzf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH" || :
+            deep_id=$(sed -n 's/^deeplearning=//p' "$backup_dir/$STAMP.images")
+            worker_id=$(sed -n 's/^worker=//p' "$backup_dir/$STAMP.images")
+            if [ -n "$deep_id" ]; then
+              docker image tag "$deep_id" ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest || :
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest >/dev/null 2>&1 || :
+            fi
+            if [ -n "$worker_id" ]; then
+              docker image tag "$worker_id" ghcr.io/where-is-jo/classroom-monitoring-worker:latest || :
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-worker:latest >/dev/null 2>&1 || :
+            fi
+            docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+            exit 1
+          fi
           REMOTE
 
       # 떠 있는 스택만 다시 올린다. 내려 둔 스택을 CI가 마음대로 켜지 않는다 —
@@ -251,18 +354,72 @@ jobs:
       - name: 떠 있는 스택 재적용
         run: |
           set -euo pipefail
-          ssh $SSH_OPTS "$TARGET" "REMOTE_PATH='$REMOTE_PATH' STACKS='$SERVER_STACKS' bash -s" <<'REMOTE' | tee /tmp/apply.log
+          ssh $SSH_OPTS "$TARGET" \
+            "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' STACKS='$SERVER_STACKS' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" \
+            <<'REMOTE' | tee /tmp/apply.log
           set -euo pipefail
           cd "$REMOTE_PATH"
+
+          rollback() {
+            set +e
+            echo "재기동 실패 — 설정과 latest 이미지 태그를 되돌린다" >&2
+            backup_dir="$REMOTE_PATH/.deploy-backups"
+            tar xzf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH"
+            deep_id=$(sed -n 's/^deeplearning=//p' "$backup_dir/$STAMP.images")
+            worker_id=$(sed -n 's/^worker=//p' "$backup_dir/$STAMP.images")
+            if [ -n "$deep_id" ]; then
+              docker image tag "$deep_id" ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest >/dev/null 2>&1 || :
+            fi
+            if [ -n "$worker_id" ]; then
+              docker image tag "$worker_id" ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-worker:latest >/dev/null 2>&1 || :
+            fi
+            while IFS= read -r stack; do
+              [ -n "$stack" ] || continue
+              if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
+                docker compose -f ".docker/$stack" up -d --force-recreate \
+                  deeplearning inference-worker || :
+                docker compose -f ".docker/$stack" up -d || :
+              else
+                docker compose -f ".docker/$stack" up -d || :
+              fi
+            done < "$backup_dir/$STAMP.running"
+            docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+          }
+          finish() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              rollback
+            fi
+            exit "$status"
+          }
+          trap finish EXIT
+
           for stack in $STACKS; do
             if [ -n "$(docker compose -f ".docker/$stack" ps -q)" ]; then
               echo "== $stack: up -d"
-              docker compose -f ".docker/$stack" up -d
+              if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
+                docker compose -f ".docker/$stack" up -d --force-recreate \
+                  deeplearning inference-worker
+                # mediamtx·minio 등 같은 스택의 설정 변경도 이전 배포처럼 반영한다.
+                docker compose -f ".docker/$stack" up -d
+              else
+                docker compose -f ".docker/$stack" up -d
+              fi
               docker compose -f ".docker/$stack" ps
+              if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
+                python3 .docker/scripts/verify_face_handover_runtime.py
+              fi
             else
               echo "== $stack: 실행 중인 컨테이너가 없어 건너뛴다"
             fi
           done
+          docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+          trap - EXIT
           REMOTE
 
       - name: 결과 요약
@@ -274,6 +431,12 @@ jobs:
             echo
             echo "- 배포 경로: \`${REMOTE_PATH:-미확인}\`"
             echo "- 백업: \`${REMOTE_PATH:-?}/.deploy-backups/${BACKUP_STAMP:-없음}.tar.gz\`"
+            echo "- 소스 revision: \`${GITHUB_SHA}\`"
+            echo
+            echo "### 추론 이미지 빌드"
+            echo '```'
+            cat /tmp/build.log 2>/dev/null || echo "(빌드 단계에 이르지 못했다)"
+            echo '```'
             echo
             echo "### 전송된 파일"
             echo '```'

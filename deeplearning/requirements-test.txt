@@ -1,0 +1,7 @@
+# deeplearning HTTP 서비스의 단위·통합 테스트 전용 의존성.
+# 제품 이미지는 requirements.txt만 설치하므로 TestClient 의존성을 런타임에 넣지 않는다.
+-r requirements.txt
+
+pytest>=8
+# Starlette 1.2+ TestClient가 사용하는 HTTP 클라이언트다.
+httpx2>=2,<3

@@ -84,6 +84,7 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도와 동적 설정 on/off·갱신 주기·timeout | `config/settings.yml` |
 | `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |
 | `face_identity_jpeg_quality` | 얼굴 식별 요청 JPEG 품질 | 기본 95 |
+| `face_identity_min_person_confidence` | 얼굴 서비스로 보낼 사람 bbox 최소 신뢰도 | 기본 0.5. ByteTrack 저신뢰도 bbox는 추적에만 사용 |
 | `metrics_enabled` | 지표 노출 여부 | 기본 `true` |
 | `metrics_host` | 지표 서버 바인딩 주소 | 기본 `0.0.0.0` |
 | `metrics_port` | 지표 서버 포트 | 기본 9101 |
@@ -167,6 +168,8 @@ curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
 | 카메라 한 대 연결 실패 | 그 카메라만 재연결을 반복한다. 다른 카메라는 계속 돈다 |
 | 추론 1회 실패 | 스택을 로그로 남기고 다음 프레임으로 넘어간다 |
 | 얼굴 식별 HTTP·응답 실패 | 경고를 남기고 신원 없는 원래 사람 탐지를 FastAPI로 보낸다 |
+| YOLO 임계값이 ByteTrack high 이상 | 저신뢰도 2단계 매칭이 사라지므로 시작 시 종료 |
+| 얼굴 식별 camera ID가 STREAM_SOURCES에 없음 | 호출이 영원히 0건인 상태를 막기 위해 시작 시 종료 |
 | 인계 후보 학생 또는 문 영역 신규 track이 여러 명 | 신원을 붙이지 않고 각 CCTV track을 미식별로 둔다 |
 | ByteTrack이 buffer보다 오래 끊김 | 이전 신원을 버리고 새 track ID로 시작한다 |
 | 추론 연속 실패가 한계 초과 | 파이프라인 전체를 멈춘다. 프레임만 버리며 도는 상태를 두지 않는다 |
