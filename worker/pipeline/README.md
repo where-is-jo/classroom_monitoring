@@ -79,9 +79,9 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
 | `PERSON_TRACKING_CAMERA_IDS` | ByteTrack 대상 camera ID | 비우면 모든 `STREAM_SOURCES` |
-| `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | `.env.{APP_ENV}`. 실제 화면으로 보정 |
+| `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | FastAPI 설정을 처음 읽기 전과 장애 시 사용할 정적 초기·fallback 값 |
 | `bytetrack_*` | 두 단계 매칭·track buffer 기준 | `config/settings.yml` |
-| `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도 | `config/settings.yml` |
+| `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도와 동적 설정 on/off·갱신 주기·timeout | `config/settings.yml` |
 | `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |
 | `face_identity_jpeg_quality` | 얼굴 식별 요청 JPEG 품질 | 기본 95 |
 | `metrics_enabled` | 지표 노출 여부 | 기본 `true` |
@@ -90,8 +90,13 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 
 ### CCTV 문 영역 보정
 
-카메라 간 인계를 켜기 전에 실제 CCTV 기준 프레임에서 학생이 교실로 처음 나타나는 문
-영역을 선택한다. 화면을 추측해 좌표를 넣지 않는다.
+카메라 간 인계를 켜기 전에 FastAPI의 `/identity-handover` 화면에서 강의실·입구 카메라·
+CCTV를 고른다. **CCTV 현재 화면 캡처**를 누르면 저장된 영역이 실제 프레임 위에 겹쳐
+보인다. 문 바닥 경계와 다르면 **영역 다시 그리기**로 좁게 다시 그려 저장한다. worker는
+기본 5초마다 이 값을 읽어 재시작 없이 반영한다. 조회가 잠시 실패하면 마지막 정상 설정을
+유지하고, 화면에서 route를 삭제하면 다음 정상 갱신부터 새 인계를 중단한다.
+
+웹 화면을 쓸 수 없는 개발 환경에서는 아래 CLI로 같은 정규화 좌표를 만들 수 있다.
 
 ```bash
 cd worker
@@ -103,12 +108,13 @@ python -m pipeline.handover_calibration \
 ```
 
 마우스로 문 영역을 드래그하고 Enter를 누르면 정규화된
-`IDENTITY_HANDOVER_ROUTES=...` 한 줄을 출력한다. 그 값을 `pipeline/.env.dev` 또는
-`.docker/env/worker.dev.env`에 옮기고 preview에서 문만 포함됐는지 확인한다. GUI를 쓸 수
-없는 호스트에서는 `--rect X Y WIDTH HEIGHT`로 같은 픽셀 사각형을 줄 수 있다.
+`IDENTITY_HANDOVER_ROUTES=...` 한 줄을 출력한다. 동적 설정이 꺼진 환경이나 장애 fallback이
+필요한 배포에서는 그 값을 `pipeline/.env.dev` 또는 `.docker/env/worker.dev.env`에 옮긴다.
+GUI를 쓸 수 없는 호스트에서는 `--rect X Y WIDTH HEIGHT`로 같은 픽셀 사각형을 줄 수 있다.
 
 한 사람 bbox의 **하단 중앙점**이 이 영역에 처음 들어오는 순간이 CCTV 인계 후보가 된다.
-통로 전체나 좌석까지 넓게 잡으면 여러 신규 track이 동시에 후보가 되어 보수적 인계가
+track이 화면 다른 곳에서 먼저 만들어졌더라도 이후 이 영역으로 들어오면 후보가 된다.
+통로 전체나 좌석까지 넓게 잡으면 여러 track이 동시에 후보가 되어 보수적 인계가
 의도대로 `UNKNOWN`을 반환하므로, 실제 출입문 바닥 경계만 포함한다.
 
 ### 카메라별 최신 한 장만 두는 이유
