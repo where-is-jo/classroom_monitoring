@@ -27,6 +27,11 @@ bytetrack_second_match_iou_threshold: 0.2
 bytetrack_buffer_frames: 30
 
 # 입구에서 식별된 시각과 CCTV 문 영역에서 새 track이 생긴 시각의 허용 범위.
+# FastAPI의 인계 ROI 관리 화면을 설정 정본으로 사용하고 5초마다 갱신한다. 조회 실패 시
+# 마지막 정상 설정을 유지하므로 일시적인 웹앱 장애가 기존 track을 바꾸지 않는다.
+identity_handover_dynamic_config_enabled: true
+identity_handover_config_refresh_seconds: 5.0
+identity_handover_config_timeout_seconds: 2.0
 identity_handover_max_delay_seconds: 8.0
 identity_handover_clock_skew_seconds: 0.5
 # 신원이 붙은 CCTV track이 잠시 가려져도 이 시간 안에는 같은 신원을 유지한다.

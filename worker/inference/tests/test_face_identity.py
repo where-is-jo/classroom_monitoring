@@ -177,6 +177,54 @@ def test_사람_ByteTrack_ID를_얼굴_track으로_덮어쓰지_않는다() -> N
     assert enriched.detections[1].student_id == "student-001"
 
 
+def test_얼굴_식별은_낮은_신뢰도_사람_오탐을_요청에서_제외한다() -> None:
+    requests_seen: list[dict[str, str]] = []
+
+    def post(
+        url: str,
+        *,
+        data: bytes,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> FakeResponse:
+        del url, data, timeout
+        requests_seen.append(headers)
+        return FakeResponse(
+            {
+                "identities": [
+                    {
+                        "person_index": 0,
+                        "face_bbox": [45, 20, 80, 65],
+                        "track_id": "face-9",
+                        "student_id": "student-001",
+                        "identity_confidence": 0.88,
+                    }
+                ]
+            }
+        )
+
+    result = InferenceResult(
+        frame_shape=(120, 160, 3),
+        detections=(
+            Detection(0, "person", 0.41, (35, 10, 105, 110), track_id="person-1"),
+            Detection(0, "person", 0.67, (20, 5, 125, 118), track_id="person-2"),
+        ),
+    )
+
+    enriched = HttpFaceIdentifier(
+        "http://deeplearning:8100",
+        timeout_seconds=2,
+        jpeg_quality=90,
+        minimum_person_confidence=0.5,
+        post=post,  # type: ignore[arg-type]
+    ).enrich(captured(), result)
+
+    assert requests_seen[0]["X-Person-Bboxes"] == "[[20,5,125,118]]"
+    assert enriched.detections[0].student_id is None
+    assert enriched.detections[1].student_id == "student-001"
+    assert enriched.detections[1].track_id == "person-2"
+
+
 def test_중복된_사람_응답은_거부한다() -> None:
     item = {
         "person_index": 0,

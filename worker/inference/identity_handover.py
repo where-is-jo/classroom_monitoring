@@ -2,15 +2,20 @@
 
 두 카메라의 화각이 겹치지 않아 bbox 좌표를 직접 이어 붙이지 않는다. 대신 입구에서
 확정된 신원을 짧은 시간 동안 대기시키고, 그 직후 교실 CCTV의 설정된 문 영역에서
-처음 만들어진 사람 track과만 연결한다. 후보 학생이나 신규 track이 둘 이상이면
-가까운 사람을 추측하지 않고 인계를 보류한다.
+처음 만들어지거나 영역 밖에서 안으로 진입한 사람 track과만 연결한다. 후보 학생이나
+진입 track이 둘 이상이면 가까운 사람을 추측하지 않고 인계를 보류한다.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Protocol
+
+import requests
 
 from shared.types import CapturedFrame
 
@@ -20,13 +25,16 @@ from .types import Detection, InferenceResult
 
 logger = logging.getLogger(__name__)
 
+HANDOVER_ROUTES_PATH = "/internal/identity-handover-routes"
+
 
 @dataclass(frozen=True)
 class IdentityHandoverRoute:
     entry_camera_id: str
     classroom_camera_id: str
     # CCTV 프레임의 정규화 좌표 [left, top, right, bottom]. 사람 bbox의 발 위치가
-    # 이 영역에서 처음 관측될 때만 입구 신원 후보와 연결한다.
+    # 이 영역에서 처음 관측되거나 영역 밖에서 안으로 들어올 때 입구 신원 후보와
+    # 연결한다.
     classroom_entry_zone: tuple[float, float, float, float]
 
     def __post_init__(self) -> None:
@@ -89,6 +97,112 @@ def parse_identity_handover_routes(value: str) -> tuple[IdentityHandoverRoute, .
     return tuple(routes)
 
 
+class IdentityHandoverRouteProvider(Protocol):
+    def load(self) -> tuple[IdentityHandoverRoute, ...]: ...
+
+
+class HttpIdentityHandoverRouteProvider:
+    """FastAPI 관리 화면에 저장된 현재 인계 route를 읽는다."""
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout_seconds: float,
+        get: Callable[..., requests.Response] = requests.get,
+    ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("인계 설정 조회 timeout은 0보다 커야 합니다.")
+        self._url = base_url.rstrip("/") + HANDOVER_ROUTES_PATH
+        self._timeout_seconds = timeout_seconds
+        self._get = get
+
+    def load(self) -> tuple[IdentityHandoverRoute, ...]:
+        response = self._get(self._url, timeout=self._timeout_seconds)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise TypeError("인계 설정 응답에는 items 배열이 필요합니다.")
+        return parse_identity_handover_routes(
+            json.dumps(payload["items"], ensure_ascii=False)
+        )
+
+
+class RefreshingIdentityHandoverResultHandler:
+    """관리 화면의 route를 주기적으로 다시 읽어 실행 중인 worker에 적용한다.
+
+    조회 실패는 기존 route를 유지한다. 정상 응답이 빈 목록이면 관리자가 route를 모두
+    지운 것이므로 인계만 끄고 사람 탐지 전송은 계속한다.
+    """
+
+    def __init__(
+        self,
+        initial_routes: tuple[IdentityHandoverRoute, ...],
+        *,
+        provider: IdentityHandoverRouteProvider,
+        inner: ResultHandler,
+        refresh_seconds: float,
+        maximum_delay_seconds: float = 8.0,
+        clock_skew_seconds: float = 0.5,
+        track_stale_seconds: float = 30.0,
+        minimum_identity_confidence: float = 0.6,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if refresh_seconds <= 0:
+            raise ValueError("인계 설정 갱신 주기는 0보다 커야 합니다.")
+        self._routes = initial_routes
+        self._provider = provider
+        self._inner = inner
+        self._refresh_seconds = refresh_seconds
+        self._maximum_delay_seconds = maximum_delay_seconds
+        self._clock_skew_seconds = clock_skew_seconds
+        self._track_stale_seconds = track_stale_seconds
+        self._minimum_identity_confidence = minimum_identity_confidence
+        self._monotonic = monotonic
+        self._last_refresh = float("-inf")
+        self._active = self._build(initial_routes)
+
+    def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
+        self._refresh_if_due()
+        if self._active is None:
+            self._inner(captured, result)
+            return
+        self._active(captured, result)
+
+    def _refresh_if_due(self) -> None:
+        now = self._monotonic()
+        if now - self._last_refresh < self._refresh_seconds:
+            return
+        self._last_refresh = now
+        try:
+            routes = self._provider.load()
+        except (requests.RequestException, ValueError, TypeError) as error:
+            logger.warning(
+                "신원 인계 설정을 갱신하지 못해 직전 설정을 유지합니다: %s",
+                type(error).__name__,
+            )
+            return
+        if routes == self._routes:
+            return
+        self._routes = routes
+        self._active = self._build(routes)
+        logger.info("신원 인계 route 동적 설정 %d개를 적용했습니다.", len(routes))
+
+    def _build(
+        self, routes: tuple[IdentityHandoverRoute, ...]
+    ) -> IdentityHandoverResultHandler | None:
+        if not routes:
+            return None
+        return IdentityHandoverResultHandler(
+            routes,
+            inner=self._inner,
+            maximum_delay_seconds=self._maximum_delay_seconds,
+            clock_skew_seconds=self._clock_skew_seconds,
+            track_stale_seconds=self._track_stale_seconds,
+            minimum_identity_confidence=self._minimum_identity_confidence,
+        )
+
+
 @dataclass
 class _PendingIdentity:
     entry_track_id: str
@@ -116,6 +230,7 @@ class _RouteState:
     pending: dict[str, _PendingIdentity] = field(default_factory=dict)
     consumed_entry_tracks: dict[str, float] = field(default_factory=dict)
     known_classroom_tracks: dict[str, float] = field(default_factory=dict)
+    classroom_tracks_in_entry_zone: dict[str, bool] = field(default_factory=dict)
     unmatched_classroom_tracks: dict[str, _UnmatchedClassroomTrack] = field(
         default_factory=dict
     )
@@ -224,6 +339,11 @@ class IdentityHandoverResultHandler:
             for track_id, last_seen in state.known_classroom_tracks.items()
             if now - last_seen <= self._track_stale_seconds
         }
+        state.classroom_tracks_in_entry_zone = {
+            track_id: inside
+            for track_id, inside in state.classroom_tracks_in_entry_zone.items()
+            if track_id in state.known_classroom_tracks
+        }
         state.active_identities = {
             track_id: identity
             for track_id, identity in state.active_identities.items()
@@ -248,6 +368,16 @@ class IdentityHandoverResultHandler:
                 detection.student_id is None
                 or detection.identity_confidence is None
                 or detection.identity_confidence < self._minimum_identity_confidence
+            ):
+                continue
+            # 사람 detector의 confidence가 ByteTrack 기준을 오가면 같은 실제 사람이
+            # 잠깐 face-* fallback track으로 보였다가 person-* track으로 다시 보일 수
+            # 있다. 이미 CCTV track에 붙은 학생을 새 entry track 후보로 다시 받으면
+            # 한 학생이 교실의 두 사람에게 동시에 붙는다. 활성 CCTV track이 만료될
+            # 때까지는 학생 단위로 한 번만 인계한다.
+            if any(
+                active.student_id == detection.student_id
+                for active in state.active_identities.values()
             ):
                 continue
             track_id = detection.track_id
@@ -281,30 +411,39 @@ class IdentityHandoverResultHandler:
         state = self._states[route]
         match_inputs_expired = self._expire(state, observed_at)
         people = _person_detections(result)
-        new_in_entry_zone: list[str] = []
+        entered_entry_zone: list[str] = []
         for _, detection in people:
             track_id = detection.track_id
             assert track_id is not None
             is_new = track_id not in state.known_classroom_tracks
+            was_in_entry_zone = state.classroom_tracks_in_entry_zone.get(
+                track_id, False
+            )
+            is_in_entry_zone = _foot_in_zone(
+                detection, result.frame_shape, route.classroom_entry_zone
+            )
             state.known_classroom_tracks[track_id] = max(
                 state.known_classroom_tracks.get(track_id, observed_at), observed_at
             )
+            state.classroom_tracks_in_entry_zone[track_id] = is_in_entry_zone
             active = state.active_identities.get(track_id)
             if active is not None:
                 active.last_seen_at = max(active.last_seen_at, observed_at)
-            if is_new and _foot_in_zone(
-                detection, result.frame_shape, route.classroom_entry_zone
-            ):
+            unmatched = state.unmatched_classroom_tracks.get(track_id)
+            if unmatched is not None:
+                unmatched.last_seen_at = max(unmatched.last_seen_at, observed_at)
+
+            entered = is_in_entry_zone and (is_new or not was_in_entry_zone)
+            if active is None and unmatched is None and entered:
                 state.unmatched_classroom_tracks[track_id] = _UnmatchedClassroomTrack(
                     track_id, observed_at, observed_at
                 )
-                new_in_entry_zone.append(track_id)
+                entered_entry_zone.append(track_id)
 
-        if new_in_entry_zone:
-            if len(new_in_entry_zone) > 1:
-                IDENTITY_HANDOFF_TOTAL.labels(outcome="ambiguous_tracks").inc()
+        if entered_entry_zone and len(entered_entry_zone) > 1:
+            IDENTITY_HANDOFF_TOTAL.labels(outcome="ambiguous_tracks").inc()
 
-        if new_in_entry_zone or match_inputs_expired:
+        if entered_entry_zone or match_inputs_expired:
             self._try_match(state)
 
         enriched = list(result.detections)
@@ -323,15 +462,20 @@ class IdentityHandoverResultHandler:
         return InferenceResult(result.frame_shape, tuple(enriched))
 
     def _try_match(self, state: _RouteState) -> None:
+        active_student_ids = {
+            identity.student_id for identity in state.active_identities.values()
+        }
+        for entry_track_id, identity in list(state.pending.items()):
+            if identity.student_id not in active_student_ids:
+                continue
+            del state.pending[entry_track_id]
+            state.consumed_entry_tracks[entry_track_id] = identity.observed_at
+
         viable: list[tuple[_PendingIdentity, _UnmatchedClassroomTrack]] = []
         for identity in state.pending.values():
             for classroom_track in state.unmatched_classroom_tracks.values():
                 delay = classroom_track.first_seen_at - identity.observed_at
-                if (
-                    -self._clock_skew_seconds
-                    <= delay
-                    <= self._maximum_delay_seconds
-                ):
+                if -self._clock_skew_seconds <= delay <= self._maximum_delay_seconds:
                     viable.append((identity, classroom_track))
 
         if not viable:
@@ -348,9 +492,14 @@ class IdentityHandoverResultHandler:
             identity.confidence,
             classroom_track.last_seen_at,
         )
-        del state.pending[identity.entry_track_id]
+        # 같은 실제 사람이 face-*와 person-* 두 entry track으로 보였더라도 하나의
+        # CCTV track에 인계한 순간 같은 학생 후보를 모두 소비한다.
+        for entry_track_id, pending in list(state.pending.items()):
+            if pending.student_id != identity.student_id:
+                continue
+            del state.pending[entry_track_id]
+            state.consumed_entry_tracks[entry_track_id] = pending.observed_at
         del state.unmatched_classroom_tracks[classroom_track.track_id]
-        state.consumed_entry_tracks[identity.entry_track_id] = identity.observed_at
         IDENTITY_HANDOFF_TOTAL.labels(outcome="accepted").inc()
         logger.info(
             "입구 신원을 교실 track으로 인계했습니다. entry_track=%s classroom_track=%s",
@@ -360,7 +509,10 @@ class IdentityHandoverResultHandler:
 
 
 __all__ = [
+    "HANDOVER_ROUTES_PATH",
+    "HttpIdentityHandoverRouteProvider",
     "IdentityHandoverResultHandler",
     "IdentityHandoverRoute",
+    "RefreshingIdentityHandoverResultHandler",
     "parse_identity_handover_routes",
 ]
