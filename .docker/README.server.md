@@ -346,6 +346,7 @@ docker build -t classroom-monitoring-worker:local-20260824-face-handover worker
 python .docker/scripts/validate_face_handover_deployment.py
 docker compose -f .docker/compose.main.dev.gpu.yml config --quiet
 docker compose -f .docker/compose.main.dev.gpu.yml up -d
+python .docker/scripts/verify_face_handover_runtime.py
 ```
 
 deeplearning healthcheck는 모델 파일 존재만이 아니라 MongoDB 갤러리가 비어 있지 않고
@@ -366,6 +367,14 @@ ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deep
    embedding은 지표·로그에 출력하지 않는다.
 5. FastAPI 수신 이벤트에서 같은 CCTV `track_id`에 `student_id`가 유지되고 좌석 ROI에
    들어갔을 때 학생 상태로 반영되는지 확인한다.
+
+위 3번 실제 동선까지 수행한 뒤 다음 명령을 실행하면 두 camera의 처리 프레임, 성공한
+얼굴 호출, `accepted` 인계가 모두 1건 이상인지 자동 확인한다. URL·MongoDB 자격 증명·
+학생 ID는 출력하지 않는다.
+
+```bash
+python .docker/scripts/verify_face_handover_runtime.py --require-live-handoff
+```
 
 ## 이미지
 
