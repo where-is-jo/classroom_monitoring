@@ -16,6 +16,18 @@
 **서버가 꺼져 있으면 배포는 실패가 아니라 건너뛴다** — 서버를 켠 뒤 Actions 탭에서
 `Run workflow`로 다시 돌린다. `env/`와 `models/`는 전송 대상이 아니라 여전히 사람이 올린다.
 
+반영 대상은 compose 파일만이 아니다. **`.docker/` 아래 커밋되는 모든 파일**이며
+(`prometheus/`·`alloy/`·`minio/` 포함) 문서(`.md`)만 제외된다.
+
+이 서버의 배포 루트는 **홈 디렉터리 자체**다. 저장소 변수 `GPU_SERVER_DEPLOY_PATH`에
+`/home/doyoon`이 들어 있고, 파일은 `~/.docker/`에 놓인다. 배포 직전 백업은
+`~/.deploy-backups/<타임스탬프>.tar.gz`로 남고 최근 10개만 유지한다(`env/`·`models/` 제외).
+
+**`~/.docker/`는 Docker CLI의 설정 디렉터리이기도 하다.** `buildx/`와 `config.json`이
+같은 곳에 있다. 배포가 `rsync --delete`를 쓰지 않는 이유가 여기서 한 번 더 중요해진다 —
+저장소에 없는 파일은 건드리지 않으므로 CLI 설정은 그대로 남는다. 이 경로에서
+`--delete`를 켜는 변경은 하지 않는다.
+
 ## 파일
 
 | 파일 | project name | 담는 것 |
