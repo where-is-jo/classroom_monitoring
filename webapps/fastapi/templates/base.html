@@ -36,6 +36,7 @@
           <p class="nav-group-title">등록 관리</p>
           <a href="/students"{% if current_path in ['/students', '/students/new'] %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">♙</span><span>학생 관리</span></a>
           <a href="/roi-connections"{% if current_path == '/roi-connections' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span><span>ROI 연결</span></a>
+          <a href="/identity-handover"{% if current_path == '/identity-handover' %} aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⇥</span><span>인계 ROI</span></a>
         </div>
         <div class="nav-group nav-group-spaced">
           <p class="nav-group-title">학생 현황</p>

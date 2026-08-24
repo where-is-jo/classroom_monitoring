@@ -49,6 +49,12 @@ from ..face_enrollment.models import PoseBin
 from ..face_enrollment.ports import FaceEnrollmentRepository
 from ..face_enrollment.rules import EnrollmentThresholds
 from ..face_enrollment.service import FaceEnrollmentService
+from ..identity_handover.adapters.memory import (
+    InMemoryIdentityHandoverRouteRepository,
+)
+from ..identity_handover.adapters.mongo import MongoIdentityHandoverRouteRepository
+from ..identity_handover.ports import IdentityHandoverRouteRepository
+from ..identity_handover.service import IdentityHandoverRouteService
 from ..llm_search.adapters.llama_planner import LlamaQueryPlanner
 from ..llm_search.adapters.stub_planner import StubQueryPlanner
 from ..llm_search.ports import QueryPlanner
@@ -310,6 +316,16 @@ def _mongo_roi_connection_repository() -> MongoRoiConnectionRepository:
     return MongoRoiConnectionRepository(_mongo_database())
 
 
+@lru_cache
+def _memory_identity_handover_route_repository() -> InMemoryIdentityHandoverRouteRepository:
+    return InMemoryIdentityHandoverRouteRepository()
+
+
+@lru_cache
+def _mongo_identity_handover_route_repository() -> MongoIdentityHandoverRouteRepository:
+    return MongoIdentityHandoverRouteRepository(_mongo_database())
+
+
 def get_classroom_repository(
     settings: Settings = Depends(get_settings),
 ) -> ClassroomRepository:
@@ -390,6 +406,13 @@ def get_roi_connection_repository() -> RoiConnectionRepository:
     if settings.database_mode == "memory":
         return _memory_roi_connection_repository()
     return _mongo_roi_connection_repository()
+
+
+def get_identity_handover_route_repository() -> IdentityHandoverRouteRepository:
+    settings = get_settings()
+    if settings.database_mode == "memory":
+        return _memory_identity_handover_route_repository()
+    return _mongo_identity_handover_route_repository()
 
 
 def get_student_service(
@@ -538,6 +561,21 @@ def _roi_connection_service() -> RoiConnectionService:
 
 def get_roi_connection_service() -> RoiConnectionService:
     return _roi_connection_service()
+
+
+@lru_cache
+def _identity_handover_route_service() -> IdentityHandoverRouteService:
+    return IdentityHandoverRouteService(
+        get_identity_handover_route_repository(),
+        get_roi_connection_service(),
+        get_camera_frame_grabber(),
+        max_image_bytes=get_settings().roi_reference_image_max_bytes,
+        clock=utc_now,
+    )
+
+
+def get_identity_handover_route_service() -> IdentityHandoverRouteService:
+    return _identity_handover_route_service()
 
 
 @lru_cache
@@ -819,6 +857,7 @@ def initialize_data_store() -> None:
                 MongoPlaybackSessionRepository.ensure_indexes,
                 MongoStudentRepository.ensure_indexes,
                 MongoRoiConnectionRepository.ensure_indexes,
+                MongoIdentityHandoverRouteRepository.ensure_indexes,
                 MongoFaceEmbeddingRepository.ensure_indexes,
                 MongoFaceEnrollmentRepository.ensure_indexes,
             ],
@@ -870,6 +909,7 @@ def close_data_store() -> None:
     _mongo_student_repository.cache_clear()
     _mongo_face_embedding_repository.cache_clear()
     _mongo_roi_connection_repository.cache_clear()
+    _mongo_identity_handover_route_repository.cache_clear()
     _mongo_database.cache_clear()
     _mongo_client.cache_clear()
     _memory_face_object_storage.cache_clear()
@@ -877,8 +917,10 @@ def close_data_store() -> None:
     _face_analyzer.cache_clear()
     _http_face_analyzer.cache_clear()
     _roi_connection_service.cache_clear()
+    _identity_handover_route_service.cache_clear()
     _roi_classroom_service.cache_clear()
     _memory_roi_connection_repository.cache_clear()
+    _memory_identity_handover_route_repository.cache_clear()
     _memory_student_repository.cache_clear()
     _memory_face_enrollment_repository.cache_clear()
     _mongo_face_enrollment_repository.cache_clear()
