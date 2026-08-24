@@ -284,7 +284,7 @@ FACE_EVAL_THRESHOLD_OUTPUT=<thresholds.json 출력 절대경로>
 ```
 
 ```bash
-python -m pip install -r deeplearning/training/requirements.txt
+python -m pip install -r deeplearning/training/requirements-face-eval.txt
 python -m deeplearning.training.face_identification_eval
 ```
 

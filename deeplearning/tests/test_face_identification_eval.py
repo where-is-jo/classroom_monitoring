@@ -18,6 +18,7 @@ from deeplearning.training.face_identification_eval import (
     load_split,
     score_probe,
     select_threshold_for_far,
+    validate_evaluation_inputs,
     write_csv,
     write_thresholds,
 )
@@ -62,6 +63,53 @@ def test_load_split_reads_unknown_flat_directory(tmp_path: Path) -> None:
 
     assert len(images) == 2
     assert all(image.true_id is None for image in images)
+
+
+def test_load_split은_없는_디렉터리를_명확히_거부한다(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="split 디렉터리"):
+        load_split(tmp_path / "missing", labeled=False)
+
+
+def test_평가_split은_각각_비어_있지_않아야_한다(tmp_path: Path) -> None:
+    probe = ProbeImage(tmp_path / "one.jpg", "student-a")
+    unknown = ProbeImage(tmp_path / "unknown.jpg", None)
+
+    with pytest.raises(ValueError, match="known test"):
+        validate_evaluation_inputs(
+            _gallery(),
+            known_validation=[probe],
+            unknown_validation=[unknown],
+            known_test=[],
+            unknown_test=[ProbeImage(tmp_path / "unknown-test.jpg", None)],
+        )
+
+
+def test_known_평가_학생은_MongoDB_gallery에_등록되어야_한다(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="gallery"):
+        validate_evaluation_inputs(
+            _gallery(),
+            known_validation=[ProbeImage(tmp_path / "one.jpg", "student-missing")],
+            unknown_validation=[ProbeImage(tmp_path / "unknown.jpg", None)],
+            known_test=[ProbeImage(tmp_path / "test.jpg", "student-a")],
+            unknown_test=[ProbeImage(tmp_path / "unknown-test.jpg", None)],
+        )
+
+
+def test_validation과_test에_같은_파일을_재사용할_수_없다(
+    tmp_path: Path,
+) -> None:
+    same = tmp_path / "same.jpg"
+
+    with pytest.raises(ValueError, match="중복"):
+        validate_evaluation_inputs(
+            _gallery(),
+            known_validation=[ProbeImage(same, "student-a")],
+            unknown_validation=[ProbeImage(tmp_path / "unknown.jpg", None)],
+            known_test=[ProbeImage(same, "student-a")],
+            unknown_test=[ProbeImage(tmp_path / "unknown-test.jpg", None)],
+        )
 
 
 def test_score_probe_returns_top1_and_top2(tmp_path: Path) -> None:
@@ -121,6 +169,28 @@ def test_select_threshold_for_far_rejects_all_when_target_is_zero() -> None:
     threshold = select_threshold_for_far(unknown_scores, target_far=0.0)
 
     assert all(score < threshold for score in unknown_scores)
+
+
+def test_select_threshold_for_far는_경계_동점으로_목표_FAR을_넘지_않는다() -> None:
+    unknown_scores = [0.9, 0.8, 0.8, 0.7]
+
+    threshold = select_threshold_for_far(unknown_scores, target_far=0.5)
+
+    accepted = [score for score in unknown_scores if score >= threshold]
+    assert accepted == [0.9]
+
+
+@pytest.mark.parametrize("target_far", [-0.1, 1.1])
+def test_select_threshold_for_far는_잘못된_FAR을_거부한다(
+    target_far: float,
+) -> None:
+    with pytest.raises(ValueError, match="target FAR"):
+        select_threshold_for_far([0.5], target_far=target_far)
+
+
+def test_select_threshold_for_far는_상한의_동점을_배제할_수_없으면_실패한다() -> None:
+    with pytest.raises(ValueError, match="목표 FAR"):
+        select_threshold_for_far([1.0], target_far=0.0)
 
 
 def test_select_threshold_for_far_raises_on_empty_input() -> None:
@@ -276,6 +346,23 @@ def test_write_thresholds_creates_runtime_artifact(tmp_path: Path) -> None:
         "model_version": "model-v1",
         "preprocessing_version": "crop-v1",
     }
+
+
+def test_write_thresholds는_런타임이_거부할_값을_쓰지_않는다(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="similarity"):
+        write_thresholds(
+            tmp_path / "thresholds.json",
+            similarity_threshold=1.1,
+            margin_threshold=0.1,
+            target_far=0.001,
+            model_name="arcface",
+            model_version="model-v1",
+            preprocessing_version="crop-v1",
+        )
+
+    assert not (tmp_path / "thresholds.json").exists()
 
 
 def test_mongodb_gallery는_URI가_없으면_연결_전에_거부한다(

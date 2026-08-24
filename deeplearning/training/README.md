@@ -131,8 +131,12 @@ test 결과를 보고 다시 임계값을 고르지 않는다.
 
 ```bash
 cd <저장소 루트>
+python -m pip install -r deeplearning/training/requirements-face-eval.txt
 python -m deeplearning.training.face_identification_eval
 ```
+
+`training/requirements.txt`는 사람 탐지 학습·노트북용이며 얼굴 평가 런타임 의존성을
+모두 설치하지 않는다. 얼굴 임계값만 생성할 때는 위 `requirements-face-eval.txt`를 쓴다.
 
 필수 디렉터리와 모델 경로는 [`.env.example`](./.env.example)의 `FACE_EVAL_*`,
 `FACE_*_MODEL_PATH`를 따른다. known 디렉터리는 `<student_id>/*.jpg`, unknown 디렉터리는
