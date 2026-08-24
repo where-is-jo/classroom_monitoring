@@ -113,8 +113,10 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: deeplearning/requirements.txt
-      - run: python -m pip install -r deeplearning/requirements.txt pytest
+          cache-dependency-path: |
+            deeplearning/requirements.txt
+            deeplearning/requirements-test.txt
+      - run: python -m pip install -r deeplearning/requirements-test.txt
       # 패키지 import가 저장소 루트를 기준으로 하므로 working-directory를 바꾸지 않는다.
       - run: python -m pytest deeplearning/tests -q
 

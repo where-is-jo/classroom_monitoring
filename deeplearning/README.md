@@ -248,6 +248,7 @@ curl -s http://127.0.0.1:8100/metrics | grep classroom_monitoring_
 
 ```bash
 # 저장소 최상위에서. mediapipe·insightface가 설치돼 있어야 한다.
+python -m pip install -r deeplearning/requirements-test.txt
 python -m pytest deeplearning/tests -q
 
 # 모델 의존성 없이 지표 정의만 확인할 때
