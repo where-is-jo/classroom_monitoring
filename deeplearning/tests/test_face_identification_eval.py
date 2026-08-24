@@ -12,6 +12,7 @@ from deeplearning.training.face_identification_eval import (
     ProbeImage,
     aggregate_metrics,
     build_gallery_from_directory,
+    build_mongo_gallery,
     classify_failure,
     evaluate_split,
     load_split,
@@ -275,3 +276,25 @@ def test_write_thresholds_creates_runtime_artifact(tmp_path: Path) -> None:
         "model_version": "model-v1",
         "preprocessing_version": "crop-v1",
     }
+
+
+def test_mongodb_gallery는_URI가_없으면_연결_전에_거부한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in ("MONGODB_URI", "DATABASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MONGODB_DATABASE", "classroom")
+
+    with pytest.raises(RuntimeError, match="MONGODB_URI"):
+        build_mongo_gallery()
+
+
+def test_mongodb_gallery는_DB_이름이_없으면_연결_전에_거부한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MONGODB_URI", "mongodb://example.invalid")
+    for key in ("MONGODB_DATABASE", "DATABASE_NAME"):
+        monkeypatch.delenv(key, raising=False)
+
+    with pytest.raises(RuntimeError, match="MONGODB_DATABASE"):
+        build_mongo_gallery()

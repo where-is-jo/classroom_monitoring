@@ -140,6 +140,13 @@ python -m deeplearning.training.face_identification_eval
 MongoDB를 건드리지 않는 dry-run은 `FACE_EVAL_GALLERY_SOURCE=directory`와
 `FACE_EVAL_GALLERY_DIR=<student_id별 등록 이미지 루트>`를 쓴다.
 
+MongoDB에 저장된 등록 embedding을 갤러리로 쓰려면 `FACE_EVAL_GALLERY_SOURCE=mongodb`,
+`MONGODB_URI`, `MONGODB_DATABASE`, `FACE_EMBEDDING_COLLECTION`을 설정한다. **MongoDB
+embedding만으로 임계값을 만들 수는 없다.** 오인식률을 측정할 별도의 known/unknown
+validation과 test 이미지가 네 디렉터리에 모두 있어야 한다. 로컬 Windows에서 실행하면
+`FACE_EVAL_*_DIR`와 모델 경로도 Windows 절대경로여야 하며, `/home/...` 경로는 GPU 서버에서
+실행할 때만 유효하다.
+
 생성된 임계값 파일에는 모델명·모델 버전·전처리 버전이 함께 들어간다. 실시간 서비스의
 `FACE_IDENTITY_THRESHOLD_FILE`로 연결하며, 현재 런타임 메타데이터와 하나라도 다르면
 기동을 거부한다. 실측 데이터가 없으면 임의 임계값으로 학생 이름을 붙이지 않는다.

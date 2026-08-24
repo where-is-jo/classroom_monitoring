@@ -433,6 +433,10 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
     mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get(
         "DATABASE_NAME", ""
     )
+    if not mongodb_uri.strip():
+        raise RuntimeError("MongoDB gallery에는 MONGODB_URI가 필요합니다.")
+    if not mongodb_database.strip():
+        raise RuntimeError("MongoDB gallery에는 MONGODB_DATABASE가 필요합니다.")
     collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
 
     entries: list[GalleryEntry] = []
