@@ -45,6 +45,10 @@ __all__ = [
     "PERSON_TRACKS_CREATED_TOTAL",
     "PERSON_TRACKS_EXPIRED_TOTAL",
     "PERSON_TRACK_LIFETIME_FRAMES",
+    "RESULT_DISPATCH_DROPPED_TOTAL",
+    "RESULT_DISPATCH_DURATION_SECONDS",
+    "RESULT_DISPATCH_FAILED_TOTAL",
+    "RESULT_DISPATCH_QUEUE_DEPTH",
 ]
 
 # 모델 호출 한 번에 걸린 시간. **평균이 아니라 분포로 본다** — 평균은 가끔 튀는
@@ -145,4 +149,42 @@ IDENTITY_HANDOFF_TOTAL = Counter(
     f"{METRIC_PREFIX}identity_handoff_total",
     "입구 신원을 교실 CCTV track으로 인계한 시도 결과",
     labelnames=("outcome",),
+)
+
+
+# --- 결과 전송 분리 ---
+# **여기가 지금까지 보이지 않던 구간이다.** 추론은 16ms인데 소비자 한 장의 주기가
+# 800ms였고, 그 차이는 FastAPI 왕복(내부적으로 MongoDB Atlas 왕복 여러 번)이었다.
+# 재는 자리가 없어서 추정으로만 알 수 있었으므로 지표를 먼저 만든다.
+#
+# `channel`은 detection / entry 두 값이다. 두 경로의 비용이 다르고(입구는 얼굴
+# 서비스 호출이 앞에 붙는다) 막히는 원인도 다르다.
+RESULT_DISPATCH_DURATION_SECONDS = Histogram(
+    f"{METRIC_PREFIX}result_dispatch_duration_seconds",
+    "결과 핸들러(FastAPI 전송 포함) 한 건을 처리하는 데 걸린 시간",
+    labelnames=("channel",),
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+# 전송 큐에 밀린 건수. 0에서 떨어지지 않으면 전송이 생산을 못 따라간다는 뜻이다.
+RESULT_DISPATCH_QUEUE_DEPTH = Gauge(
+    f"{METRIC_PREFIX}result_dispatch_queue_depth",
+    "전송 대기 중인 결과 수",
+    labelnames=("channel",),
+)
+
+# 큐가 가득 차 버린 결과 수. **프레임 버퍼의 dropped와 뜻이 같다** — 밀린 것을
+# 붙들고 있는 것보다 최신을 보내는 편이 실시간 파이프라인에 맞다.
+RESULT_DISPATCH_DROPPED_TOTAL = Counter(
+    f"{METRIC_PREFIX}result_dispatch_dropped_total",
+    "전송 큐가 가득 차 버린 결과 수",
+    labelnames=("channel",),
+)
+
+# 핸들러가 던진 예외 수. 전송 스레드는 예외를 밖으로 내보내지 않으므로
+# 이 값이 오르지 않는지로 확인한다.
+RESULT_DISPATCH_FAILED_TOTAL = Counter(
+    f"{METRIC_PREFIX}result_dispatch_failed_total",
+    "결과 핸들러가 예외로 끝난 횟수",
+    labelnames=("channel",),
 )

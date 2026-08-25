@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from inference.config import InferenceSettings
 from inference.consumer import log_result
+from inference.dispatch import AsyncResultDispatcher
 from inference.face_identity import FastAPIEntryIdentityEventHandler
 from inference.handler import FastAPIResultHandler
 from inference.identity_handover import (
@@ -109,7 +110,7 @@ def build_runner(
 def test_FASTAPI_URL_미설정이면_log_result를_그대로_쓴다() -> None:
     settings = build_inference_settings()
 
-    handler, entry_handler = pipeline_main.build_result_handlers(
+    handler, entry_handler, _dispatchers = pipeline_main.build_result_handlers(
         settings, fastapi_url=None
     )
 
@@ -120,7 +121,7 @@ def test_FASTAPI_URL_미설정이면_log_result를_그대로_쓴다() -> None:
 def test_FASTAPI_URL_설정이면_FastAPIResultHandler로_감싼다() -> None:
     settings = build_inference_settings()
 
-    handler, entry_handler = pipeline_main.build_result_handlers(
+    handler, entry_handler, _dispatchers = pipeline_main.build_result_handlers(
         settings, fastapi_url="http://fastapi:8000"
     )
 
@@ -134,7 +135,7 @@ def test_FASTAPI_URL_설정이어도_스냅샷_핸들러를_감싼다() -> None:
     """기존 스냅샷 적재 동작을 해치지 않고 그 위에 전송만 얹는다."""
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler, _ = pipeline_main.build_result_handlers(
+    handler, _, _dispatchers = pipeline_main.build_result_handlers(
         settings, fastapi_url="http://fastapi:8000"
     )
 
@@ -145,7 +146,7 @@ def test_FASTAPI_URL_설정이어도_스냅샷_핸들러를_감싼다() -> None:
 def test_FACE_IDENTITY_URL_설정이면_입구_관측_전용_핸들러를_분리한다() -> None:
     settings = build_inference_settings()
 
-    handler, entry_handler = pipeline_main.build_result_handlers(
+    handler, entry_handler, _dispatchers = pipeline_main.build_result_handlers(
         settings,
         fastapi_url="http://fastapi:8000",
         face_identity_url="http://deeplearning:8100",
@@ -159,7 +160,7 @@ def test_FASTAPI_URL_미설정이면_스냅샷_설정은_기존대로_적용된�
     """fastapi_url을 안 준다고 스냅샷이 꺼지면 안 된다."""
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler, _ = pipeline_main.build_result_handlers(settings, fastapi_url=None)
+    handler, _, _dispatchers = pipeline_main.build_result_handlers(settings, fastapi_url=None)
 
     assert isinstance(handler, SnapshotResultHandler)
 
@@ -170,9 +171,19 @@ def test_FASTAPI_URL_미설정이면_스냅샷_설정은_기존대로_적용된�
 
 
 def _handler_chain(handler: object) -> list[object]:
-    """`inner`로 이어진 결과 핸들러를 바깥부터 안쪽 순서로 편다."""
+    """이어진 결과 핸들러를 바깥부터 안쪽 순서로 편다.
+
+    전송 분리(`AsyncResultDispatcher`)는 감싼 핸들러를 `_inner`가 아니라 `_handler`에
+    들고 있다. 감싸는 방식이 달라도 체인은 이어져 보여야 한다.
+    """
     chain = [handler]
-    while (inner := getattr(chain[-1], "_inner", None)) is not None:
+    while True:
+        current = chain[-1]
+        inner = getattr(current, "_inner", None)
+        if inner is None:
+            inner = getattr(current, "_handler", None)
+        if inner is None:
+            break
         chain.append(inner)
     return chain
 
@@ -200,7 +211,7 @@ def test_저장소를_준비하지_못하면_스냅샷만_끄고_계속한다(
     _fail_to_build_storage(monkeypatch)
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler, _ = pipeline_main.build_result_handlers(settings, fastapi_url=None)
+    handler, _, _dispatchers = pipeline_main.build_result_handlers(settings, fastapi_url=None)
 
     assert handler is log_result
 
@@ -212,7 +223,7 @@ def test_저장소가_없어도_FastAPI_전송은_그대로_남는다(
     _fail_to_build_storage(monkeypatch)
     settings = build_inference_settings(snapshot_enabled=True)
 
-    handler, _ = pipeline_main.build_result_handlers(
+    handler, _, _dispatchers = pipeline_main.build_result_handlers(
         settings, fastapi_url="http://fastapi:8000"
     )
 
@@ -259,8 +270,14 @@ def test_조립_시_FASTAPI_URL_설정이면_FastAPIResultHandler가_주입된�
     # 핸들러는 조립 결과로만 확인할 수 있어 소비자 내부 필드를 본다.
     handler = runner._consumer._result_handler  # type: ignore[attr-defined]
     assert isinstance(handler, ByteTrackResultHandler)
-    assert isinstance(handler._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
-    assert handler._inner._inner is log_result  # type: ignore[attr-defined]
+
+    # 전송 분리가 기본값이라 ByteTrack 바로 안쪽은 dispatcher다. **순서가 중요하다** —
+    # ByteTrack은 프레임 순서에 기대는 상태를 들고 있어 소비자 스레드에 남아야 하고,
+    # 그보다 안쪽(전송)만 전용 스레드로 넘어간다.
+    chain = _handler_chain(handler)
+    assert isinstance(chain[1], AsyncResultDispatcher)
+    assert isinstance(chain[2], FastAPIResultHandler)
+    assert chain[-1] is log_result
 
 
 def test_조립_시_FASTAPI_URL_미설정이면_log_result가_주입된다(
@@ -292,7 +309,7 @@ def test_CCTV와_입구_핸들러가_공유_인계_coordinator로_조립된다()
         "entry-camera", "classroom-cctv", (0.0, 0.0, 0.3, 1.0)
     )
 
-    handler, entry_handler = pipeline_main.build_result_handlers(
+    handler, entry_handler, _dispatchers = pipeline_main.build_result_handlers(
         settings,
         fastapi_url="http://fastapi:8000",
         face_identity_url="http://deeplearning:8100",

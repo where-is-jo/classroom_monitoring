@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from pymongo import ASCENDING, DESCENDING
-from pymongo.errors import DuplicateKeyError, PyMongoError
+from pymongo.errors import DuplicateKeyError, OperationFailure, PyMongoError
 
 from ...shared.database import MongoDatabase, MongoDocument
 from ...shared.errors import RepositoryDataError, RepositoryUnavailableError
@@ -22,6 +22,10 @@ from ..models import (
     StudentStateRecord,
     VideoSegment,
 )
+
+# 같은 이름의 인덱스를 다른 옵션으로 만들려 할 때 MongoDB가 내는 코드.
+# 85는 IndexOptionsConflict, 86은 IndexKeySpecsConflict다.
+_INDEX_OPTIONS_CONFLICT_CODES = frozenset({85, 86})
 
 
 def _to_bbox(value: Any) -> tuple[int, int, int, int]:
@@ -41,12 +45,13 @@ class MongoDetectionEventRepository:
     """MongoDB detection event repository."""
 
     collection_name = "detection_events"
+    ttl_index_name = "detection_events_ttl"
 
     def __init__(self, database: MongoDatabase) -> None:
         self._collection = database[self.collection_name]
 
     @classmethod
-    def ensure_indexes(cls, database: MongoDatabase) -> None:
+    def ensure_indexes(cls, database: MongoDatabase, *, retention_days: int = 7) -> None:
         """Create indexes."""
         database[cls.collection_name].create_index(
             [("camera_id", ASCENDING), ("captured_at", DESCENDING)],
@@ -56,6 +61,39 @@ class MongoDetectionEventRepository:
             [("classroom_id", ASCENDING), ("captured_at", DESCENDING)],
             name="detection_events_classroom_time",
         )
+        cls._ensure_ttl_index(database, retention_days=retention_days)
+
+    @classmethod
+    def _ensure_ttl_index(cls, database: MongoDatabase, *, retention_days: int) -> None:
+        """보존 기간이 지난 탐지 이벤트를 MongoDB가 스스로 지우게 한다.
+
+        **`expires_at` 필드를 새로 두지 않고 `captured_at`에 직접 건다.** 입구 관측은
+        문서에 만료 시각을 담지만(`entry_identity_events_ttl`), 탐지 이벤트는 이미
+        쌓인 문서가 많아 필드를 추가하면 마이그레이션이 필요하다. 촬영 시각 기준
+        TTL은 기존 문서에도 그대로 적용된다.
+
+        대신 보존 기간을 바꾸면 인덱스 옵션이 달라진다. pymongo는 같은 이름의
+        인덱스를 다른 옵션으로 만들려 하면 거절하므로, 그때는 `collMod`로 기간만
+        고친다. 인덱스를 지웠다 다시 만들면 그 사이 조회가 느려진다.
+        """
+        expire_after_seconds = retention_days * 24 * 60 * 60
+        try:
+            database[cls.collection_name].create_index(
+                [("captured_at", ASCENDING)],
+                name=cls.ttl_index_name,
+                expireAfterSeconds=expire_after_seconds,
+            )
+        except OperationFailure as error:
+            if error.code not in _INDEX_OPTIONS_CONFLICT_CODES:
+                raise
+            database.command(
+                "collMod",
+                cls.collection_name,
+                index={
+                    "name": cls.ttl_index_name,
+                    "expireAfterSeconds": expire_after_seconds,
+                },
+            )
 
     def save(self, event: DetectionEvent) -> DetectionEvent:
         """Save event (idempotent)."""

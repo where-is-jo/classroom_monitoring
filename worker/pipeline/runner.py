@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Sequence
+from typing import Protocol
 
 from inference.consumer import InferenceConsumer
 from shared.frame_buffer import FrameBuffer
@@ -17,6 +18,16 @@ from stream.worker import StreamWorker
 logger = logging.getLogger(__name__)
 
 _CONSUMER_JOIN_TIMEOUT_SECONDS = 10.0
+
+
+class ResultDispatcher(Protocol):
+    """전송 스레드를 들고 있는 것 중 runner가 실제로 쓰는 부분만 추린 것.
+
+    `AsyncResultDispatcher`를 직접 import하지 않는 이유는 runner가 결과 종류를
+    알 필요가 없기 때문이다. 탐지든 입구 관측이든 닫는 방법은 같다.
+    """
+
+    def close(self) -> None: ...
 
 
 class PipelineRunner:
@@ -31,6 +42,7 @@ class PipelineRunner:
         shutdown_event: threading.Event,
         additional_consumers: Sequence[InferenceConsumer] = (),
         additional_frame_buffers: Sequence[FrameBuffer] = (),
+        result_dispatchers: Sequence[ResultDispatcher] = (),
         consumer_join_timeout_seconds: float = _CONSUMER_JOIN_TIMEOUT_SECONDS,
     ) -> None:
         self._stream_worker = stream_worker
@@ -41,6 +53,9 @@ class PipelineRunner:
         if len(self._consumers) != len(self._frame_buffers):
             raise ValueError("추론 소비자와 프레임 버퍼 수가 같아야 합니다.")
         self._shutdown_event = shutdown_event
+        # 전송 스레드는 소비자보다 늦게 닫는다. 소비자가 마지막으로 넘긴 결과까지
+        # 내보내야 종료 직전 상태가 화면에 반영된다.
+        self._result_dispatchers = tuple(result_dispatchers)
         self._consumer_join_timeout_seconds = consumer_join_timeout_seconds
 
     @property
@@ -98,6 +113,11 @@ class PipelineRunner:
                         thread.name,
                         self._consumer_join_timeout_seconds,
                     )
+
+            # 소비자를 모두 세운 뒤에 닫는다. 먼저 닫으면 소비자가 마지막으로
+            # 넘긴 결과가 큐에 들어가지도 못하고 사라진다.
+            for dispatcher in self._result_dispatchers:
+                dispatcher.close()
 
             buffer_stats = [frame_buffer.stats for frame_buffer in self._frame_buffers]
             consumer_stats = [consumer.stats for consumer in self._consumers]

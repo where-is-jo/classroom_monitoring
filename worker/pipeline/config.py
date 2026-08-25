@@ -58,6 +58,16 @@ class PipelineSettings(BaseSettings):
     face_identity_sample_interval_frames: int = Field(default=20, ge=1, le=10000)
     person_tracking_sample_interval_frames: int = Field(default=4, ge=1, le=10000)
 
+    # --- 결과 전송 분리 ---
+    # FastAPI 전송을 추론 소비자 스레드에서 떼어낸다. 끄면 예전처럼 소비자가 직접
+    # 전송하며, 전송 왕복만큼 다음 프레임을 못 가져간다(inference/dispatch.py).
+    result_dispatch_enabled: bool = True
+    # 전송이 밀렸을 때 들고 있을 최대 건수. 넘치면 오래된 것부터 버린다 —
+    # 프레임 버퍼와 같은 판단이다. 키울수록 지난 상태를 오래 붙들게 된다.
+    result_dispatch_queue_maxsize: int = Field(default=32, ge=1, le=1024)
+    # 종료할 때 남은 전송을 기다리는 상한. FastAPI가 죽어 있으면 끝나지 않으므로 둔다.
+    result_dispatch_close_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
     # --- 지표 노출 ---
     # 워커는 웹 서버가 아니라서 Prometheus가 긁어갈 곳이 없다. 켜면 전용 포트에
     # /metrics만 여는 최소 HTTP 서버가 데몬 스레드로 뜬다.

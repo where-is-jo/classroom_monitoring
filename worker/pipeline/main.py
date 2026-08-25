@@ -21,6 +21,7 @@ from inference.consumer import (
     ResultHandler,
     log_result,
 )
+from inference.dispatch import AsyncResultDispatcher
 from inference.face_identity import (
     EntryFaceProcessor,
     FastAPIEntryIdentityEventHandler,
@@ -37,7 +38,7 @@ from inference.model import Yolo8nDetector
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
 from inference.tracking import ByteTrackConfig, ByteTrackResultHandler
-from inference.types import EntryFaceObservationBatch
+from inference.types import EntryFaceObservationBatch, InferenceResult
 from pydantic import ValidationError
 from shared.config_errors import format_validation_error
 from shared.frame_buffer import FrameBuffer
@@ -52,7 +53,7 @@ from stream.main import build_publisher
 from stream.worker import StreamWorker
 
 from .config import PIPELINE_ENV_FILE, PipelineSettings
-from .runner import PipelineRunner
+from .runner import PipelineRunner, ResultDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,24 @@ def _discard_entry_result(
     """인계 route가 없을 때도 얼굴 분석 결과를 일반 탐지로 바꾸지 않는다."""
 
 
+def _sequence_entry_handlers(
+    first: EntryResultHandler, second: EntryResultHandler
+) -> EntryResultHandler:
+    """입구 결과를 두 곳에 순서대로 넘긴다.
+
+    `FastAPIEntryIdentityEventHandler`는 inner를 먼저 부르고 전송하는 구조라, 통째로
+    전송 스레드에 넘기면 신원 인계 coordinator까지 그 스레드로 따라간다. coordinator는
+    프레임 순서에 기대는 상태를 들고 있어 소비자 스레드에 남아야 한다. 그래서 둘을
+    갈라 붙인다 — 인계 관측은 여기서 즉시, 전송은 dispatcher가.
+    """
+
+    def handle(captured: CapturedFrame, batch: EntryFaceObservationBatch) -> None:
+        first(captured, batch)
+        second(captured, batch)
+
+    return handle
+
+
 def build_result_handlers(
     settings: InferenceSettings,
     *,
@@ -125,7 +144,10 @@ def build_result_handlers(
     available_camera_ids: frozenset[str] | None = None,
     entry_camera_ids: frozenset[str] = frozenset(),
     classroom_camera_ids: frozenset[str] = frozenset(),
-) -> tuple[ResultHandler, EntryResultHandler | None]:
+    result_dispatch_enabled: bool = False,
+    result_dispatch_queue_maxsize: int = 32,
+    result_dispatch_close_timeout_seconds: float = 5.0,
+) -> tuple[ResultHandler, EntryResultHandler | None, tuple[ResultDispatcher, ...]]:
     """CCTV 탐지와 입구 얼굴 관측의 서로 다른 결과 경계를 조립한다.
 
     스냅샷이 꺼져 있으면 저장소를 만들지 않는다. MinIO 접속 정보 없이도 파이프라인이
@@ -140,10 +162,28 @@ def build_result_handlers(
     handler: ResultHandler = (
         build_snapshot_handler(settings) if settings.snapshot_enabled else log_result
     )
+    dispatchers: list[ResultDispatcher] = []
 
     if fastapi_url is not None:
         logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
         handler = FastAPIResultHandler(fastapi_url, inner=handler)
+        if result_dispatch_enabled:
+            # **여기가 소비자 스레드와 네트워크의 경계다.** 아래(전송·스냅샷)는 전용
+            # 스레드가, 위(ByteTrack·신원 인계)는 소비자 스레드가 맡는다.
+            logger.info(
+                "탐지 결과 전송을 별도 스레드로 분리한다. 큐 %d건, 넘치면 오래된 것을 버린다.",
+                result_dispatch_queue_maxsize,
+            )
+            detection_dispatcher: AsyncResultDispatcher[InferenceResult] = (
+                AsyncResultDispatcher(
+                    handler,
+                    channel="detection",
+                    maxsize=result_dispatch_queue_maxsize,
+                    close_timeout_seconds=result_dispatch_close_timeout_seconds,
+                )
+            )
+            dispatchers.append(detection_dispatcher)
+            handler = detection_dispatcher
 
     coordinator: (
         IdentityHandoverResultHandler | RefreshingIdentityHandoverResultHandler | None
@@ -207,13 +247,31 @@ def build_result_handlers(
         )
         if fastapi_url is None:
             entry_handler = observe_entry
+        elif result_dispatch_enabled:
+            logger.info(
+                "입구 얼굴 관측을 FastAPI(%s)에 저장한다. 전송은 별도 스레드가 맡는다.",
+                fastapi_url,
+            )
+            # inner를 비워 전송만 남긴다. 인계 관측은 아래에서 소비자 스레드가 먼저 한다.
+            entry_dispatcher: AsyncResultDispatcher[EntryFaceObservationBatch] = (
+                AsyncResultDispatcher(
+                    FastAPIEntryIdentityEventHandler(
+                        fastapi_url, inner=_discard_entry_result
+                    ),
+                    channel="entry",
+                    maxsize=result_dispatch_queue_maxsize,
+                    close_timeout_seconds=result_dispatch_close_timeout_seconds,
+                )
+            )
+            dispatchers.append(entry_dispatcher)
+            entry_handler = _sequence_entry_handlers(observe_entry, entry_dispatcher)
         else:
             logger.info("입구 얼굴 관측을 FastAPI(%s)에 저장한다.", fastapi_url)
             entry_handler = FastAPIEntryIdentityEventHandler(
                 fastapi_url,
                 inner=observe_entry,
             )
-    return handler, entry_handler
+    return handler, entry_handler, tuple(dispatchers)
 
 
 def build_runner(
@@ -381,7 +439,7 @@ def build_runner(
         if pipeline_settings.person_tracking_enabled
         else None
     )
-    result_handler, entry_result_handler = build_result_handlers(
+    result_handler, entry_result_handler, result_dispatchers = build_result_handlers(
         inference_settings,
         fastapi_url=fastapi_url,
         face_identity_url=face_identity_url,
@@ -417,6 +475,11 @@ def build_runner(
         available_camera_ids=frozenset(configured_camera_ids),
         entry_camera_ids=face_identity_camera_ids,
         classroom_camera_ids=tracking_camera_ids,
+        result_dispatch_enabled=pipeline_settings.result_dispatch_enabled,
+        result_dispatch_queue_maxsize=pipeline_settings.result_dispatch_queue_maxsize,
+        result_dispatch_close_timeout_seconds=(
+            pipeline_settings.result_dispatch_close_timeout_seconds
+        ),
     )
 
     entry_processor = (
@@ -484,6 +547,7 @@ def build_runner(
         frame_buffer=consumer_buffers[0],
         additional_consumers=consumers[1:],
         additional_frame_buffers=consumer_buffers[1:],
+        result_dispatchers=result_dispatchers,
         shutdown_event=shutdown_event,
     )
 

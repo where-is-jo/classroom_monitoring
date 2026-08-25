@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 
 from fastapi import Depends
@@ -916,7 +916,12 @@ def initialize_data_store() -> None:
                 MongoClassroomRepository.ensure_indexes,
                 MongoSeatMutationUnitOfWork.ensure_indexes,
                 MongoSeatMigrationRepository.ensure_indexes,
-                MongoDetectionEventRepository.ensure_indexes,
+                # 보존 기간이 설정값이라 partial로 넘긴다. TTL 인덱스는 기간이 바뀌면
+                # 옵션도 바뀌므로 초기화 시점에 현재 설정을 반영해야 한다.
+                partial(
+                    MongoDetectionEventRepository.ensure_indexes,
+                    retention_days=settings.detection_event_retention_days,
+                ),
                 MongoVideoSegmentRepository.ensure_indexes,
                 MongoStudentStateRepository.ensure_indexes,
                 MongoVideoStreamRepository.ensure_indexes,
