@@ -174,7 +174,7 @@ jobs:
           set -euo pipefail
           port="${PORT:-2222}"
           deploy_path="${DEPLOY_PATH:-~/classroom-monitoring}"
-          ssh_opts="-i $HOME/.ssh/gpu_deploy_key -p $port -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20"
+          ssh_opts="-i $HOME/.ssh/gpu_deploy_key -p $port -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes"
           echo "SSH_OPTS=$ssh_opts" >> "$GITHUB_ENV"
           echo "TARGET=$USER_NAME@$HOST" >> "$GITHUB_ENV"
 
