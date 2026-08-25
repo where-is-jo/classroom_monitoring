@@ -84,7 +84,7 @@ bbox의 정본이다.** 구성도에 단계를 그리지 않은 것은 어느 �
 | FastAPI 백엔드 API | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`app/`) | 학생·좌석·얼굴 등록, 탐지 수신, 상태 판정·이력과 관리자 화면 구현 |
 | 카메라 실시간 수신, 프레임 샘플링 | [`worker/stream`](../../worker/stream/README.md) | 동작. 다중 RTSP 소스 수신·재연결·샘플링. 로컬 저장은 개발용이며 기본 꺼짐 |
 | 추론 실행 단계 | [`worker/inference`](../../worker/inference/README.md) | 입구 얼굴 관측 HTTP 호출·저장, CCTV 사람 탐지·ByteTrack, 문 영역·시각 기반 신원 인계, FastAPI 전달 구현. 사람 모델 직접 호출은 이관 대상([결정 0009](./decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)) |
-| 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | 사람 탐지 학습·평가, SCRFD·ArcFace 갤러리 식별·얼굴 추적·MediaPipe 자세 구현. 운영 사람 ByteTrack과 카메라 간 인계는 worker가 담당 |
+| 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | 사람 탐지 학습·평가, SCRFD·ArcFace/AdaFace 갤러리 식별·얼굴 추적·MediaPipe 자세 구현. 운영 사람 ByteTrack과 카메라 간 인계는 worker가 담당 |
 | 학생 상태 판정 | `webapps/fastapi` | 구현됨. CCTV의 신원 있는 track을 좌석 ROI 근거와 결합해 수신 시점에 판정·저장·이력을 남긴다([결정 0032](./decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)) |
 | MongoDB 저장 | `webapps/fastapi`의 어댑터 | 학생·강의실·좌석·얼굴 대표 embedding·탐지 이벤트·입구 얼굴 이벤트(7일 TTL)·상태 이력 구현. deeplearning은 대표 embedding만 읽기 전용 조회 |
 | 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0028](./decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
@@ -143,8 +143,8 @@ MediaMTX로 영상을 보내는 방향이 필요하다. CCTV 사설망을 GPU �
 ## 지금 동작하는 것과 목표의 거리
 
 ```text
-입구 카메라 → deeplearning SCRFD·ArcFace → 얼굴 track·student_id
-                               ↑ MongoDB 대표 embedding 갤러리
+입구 카메라 → deeplearning SCRFD·ArcFace/AdaFace → 얼굴 track·student_id
+                                       ↑ 모델별 MongoDB 대표 embedding 갤러리
                                ├→ FastAPI 입구 얼굴 이벤트 7일 저장
                                │
                  문 영역·통과 시각의 유일 후보일 때만 신원 인계
@@ -391,7 +391,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 영상·스냅샷 접근 권한 | 결정 필요 | 개인정보 합의 사항. 스냅샷에도 얼굴이 담긴다 |
 | 운영 접근 통제 방식(내부망 / reverse proxy / 상위 시스템 위임) | 결정 필요 | **prod 배포를 막는다**([0010](./decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)) |
 | 얼굴 탐지 모델 | 후보: SCRFD | deeplearning |
-| 얼굴 인식 모델 | 후보: AdaFace R50, ArcFace (비교 후 결정) | deeplearning |
+| 얼굴 인식 모델 | 단일 활성 모델 선택: ArcFace(기본) / AdaFace IR50 WebFace4M. AdaFace는 FAR 0.1% 검증 뒤 전환 | deeplearning |
 | 사람 탐지 모델 버전 | 후보: YOLO 계열 (현재 코드는 YOLOv8n) | deeplearning, worker |
 | 학습 데이터셋 확보·라벨링 정책 | 결정 필요. 입구 카메라가 수집을 겸하지만, 동의·보존·삭제 합의 전에는 실제 학생 얼굴을 수집하지 않는다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 5번) | deeplearning |
 | 학습 가중치를 `worker/inference` 실행 환경까지 전달하는 방식 | dev는 gitignore 대상 `.docker/models/`를 GPU worker에 read-only bind mount하는 것으로 확정·구성됨. 모델 배포 자동화는 예정 | deeplearning, worker |
