@@ -36,8 +36,10 @@
 자르는 진짜 이유는 따로 있다. **기간 상한 절삭의 기준점을 현실로 되돌리는 것**이다.
 `to`가 미래인 채로 7일을 세면 결과 구간이 통째로 미래에 남는다.
 
-구간 전체가 미래면 자를 수 없으므로 그때는 오류다. 사용자가 할 수 있는 일이
-질문을 고치는 것뿐이라 `EMPTY_RANGE`와 같은 성격이다.
+구간 전체가 미래면 자를 수 없다. 그때는 **12시간을 되돌려 본다** — 오전·오후 기본값을
+뒤집은 것이 원인인 경우가 대부분이라(`_pull_back_half_day`) 되돌리면 사용자가 물은
+구간이 나온다. 되돌려도 미래면 그때는 오류다. 사용자가 할 수 있는 일이 질문을 고치는
+것뿐이라 `EMPTY_RANGE`와 같은 성격이다.
 """
 
 from __future__ import annotations
@@ -60,6 +62,9 @@ MAX_LIMIT: Final = 50
 _INTENT: Final = "detection_search"
 _ALLOWED_KEYS: Final = frozenset({"intent", "camera_id", "classroom_id", "from", "to", "limit"})
 _MAX_IDENTIFIER_LENGTH: Final = 128
+
+# 오전·오후를 뒤집는 폭. `_pull_back_half_day`가 유일한 사용처다.
+_HALF_DAY: Final = timedelta(hours=12)
 
 # 어댑터가 생성 단계에서 구조를 강제하는 데 쓴다(llama.cpp가 grammar로 바꿔 준다).
 # **검증이 아니라 생성 힌트다.** 이 스키마를 통과한 값도 아래 `parse_plan`을 전부
@@ -137,13 +142,17 @@ def parse_plan(
         # 항상 0건인데, 사용자에게는 "그 시간에 아무도 없었다"로 보인다.
         raise LlmSearchPlanInvalidError("EMPTY_RANGE")
 
+    notes: list[str] = []
+
     if to_at > now:
         if from_at >= now:
-            # 구간 전체가 미래다. 자르면 빈 구간이 되므로 알려 주는 편이 낫다.
-            raise LlmSearchPlanInvalidError("FUTURE_RANGE")
-        to_at = now
-
-    notes: list[str] = []
+            from_at, to_at = _pull_back_half_day(from_at, to_at, now)
+            notes.append(
+                "오후로 읽으면 아직 오지 않은 시각이라 오전으로 바꿔 찾았습니다. "
+                "오후를 뜻하셨다면 그 시간이 지난 뒤에 다시 물어봐 주세요."
+            )
+        else:
+            to_at = now
 
     max_span = timedelta(days=max_span_days)
     if to_at - from_at > max_span:
@@ -162,6 +171,35 @@ def parse_plan(
         limit=limit,
         notes=tuple(notes),
     )
+
+
+def _pull_back_half_day(
+    from_at: datetime, to_at: datetime, now: datetime
+) -> tuple[datetime, datetime]:
+    """구간 전체가 미래일 때 12시간을 되돌려 본다. 그래도 미래면 오류다.
+
+    **오전·오후 기본값의 뒷정리다.** 지시문은 오전인지 밝히지 않은 1시~11시를 오후로
+    읽게 한다(`prompts.py`). 강의실을 쓰는 시간대가 낮이라 대개 맞지만, **아직 그
+    시각이 오지 않았으면 반드시 틀린다** — 오전 3시를 뜻한 질문이 오후 3시가 된다.
+
+    2026-08-25 GPU 서버(gemma) 실측: KST 14:00에 "오늘 3시부터 4시 사이에 강의실에
+    몇 명 있었어?"가 15:00~16:00으로 나왔고, 재시도까지 같은 값이라 사용자는 422를
+    받았다. 지시문에 "오후로 읽으면 지금보다 뒤가 되는 시각은 오전으로 읽어라"를
+    넣고 다시 측정했으나 결과는 같았다 — 작은 모델이 "지금"과 생성 중인 시각을
+    비교하지 못한다. 그래서 **모델에게 맡기지 않고 여기서 되돌린다.**
+
+    12시간이라는 폭이 곧 판정 근거다. 되돌려서 과거가 되는 구간은 오전·오후를 뒤집은
+    것이고, 되돌려도 미래인 구간(예: 모델이 내일 날짜를 낸 경우)은 성격이 다르므로
+    그대로 오류로 둔다. 자르지 않는 이유는 잘라 봐야 빈 구간이 되기 때문이다.
+
+    **조용히 바꾸지 않는다.** 호출자가 `notes`에 사유를 남긴다. 오후를 정말로 뜻한
+    사용자는 그 문장을 보고 자기가 물은 시각이 아직 오지 않았음을 안다.
+    """
+    shifted_from = from_at - _HALF_DAY
+    shifted_to = to_at - _HALF_DAY
+    if shifted_to > now:
+        raise LlmSearchPlanInvalidError("FUTURE_RANGE")
+    return shifted_from, shifted_to
 
 
 def _load_object(text: str) -> dict[str, Any]:

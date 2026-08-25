@@ -313,9 +313,37 @@ def test_미래를_자를_때는_사유를_남기지_않는다() -> None:
     assert query.notes == ()
 
 
-def test_구간_전체가_미래면_거부한다() -> None:
-    """잘라 낼 수 없다. 조용히 0건을 돌려주면 "그때 아무도 없었다"로 읽힌다."""
-    payload = {**_VALID, "from": "2026-08-20T00:00:00Z", "to": "2026-08-21T00:00:00Z"}
+def test_구간_전체가_미래면_12시간을_되돌려_본다() -> None:
+    """오전·오후 기본값의 뒷정리다. 되돌리면 사용자가 물은 구간이 나온다.
+
+    2026-08-25 GPU 서버(gemma) 실측: KST 14:00에 "오늘 3시부터 4시 사이에 강의실에
+    몇 명 있었어?"가 15:00~16:00으로 나왔고 **재시도까지 같은 값이라 422가 됐다.**
+    지시문으로 막아 보았으나 작은 모델이 "지금"과 생성 중인 시각을 비교하지 못했다.
+    """
+    payload = {
+        **_VALID,
+        "from": "2026-08-14T15:00:00Z",
+        "to": "2026-08-14T16:00:00Z",
+    }
+
+    query = parse_plan(json.dumps(payload), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert query.from_at == datetime(2026, 8, 14, 3, 0, tzinfo=UTC)
+    assert query.to_at == datetime(2026, 8, 14, 4, 0, tzinfo=UTC)
+
+
+def test_되돌린_사실을_반드시_알린다() -> None:
+    """조용히 바꾸면 오후를 정말로 뜻한 사용자가 틀린 결과를 맞는 답으로 읽는다."""
+    payload = {**_VALID, "from": "2026-08-14T15:00:00Z", "to": "2026-08-14T16:00:00Z"}
+
+    query = parse_plan(json.dumps(payload), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert any("오전으로 바꿔 찾았습니다" in note for note in query.notes)
+
+
+def test_12시간을_되돌려도_미래면_거부한다() -> None:
+    """모델이 내일 날짜를 낸 경우다. 오전·오후를 뒤집은 것과 성격이 다르다."""
+    payload = {**_VALID, "from": "2026-08-15T06:00:00Z", "to": "2026-08-15T07:00:00Z"}
 
     assert _reason(json.dumps(payload)) == "FUTURE_RANGE"
 
