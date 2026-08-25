@@ -96,16 +96,28 @@ def post_webhook(webhook_url: str, text: str) -> None:
         raise RuntimeError("Slack webhook did not return ok")
 
 
+def post_message(token: str, channel_id: str, text: str) -> dict[str, Any]:
+    """파일 없이 텍스트만 보낸다.
+
+    시간표를 읽지 못했을 때처럼 첨부할 산출물이 없는 오류 상황에 쓴다. Incoming
+    Webhook을 쓰지 않는 이유는 별도 발급이 필요해서다 — 파일 업로드에 이미 쓰는
+    Bot token에 chat:write가 있으면 그대로 보낼 수 있다.
+    """
+    return api_call("chat.postMessage", token, {"channel": channel_id, "text": text})
+
+
 def parse_args() -> argparse.Namespace:
     load_env_file(ENV_FILE)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--file", type=Path, required=True)
-    parser.add_argument("--title", required=True)
+    # 메시지만 보내는 모드에서는 첨부할 파일이 없다.
+    parser.add_argument("--file", type=Path)
+    parser.add_argument("--title")
     parser.add_argument("--comment", required=True)
     parser.add_argument("--token", default=os.environ.get("SLACK_BOT_TOKEN", ""))
     parser.add_argument("--channel-id", default=os.environ.get("SLACK_CHANNEL_ID", ""))
     parser.add_argument("--webhook-url", default=os.environ.get("SLACK_WEBHOOK_URL", ""))
     parser.add_argument("--webhook-only", action="store_true")
+    parser.add_argument("--message-only", action="store_true")
     return parser.parse_args()
 
 
@@ -118,10 +130,21 @@ def main() -> None:
         print("OK: Slack webhook message sent")
         return
 
+    if args.message_only:
+        if not args.token:
+            raise SystemExit("SLACK_BOT_TOKEN is required")
+        if not args.channel_id:
+            raise SystemExit("SLACK_CHANNEL_ID is required for message")
+        post_message(args.token, args.channel_id, args.comment)
+        print("OK: Slack message sent")
+        return
+
     if not args.token:
         raise SystemExit("SLACK_BOT_TOKEN is required")
     if not args.channel_id:
         raise SystemExit("SLACK_CHANNEL_ID is required for file upload")
+    if args.file is None or args.title is None:
+        raise SystemExit("--file and --title are required for file upload")
 
     result = upload_file(args.token, args.channel_id, args.file, args.title, args.comment)
     file_ids = [item.get("id") for item in result.get("files", [])]

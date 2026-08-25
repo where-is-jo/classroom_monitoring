@@ -13,11 +13,13 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -26,6 +28,7 @@ logger = logging.getLogger("rpa-runner")
 
 REPO_DIR = Path(os.environ.get("REPO_DIR", "/repo")).resolve()
 SCRIPT_DIR = REPO_DIR / "RPAs" / "study-status-report" / "scripts"
+LOG_DIR = REPO_DIR / "RPAs" / "study-status-report" / "logs"
 LISTEN_PORT = int(os.environ.get("RUNNER_PORT", "8099"))
 # 워크북 생성은 이벤트가 많으면 수 초가 걸리고, Slack 업로드는 외부 호출이다.
 # 무한정 매달리지 않도록 상한을 둔다.
@@ -58,6 +61,49 @@ def _require(payload: dict[str, object], key: str) -> str:
     return value
 
 
+def append_run_log(entry: dict[str, object]) -> None:
+    """실행 이력을 하루 한 파일에 한 줄씩 남긴다.
+
+    **학생 이름과 토큰은 남기지 않는다**(RPAs/README.md). 대상 식별은 내부 ID인
+    student_id만 쓴다. 로그를 남기지 못해도 본 작업을 실패로 만들지는 않는다 —
+    이력은 보조 기록이고, 여기서 예외를 올리면 이미 끝난 Slack 전송을 되돌릴 수
+    없는데도 호출자가 실패로 보게 된다.
+    """
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC)
+        record = {"logged_at": stamp.isoformat(), **entry}
+        path = LOG_DIR / f"run-{stamp:%Y-%m-%d}.json"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.exception("실행 이력을 남기지 못했습니다. 본 작업은 계속합니다.")
+
+
+def _state_changes_without_names(events_base64: str) -> list[dict[str, object]]:
+    """관리 문서에 담긴 상태 변화에서 개인정보를 뺀 형태로 돌려준다."""
+    try:
+        decoded = base64.b64decode(events_base64.encode("ascii")).decode("utf-8")
+        events = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError):
+        logger.warning("상태 변화 이벤트를 해석하지 못해 이력에서 건너뜁니다.")
+        return []
+    if not isinstance(events, list):
+        return []
+    # student_name과 seat_number는 남기지 않는다 — 이름은 개인정보이고, 좌석은
+    # 이름과 붙으면 특정 학생을 지목하게 된다.
+    return [
+        {
+            "period": event.get("period"),
+            "observed_at": event.get("observed_at"),
+            "student_id": event.get("student_id"),
+            "student_state": event.get("student_state"),
+        }
+        for event in events
+        if isinstance(event, dict)
+    ]
+
+
 def _run(script_name: str, args: list[str]) -> dict[str, object]:
     script_path = SCRIPT_DIR / script_name
     if not script_path.exists():
@@ -85,15 +131,28 @@ def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
     """관리 문서(.xlsx)를 만든다."""
     out_path = _resolve_inside_repo(_require(payload, "out"))
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    events_base64 = _require(payload, "events_base64")
 
     args = [
         "--date", _require(payload, "date"),
         "--classroom", _require(payload, "classroom"),
-        "--events-base64", _require(payload, "events_base64"),
+        "--events-base64", events_base64,
         "--out", str(out_path),
     ]
     result = _run("create_management_workbook.py", args)
     result["workbook_path"] = str(out_path)
+
+    changes = _state_changes_without_names(events_base64)
+    append_run_log(
+        {
+            "action": "workbook",
+            "ok": result["ok"],
+            "workbook": out_path.name,
+            "state_change_count": len(changes),
+            "state_changes": changes,
+            "error": result["stderr"] or None if not result["ok"] else None,
+        }
+    )
     return result
 
 
@@ -112,12 +171,39 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
         "--title", _require(payload, "title"),
         "--comment", _require(payload, "comment"),
     ]
-    return _run("slack_upload_file.py", args)
+    result = _run("slack_upload_file.py", args)
+    # 업로드에 실패해도 만들어 둔 파일은 지우지 않는다. 관리자가 그대로 올릴 수
+    # 있어야 하기 때문이다(README 실패 조건: "파일은 보존하고 실패 로그를 남긴다").
+    append_run_log(
+        {
+            "action": "slack_upload",
+            "ok": result["ok"],
+            "workbook": file_path.name,
+            "error": result["stderr"] or None if not result["ok"] else None,
+        }
+    )
+    return result
+
+
+def handle_slack_message(payload: dict[str, object]) -> dict[str, object]:
+    """첨부 없이 텍스트만 보낸다. 시간표를 읽지 못한 경우의 오류 알림에 쓴다."""
+    text = _require(payload, "text")
+    result = _run("slack_upload_file.py", ["--message-only", "--comment", text])
+    append_run_log(
+        {
+            "action": "slack_message",
+            "ok": result["ok"],
+            "reason": payload.get("reason"),
+            "error": result["stderr"] or None if not result["ok"] else None,
+        }
+    )
+    return result
 
 
 ROUTES = {
     "/workbook": handle_workbook,
     "/slack-upload": handle_slack_upload,
+    "/slack-message": handle_slack_message,
 }
 
 
