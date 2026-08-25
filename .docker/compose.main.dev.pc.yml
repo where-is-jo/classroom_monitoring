@@ -133,18 +133,58 @@ services:
       # localhost로 두면 이 노트북에서만 편집기가 정상 동작한다.
       N8N_EDITOR_BASE_URL: http://100.119.241.93:15678/
       WEBHOOK_URL: http://100.119.241.93:15678/
+      # --- study-status-report 워크플로가 $env로 읽는 값 ---
+      # 비밀값이 아니라 어느 강의실을 보는지의 문제라 결정 0018대로 여기 직접 적는다.
+      # 대상 강의실을 바꾸려면 이 두 값을 고친다(fastapi의 강의실 목록 id·이름).
+      CLASSROOM_ID: f5a51e8e-2fe6-4056-b6d5-84a6a9804dbb
+      CLASSROOM_NAME: 4A 강의실
+      # 컨테이너끼리는 같은 network 안에서 서비스 이름으로 부른다. 호스트 포트(8076)를
+      # 쓰면 Tailscale이 내려갈 때 같이 끊긴다.
+      FASTAPI_BASE_URL: http://fastapi:8001
+      # 시간표 문서는 gitignore 대상이라 저장소에 없다. 없으면 워크플로가 멈추지 않고
+      # Parse Schedule의 기본 시간표로 넘어간다 — 아래 마운트에 파일을 두면 그걸 쓴다.
+      SCHEDULE_FILE_PATH: /repo/individual_tasks/시간표.md
+      # 파이썬 스크립트를 대신 실행하는 사이드카. 아래 rpa-runner 서비스다.
+      RPA_RUNNER_URL: http://rpa-runner:8099
     volumes:
       # **GPU 서버에 있던 워크플로는 따라오지 않는다.** 볼륨은 기계에 묶여 있고
       # project name도 달라졌다(classroom-monitoring-dev_n8n-data ->
       # classroom-monitoring-dev-pc_n8n-data). 옮기려면 편집기에서 워크플로와
       # 자격 증명을 export/import 하거나, 서버의 볼륨을 tar로 떠서 옮긴다.
       - n8n-data:/home/node/.n8n
+      # 시간표 문서만 읽는다. 쓰기는 rpa-runner가 하므로 여기서는 읽기 전용이다.
+      - ../individual_tasks:/repo/individual_tasks:ro
+    depends_on:
+      - rpa-runner
     ports:
       - "127.0.0.1:15678:5678"
       - "100.119.241.93:15678:5678"
     networks:
       # fastapi와 같은 network에 둔다. n8n -> fastapi 호출은 경계를 넘지 않으므로
       # (결정 0026의 3번) 워크플로 안에서는 http://fastapi:8001 로 부르면 된다.
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
+  rpa-runner:
+    # **n8n 안에서 파이썬을 못 돌려서 생긴 서비스다.** n8n 2.33.5 공식 이미지에는
+    # 파이썬이 없고 패키지 관리자(apk)까지 빠져 있어 Execute Command로 스크립트를
+    # 부를 수 없다. 그래서 파이썬만 있는 작은 컨테이너를 두고, 워크플로는 이걸
+    # HTTP Request 노드로 부른다(RPA_RUNNER_URL).
+    build:
+      context: ../RPAs/study-status-report/runner
+    environment:
+      REPO_DIR: /repo
+    volumes:
+      # 스크립트와 산출물이 모두 여기 있다. 보고서를 쓰므로 읽기 전용이 아니다.
+      #
+      # **Slack 토큰도 이 마운트로 들어온다.** scripts/slack_upload_file.py가
+      # RPAs/study-status-report/.env를 읽는다 — 그 파일은 gitignore 대상이라
+      # 저장소에 없고, 이 노트북에 직접 만들어 둬야 한다(RPA README 참고).
+      - ../RPAs:/repo/RPAs
+    # **호스트 포트로 내보내지 않는다.** 이 서비스는 스크립트를 실행하므로 n8n만
+    # 부를 수 있으면 된다. 사설망이나 tailnet에 열 이유가 없다.
+    networks:
       - backend
     logging: *default-logging
     restart: unless-stopped

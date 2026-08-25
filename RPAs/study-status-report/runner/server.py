@@ -1,0 +1,198 @@
+"""study-status-report 스크립트를 HTTP로 감싸는 실행기.
+
+**왜 이게 있나.** n8n 2.33.5 공식 이미지에는 파이썬이 없고, 패키지 관리자(apk)까지
+제거돼 있어 컨테이너 안에서 `python`을 부를 수 없다. 그래서 Execute Command 노드로
+스크립트를 직접 실행하지 못한다. 이 서비스는 파이썬이 있는 별도 컨테이너에서 돌면서
+기존 스크립트를 그대로 호출하고, n8n은 HTTP Request 노드로 이 서비스를 부른다.
+
+**스크립트를 고쳐 쓰지 않는다.** 검증이 끝난 CLI를 subprocess로 그대로 호출한다 —
+로직을 여기로 옮기면 두 벌이 되어 어긋난다.
+
+이 서비스는 compose의 backend network 안에만 열린다. 호스트 포트로 내보내지 않는다.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("rpa-runner")
+
+REPO_DIR = Path(os.environ.get("REPO_DIR", "/repo")).resolve()
+SCRIPT_DIR = REPO_DIR / "RPAs" / "study-status-report" / "scripts"
+LISTEN_PORT = int(os.environ.get("RUNNER_PORT", "8099"))
+# 워크북 생성은 이벤트가 많으면 수 초가 걸리고, Slack 업로드는 외부 호출이다.
+# 무한정 매달리지 않도록 상한을 둔다.
+COMMAND_TIMEOUT_SECONDS = float(os.environ.get("RUNNER_TIMEOUT_SECONDS", "120"))
+
+MAX_BODY_BYTES = 8 * 1024 * 1024  # 이벤트 base64가 커질 수 있어 넉넉히 잡는다.
+
+
+class RunnerError(Exception):
+    """요청이 잘못됐을 때. 스크립트 실행 실패와 구분한다."""
+
+
+def _resolve_inside_repo(raw_path: str) -> Path:
+    """저장소 밖 경로를 쓰지 못하게 막는다.
+
+    경로가 n8n 워크플로에서 넘어오므로, 실수든 아니든 저장소 밖에 파일을 쓰거나
+    읽는 요청은 거부한다.
+    """
+    candidate = Path(raw_path)
+    resolved = (candidate if candidate.is_absolute() else REPO_DIR / candidate).resolve()
+    if resolved != REPO_DIR and REPO_DIR not in resolved.parents:
+        raise RunnerError(f"저장소 밖 경로는 사용할 수 없습니다: {raw_path}")
+    return resolved
+
+
+def _require(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise RunnerError(f"'{key}'가 필요합니다.")
+    return value
+
+
+def _run(script_name: str, args: list[str]) -> dict[str, object]:
+    script_path = SCRIPT_DIR / script_name
+    if not script_path.exists():
+        raise RunnerError(f"스크립트를 찾을 수 없습니다: {script_path}. 저장소 마운트를 확인하세요.")
+
+    command = [sys.executable, str(script_path), *args]
+    # cwd를 저장소 루트로 둔다. 스크립트의 기본 출력 경로가 저장소 기준 상대 경로다.
+    completed = subprocess.run(
+        command,
+        cwd=str(REPO_DIR),
+        capture_output=True,
+        text=True,
+        timeout=COMMAND_TIMEOUT_SECONDS,
+        check=False,
+    )
+    return {
+        "ok": completed.returncode == 0,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout.strip(),
+        "stderr": completed.stderr.strip(),
+    }
+
+
+def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
+    """관리 문서(.xlsx)를 만든다."""
+    out_path = _resolve_inside_repo(_require(payload, "out"))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    args = [
+        "--date", _require(payload, "date"),
+        "--classroom", _require(payload, "classroom"),
+        "--events-base64", _require(payload, "events_base64"),
+        "--out", str(out_path),
+    ]
+    result = _run("create_management_workbook.py", args)
+    result["workbook_path"] = str(out_path)
+    return result
+
+
+def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
+    """관리 문서를 Slack 채널에 올린다.
+
+    토큰과 채널 ID는 이 컨테이너의 환경변수로 주입된다 — 요청 본문으로 받지 않는다.
+    n8n 워크플로나 실행 이력에 비밀값이 남지 않게 하려는 것이다.
+    """
+    file_path = _resolve_inside_repo(_require(payload, "file"))
+    if not file_path.exists():
+        raise RunnerError(f"업로드할 파일이 없습니다: {file_path}")
+
+    args = [
+        "--file", str(file_path),
+        "--title", _require(payload, "title"),
+        "--comment", _require(payload, "comment"),
+    ]
+    return _run("slack_upload_file.py", args)
+
+
+ROUTES = {
+    "/workbook": handle_workbook,
+    "/slack-upload": handle_slack_upload,
+}
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "rpa-runner"
+
+    def _send(self, status: int, payload: dict[str, object]) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler의 이름 규칙이다.
+        if self.path == "/health":
+            self._send(200, {"ok": True, "repo_dir": str(REPO_DIR)})
+            return
+        self._send(404, {"ok": False, "error": "not found"})
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler의 이름 규칙이다.
+        handler = ROUTES.get(self.path)
+        if handler is None:
+            self._send(404, {"ok": False, "error": "not found"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send(400, {"ok": False, "error": "Content-Length가 올바르지 않습니다."})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send(413, {"ok": False, "error": "요청 본문이 너무 큽니다."})
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self._send(400, {"ok": False, "error": f"JSON을 읽지 못했습니다: {exc}"})
+            return
+        if not isinstance(payload, dict):
+            self._send(400, {"ok": False, "error": "요청 본문은 JSON 객체여야 합니다."})
+            return
+
+        try:
+            result = handler(payload)
+        except RunnerError as exc:
+            logger.warning("path=%s 잘못된 요청: %s", self.path, exc)
+            self._send(400, {"ok": False, "error": str(exc)})
+            return
+        except subprocess.TimeoutExpired:
+            logger.error("path=%s 스크립트가 %.0f초 안에 끝나지 않았습니다.", self.path, COMMAND_TIMEOUT_SECONDS)
+            self._send(504, {"ok": False, "error": "스크립트 실행이 시간을 초과했습니다."})
+            return
+        except Exception:
+            logger.exception("path=%s 처리 중 오류", self.path)
+            self._send(500, {"ok": False, "error": "실행기 내부 오류"})
+            return
+
+        # 스크립트가 실패하면 그대로 실패로 돌려준다. n8n이 성공으로 넘기지 않게 한다.
+        self._send(200 if result.get("ok") else 500, result)
+
+    def log_message(self, format: str, *args: object) -> None:
+        # 기본 구현은 stderr로 직접 찍는다. 로거를 거치게 해 형식을 맞춘다.
+        logger.info("%s - %s", self.address_string(), format % args)
+
+
+def main() -> None:
+    logger.info("rpa-runner 시작 (port=%s, repo_dir=%s)", LISTEN_PORT, REPO_DIR)
+    if not SCRIPT_DIR.exists():
+        # 죽이지는 않는다. compose 기동 순서에 따라 마운트가 늦을 수 있고,
+        # /health로 원인을 확인할 수 있어야 한다.
+        logger.warning("스크립트 디렉터리가 없습니다: %s (저장소 마운트 확인 필요)", SCRIPT_DIR)
+    ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
