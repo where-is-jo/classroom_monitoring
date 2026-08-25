@@ -126,6 +126,12 @@ class Settings(BaseSettings):
     detection_event_stale_seconds: int = Field(default=300, ge=1)
     # 입구 얼굴 관측 메타데이터는 원본 이미지·embedding 없이 이 기간만 보관한다.
     entry_identity_event_retention_days: int = Field(default=7, ge=1, le=90)
+    # 탐지 이벤트도 같은 이유로 무한히 쌓아 두지 않는다. 초당 한 건만 받아도 하루
+    # 8만 건이라, TTL이 없으면 저장소가 계속 커지기만 한다. **보존 기간은 아직 팀
+    # 합의값이 아니다**(결정 0007과 같은 상태). 입구 관측과 같은 7일을 기본값으로
+    # 두되, 좌석 판정 이력(`seat_occupancy_history`)은 이 값과 무관하게 남는다 —
+    # 지워지는 것은 프레임 단위 원시 탐지뿐이다.
+    detection_event_retention_days: int = Field(default=7, ge=1, le=90)
     student_identity_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     # --- 학생 상태 판정 시간 정책 (결정 0008) ---
     # 마지막으로 학생을 식별한 뒤 이 시간 동안은 직전 판정을 이어받는다. 앉은 사람도
