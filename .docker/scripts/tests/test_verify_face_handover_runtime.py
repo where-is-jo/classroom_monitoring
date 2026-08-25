@@ -301,6 +301,17 @@ def test_GPU_배포_workflow가_현재_소스로_latest_두_개를_함께_갱신
     assert worker_build < config_validation < worker_latest < force_recreate
 
 
+def test_GPU_배포_workflow가_대용량_image_빌드_중_SSH_연결을_유지한다() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    workflow = (
+        repository_root / ".github" / "workflows" / "deploy-gpu-server.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "-o ServerAliveInterval=30" in workflow
+    assert "-o ServerAliveCountMax=20" in workflow
+    assert "-o TCPKeepAlive=yes" in workflow
+
+
 def test_GPU_배포_workflow는_실패하면_이전_latest_image_ID를_복구한다() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     workflow = (
