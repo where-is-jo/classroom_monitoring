@@ -9,8 +9,10 @@ import pytest
 
 from deeplearning.face_identification import FaceGallerySnapshot, FaceModelMetadata
 from deeplearning.face_identity import FaceGallery, GalleryEntry
+from deeplearning.face_recognizer import FaceRecognizerConfig
 from deeplearning.training import face_identification_eval as eval_module
 from deeplearning.training.face_identification_eval import (
+    AggregateMetrics,
     ProbeImage,
     aggregate_metrics,
     build_gallery_from_directory,
@@ -23,6 +25,7 @@ from deeplearning.training.face_identification_eval import (
     select_threshold_for_far,
     validate_evaluation_inputs,
     write_csv,
+    write_evaluation_summary,
     write_thresholds,
 )
 
@@ -112,6 +115,26 @@ def test_validation과_test에_같은_파일을_재사용할_수_없다(
             unknown_validation=[ProbeImage(tmp_path / "unknown.jpg", None)],
             known_test=[ProbeImage(same, "student-a")],
             unknown_test=[ProbeImage(tmp_path / "unknown-test.jpg", None)],
+        )
+
+
+def test_unknown_validation과_test는_각각_최소_1000개를_요구한다(
+    tmp_path: Path,
+) -> None:
+    unknown_validation = [
+        ProbeImage(tmp_path / f"validation-{index}.jpg", None) for index in range(999)
+    ]
+    unknown_test = [
+        ProbeImage(tmp_path / f"test-{index}.jpg", None) for index in range(1_000)
+    ]
+
+    with pytest.raises(ValueError, match="unknown validation.*1,000"):
+        validate_evaluation_inputs(
+            _gallery(),
+            known_validation=[ProbeImage(tmp_path / "known-val.jpg", "student-a")],
+            unknown_validation=unknown_validation,
+            known_test=[ProbeImage(tmp_path / "known-test.jpg", "student-a")],
+            unknown_test=unknown_test,
         )
 
 
@@ -244,6 +267,7 @@ def test_evaluate_split_and_aggregate_metrics(tmp_path: Path) -> None:
     assert metrics.unknown_false_accept_rate == pytest.approx(0.0)
     assert metrics.unknown_correct_reject_rate == pytest.approx(1.0)
     assert metrics.average_recognition_ms == pytest.approx(5.0)
+    assert metrics.p95_recognition_ms == pytest.approx(5.0)
 
 
 def test_evaluate_split_rejects_near_tie_below_margin(tmp_path: Path) -> None:
@@ -355,6 +379,46 @@ def test_write_thresholds_creates_runtime_artifact(tmp_path: Path) -> None:
     }
 
 
+def test_평가_요약은_모델_비교용_비식별_집계만_기록한다(tmp_path: Path) -> None:
+    output_path = tmp_path / "summary.json"
+    metrics = AggregateMetrics(
+        registered_success_rate=0.92,
+        registered_false_reject_rate=0.07,
+        unknown_false_accept_rate=0.001,
+        unknown_correct_reject_rate=0.999,
+        average_recognition_ms=12.0,
+        p95_recognition_ms=18.0,
+        registered_probe_count=300,
+        unknown_probe_count=1_000,
+    )
+    metadata = FaceModelMetadata(
+        "adaface",
+        "cvlface-adaface-ir50-webface4m-fe7718c6",
+        "cvlface-rgb-norm-crop-112-v1",
+    )
+
+    write_evaluation_summary(
+        output_path,
+        metrics=metrics,
+        similarity_threshold=0.37,
+        margin_threshold=0.08,
+        track_similarity_threshold=0.72,
+        target_far=0.001,
+        track_target_false_association=0.001,
+        track_different_identity_pair_count=1_000,
+        track_different_identity_false_association_rate=0.001,
+        track_same_identity_accept_rate=0.95,
+        metadata=metadata,
+    )
+
+    value = json.loads(output_path.read_text(encoding="utf-8"))
+    assert value["schema_version"] == 1
+    assert value["model_name"] == "adaface"
+    assert value["unknown_probe_count"] == 1_000
+    assert value["p95_recognition_ms"] == 18.0
+    assert not {"student_id", "image_id", "image_path"} & set(value)
+
+
 def test_track_임계값용_동일인과_타인_쌍을_분리한다(tmp_path: Path) -> None:
     images = [
         ProbeImage(tmp_path / "a-1.jpg", "student-a"),
@@ -370,11 +434,33 @@ def test_track_임계값용_동일인과_타인_쌍을_분리한다(tmp_path: Pa
     }
 
     same, different = collect_track_pair_similarities(
-        images, lambda path: (vectors[path.name], 1.0)
+        images,
+        lambda path: (vectors[path.name], 1.0),
+        minimum_different_identity_pairs=1,
     )
 
     assert same == [1.0, 1.0]
     assert different == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_track_임계값은_다른_사람_유효쌍_1000개를_요구한다(
+    tmp_path: Path,
+) -> None:
+    images = [
+        ProbeImage(tmp_path / "a-1.jpg", "student-a"),
+        ProbeImage(tmp_path / "a-2.jpg", "student-a"),
+        ProbeImage(tmp_path / "b-1.jpg", "student-b"),
+        ProbeImage(tmp_path / "b-2.jpg", "student-b"),
+    ]
+    vectors = {
+        "a-1.jpg": _vector(0),
+        "a-2.jpg": _vector(0),
+        "b-1.jpg": _vector(1),
+        "b-2.jpg": _vector(1),
+    }
+
+    with pytest.raises(ValueError, match="1,000쌍"):
+        collect_track_pair_similarities(images, lambda path: (vectors[path.name], 1.0))
 
 
 def test_write_thresholds는_런타임이_거부할_값을_쓰지_않는다(
@@ -448,3 +534,41 @@ def test_mongodb_평가_갤러리는_런타임과_같은_학생_필터를_사용
     assert captured["expected_metadata"] == FaceModelMetadata(
         "arcface", "model-v1", "crop-v1"
     )
+
+
+def test_평가_갤러리는_런타임_선택_객체의_메타데이터와_컬렉션을_사용한다(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeLoader:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def load(self) -> FaceGallerySnapshot:
+            return FaceGallerySnapshot(
+                entries=(GalleryEntry("student-a", _vector(0)),),
+                revision=(("student-a", "revision"),),
+                excluded_entries=0,
+            )
+
+    monkeypatch.setattr(eval_module, "MongoFaceGalleryLoader", FakeLoader)
+    monkeypatch.setenv("MONGODB_URI", "mongodb://example.invalid")
+    monkeypatch.setenv("MONGODB_DATABASE", "classroom")
+    monkeypatch.setenv("FACE_EMBEDDING_MODEL_VERSION", "wrong-arcface-version")
+    monkeypatch.setenv("FACE_EMBEDDING_COLLECTION", "face_embeddings_arcface")
+    config = FaceRecognizerConfig(
+        kind="adaface",
+        model_path=tmp_path / "adaface.onnx",
+        metadata=FaceModelMetadata(
+            "adaface",
+            "cvlface-adaface-ir50-webface4m-fe7718c6",
+            "cvlface-rgb-norm-crop-112-v1",
+        ),
+        collection_name="face_embeddings_adaface",
+    )
+
+    build_mongo_gallery(config=config)
+
+    assert captured["collection_name"] == "face_embeddings_adaface"
+    assert captured["expected_metadata"] == config.metadata

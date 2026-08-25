@@ -192,7 +192,7 @@ def test_Mongo_갤러리는_ObjectId_학생을_문자열_embedding과_연결한�
     assert [entry.student_id for entry in snapshot.entries] == [str(student_id)]
 
 
-def test_Mongo_갤러리는_embedding이_없는_ObjectId_학생때문에_실패하지_않는다() -> None:
+def test_Mongo_갤러리는_embedding이_없는_활성_등록_학생이_있으면_실패한다() -> None:
     client = _FakeClient(
         [_gallery_document(_vector(0))],
         students=[
@@ -208,9 +208,8 @@ def test_Mongo_갤러리는_embedding이_없는_ObjectId_학생때문에_실패�
         client_factory=lambda *_args, **_kwargs: client,
     )
 
-    snapshot = loader.load()
-
-    assert [entry.student_id for entry in snapshot.entries] == ["student-a"]
+    with pytest.raises(FaceGalleryUnavailable, match="없는 항목"):
+        loader.load()
 
 
 def test_Mongo_갤러리는_이전_student_id를_학번으로_현재_학생에_연결한다() -> None:
