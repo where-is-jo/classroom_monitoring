@@ -14,6 +14,7 @@ from threading import RLock
 from typing import Any, Protocol
 
 import numpy as np
+from bson import ObjectId
 
 try:
     from .face_identity import (
@@ -143,17 +144,20 @@ class MongoFaceGalleryLoader:
 
         active_student_ids: set[str] = set()
         for document in student_documents:
-            student_id = document.get("_id")
+            raw_student_id = document.get("_id")
             if (
-                not isinstance(student_id, str)
-                or not student_id
+                not isinstance(raw_student_id, (str, ObjectId))
+                or not str(raw_student_id).strip()
                 or document.get("is_active") is not True
                 or document.get("face_registered") is not True
             ):
                 raise FaceGalleryUnavailable(
                     "활성 학생 얼굴 등록 정보가 올바르지 않습니다."
                 )
-            active_student_ids.add(student_id)
+            # FastAPI의 Mongo 저장소는 신규 문서에 문자열 UUID를 쓰지만, 기존 학생
+            # 문서에는 MongoDB ObjectId가 남아 있다. 얼굴 embedding은 도메인 모델의
+            # 문자열 student_id를 저장하므로 양쪽을 같은 문자열 표현으로 연결한다.
+            active_student_ids.add(str(raw_student_id))
 
         entries: list[GalleryEntry] = []
         revision: list[tuple[str, str]] = []

@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from bson import ObjectId
 
 from deeplearning.face_identification import (
     FaceGallerySnapshot,
@@ -163,6 +164,50 @@ def test_Mongo_갤러리는_활성_얼굴등록_학생이_아닌_embedding을_�
 
     assert [entry.student_id for entry in snapshot.entries] == ["student-a"]
     assert snapshot.excluded_entries == 1
+
+
+def test_Mongo_갤러리는_ObjectId_학생을_문자열_embedding과_연결한다() -> None:
+    student_id = ObjectId()
+    document = {
+        **_gallery_document(_vector(0)),
+        "student_id": str(student_id),
+    }
+    client = _FakeClient(
+        [document],
+        students=[{"_id": student_id, "is_active": True, "face_registered": True}],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    snapshot = loader.load()
+
+    assert [entry.student_id for entry in snapshot.entries] == [str(student_id)]
+
+
+def test_Mongo_갤러리는_embedding이_없는_ObjectId_학생때문에_실패하지_않는다() -> None:
+    client = _FakeClient(
+        [_gallery_document(_vector(0))],
+        students=[
+            {"_id": ObjectId(), "is_active": True, "face_registered": True},
+            {"_id": "student-a", "is_active": True, "face_registered": True},
+        ],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    snapshot = loader.load()
+
+    assert [entry.student_id for entry in snapshot.entries] == ["student-a"]
 
 
 def test_Mongo_갤러리는_유효한_활성_학생_embedding이_없으면_거부한다() -> None:
