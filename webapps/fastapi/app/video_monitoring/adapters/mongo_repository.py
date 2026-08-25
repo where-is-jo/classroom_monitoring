@@ -70,11 +70,11 @@ class MongoVideoStreamRepository:
         return [self._to_domain(doc) for doc in documents]
 
     def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
-        """Update last detection timestamp."""
+        """마지막 탐지 시각을 과거로 되돌리지 않고 갱신한다."""
         try:
             self._collection.update_one(
                 {"camera_id": camera_id},
-                {"$set": {"last_detection_at": captured_at}},
+                {"$max": {"last_detection_at": captured_at}},
             )
         except PyMongoError:
             raise RepositoryUnavailableError() from None

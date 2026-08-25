@@ -149,6 +149,7 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
 | `GET` | `/api/v1/video-streams/{stream_id}/detection-events` | SSE 실시간 탐지 이벤트 구독 |
 | `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events` | 입구 얼굴 관측 이벤트 조회. 상태·학생·시간·limit·cursor 필터, 기본 최신 50건 |
+| `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events/stream` | 활성 `IDENTITY_ONLY` 입구 카메라의 얼굴 관측 SSE 구독. `entry-identity` 이벤트로 bbox·화면용 이름·분석 상태를 전달 |
 | `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
 | `POST` | `/api/v1/video-searches` | 부작용 없는 데모 catalog 검색 실행 (규칙 기반) |
 | `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
@@ -163,6 +164,12 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 얼굴 관측 이벤트(`/internal/entry-identity-events`)와 영상 세그먼트
 (`/internal/video-segments`)를 보낼 수 있다. 로그인, 사용자 관리,
 알림, 관리자 대시보드는 현재 구현되어 있지 않다.
+
+실시간 모니터링 화면은 카메라 역할별 채널을 분리한다. `IDENTITY_ONLY` 입구캠은
+얼굴 관측 SSE에서 얼굴 bbox와 화면용 라벨을 받고, `SEAT_JUDGING` CCTV는 기존 객체
+탐지 SSE를 그대로 사용한다. 등록 학생은 활성 학생 조회에 성공할 때만 이름을 표시하며,
+그 외에는 `등록 얼굴`·`미등록 얼굴`·`판정 보류`로 표시한다. 실시간 응답에는
+`student_id`·학번·유사도·embedding·얼굴 이미지 등 내부 식별자나 생체 원본을 싣지 않는다.
 
 ### 좌석 상태 표기
 

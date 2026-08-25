@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from ..models import VideoStream
@@ -33,21 +34,12 @@ class MemoryVideoStreamRepository:
         return [s for s in self._streams.values() if s.enabled and not s.is_demo]
 
     def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
-        """Update last detection timestamp."""
+        """마지막 탐지 시각을 과거로 되돌리지 않고 갱신한다."""
         stream = self._streams.get(camera_id)
-        if stream:
-            self._streams[camera_id] = VideoStream(
-                id=stream.id,
-                camera_id=stream.camera_id,
-                classroom_id=stream.classroom_id,
-                camera_label=stream.camera_label,
-                playback_kind=stream.playback_kind,
-                playback_path=stream.playback_path,
-                enabled=stream.enabled,
-                last_frame_at=stream.last_frame_at,
+        if stream and (stream.last_detection_at is None or captured_at > stream.last_detection_at):
+            self._streams[camera_id] = replace(
+                stream,
                 last_detection_at=captured_at,
-                is_demo=stream.is_demo,
-                created_at=stream.created_at,
                 updated_at=datetime.now(stream.created_at.tzinfo),
             )
 

@@ -29,7 +29,7 @@ class VideoStreamRepository(Protocol):
         ...
 
     def update_last_detection(self, camera_id: str, captured_at: datetime) -> None:
-        """Update last detection timestamp."""
+        """더 최신인 경우에만 마지막 탐지 시각을 갱신한다."""
         ...
 
     def save(self, stream: VideoStream) -> VideoStream:

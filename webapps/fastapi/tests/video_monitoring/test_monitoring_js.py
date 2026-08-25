@@ -138,11 +138,14 @@ class TestMonitoringJsStatic:
             "data-video-error",
             "data-last-detection",
             "data-detection-count",
+            "data-source-status",
+            "data-analysis-status",
         ):
             assert attribute in source, f"data attribute 미사용: {attribute}"
         # template의 data-stream-id/data-camera-id는 dataset으로 읽는다.
         assert "dataset.streamId" in source
         assert "dataset.cameraId" in source
+        assert "dataset.cameraRole" in source
 
     def test_bundle_implements_playback_session_contract(self) -> None:
         """FastAPI playback session/signaling/SSE/unload cleanup 계약이 있다."""
@@ -151,6 +154,7 @@ class TestMonitoringJsStatic:
         assert 'method: "POST"' in source  # session 생성·signaling offer
         assert 'method: "DELETE"' in source  # unload에서 session 폐기 (idempotent)
         assert "detection-events" in source  # SSE 구독
+        assert "entry-identity-events/stream" in source  # 입구 얼굴 SSE 구독
         assert "beforeunload" in source  # unload cleanup
         assert "pagehide" in source
         assert "EventSource" in source
@@ -198,7 +202,7 @@ class TestMonitoringJsBrowser:
         assert checkpoint["ok"]
 
     def test_sse_subscribed(self, browser_results: dict[str, object]) -> None:
-        """camera_id 기반 detection-events SSE를 구독한다."""
+        """입구 얼굴과 CCTV 객체 탐지를 역할별 SSE로 구독한다."""
         _assert_all_checkpoints(browser_results)
         checkpoint = _checkpoint(browser_results, "sse-subscribed")
         assert checkpoint["ok"]
@@ -212,6 +216,10 @@ class TestMonitoringJsBrowser:
             "track-label-visible",
             "detection-count-updated",
             "last-detection-updated",
+            "face-source-connected",
+            "face-analysis-error-visible",
+            "face-analysis-error-cleared",
+            "cctv-object-detection-kept",
         ):
             checkpoint = _checkpoint(browser_results, name)
             assert checkpoint["ok"], f"{name}: {checkpoint['detail']}"
