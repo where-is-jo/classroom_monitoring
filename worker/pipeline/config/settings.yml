@@ -11,6 +11,10 @@ inference_poll_timeout_seconds: 0.5
 # 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다
 inference_max_consecutive_failures: 5
 
+# 입구 얼굴 HTTP와 CCTV YOLO는 독립 처리 경로다. 20 FPS 입력 기준 각각 약 1 FPS와 5 FPS다.
+face_identity_sample_interval_frames: 20
+person_tracking_sample_interval_frames: 4
+
 # 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의
 # FACE_IDENTITY_URL이 소유하고, 비워 두면 기능을 끈다. 실패해도 CCTV 사람 탐지는
 # 독립적으로 계속한다.

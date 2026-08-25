@@ -38,6 +38,13 @@ def test_신원_인계는_얼굴_서비스가_확정한_학생을_다시_탈락�
     assert settings.identity_handover_min_confidence == 0.0
 
 
+def test_입구와_CCTV는_역할별_샘플링_주기를_쓴다() -> None:
+    settings = build_settings()
+
+    assert settings.face_identity_sample_interval_frames == 20
+    assert settings.person_tracking_sample_interval_frames == 4
+
+
 def test_지표_노출_기본값은_켜짐이다() -> None:
     """저장 기능과 달리 개인정보가 나가지 않아 기본으로 켠다."""
     settings = build_settings()

@@ -6,16 +6,15 @@ import os
 from pathlib import Path
 from typing import Self
 
+from inference.identity_handover import (
+    IdentityHandoverRoute,
+    parse_identity_handover_routes,
+)
 from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
-)
-
-from inference.identity_handover import (
-    IdentityHandoverRoute,
-    parse_identity_handover_routes,
 )
 from shared.settings_sources import customise_sources_with_yaml
 
@@ -54,6 +53,10 @@ class PipelineSettings(BaseSettings):
     # 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다. 계속 실패하는 상태로
     # 도는 것은 프레임을 버리면서 아무것도 만들지 않는 것과 같다.
     inference_max_consecutive_failures: int = Field(default=5, ge=1, le=100)
+
+    # 역할별 처리량을 분리한다. 입구 HTTP가 느려도 CCTV track은 약 5FPS로 갱신한다.
+    face_identity_sample_interval_frames: int = Field(default=20, ge=1, le=10000)
+    person_tracking_sample_interval_frames: int = Field(default=4, ge=1, le=10000)
 
     # --- 지표 노출 ---
     # 워커는 웹 서버가 아니라서 Prometheus가 긁어갈 곳이 없다. 켜면 전용 포트에
@@ -187,8 +190,7 @@ class PipelineSettings(BaseSettings):
             if missing_classroom_ids:
                 raise ValueError(
                     "신원 인계 route의 교실 카메라는 PERSON_TRACKING_CAMERA_IDS에 "
-                    "있어야 합니다: "
-                    + ", ".join(sorted(missing_classroom_ids))
+                    "있어야 합니다: " + ", ".join(sorted(missing_classroom_ids))
                 )
         if (
             routes

@@ -123,6 +123,54 @@ def test_수신과_추론을_함께_돌린다() -> None:
     assert consumer.ran
 
 
+def test_느린_얼굴_소비자가_CCTV_소비자를_막지_않는다() -> None:
+    tracking_buffer = FrameBuffer(maxsize=1)
+    entry_buffer = FrameBuffer(maxsize=1)
+    shutdown = threading.Event()
+    tracking_processed = threading.Event()
+    entry_processing_started = threading.Event()
+    release_entry = threading.Event()
+
+    class TrackingConsumer(FakeConsumer):
+        def run(self) -> None:
+            captured = self._buffer.get_latest(timeout=0.2)
+            if captured is not None:
+                self.consumed += 1
+                tracking_processed.set()
+            self.finished.set()
+
+    class SlowEntryConsumer(FakeConsumer):
+        def run(self) -> None:
+            if self._buffer.get_latest(timeout=0.2) is not None:
+                entry_processing_started.set()
+                release_entry.wait(timeout=1)
+                self.consumed += 1
+            self.finished.set()
+
+    class DualStreamWorker:
+        def run(self) -> None:
+            entry_buffer.put(make_captured(1))
+            assert entry_processing_started.wait(timeout=0.2)
+            tracking_buffer.put(make_captured(1))
+            assert tracking_processed.wait(timeout=0.2)
+            release_entry.set()
+
+    tracking_consumer = TrackingConsumer(tracking_buffer, shutdown)
+    entry_consumer = SlowEntryConsumer(entry_buffer, shutdown)
+    runner = PipelineRunner(
+        stream_worker=DualStreamWorker(),  # type: ignore[arg-type]
+        consumer=tracking_consumer,  # type: ignore[arg-type]
+        frame_buffer=tracking_buffer,
+        additional_consumers=(entry_consumer,),  # type: ignore[arg-type]
+        additional_frame_buffers=(entry_buffer,),
+        shutdown_event=shutdown,
+    )
+
+    assert runner.run() == 0
+    assert tracking_consumer.consumed == 1
+    assert entry_consumer.consumed == 1
+
+
 def test_수신이_끝나면_버퍼를_닫아_소비자를_깨운다() -> None:
     """버퍼를 닫지 않으면 소비자가 오지 않을 프레임을 기다린다."""
     buffer = FrameBuffer(maxsize=1)
@@ -159,7 +207,12 @@ def test_종료_요청은_양쪽을_모두_멈춘다() -> None:
 def test_종료_요청은_기다리는_소비자를_즉시_깨운다() -> None:
     buffer = FrameBuffer(maxsize=1)
     shutdown = threading.Event()
-    runner = build_runner(buffer, shutdown, FakeStreamWorker(buffer, shutdown), FakeConsumer(buffer, shutdown))
+    runner = build_runner(
+        buffer,
+        shutdown,
+        FakeStreamWorker(buffer, shutdown),
+        FakeConsumer(buffer, shutdown),
+    )
 
     runner.request_shutdown()
 

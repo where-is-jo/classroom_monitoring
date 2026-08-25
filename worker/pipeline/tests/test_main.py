@@ -68,11 +68,15 @@ class StubStreamWorker:
         *,
         publisher: object = None,
         frame_buffer: object = None,
+        frame_buffers_by_camera_id: object = None,
+        sample_intervals_by_camera_id: object = None,
         shutdown_event: object = None,
     ) -> None:
         self.settings = settings
         self.publisher = publisher
         self.frame_buffer = frame_buffer
+        self.frame_buffers_by_camera_id = frame_buffers_by_camera_id
+        self.sample_intervals_by_camera_id = sample_intervals_by_camera_id
         self.shutdown_event = shutdown_event
 
 
@@ -329,6 +333,42 @@ def test_다중_카메라_조립은_카메라마다_최신_프레임을_보존�
     assert runner.frame_buffer._per_camera is True  # type: ignore[attr-defined]
 
 
+def test_입구와_CCTV를_서로_다른_버퍼와_소비자로_조립한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pipeline_main, "Yolo8nDetector", StubDetector)
+    monkeypatch.setattr(pipeline_main, "StreamWorker", StubStreamWorker)
+
+    runner = pipeline_main.build_runner(
+        stream_settings=StreamSettings(  # type: ignore[call-arg]
+            _env_file=None,
+            app_env="local",
+            stream_sources=(
+                "entry-camera=rtsp://localhost:8554/entry-camera,"
+                "classroom-cctv=rtsp://host/classroom"
+            ),
+        ),
+        inference_settings=build_inference_settings(),
+        pipeline_settings=PipelineSettings(  # type: ignore[call-arg]
+            _env_file=None,
+            fastapi_url="http://fastapi:8000",
+            face_identity_url="http://deeplearning:8100",
+            face_identity_camera_ids="entry-camera",
+            person_tracking_camera_ids="classroom-cctv",
+        ),
+    )
+
+    assert len(runner.frame_buffers) == 2
+    assert len(runner._consumers) == 2  # type: ignore[attr-defined]
+    stream_worker = runner._stream_worker  # type: ignore[attr-defined]
+    buffers = stream_worker.frame_buffers_by_camera_id
+    assert buffers["entry-camera"] is not buffers["classroom-cctv"]
+    assert stream_worker.sample_intervals_by_camera_id == {
+        "entry-camera": 20,
+        "classroom-cctv": 4,
+    }
+
+
 def test_학습_모델의_탐지_클래스_설정을_detector에_전달한다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -440,7 +480,7 @@ def test_지표를_켜면_버퍼를_등록하고_서버를_띄운다(
 
     pipeline_main.enable_metrics(runner, settings)
 
-    assert spy.registered == [runner.frame_buffer]
+    assert spy.registered == [runner.frame_buffers]
     assert spy.started == [(settings.metrics_host, settings.metrics_port)]
 
 
@@ -456,7 +496,9 @@ def test_지표를_끄면_아무것도_열지_않는다(monkeypatch: pytest.Monk
     assert spy.started == []
 
 
-def test_탐지_클래스_설정이_그대로_detector에_전달된다(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_탐지_클래스_설정이_그대로_detector에_전달된다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """모델을 바꿀 때 클래스 목록이 코드가 아니라 설정으로 따라가야 한다.
 
     사람만 학습한 전용 모델은 클래스가 0 하나뿐이라, 범용 모델 기준의 67(cell phone)을

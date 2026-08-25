@@ -13,10 +13,10 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from threading import RLock
 from typing import Protocol
 
 import requests
-
 from shared.types import CapturedFrame
 
 from .consumer import ResultHandler
@@ -176,6 +176,7 @@ class RefreshingIdentityHandoverResultHandler:
         self._monotonic = monotonic
         self._last_refresh = float("-inf")
         self._active = self._build(initial_routes)
+        self._lock = RLock()
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
         self._inner(captured, self.enrich_classroom(captured, result))
@@ -185,19 +186,29 @@ class RefreshingIdentityHandoverResultHandler:
         captured: CapturedFrame,
         batch: EntryFaceObservationBatch,
     ) -> None:
-        self._refresh_if_due()
-        if self._active is not None:
-            self._active.observe_entry(captured, batch)
+        with self._lock:
+            self._refresh_if_due()
+            if self._active is not None:
+                self._active.observe_entry(captured, batch)
 
     def enrich_classroom(
         self,
         captured: CapturedFrame,
         result: InferenceResult,
     ) -> InferenceResult:
-        self._refresh_if_due()
-        if self._active is None:
-            return result
-        return self._active.enrich_classroom(captured, result)
+        with self._lock:
+            self._refresh_if_due()
+            if self._active is None:
+                return result
+            return self._active.enrich_classroom(captured, result)
+
+    def expire_classroom_tracks(
+        self, camera_id: str, track_ids: tuple[str, ...]
+    ) -> None:
+        with self._lock:
+            self._refresh_if_due()
+            if self._active is not None:
+                self._active.expire_classroom_tracks(camera_id, track_ids)
 
     def _refresh_if_due(self) -> None:
         now = self._monotonic()
@@ -219,9 +230,7 @@ class RefreshingIdentityHandoverResultHandler:
         self._active = self._build(routes)
         logger.info("신원 인계 route 동적 설정 %d개를 적용했습니다.", len(routes))
 
-    def _validate_camera_ids(
-        self, routes: tuple[IdentityHandoverRoute, ...]
-    ) -> None:
+    def _validate_camera_ids(self, routes: tuple[IdentityHandoverRoute, ...]) -> None:
         if self._available_camera_ids is None:
             return
         route_camera_ids = {
@@ -355,6 +364,7 @@ class IdentityHandoverResultHandler:
         self._track_stale_seconds = track_stale_seconds
         self._minimum_identity_confidence = minimum_identity_confidence
         self._states = {route: _RouteState() for route in routes}
+        self._route_locks = {route: RLock() for route in routes}
         self._entry_routes: dict[str, list[IdentityHandoverRoute]] = {}
         self._classroom_routes: dict[str, IdentityHandoverRoute] = {}
         for route in routes:
@@ -371,7 +381,8 @@ class IdentityHandoverResultHandler:
     ) -> None:
         observed_at = captured.captured_at.timestamp()
         for route in self._entry_routes.get(captured.camera_id, ()):
-            self._observe_entry(route, batch, observed_at)
+            with self._route_locks[route]:
+                self._observe_entry(route, batch, observed_at)
 
     def enrich_classroom(
         self,
@@ -381,11 +392,27 @@ class IdentityHandoverResultHandler:
         route = self._classroom_routes.get(captured.camera_id)
         if route is None:
             return result
-        return self._observe_classroom(
-            route,
-            result,
-            captured.captured_at.timestamp(),
-        )
+        with self._route_locks[route]:
+            return self._observe_classroom(
+                route,
+                result,
+                captured.captured_at.timestamp(),
+            )
+
+    def expire_classroom_tracks(
+        self, camera_id: str, track_ids: tuple[str, ...]
+    ) -> None:
+        """ByteTrack이 만료를 확정한 순간 인계 상태에서도 같은 track을 제거한다."""
+        route = self._classroom_routes.get(camera_id)
+        if route is None or not track_ids:
+            return
+        with self._route_locks[route]:
+            state = self._states[route]
+            for track_id in track_ids:
+                state.known_classroom_tracks.pop(track_id, None)
+                state.classroom_tracks_in_entry_zone.pop(track_id, None)
+                state.unmatched_classroom_tracks.pop(track_id, None)
+                state.active_identities.pop(track_id, None)
 
     def _expire(self, state: _RouteState, observed_at: float) -> bool:
         """오래된 후보를 버리고 인계 입력 집합이 바뀌었는지 돌려준다.
