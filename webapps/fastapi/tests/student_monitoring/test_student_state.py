@@ -46,6 +46,8 @@ from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRep
 from app.video_monitoring.errors import VideoStreamNotFoundError
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
+from ..roi_connections.fakes import FakeSeatedDetectionSource
+
 CLASSROOM_ID = "classroom-a101"
 NOW = datetime(2026, 8, 13, 9, 10, tzinfo=UTC)
 RECENT = datetime(2026, 8, 13, 9, 9, tzinfo=UTC)
@@ -138,6 +140,7 @@ def _build_context(*, assign_two_students: bool = True) -> StateContext:
         roi_repository,
         stream_repository,
         UnavailableCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: NOW,

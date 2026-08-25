@@ -46,9 +46,10 @@ class RoiConnection:
     reference_image_revision: int
     updated_at: datetime
     auto_generated: bool = False
-    """좌석 격자를 사영해 만든 좌표이며 관리자가 아직 확정하지 않았다.
+    """사람이 그리지 않고 계산으로 만든 좌표이며, 관리자가 아직 확정하지 않았다.
 
-    계산으로 만든 좌표는 격자와 실제 배치가 어긋나 있으면 조용히 틀린 좌석을 가리킨다.
+    좌석 격자를 사영한 것(결정 0039)이든 탐지 밀도에서 찾은 것(결정 0041)이든 같다.
+    계산으로 만든 좌표는 근거가 실제와 어긋나 있으면 조용히 틀린 좌석을 가리킨다.
     확정 전까지 `needs_review`로 두어 좌석 판정에서 빼는 이유다
     ([결정 0020](../../../docs/architecture/decisions.md)의 6번).
     """
@@ -162,3 +163,57 @@ class ConfirmAutoRoiResult:
 
     confirmed_count: int
     stale_count: int
+
+
+@dataclass(frozen=True)
+class PlanDetectionRoiCommand:
+    """탐지가 몰린 자리를 찾아 달라는 요청. 저장하지 않는다."""
+
+    classroom_id: str
+    camera_id: str
+    lookback_hours: int
+
+
+@dataclass(frozen=True)
+class DetectionRoiProposal:
+    """탐지에서 찾은 자리 하나. 어느 좌석인지는 아직 정해지지 않았다."""
+
+    index: int
+    polygon: tuple[Point, ...]
+    sample_count: int
+    suggested_seat_id: str | None
+    """이 자리에 이미 ROI가 있는 좌석. 다시 만들 때 좌석을 새로 고르지 않게 하는 힌트다."""
+
+
+@dataclass(frozen=True)
+class DetectionRoiPlanResult:
+    classroom_id: str
+    camera_id: str
+    window_from: datetime
+    window_to: datetime
+    sample_count: int
+    stationary_count: int
+    dropped_overlapping: int
+    dropped_weak: int
+    proposals: tuple[DetectionRoiProposal, ...]
+
+
+@dataclass(frozen=True)
+class DetectionRoiAssignment:
+    seat_id: str
+    polygon: tuple[Point, ...]
+
+
+@dataclass(frozen=True)
+class ApplyDetectionRoiCommand:
+    """관리자가 좌석을 지정한 자리들을 저장한다."""
+
+    classroom_id: str
+    camera_id: str
+    assignments: tuple[DetectionRoiAssignment, ...]
+
+
+@dataclass(frozen=True)
+class ApplyDetectionRoiResult:
+    saved_count: int
+    seat_ids: tuple[str, ...]

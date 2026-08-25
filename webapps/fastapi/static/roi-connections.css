@@ -56,3 +56,19 @@ button.danger:disabled { cursor: not-allowed; opacity: .45; }
 .roi-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 body.roi-modal-open { overflow: hidden; }
 @media (max-width: 680px) { .roi-filter-line { align-items: stretch; flex-direction: column-reverse; } .roi-classroom-filter { justify-content: space-between; } .roi-classroom-filter select { min-width: 0; width: 70%; } .roi-action-buttons button { flex: 1; } }
+
+/* 탐지에서 찾은 자리. 좌석이 아직 정해지지 않아 저장된 ROI·격자 미리보기와 구분한다. */
+#roi-auto-preview polygon[data-spot-index] { fill: rgba(0, 170, 90, .18); stroke: #00c46a; stroke-dasharray: 6 3; }
+#roi-auto-preview polygon.is-highlighted { fill: rgba(0, 170, 90, .45); stroke-width: 5; }
+.roi-detect-panel { padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.roi-detect-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; }
+.roi-detect-heading h2 { margin: 0; font-size: 1.05rem; }
+.roi-detect-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+.roi-detect-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg, #f6f8f8); border: 1px solid var(--border); border-radius: 10px; }
+.roi-detect-row:hover { border-color: #00c46a; }
+.roi-detect-name { font-weight: 600; white-space: nowrap; }
+.roi-detect-support { font-size: .82rem; color: var(--muted); white-space: nowrap; }
+.roi-detect-row select { flex: 1; min-width: 0; }
+#roi-detect:not(:disabled) { color: #fff; background: #00794a; border-color: #00794a; }
+#roi-detect-save:not(:disabled) { color: #fff; background: #087f6d; border-color: #087f6d; }
+#roi-detect:disabled, #roi-detect-save:disabled { cursor: not-allowed; opacity: .45; }

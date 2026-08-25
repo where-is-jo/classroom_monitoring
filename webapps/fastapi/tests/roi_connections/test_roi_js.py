@@ -115,3 +115,32 @@ def test_preview_is_not_signalled_by_colour_alone() -> None:
     assert "미리보기" in source
     assert "#roi-auto-preview polygon" in style
     assert "stroke-dasharray: 3 4" in style
+
+
+def test_detection_spots_are_assigned_by_a_person_not_guessed() -> None:
+    """카메라는 자리를 알지만 좌석 이름을 알지 못한다(결정 0041)."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "from-detections" in source
+    assert "const findSpots" in source
+    assert "const saveSpots" in source
+    # 자리마다 좌석을 고르는 줄을 만든다.
+    assert "renderDetectPanel" in source
+    assert "저장하지 않음" in source
+
+
+def test_detection_result_distinguishes_no_data_from_no_spots() -> None:
+    """ "탐지가 없다"와 "자리로 인정할 곳이 없다"는 다른 사실이다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "탐지 기록이 없습니다" in source
+    assert "오래 머문 곳이 없었습니다" in source
+
+
+def test_detection_preview_is_not_signalled_by_colour_alone() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
+
+    assert '"탐지"' in source
+    assert "polygon[data-spot-index]" in style
+    assert "stroke-dasharray: 6 3" in style

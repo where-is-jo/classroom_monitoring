@@ -49,6 +49,8 @@ from app.student_monitoring.service import StudentMonitoringService
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
+from ..roi_connections.fakes import FakeSeatedDetectionSource
+
 CLASSROOM_ID = "synthetic-classroom-001"
 CAMERA_ID = "synthetic-camera-001"
 STUDENT_ID = "synthetic-student-001"
@@ -346,6 +348,7 @@ def _build_context(
         roi_repository,
         streams,
         UnavailableCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: NOW,

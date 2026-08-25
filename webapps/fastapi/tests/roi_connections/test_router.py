@@ -20,7 +20,7 @@ from app.shared.student_identity import StudentIdentity
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
-from .fakes import FakeCameraFrameGrabber
+from .fakes import FakeCameraFrameGrabber, FakeSeatedDetectionSource
 
 
 def make_service(
@@ -65,6 +65,7 @@ def make_service(
         InMemoryRoiConnectionRepository(),
         streams,
         grabber or FakeCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=20,
         clock=lambda: datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
