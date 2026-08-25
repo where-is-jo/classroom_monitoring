@@ -36,7 +36,7 @@ from app.shared.student_identity import StudentIdentity
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
-from .fakes import FakeCameraFrameGrabber
+from .fakes import FakeCameraFrameGrabber, FakeSeatedDetectionSource
 
 NOW = datetime(2026, 8, 24, 9, 0, tzinfo=UTC)
 
@@ -96,6 +96,7 @@ def make_service(
         InMemoryRoiConnectionRepository(),
         streams,
         FakeCameraFrameGrabber({"camera-a"}),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=20,
         clock=lambda: NOW,

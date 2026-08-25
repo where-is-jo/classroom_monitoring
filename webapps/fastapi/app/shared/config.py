@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     # 캡처는 RTSP 연결·키프레임 대기를 포함해 실측 4초대가 나온다. 다른 외부 호출(5초)과
     # 같은 값을 쓰면 정상 캡처가 타임아웃으로 잘린다.
     camera_frame_capture_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
+    # --- 탐지 밀도 기반 ROI 자리 찾기 (결정 0041) ---
+    # 한 번 찾을 때 읽을 탐지 이벤트 수의 상한. 실측 CCTV는 프레임당 사람 6~7명을
+    # 담으므로 8000건이면 표본 5만 개쯤 된다. 조회 기간을 길게 잡아도 응답 시간과
+    # 메모리가 예측 가능한 범위에 있도록 건수로 막는다.
+    roi_detection_sample_max_events: int = Field(default=8000, ge=100, le=100_000)
     face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
     face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
     face_pose_front_quota: int = Field(default=32, ge=1)

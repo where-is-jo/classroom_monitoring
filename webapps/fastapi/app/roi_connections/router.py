@@ -10,10 +10,14 @@ from fastapi.responses import Response
 from ..shared.dependencies import get_roi_connection_service
 from ..shared.templating import templates
 from .schemas import (
+    ApplyDetectionRoiRequest,
+    ApplyDetectionRoiResponse,
     AutoRoiResponse,
     ConfirmAutoRoiRequest,
     ConfirmAutoRoiResponse,
+    DetectionRoiPlanResponse,
     GenerateAutoRoiRequest,
+    PlanDetectionRoiRequest,
     ReferenceImageResponse,
     RoiConnectionListResponse,
     RoiConnectionResponse,
@@ -143,6 +147,48 @@ def generate_auto_roi_connections(
     """
     return AutoRoiResponse.from_domain(
         service.generate_auto_connections(payload.to_command(classroom_id))
+    )
+
+
+@api_router.post(
+    "/classrooms/{classroom_id}/roi-connections/auto/from-detections",
+    response_model=DetectionRoiPlanResponse,
+)
+def plan_detection_roi_connections(
+    classroom_id: str,
+    payload: PlanDetectionRoiRequest,
+    service: RoiConnectionService = Depends(get_roi_connection_service),
+) -> DetectionRoiPlanResponse:
+    """카메라가 실제로 본 탐지에서 좌석 자리를 찾는다. **저장하지 않는다.**
+
+    좌석 격자를 사영하는 경로(결정 0039)와 달리 배치 정보를 쓰지 않고, 사람이 오래
+    앉아 있던 자리를 밀도로 찾는다(결정 0041).
+
+    **어느 자리가 어느 좌석인지는 응답에 없다.** 카메라는 자리를 알지만 좌석 이름을
+    알지 못한다. 관리자가 화면에서 지정한 뒤 `.../from-detections/apply`로 저장한다.
+    조회가 수천 건을 훑으므로 동기 endpoint로 두어 FastAPI가 threadpool에서 돌린다.
+    """
+    return DetectionRoiPlanResponse.from_domain(
+        service.plan_detection_rois(payload.to_command(classroom_id))
+    )
+
+
+@api_router.post(
+    "/classrooms/{classroom_id}/roi-connections/auto/from-detections/apply",
+    response_model=ApplyDetectionRoiResponse,
+)
+def apply_detection_roi_connections(
+    classroom_id: str,
+    payload: ApplyDetectionRoiRequest,
+    service: RoiConnectionService = Depends(get_roi_connection_service),
+) -> ApplyDetectionRoiResponse:
+    """관리자가 좌석을 지정한 자리를 ROI로 저장한다.
+
+    좌표의 근거가 캡처 화면이 아니라 탐지 기록이라 `reference_image_revision`을 받지
+    않는다. 확정 전까지 좌석 판정에 쓰이지 않는 것은 격자 경로와 같다.
+    """
+    return ApplyDetectionRoiResponse.from_domain(
+        service.apply_detection_rois(payload.to_command(classroom_id))
     )
 
 

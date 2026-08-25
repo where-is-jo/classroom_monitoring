@@ -52,6 +52,8 @@ from app.students.models import Student
 from app.video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
 from app.video_monitoring.models import CameraRole, PlaybackKind, VideoStream
 
+from ..roi_connections.fakes import FakeSeatedDetectionSource
+
 CLASSROOM_ID = "it-classroom-a"
 CAMERA_ID = "it-camera-a"
 STREAM_ID = "it-stream-a"
@@ -237,6 +239,7 @@ def context(
         roi_repository,
         streams,
         UnavailableCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: NOW,

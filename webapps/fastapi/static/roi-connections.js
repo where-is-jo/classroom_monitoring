@@ -21,6 +21,12 @@
   const autoSaveButton = document.querySelector("#roi-auto-save");
   const autoConfirmButton = document.querySelector("#roi-auto-confirm");
   const seatFillInput = document.querySelector("#roi-seat-fill");
+  const detectButton = document.querySelector("#roi-detect");
+  const detectSaveButton = document.querySelector("#roi-detect-save");
+  const detectPanel = document.querySelector("#roi-detect-panel");
+  const detectList = document.querySelector("#roi-detect-list");
+  const detectSummary = document.querySelector("#roi-detect-summary");
+  const lookbackInput = document.querySelector("#roi-lookback");
   const classroomSelect = document.querySelector("#roi-classroom-select");
   const cameraSelect = document.querySelector("#roi-camera-select");
   const dialog = document.querySelector("#roi-student-dialog");
@@ -45,6 +51,15 @@
   // 아직 저장하지 않은 자동 생성 결과. 관리자가 겹쳐 보고 판단하는 대상이다.
   let previewSeats = [];
   let previewCorners = [];
+
+  // 탐지에서 찾은 자리. 좌석이 아직 정해지지 않아 좌석 목록과 짝지어 저장한다.
+  let detectedSpots = [];
+
+  const lookbackHours = () => {
+    const hours = Number(lookbackInput?.value);
+    if (!Number.isFinite(hours)) return 24;
+    return Math.min(336, Math.max(1, Math.round(hours)));
+  };
 
   // 좌석 칸을 얼마나 채울지. 서버 기본값과 같은 값에서 시작한다.
   const seatFillRatio = () => {
@@ -125,22 +140,23 @@
     // 아직 저장하지 않은 자동 생성 결과를 위에 겹쳐 그린다. 어느 좌석이 어디로
     // 갔는지 보지 않고는 격자가 실제 배치와 맞는지 알 수 없다.
     const previewNodes = [];
-    for (const seat of previewSeats) {
-      if (!seat.polygon) continue;
+    for (const item of previewSeats) {
+      if (!item.polygon) continue;
       const shape = document.createElementNS(SVG_NS, "polygon");
-      shape.setAttribute("points", seat.polygon.map((p) => `${p.x},${p.y}`).join(" "));
-      shape.dataset.seatId = seat.seat_id;
+      shape.setAttribute("points", item.polygon.map((p) => `${p.x},${p.y}`).join(" "));
+      if (item.seat_id) shape.dataset.seatId = item.seat_id;
+      if (item.index) shape.dataset.spotIndex = String(item.index);
       previewNodes.push(shape);
 
-      const center = centerOf(seat.polygon);
+      const center = centerOf(item.polygon);
       const label = document.createElement("span");
       label.className = "roi-saved-label roi-preview-label";
       label.style.left = `${center.x * 100}%`;
       label.style.top = `${center.y * 100}%`;
-      label.textContent = seat.seat_label;
+      label.textContent = item.seat_label;
       const mark = document.createElement("span");
       mark.className = "review-mark";
-      mark.textContent = "미리보기";
+      mark.textContent = item.mark || "미리보기";
       label.append(mark);
       labels.push(label);
     }
@@ -172,7 +188,11 @@
   const clearPreview = () => {
     previewSeats = [];
     previewCorners = [];
+    detectedSpots = [];
     autoSaveButton.hidden = true;
+    detectSaveButton.hidden = true;
+    detectPanel.hidden = true;
+    detectList.replaceChildren();
     renderSaved();
   };
 
@@ -371,6 +391,161 @@
     );
     renderSaved();
   };
+
+
+  const detectPath = () =>
+    `/api/v1/classrooms/${encodeURIComponent(selectedClassroomId())}` +
+    "/roi-connections/auto/from-detections";
+
+  // 찾은 자리마다 좌석을 고르는 줄을 만든다. 어느 자리가 몇 번 좌석인지는 카메라가
+  // 알 수 없으므로 사람이 정한다.
+  const renderDetectPanel = () => {
+    const rows = detectedSpots.map((spot) => {
+      const row = document.createElement("li");
+      row.className = "roi-detect-row";
+      row.dataset.spotIndex = String(spot.index);
+
+      const name = document.createElement("span");
+      name.className = "roi-detect-name";
+      name.textContent = `자리 ${spot.index}`;
+      const support = document.createElement("span");
+      support.className = "roi-detect-support";
+      support.textContent = `표본 ${spot.sample_count.toLocaleString("ko-KR")}개`;
+
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", `자리 ${spot.index}의 좌석`);
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "저장하지 않음";
+      select.append(blank);
+      for (const option of seatSelect?.querySelectorAll("option[value]:not([value=''])") || []) {
+        const copy = document.createElement("option");
+        copy.value = option.value;
+        copy.textContent = option.textContent;
+        select.append(copy);
+      }
+      select.value = spot.suggested_seat_id || "";
+      select.addEventListener("change", () => {
+        spot.seat_id = select.value || null;
+        updateDetectSummary();
+      });
+      // 어느 줄이 화면의 어느 자리인지 짚어 준다.
+      row.addEventListener("mouseenter", () => highlightSpot(spot.index, true));
+      row.addEventListener("mouseleave", () => highlightSpot(spot.index, false));
+      select.addEventListener("focus", () => highlightSpot(spot.index, true));
+      select.addEventListener("blur", () => highlightSpot(spot.index, false));
+
+      row.append(name, support, select);
+      return row;
+    });
+    detectList.replaceChildren(...rows);
+    detectPanel.hidden = detectedSpots.length === 0;
+    detectSaveButton.hidden = detectedSpots.length === 0;
+    updateDetectSummary();
+  };
+
+  const highlightSpot = (index, on) => {
+    const shape = previewShapes.querySelector(`polygon[data-spot-index="${index}"]`);
+    if (shape) shape.classList.toggle("is-highlighted", on);
+  };
+
+  const updateDetectSummary = () => {
+    const assigned = detectedSpots.filter((spot) => spot.seat_id).length;
+    detectSummary.textContent =
+      `찾은 자리 ${detectedSpots.length}개 중 ${assigned}개에 좌석을 지정했습니다.`;
+    detectSaveButton.disabled = assigned === 0;
+  };
+
+  const showDetectedSpots = () => {
+    previewSeats = detectedSpots.map((spot) => ({
+      polygon: spot.polygon,
+      seat_label: spot.seat_id ? seatLabel(spot.seat_id) : `자리 ${spot.index}`,
+      index: spot.index,
+      mark: "탐지",
+    }));
+    renderSaved();
+  };
+
+  const findSpots = async () => {
+    const classroomId = selectedClassroomId();
+    const cameraId = selectedCameraId();
+    if (!classroomId || !cameraId) {
+      status.textContent = "강의실과 카메라를 먼저 선택해 주세요.";
+      return;
+    }
+    detectButton.disabled = true;
+    detectButton.textContent = "찾는 중";
+    status.textContent = "탐지 기록에서 사람이 앉았던 자리를 찾는 중입니다. 몇 초 걸립니다.";
+    try {
+      const response = await fetch(detectPath(), {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({camera_id: cameraId, lookback_hours: lookbackHours()}),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "자리를 찾지 못했습니다.");
+      detectedSpots = body.proposals.map((proposal) => ({
+        ...proposal,
+        seat_id: proposal.suggested_seat_id || null,
+      }));
+      showDetectedSpots();
+      renderDetectPanel();
+      if (detectedSpots.length === 0) {
+        // "자리가 없다"와 "탐지가 없다"를 구분해서 알린다.
+        status.textContent = body.sample_count === 0
+          ? `최근 ${lookbackHours()}시간 동안 이 카메라의 탐지 기록이 없습니다. 기간을 늘리거나 worker가 도는지 확인해 주세요.`
+          : `탐지 ${body.sample_count.toLocaleString("ko-KR")}개를 봤지만 자리로 인정할 만큼 오래 머문 곳이 없었습니다.`;
+      } else {
+        status.textContent =
+          `탐지 ${body.sample_count.toLocaleString("ko-KR")}개 중 ` +
+          `앉아 있던 ${body.stationary_count.toLocaleString("ko-KR")}개로 자리 ${detectedSpots.length}개를 찾았습니다. ` +
+          "아래에서 각 자리의 좌석을 골라 주세요.";
+      }
+    } catch (reason) {
+      console.error("탐지 자리 찾기 실패", reason);
+      status.textContent = reason instanceof Error ? reason.message : "자리를 찾지 못했습니다.";
+    } finally {
+      detectButton.disabled = false;
+      detectButton.textContent = "탐지로 자리 찾기";
+    }
+  };
+
+  const saveSpots = async () => {
+    const assignments = detectedSpots
+      .filter((spot) => spot.seat_id)
+      .map((spot) => ({seat_id: spot.seat_id, polygon: spot.polygon}));
+    if (assignments.length === 0) return;
+    const seatIds = assignments.map((item) => item.seat_id);
+    if (new Set(seatIds).size !== seatIds.length) {
+      status.textContent = "같은 좌석을 두 자리에 지정했습니다. 하나만 남겨 주세요.";
+      return;
+    }
+    detectSaveButton.disabled = true;
+    detectSaveButton.textContent = "저장 중";
+    try {
+      const response = await fetch(`${detectPath()}/apply`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({camera_id: selectedCameraId(), assignments}),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "자리를 저장하지 못했습니다.");
+      clearPreview();
+      await loadConnections();
+      status.textContent =
+        `자리 ${body.saved_count}개를 좌석 ROI로 저장했습니다. ` +
+        "확인 전까지 좌석 판정에 쓰이지 않습니다 — 화면에서 확인한 뒤 ‘자동 생성 확정’을 눌러 주세요.";
+    } catch (reason) {
+      console.error("탐지 자리 저장 실패", reason);
+      status.textContent = reason instanceof Error ? reason.message : "자리를 저장하지 못했습니다.";
+    } finally {
+      detectSaveButton.disabled = false;
+      detectSaveButton.textContent = "지정한 좌석으로 저장";
+    }
+  };
+
+  detectButton?.addEventListener("click", findSpots);
+  detectSaveButton?.addEventListener("click", saveSpots);
 
   const autoRoiPath = () =>
     `/api/v1/classrooms/${encodeURIComponent(selectedClassroomId())}/roi-connections/auto`;

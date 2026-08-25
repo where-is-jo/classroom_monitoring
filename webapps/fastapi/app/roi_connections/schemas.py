@@ -9,12 +9,18 @@ from pydantic import BaseModel, Field
 
 from .auto_layout import DEFAULT_SEAT_FILL_RATIO, GRID_CORNER_COUNT
 from .models import (
+    ApplyDetectionRoiCommand,
+    ApplyDetectionRoiResult,
     AutoRoiOutcome,
     AutoRoiResult,
     AutoRoiSeatResult,
     ConfirmAutoRoiCommand,
     ConfirmAutoRoiResult,
+    DetectionRoiAssignment,
+    DetectionRoiPlanResult,
+    DetectionRoiProposal,
     GenerateAutoRoiCommand,
+    PlanDetectionRoiCommand,
     Point,
     ReferenceImage,
     RoiConnectionView,
@@ -206,3 +212,96 @@ class RoiConnectionResponse(BaseModel):
 
 class RoiConnectionListResponse(BaseModel):
     items: list[RoiConnectionResponse]
+
+
+class PlanDetectionRoiRequest(BaseModel):
+    """카메라가 실제로 본 것에서 좌석 자리를 찾아 달라는 요청.
+
+    좌석을 지정하지 않는다 — 어느 자리가 어느 좌석인지는 카메라가 알 수 없다.
+    """
+
+    camera_id: str = Field(min_length=1, max_length=128)
+    lookback_hours: int = Field(default=24, ge=1, le=24 * 14)
+
+    def to_command(self, classroom_id: str) -> PlanDetectionRoiCommand:
+        return PlanDetectionRoiCommand(
+            classroom_id=classroom_id,
+            camera_id=self.camera_id,
+            lookback_hours=self.lookback_hours,
+        )
+
+
+class DetectionRoiProposalResponse(BaseModel):
+    index: int
+    polygon: list[PointSchema]
+    sample_count: int
+    suggested_seat_id: str | None
+
+    @classmethod
+    def from_domain(cls, value: DetectionRoiProposal) -> DetectionRoiProposalResponse:
+        return cls(
+            index=value.index,
+            polygon=[PointSchema(x=point.x, y=point.y) for point in value.polygon],
+            sample_count=value.sample_count,
+            suggested_seat_id=value.suggested_seat_id,
+        )
+
+
+class DetectionRoiPlanResponse(BaseModel):
+    classroom_id: str
+    camera_id: str
+    window_from: datetime
+    window_to: datetime
+    sample_count: int
+    stationary_count: int
+    dropped_overlapping: int
+    dropped_weak: int
+    proposals: list[DetectionRoiProposalResponse]
+
+    @classmethod
+    def from_domain(cls, value: DetectionRoiPlanResult) -> DetectionRoiPlanResponse:
+        return cls(
+            classroom_id=value.classroom_id,
+            camera_id=value.camera_id,
+            window_from=value.window_from,
+            window_to=value.window_to,
+            sample_count=value.sample_count,
+            stationary_count=value.stationary_count,
+            dropped_overlapping=value.dropped_overlapping,
+            dropped_weak=value.dropped_weak,
+            proposals=[DetectionRoiProposalResponse.from_domain(item) for item in value.proposals],
+        )
+
+
+class DetectionRoiAssignmentRequest(BaseModel):
+    seat_id: str = Field(min_length=1, max_length=128)
+    polygon: list[PointSchema] = Field(min_length=3, max_length=64)
+
+
+class ApplyDetectionRoiRequest(BaseModel):
+    """관리자가 좌석을 지정한 자리들을 저장한다."""
+
+    camera_id: str = Field(min_length=1, max_length=128)
+    assignments: list[DetectionRoiAssignmentRequest] = Field(min_length=1, max_length=200)
+
+    def to_command(self, classroom_id: str) -> ApplyDetectionRoiCommand:
+        return ApplyDetectionRoiCommand(
+            classroom_id=classroom_id,
+            camera_id=self.camera_id,
+            assignments=tuple(
+                DetectionRoiAssignment(
+                    seat_id=assignment.seat_id,
+                    polygon=tuple(Point(x=point.x, y=point.y) for point in assignment.polygon),
+                )
+                for assignment in self.assignments
+            ),
+        )
+
+
+class ApplyDetectionRoiResponse(BaseModel):
+    saved_count: int
+    seat_ids: list[str]
+
+    @classmethod
+    def from_domain(cls, value: ApplyDetectionRoiResult) -> ApplyDetectionRoiResponse:
+        return cls(saved_count=value.saved_count, seat_ids=list(value.seat_ids))

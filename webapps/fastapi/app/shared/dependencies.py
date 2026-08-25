@@ -65,6 +65,7 @@ from ..llm_search.adapters.llama_planner import LlamaQueryPlanner
 from ..llm_search.adapters.stub_planner import StubQueryPlanner
 from ..llm_search.ports import QueryPlanner
 from ..llm_search.service import LlmSearchService
+from ..roi_connections.adapters.detection_events import DetectionEventSeatedSource
 from ..roi_connections.adapters.ffmpeg_camera import (
     FfmpegCameraFrameGrabber,
     UnavailableCameraFrameGrabber,
@@ -72,7 +73,11 @@ from ..roi_connections.adapters.ffmpeg_camera import (
 )
 from ..roi_connections.adapters.memory import InMemoryRoiConnectionRepository
 from ..roi_connections.adapters.mongo import MongoRoiConnectionRepository
-from ..roi_connections.ports import CameraFrameGrabber, RoiConnectionRepository
+from ..roi_connections.ports import (
+    CameraFrameGrabber,
+    RoiConnectionRepository,
+    SeatedDetectionSource,
+)
 from ..roi_connections.service import RoiConnectionService
 from ..snapshots.adapters.memory_storage import InMemorySnapshotStorage
 from ..snapshots.ports import SnapshotStorage
@@ -563,6 +568,24 @@ def get_camera_frame_grabber() -> CameraFrameGrabber:
 
 
 @lru_cache
+def _seated_detection_source() -> SeatedDetectionSource:
+    """탐지 기반 ROI 자리 찾기가 읽을 표본 원천을 고른다(결정 0041).
+
+    memory mode에서도 같은 어댑터를 쓴다 — 저장소만 다르고 읽는 방식이 같기 때문이다.
+    """
+    settings = get_settings()
+    repository = (
+        _detection_event_repository()
+        if settings.database_mode == "memory"
+        else _mongo_detection_event_repository()
+    )
+    return DetectionEventSeatedSource(
+        repository,
+        max_events=settings.roi_detection_sample_max_events,
+    )
+
+
+@lru_cache
 def _roi_connection_service() -> RoiConnectionService:
     settings = get_settings()
     return RoiConnectionService(
@@ -577,6 +600,7 @@ def _roi_connection_service() -> RoiConnectionService:
         get_roi_connection_repository(),
         get_video_stream_repository(settings),
         get_camera_frame_grabber(),
+        _seated_detection_source(),
         max_upload_bytes=settings.roi_reference_image_max_bytes,
         page_size_max=settings.page_size_max,
         clock=utc_now,
