@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -17,6 +18,7 @@ from app.video_monitoring.adapters.mongo_playback_session_repository import (
 )
 from app.video_monitoring.adapters.mongo_repository import MongoVideoStreamRepository
 from app.video_monitoring.models import (
+    CameraRole,
     PlaybackKind,
     PlaybackSession,
     PlaybackSessionStatus,
@@ -67,6 +69,24 @@ def test_memory_find_monitoring_streams_parity() -> None:
         "camera-01",
         "camera-02",
     }
+
+
+def test_memory_last_detection은_최신값과_카메라_역할을_유지한다() -> None:
+    repository = MemoryVideoStreamRepository()
+    stream = replace(
+        make_stream(stream_id="entry-stream", camera_id="entry-camera"),
+        role=CameraRole.IDENTITY_ONLY,
+    )
+    repository.save(stream)
+    newest = NOW + timedelta(seconds=20)
+
+    repository.update_last_detection("entry-camera", newest)
+    repository.update_last_detection("entry-camera", NOW + timedelta(seconds=10))
+
+    restored = repository.find_by_camera_id("entry-camera")
+    assert restored is not None
+    assert restored.last_detection_at == newest
+    assert restored.role is CameraRole.IDENTITY_ONLY
 
 
 def test_memory_playback_session_repository_roundtrip() -> None:
@@ -226,6 +246,21 @@ def test_mongo_find_monitoring_streams_query_parity() -> None:
 
     assert {item.camera_id for item in result} == {"camera-01"}
     assert collection.queries[-1] == {"enabled": True, "is_demo": False}
+
+
+def test_mongo_last_detection은_max_연산으로_갱신한다() -> None:
+    database = FakeMongoDatabase()
+    repository = MongoVideoStreamRepository(database)  # type: ignore[arg-type]
+    captured_at = NOW + timedelta(seconds=20)
+
+    repository.update_last_detection("entry-camera", captured_at)
+
+    assert database["video_streams"].updates == [
+        (
+            {"camera_id": "entry-camera"},
+            {"$max": {"last_detection_at": captured_at}},
+        )
+    ]
 
 
 def test_mongo_playback_session_repository_roundtrip() -> None:

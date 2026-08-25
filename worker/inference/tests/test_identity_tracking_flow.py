@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -8,11 +7,17 @@ import numpy as np
 
 from shared.types import CapturedFrame
 
-from ..face_identity import FaceIdentityResultHandler
 from ..handler import build_event_payload
 from ..identity_handover import IdentityHandoverResultHandler, IdentityHandoverRoute
 from ..tracking import ByteTrackConfig, ByteTrackResultHandler
-from ..types import Detection, InferenceResult
+from ..types import (
+    Detection,
+    EntryFaceObservation,
+    EntryFaceObservationBatch,
+    EntryIdentityProcessingStatus,
+    EntryIdentityStatus,
+    InferenceResult,
+)
 
 STARTED_AT = datetime(2026, 8, 22, 9, 0, tzinfo=UTC)
 
@@ -34,24 +39,6 @@ def _raw_person(bbox: tuple[int, int, int, int]) -> InferenceResult:
 
 
 def test_입구_얼굴_신원이_CCTV_ByteTrack을_따라_좌석_이벤트까지_간다() -> None:
-    class FakeEntryIdentifier:
-        def enrich(
-            self, captured: CapturedFrame, result: InferenceResult
-        ) -> InferenceResult:
-            del captured
-            person = result.detections[0]
-            return InferenceResult(
-                result.frame_shape,
-                (
-                    replace(
-                        person,
-                        student_id="student-001",
-                        identity_confidence=0.93,
-                        face_bbox=(70, 10, 110, 50),
-                    ),
-                ),
-            )
-
     handled: list[tuple[CapturedFrame, InferenceResult]] = []
     handover = IdentityHandoverResultHandler(
         (
@@ -67,11 +54,6 @@ def test_입구_얼굴_신원이_CCTV_ByteTrack을_따라_좌석_이벤트까지
         track_stale_seconds=30,
         minimum_identity_confidence=0.6,
     )
-    face_identity = FaceIdentityResultHandler(
-        FakeEntryIdentifier(),  # type: ignore[arg-type]
-        camera_ids=frozenset({"entry-camera"}),
-        inner=handover,
-    )
     pipeline = ByteTrackResultHandler(
         ByteTrackConfig(
             high_confidence_threshold=0.5,
@@ -81,13 +63,30 @@ def test_입구_얼굴_신원이_CCTV_ByteTrack을_따라_좌석_이벤트까지
             second_match_iou_threshold=0.2,
             track_buffer_frames=5,
         ),
-        camera_ids=frozenset({"entry-camera", "classroom-cctv"}),
-        inner=face_identity,
+        camera_ids=frozenset({"classroom-cctv"}),
+        inner=handover,
     )
 
-    pipeline(
+    handover.observe_entry(
         _captured("entry-camera", 1, 0),
-        _raw_person((50, 2, 150, 98)),
+        EntryFaceObservationBatch(
+            frame_shape=(100, 200, 3),
+            processing_status=EntryIdentityProcessingStatus.SUCCEEDED,
+            observations=(
+                EntryFaceObservation(
+                    face_track_id="face-1",
+                    face_bbox=(70, 10, 110, 50),
+                    detection_confidence=0.96,
+                    identity_status=EntryIdentityStatus.REGISTERED,
+                    student_id="student-001",
+                    similarity=0.93,
+                    margin=0.3,
+                    quality=0.85,
+                    observation_count=4,
+                    rejected_reason=None,
+                ),
+            ),
+        ),
     )
     # CCTV track은 인계 ROI 밖에서 먼저 만들어진다. 실제 카메라에서 이미 보이던
     # person-N이 문 영역으로 걸어 들어오는 경우를 재현한다.

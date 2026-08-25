@@ -15,6 +15,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .classrooms.router import api_router as classroom_api_router
 from .classrooms.router import page_router as classroom_page_router
+from .entry_identity_events.router import api_router as entry_identity_event_api_router
+from .entry_identity_events.router import (
+    internal_router as entry_identity_event_internal_router,
+)
 from .face_enrollment.router import api_router as face_enrollment_api_router
 from .face_enrollment.router import page_router as face_enrollment_page_router
 from .identity_handover.router import api_router as identity_handover_api_router
@@ -118,6 +122,8 @@ app.include_router(snapshot_api_router, responses=_ERROR_RESPONSES)
 app.include_router(roi_connection_api_router, responses=_ERROR_RESPONSES)
 app.include_router(identity_handover_api_router, responses=_ERROR_RESPONSES)
 app.include_router(identity_handover_internal_router, responses=_ERROR_RESPONSES)
+app.include_router(entry_identity_event_internal_router, responses=_ERROR_RESPONSES)
+app.include_router(entry_identity_event_api_router, responses=_ERROR_RESPONSES)
 app.include_router(students_api_router, responses=_ERROR_RESPONSES)
 app.include_router(llm_search_api_router, responses=_ERROR_RESPONSES)
 

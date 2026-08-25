@@ -4,29 +4,36 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
 
 from ..classrooms.models import Classroom, Seat
 from ..classrooms.service import ClassroomService
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
-from ..video_monitoring.models import VideoStream
+from ..video_monitoring.models import CameraRole, VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
 from .auto_layout import MIN_AUTO_POLYGON_AREA, SeatGridCell, plan_auto_roi
+from .detection_layout import plan_detection_rois
 from .errors import (
     CameraFrameUnavailableError,
     RoiConnectionConflictError,
     RoiConnectionInputError,
     RoiConnectionNotFoundError,
 )
+from .mapping import find_roi_connection_for_bbox
 from .models import (
+    ApplyDetectionRoiCommand,
+    ApplyDetectionRoiResult,
     AutoRoiOutcome,
     AutoRoiResult,
     AutoRoiSeatResult,
     ConfirmAutoRoiCommand,
     ConfirmAutoRoiResult,
+    DetectionRoiPlanResult,
+    DetectionRoiProposal,
     GenerateAutoRoiCommand,
+    PlanDetectionRoiCommand,
     Point,
     ReferenceImage,
     RoiCameraOption,
@@ -35,9 +42,13 @@ from .models import (
     SaveLiveRoiConnectionCommand,
     SaveRoiConnectionCommand,
 )
-from .ports import CameraFrameGrabber, RoiConnectionRepository
+from .ports import CameraFrameGrabber, RoiConnectionRepository, SeatedDetectionSource
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png"}
+
+# 탐지 기반 자리 찾기가 거슬러 볼 수 있는 최대 기간. 길수록 자리는 잘 드러나지만 조회가
+# 무거워지고, 그사이 카메라가 움직였다면 옛 좌표가 섞인다.
+MAX_DETECTION_LOOKBACK_HOURS = 24 * 14
 
 
 class RoiConnectionService:
@@ -50,6 +61,7 @@ class RoiConnectionService:
         repository: RoiConnectionRepository,
         stream_repository: VideoStreamRepository,
         frame_grabber: CameraFrameGrabber,
+        detection_source: SeatedDetectionSource,
         *,
         max_upload_bytes: int,
         page_size_max: int,
@@ -60,6 +72,7 @@ class RoiConnectionService:
         self._repository = repository
         self._streams = stream_repository
         self._frames = frame_grabber
+        self._detections = detection_source
         self._max_upload_bytes = max_upload_bytes
         self._page_size_max = page_size_max
         self._clock = clock
@@ -99,6 +112,27 @@ class RoiConnectionService:
                 capture_available=self._frames.is_available(stream.camera_id),
             )
             for stream in self.list_streams(classroom_id)
+        ]
+
+    def list_roi_camera_options(self, classroom_id: str) -> list[RoiCameraOption]:
+        """좌석 ROI를 그릴 수 있는 카메라만 고른다.
+
+        좌석 ROI는 좌석 판정에 쓰이는 좌표이므로 `SEAT_JUDGING` 카메라에만 의미가 있다
+        (결정 0024의 3번). 입구 카메라의 탐지는 좌석 점유·좌석 대조에 참여하지 않아
+        거기에 ROI를 그려도 판정에 쓰이지 않는다.
+
+        **실제로 이것 때문에 자리 찾기가 빈손으로 끝났다.** 카메라 목록이 식별자 순으로
+        정렬돼 입구 카메라가 먼저 왔고, 화면이 그것을 기본으로 골라 사람이 지나다니기만
+        하는 화각에서 자리를 찾고 있었다.
+        """
+        return [
+            RoiCameraOption(
+                camera_id=stream.camera_id,
+                camera_label=stream.camera_label,
+                capture_available=self._frames.is_available(stream.camera_id),
+            )
+            for stream in self.list_streams(classroom_id)
+            if stream.role is CameraRole.SEAT_JUDGING
         ]
 
     def save_reference_image(
@@ -416,6 +450,9 @@ class RoiConnectionService:
 
         기준 화면이 그사이 다시 캡처됐다면 확정하지 않는다. 그 좌표는 다른 화각의 것이라
         확정해 봐야 `needs_review`로 남고, 조용히 지나가면 관리자는 확정된 줄 안다.
+
+        **탐지 기반 ROI(`reference_image_revision=0`)는 이 검사를 받지 않는다.** 그 좌표의
+        근거는 캡처 화면이 아니라 탐지 기록이라, 화면이 바뀌었는지와 무관하다.
         """
         self._required_camera(command.classroom_id, command.camera_id)
         with self._lock:
@@ -433,7 +470,12 @@ class RoiConnectionService:
             confirmed = 0
             stale = 0
             for connection in targets:
-                if image is None or image.revision != connection.reference_image_revision:
+                # revision 0은 캡처 화면에 매이지 않은 좌표다(탐지 기반, 결정 0041).
+                # 기준 이미지가 없다는 이유로 stale로 밀면 확정할 방법이 사라진다.
+                tied_to_screen = connection.reference_image_revision != 0
+                if tied_to_screen and (
+                    image is None or image.revision != connection.reference_image_revision
+                ):
                     stale += 1
                     continue
                 self._repository.save(
@@ -441,6 +483,90 @@ class RoiConnectionService:
                 )
                 confirmed += 1
         return ConfirmAutoRoiResult(confirmed_count=confirmed, stale_count=stale)
+
+    def plan_detection_rois(self, command: PlanDetectionRoiCommand) -> DetectionRoiPlanResult:
+        """카메라가 실제로 본 것에서 좌석 자리를 찾는다. 저장하지 않는다.
+
+        좌석 격자를 사영하는 방식(결정 0039)은 격자가 실제 배치와 어긋나면 그대로
+        어긋난다. 이 경로는 반대로 **사람이 오래 앉아 있던 자리**를 밀도로 찾는다
+        (결정 0041).
+
+        **어느 자리가 어느 좌석인지는 정하지 않는다.** 카메라는 자리를 알지만 좌석
+        이름을 알지 못한다. 지정은 관리자가 한다 — 추측해서 붙이면 틀린 좌석의 출결이
+        조용히 기록된다.
+        """
+        self._required_camera(command.classroom_id, command.camera_id)
+        if not 1 <= command.lookback_hours <= MAX_DETECTION_LOOKBACK_HOURS:
+            raise RoiConnectionInputError(
+                f"조회 기간은 1시간 이상 {MAX_DETECTION_LOOKBACK_HOURS}시간 이하여야 합니다."
+            )
+        seats = [seat for seat in self.list_seats(command.classroom_id) if seat.is_active]
+        if not seats:
+            raise RoiConnectionNotFoundError("강의실에 활성 좌석이 없습니다.")
+        until = self._clock()
+        since = until - timedelta(hours=command.lookback_hours)
+        samples = self._detections.list_recent_centers(command.camera_id, since=since, until=until)
+        plan = plan_detection_rois(samples, max_clusters=len(seats))
+        existing = self._repository.list_by_camera(command.classroom_id, command.camera_id)
+        proposals = tuple(
+            DetectionRoiProposal(
+                index=index,
+                polygon=cluster.polygon,
+                sample_count=cluster.sample_count,
+                suggested_seat_id=_seat_at(cluster.polygon, existing),
+            )
+            for index, cluster in enumerate(plan.clusters, start=1)
+        )
+        return DetectionRoiPlanResult(
+            classroom_id=command.classroom_id,
+            camera_id=command.camera_id,
+            window_from=since,
+            window_to=until,
+            sample_count=plan.sample_count,
+            stationary_count=plan.stationary_count,
+            dropped_overlapping=plan.dropped_overlapping,
+            dropped_weak=plan.dropped_weak,
+            proposals=proposals,
+        )
+
+    def apply_detection_rois(self, command: ApplyDetectionRoiCommand) -> ApplyDetectionRoiResult:
+        """관리자가 좌석을 지정한 자리를 ROI로 저장한다.
+
+        **기준 화면 revision을 0으로 둔다.** 이 좌표의 근거는 캡처 화면이 아니라 탐지
+        기록이므로, 화면을 다시 캡처해도 무효가 되지 않고 프로세스를 다시 띄워도 남는다
+        (결정 0031이 남긴 in-memory 기준 이미지 제약을 타지 않는다).
+
+        확정 전까지는 `auto_generated`라 좌석 판정에 쓰이지 않는 것은 격자 방식과 같다.
+        """
+        self._required_camera(command.classroom_id, command.camera_id)
+        if not command.assignments:
+            raise RoiConnectionInputError("저장할 좌석을 하나 이상 지정해 주세요.")
+        seat_ids = [assignment.seat_id for assignment in command.assignments]
+        if len(set(seat_ids)) != len(seat_ids):
+            raise RoiConnectionInputError("같은 좌석을 두 번 지정할 수 없습니다.")
+        active_seats = {seat.id for seat in self.list_seats(command.classroom_id) if seat.is_active}
+        for assignment in command.assignments:
+            if assignment.seat_id not in active_seats:
+                raise RoiConnectionNotFoundError("선택한 강의실의 좌석을 찾을 수 없습니다.")
+            _validate_polygon(assignment.polygon)
+        with self._lock:
+            saved: list[str] = []
+            for assignment in command.assignments:
+                self._repository.save(
+                    RoiConnection(
+                        classroom_id=command.classroom_id,
+                        camera_id=command.camera_id,
+                        seat_id=assignment.seat_id,
+                        # 학생 배정의 정본은 seat_assignments다(결정 0019의 6번).
+                        student_id=None,
+                        polygon=assignment.polygon,
+                        reference_image_revision=0,
+                        updated_at=self._clock(),
+                        auto_generated=True,
+                    )
+                )
+                saved.append(assignment.seat_id)
+        return ApplyDetectionRoiResult(saved_count=len(saved), seat_ids=tuple(saved))
 
     def _required_camera(self, classroom_id: str, camera_id: str) -> VideoStream:
         self.get_classroom(classroom_id)
@@ -523,3 +649,23 @@ def _has_valid_image_signature(content_type: str, content: bytes) -> bool:
     if content_type == "image/jpeg":
         return content.startswith(b"\xff\xd8\xff")
     return content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _seat_at(polygon: tuple[Point, ...], connections: list[RoiConnection]) -> str | None:
+    """이 자리의 중심이 이미 어느 좌석 ROI 안에 있는지 본다.
+
+    좌석 판정과 같은 순수 함수를 쓴다. 다시 만들 때 관리자가 좌석을 처음부터 다시
+    고르지 않게 하는 힌트일 뿐이며, 저장은 관리자가 고른 좌석으로만 한다.
+    """
+    center_x = sum(point.x for point in polygon) / len(polygon)
+    center_y = sum(point.y for point in polygon) / len(polygon)
+    scale = 100_000
+    x = int(center_x * scale)
+    y = int(center_y * scale)
+    match = find_roi_connection_for_bbox(
+        (x - 1, y - 1, x + 1, y + 1),
+        frame_width_pixels=scale,
+        frame_height_pixels=scale,
+        connections=connections,
+    )
+    return None if match is None else match.seat_id

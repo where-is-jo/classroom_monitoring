@@ -1,6 +1,13 @@
 .roi-live-editor { display: grid; gap: 18px; }
-.roi-filter-line { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
-.roi-action-buttons { display: flex; gap: 10px; }
+/* 버튼이 많아 한 줄에 다 들어가지 않는다. 세로로 쌓지 않고 **가로로 흐르다 줄바꿈**
+   하게 한다 — 세로로 길어지면 캡처 화면이 화면 밖으로 밀려난다. */
+.roi-filter-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.roi-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.roi-action-buttons button { white-space: nowrap; }
+.roi-filter-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.roi-camera-fixed { margin: 0; white-space: nowrap; color: var(--muted); }
+.roi-camera-fixed strong { color: var(--text); }
+.roi-camera-warning { padding: 1px 6px; font-size: .8rem; color: #6b3b00; background: #ffd591; border-radius: 4px; }
 .roi-classroom-filter { display: flex; align-items: center; gap: 10px; margin: 0; white-space: nowrap; }
 .roi-classroom-filter select { min-width: 220px; }
 #roi-start.is-registering { color: #fff; background: #b45309; border-color: #b45309; }
@@ -13,8 +20,15 @@
    고정 비율을 두고 object-fit: contain으로 맞추면 이미지 둘레에 여백이 생기고, 클릭
    좌표를 stage 기준으로 계산하는 ROI 좌표가 그 여백만큼 어긋난다. 그래서 이미지를
    흐름 안에 두어 stage의 크기를 이미지가 정하게 한다. */
-.roi-media-stage { position: relative; width: 100%; min-height: 320px; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
-#roi-reference-image { display: block; width: 100%; height: auto; background: #111817; }
+/* **stage의 크기를 이미지가 정한다.** ROI 좌표는 stage 기준 상대 위치로 계산하므로
+   stage와 이미지의 상자가 정확히 같아야 한다. 이미지 둘레에 여백이 생기면 그만큼
+   좌표가 어긋난다.
+   실제 CCTV는 1280x1944로 세로가 길어 원본 비율 그대로 두면 페이지가 한없이 길어진다.
+   max-height로 줄이되 width를 auto로 두어 비율을 유지한다 — 균일 축소라 정규화 좌표는
+   그대로 유효하다. */
+.roi-media-stage { position: relative; width: fit-content; max-width: 100%; margin-inline: auto; min-height: 320px; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
+.roi-media-stage[data-state="empty"] { width: 100%; }
+#roi-reference-image { display: block; width: auto; max-width: 100%; height: auto; max-height: 72vh; background: #111817; }
 .roi-media-placeholder, #roi-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .roi-media-stage [hidden] { display: none !important; }
 .roi-media-placeholder { display: grid; align-content: center; justify-items: center; gap: 8px; padding: 30px; color: #53605e; text-align: center; background: #d8dddc; }
@@ -32,7 +46,6 @@
 #roi-auto-preview polygon { fill: rgba(124, 77, 255, .16); stroke: #7c4dff; stroke-width: 2; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; pointer-events: none; }
 .roi-saved-label.roi-preview-label { background: rgba(60, 32, 128, .86); }
 .roi-saved-label.roi-preview-label .review-mark { color: #24123f; background: #c7a8ff; }
-.roi-seat-fill input { width: 72px; }
 #roi-auto:not(:disabled) { color: #fff; background: #5b3fbe; border-color: #5b3fbe; }
 #roi-auto-save:not(:disabled) { color: #fff; background: #087f6d; border-color: #087f6d; }
 #roi-auto:disabled { cursor: not-allowed; opacity: .45; }
@@ -55,4 +68,21 @@ button.danger:disabled { cursor: not-allowed; opacity: .45; }
 .roi-student-dialog p { color: var(--muted); }
 .roi-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 body.roi-modal-open { overflow: hidden; }
-@media (max-width: 680px) { .roi-filter-line { align-items: stretch; flex-direction: column-reverse; } .roi-classroom-filter { justify-content: space-between; } .roi-classroom-filter select { min-width: 0; width: 70%; } .roi-action-buttons button { flex: 1; } }
+/* 좁은 화면에서도 버튼은 가로로 흐른다. 세로로 쌓으면 12개가 화면을 통째로 차지한다. */
+@media (max-width: 680px) { .roi-filter-line { align-items: stretch; } .roi-classroom-filter { justify-content: space-between; } .roi-classroom-filter select { min-width: 0; width: 70%; } .roi-action-buttons button { flex: 1 1 auto; } #roi-reference-image { max-height: 60vh; } }
+
+/* 탐지에서 찾은 자리. 좌석이 아직 정해지지 않아 저장된 ROI·격자 미리보기와 구분한다. */
+#roi-auto-preview polygon[data-spot-index] { fill: rgba(0, 170, 90, .18); stroke: #00c46a; stroke-dasharray: 6 3; }
+#roi-auto-preview polygon.is-highlighted { fill: rgba(0, 170, 90, .45); stroke-width: 5; }
+.roi-detect-panel { padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.roi-detect-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; }
+.roi-detect-heading h2 { margin: 0; font-size: 1.05rem; }
+.roi-detect-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+.roi-detect-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg, #f6f8f8); border: 1px solid var(--border); border-radius: 10px; }
+.roi-detect-row:hover { border-color: #00c46a; }
+.roi-detect-name { font-weight: 600; white-space: nowrap; }
+.roi-detect-support { font-size: .82rem; color: var(--muted); white-space: nowrap; }
+.roi-detect-row select { flex: 1; min-width: 0; }
+#roi-detect:not(:disabled) { color: #fff; background: #00794a; border-color: #00794a; }
+#roi-detect-save:not(:disabled) { color: #fff; background: #087f6d; border-color: #087f6d; }
+#roi-detect:disabled, #roi-detect-save:disabled { cursor: not-allowed; opacity: .45; }

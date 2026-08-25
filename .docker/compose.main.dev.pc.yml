@@ -133,6 +133,17 @@ services:
       # localhost로 두면 이 노트북에서만 편집기가 정상 동작한다.
       N8N_EDITOR_BASE_URL: http://100.119.241.93:15678/
       WEBHOOK_URL: http://100.119.241.93:15678/
+      # **n8n 2.x는 nodes.exclude 기본값이 비어 있지 않다.** @n8n/config의 NodesConfig가
+      # executeCommand·localFileTrigger 둘을 기본 제외로 들고 있어서, 아무것도 적지 않으면
+      # Execute Command 노드가 편집기에 나타나지 않는다. 서버 로그에는
+      # "Unrecognized node type: n8n-nodes-base.executeCommand"로 찍힌다.
+      #
+      # **워크플로가 사이드카(rpa-runner)를 HTTP로 부르게 바뀌어 Execute Command는 더 이상
+      # 필요하지 않다.** 다른 워크플로가 쓰지 않는다면 이 줄을 지워 기본값(둘 다 차단)으로
+      # 되돌려도 된다 — 편집기에 붙을 수 있는 사람이면 누구나 이 컨테이너 안에서 셸 명령을
+      # 실행할 수 있게 되는 설정이라, 필요가 사라지면 닫는 편이 낫다.
+      # **JSON 배열 문자열이어야 한다.** 빈 값이나 콤마 나열은 파싱되지 않는다.
+      NODES_EXCLUDE: '["n8n-nodes-base.localFileTrigger"]'
       # **컨테이너 기본 시계가 UTC라 시간표가 9시간 어긋난다.** 워크플로의 Parse
       # Schedule은 `new Date().setHours(...)`로 공부 시간 구간을 판정하므로, TZ가
       # UTC면 오전 10시(KST)를 01시로 보고 어느 구간에도 들지 않는다. 실측으로
@@ -162,8 +173,8 @@ services:
       # 컨테이너끼리는 같은 network 안에서 서비스 이름으로 부른다. 호스트 포트(8076)를
       # 쓰면 Tailscale이 내려갈 때 같이 끊긴다.
       FASTAPI_BASE_URL: http://fastapi:8001
-      # 시간표 문서는 gitignore 대상이라 저장소에 없다. 없으면 워크플로가 멈추지 않고
-      # Parse Schedule의 기본 시간표로 넘어간다 — 아래 마운트에 파일을 두면 그걸 쓴다.
+      # 시간표 문서는 gitignore 대상이라 저장소에 없다. 이 노트북에 직접 두어야 한다 —
+      # 읽지 못하면 Slack에 알리고 기록을 중단한다(RPA README의 실패 조건).
       SCHEDULE_FILE_PATH: /repo/individual_tasks/시간표.md
       # 파이썬 스크립트를 대신 실행하는 사이드카. 아래 rpa-runner 서비스다.
       RPA_RUNNER_URL: http://rpa-runner:8099

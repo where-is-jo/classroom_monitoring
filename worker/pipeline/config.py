@@ -78,21 +78,17 @@ class PipelineSettings(BaseSettings):
     # 환경마다 다른 주소이므로 .env.{APP_ENV} 쪽에 둔다 — settings.yml에 넣지 않는다.
     fastapi_url: str = Field(default="http://127.0.0.1:8001")
 
-    # 얼굴 식별 내부 서비스 주소. 비어 있으면 사람 탐지만 유지한다. worker는 모델
-    # 종류나 갤러리 구조를 모르고 이 계약만 호출한다.
+    # 입구 얼굴 관측 내부 서비스 주소. worker는 모델 종류나 갤러리 구조를 모르고
+    # 이 계약만 호출한다. 얼굴 카메라 목록과 함께 설정한다.
     face_identity_url: str = Field(default="")
     # 얼굴 인식은 입구 IDENTITY_ONLY 카메라에서만 한다. 쉼표 구분 camera_id 목록이다.
     face_identity_camera_ids: str = Field(default="")
     face_identity_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     face_identity_jpeg_quality: int = Field(default=95, ge=1, le=100)
-    # ByteTrack은 낮은 신뢰도 bbox도 연결에 쓰지만, 겹친 오탐 bbox를 얼굴 서비스에
-    # 함께 보내면 안전한 일대일 연결 규칙이 얼굴을 미식별로 둔다. 얼굴 연결에만 쓸
-    # 최소 사람 신뢰도를 별도로 둔다.
-    face_identity_min_person_confidence: float = Field(default=0.5, ge=0, le=1)
 
     # --- 사람 ByteTrack ---
     person_tracking_enabled: bool = True
-    # 비우면 STREAM_SOURCES의 모든 카메라에 적용한다. 일부만 추적할 때만 쉼표로 적는다.
+    # 비우면 STREAM_SOURCES에서 얼굴 전용 카메라를 뺀 나머지에 적용한다.
     person_tracking_camera_ids: str = Field(default="")
     bytetrack_high_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     bytetrack_low_confidence_threshold: float = Field(default=0.1, ge=0, le=1)
@@ -144,6 +140,10 @@ class PipelineSettings(BaseSettings):
             raise ValueError(
                 "FACE_IDENTITY_URL을 설정하면 FACE_IDENTITY_CAMERA_IDS가 필요합니다."
             )
+        if self.parsed_face_identity_camera_ids and not self.face_identity_url.strip():
+            raise ValueError(
+                "FACE_IDENTITY_CAMERA_IDS를 설정하면 FACE_IDENTITY_URL이 필요합니다."
+            )
         if (
             self.bytetrack_low_confidence_threshold
             > self.bytetrack_high_confidence_threshold
@@ -173,6 +173,23 @@ class PipelineSettings(BaseSettings):
                 "신원 인계 route의 입구 카메라는 FACE_IDENTITY_CAMERA_IDS에 있어야 합니다: "
                 + ", ".join(sorted(missing_entry_ids))
             )
+        tracking_ids = self.parsed_person_tracking_camera_ids
+        if tracking_ids is not None:
+            overlap = tracking_ids & self.parsed_face_identity_camera_ids
+            if overlap:
+                raise ValueError(
+                    "얼굴 전용 카메라와 사람 추적 카메라는 겹칠 수 없습니다: "
+                    + ", ".join(sorted(overlap))
+                )
+            missing_classroom_ids = {
+                route.classroom_camera_id for route in routes
+            } - tracking_ids
+            if missing_classroom_ids:
+                raise ValueError(
+                    "신원 인계 route의 교실 카메라는 PERSON_TRACKING_CAMERA_IDS에 "
+                    "있어야 합니다: "
+                    + ", ".join(sorted(missing_classroom_ids))
+                )
         if (
             routes
             and self.identity_handover_track_stale_seconds

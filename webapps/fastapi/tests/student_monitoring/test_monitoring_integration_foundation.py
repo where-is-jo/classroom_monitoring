@@ -1,9 +1,12 @@
 """모델 없이 worker 이벤트부터 학생 상태까지 잇는 합성 통합 검증."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from pymongo import DESCENDING
@@ -45,6 +49,8 @@ from app.student_monitoring.service import StudentMonitoringService
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
+from ..roi_connections.fakes import FakeSeatedDetectionSource
+
 CLASSROOM_ID = "synthetic-classroom-001"
 CAMERA_ID = "synthetic-camera-001"
 STUDENT_ID = "synthetic-student-001"
@@ -55,6 +61,34 @@ FIXTURE_PATH = (
     / "inference"
     / "fixtures"
     / "identified_student_event.json"
+)
+WORKER_ROOT = Path(__file__).resolve().parents[4] / "worker"
+if str(WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKER_ROOT))
+
+from inference.handler import build_event_payload  # type: ignore[import-not-found]
+from inference.identity_handover import (  # type: ignore[import-not-found]
+    IdentityHandoverResultHandler,
+    IdentityHandoverRoute,
+)
+from inference.tracking import (  # type: ignore[import-not-found]
+    ByteTrackConfig,
+    ByteTrackResultHandler,
+)
+from inference.types import (  # type: ignore[import-not-found]
+    Detection as WorkerDetection,
+)
+from inference.types import (
+    EntryFaceObservation,
+    EntryFaceObservationBatch,
+    EntryIdentityProcessingStatus,
+    EntryIdentityStatus,
+)
+from inference.types import (
+    InferenceResult as WorkerInferenceResult,
+)
+from shared.types import (  # type: ignore[import-not-found]
+    CapturedFrame as WorkerCapturedFrame,
 )
 
 
@@ -145,6 +179,77 @@ def test_candidate_worker_fixture_matches_fastapi_request_contract() -> None:
 
     assert validated.event_id
     assert validated.camera_id
+
+
+def test_입구_얼굴에서_CCTV_문_ROI를_거쳐_지정_좌석_PRESENT까지_이어진다() -> None:
+    context = _build_context(MemoryDetectionEventRepository())
+    handled: list[tuple[WorkerCapturedFrame, WorkerInferenceResult]] = []
+    handover = IdentityHandoverResultHandler(
+        (
+            IdentityHandoverRoute(
+                "entry-camera",
+                CAMERA_ID,
+                (0.1, 0.1, 0.3, 0.8),
+            ),
+        ),
+        inner=lambda frame, result: handled.append((frame, result)),
+        maximum_delay_seconds=8,
+        clock_skew_seconds=0.5,
+        track_stale_seconds=30,
+        minimum_identity_confidence=0.7,
+    )
+    cctv_pipeline = ByteTrackResultHandler(
+        ByteTrackConfig(),
+        camera_ids=frozenset({CAMERA_ID}),
+        inner=handover,
+    )
+    entry_frame = WorkerCapturedFrame(
+        camera_id="entry-camera",
+        frame=np.zeros((1000, 1000, 3), dtype=np.uint8),
+        captured_at=NOW,
+        sequence=1,
+    )
+    handover.observe_entry(
+        entry_frame,
+        EntryFaceObservationBatch(
+            frame_shape=entry_frame.frame.shape,
+            processing_status=EntryIdentityProcessingStatus.SUCCEEDED,
+            observations=(
+                EntryFaceObservation(
+                    face_track_id="face-1",
+                    face_bbox=(150, 130, 220, 230),
+                    detection_confidence=0.96,
+                    identity_status=EntryIdentityStatus.REGISTERED,
+                    student_id=STUDENT_ID,
+                    similarity=0.88,
+                    margin=0.31,
+                    quality=0.84,
+                    observation_count=4,
+                    rejected_reason=None,
+                ),
+            ),
+        ),
+    )
+    cctv_frame = WorkerCapturedFrame(
+        camera_id=CAMERA_ID,
+        frame=np.zeros((1000, 1000, 3), dtype=np.uint8),
+        captured_at=NOW,
+        sequence=42,
+    )
+    cctv_pipeline(
+        cctv_frame,
+        WorkerInferenceResult(
+            cctv_frame.frame.shape,
+            (WorkerDetection(0, "person", 0.91, (100, 100, 300, 700)),),
+        ),
+    )
+
+    assert handled[0][1].detections[0].student_id == STUDENT_ID
+    payload = build_event_payload(*handled[0])
+    status, states = _post_and_get_states(context, payload)
+
+    assert status == 201
+    assert states["states"][0]["current_state"] == "PRESENT"
 
 
 def _rectangle(left: float, top: float, right: float, bottom: float) -> tuple[Point, ...]:
@@ -243,6 +348,7 @@ def _build_context(
         roi_repository,
         streams,
         UnavailableCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: NOW,

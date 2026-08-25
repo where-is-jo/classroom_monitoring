@@ -20,10 +20,11 @@
                        ┌─────────────┴─────────────┐
                        ▼                           ▼
                 ② inference worker           ③ recorder worker
-                   사람 탐지 → 입구 얼굴 식별     영상 세그먼트 → MinIO
+                   입구: 얼굴 탐지·식별 호출       영상 세그먼트 → MinIO
+                   CCTV: 사람 탐지·ByteTrack
                        │
                        ▼
-                탐지 결과(student_id · bbox · 신뢰도)
+                입구 얼굴 이벤트 + CCTV 탐지 결과
                        │
                        ▼
                 webapps/fastapi   ← HTTP 수신·저장·상태 판정
@@ -61,7 +62,8 @@
 카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─카메라별 최신 1장─▶ inference
                                  같은 카메라의 오래된 것 버림        │
                                                                       ▼
-                           ByteTrack → 입구 얼굴 식별 → CCTV 문 영역 인계
+                 입구: 얼굴 탐지·식별 ──신원 후보──┐
+                 CCTV: 사람 탐지·ByteTrack ─문 ROI─┴─▶ 신원 인계
                                                                       │
                                                                       ▼
                                                         로그 + 선택적 FastAPI HTTP
@@ -70,12 +72,13 @@
 `recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
 객체 저장소에 적재한 뒤, 보존 기간이 지난 것을 지운다.
 
-입구 카메라는 `FACE_IDENTITY_URL`과 `FACE_IDENTITY_CAMERA_IDS`를 설정하면 사람 탐지 뒤
-deeplearning의 SCRFD·ArcFace 갤러리 식별을 호출한다. 식별된 학생 ID를 포함한 최종
-탐지는 `FASTAPI_URL`로 보낸다. 얼굴 식별 서비스 장애는 사람 탐지 전송을 막지 않는다
-([결정 0035](../docs/architecture/decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)).
+입구 카메라는 `FACE_IDENTITY_URL`과 `FACE_IDENTITY_CAMERA_IDS`를 설정하면 사람 탐지 없이
+deeplearning의 SCRFD·ArcFace·얼굴 track 관측을 호출한다. 관측 메타데이터는 FastAPI에
+7일 보존하고, 등록 신원은 메모리 인계 후보가 된다. 얼굴 식별·저장 장애는 CCTV 사람 탐지
+전송을 막지 않는다
+([결정 0040](../docs/architecture/decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)).
 
-사람 탐지에는 카메라별 ByteTrack을 붙인다. 입구에서 확인된 `student_id`는 설정한 시간
+사람 탐지와 ByteTrack은 `PERSON_TRACKING_CAMERA_IDS`의 CCTV에만 붙인다. 입구에서 확인된 `student_id`는 설정한 시간
 창 안에 CCTV 문 영역에서 **유일하게 새로 생긴 track**에만 인계한다. 후보 학생이나 신규
 track이 둘 이상이면 추측하지 않고 신원 없이 둔다. 인계된 신원은 같은 CCTV track이
 유지되는 동안 좌석 ROI까지 전달된다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
@@ -122,8 +125,9 @@ track이 둘 이상이면 추측하지 않고 신원 없이 둔다. 인계된 �
 ## 다른 서비스와의 관계
 
 - **영상 소스(강의실 카메라 / Jetson)**: 외부 시스템이다. 접속 정보는 환경변수로 주입한다.
-- **`deeplearning`**: `inference` worker가 지정된 입구 카메라의 JPEG와 사람 bbox를 내부
-  HTTP로 보내 얼굴 식별 결과를 받는다. 모델·갤러리 구현은 worker가 알지 않는다.
+- **`deeplearning`**: `inference` worker가 지정된 입구 카메라의 JPEG를 내부 HTTP로 보내
+  얼굴 관측·식별 결과를 받는다. 사람 bbox를 보내지 않으며 모델·갤러리 구현은 worker가
+  알지 않는다.
 - **`fastapi`**: 탐지 결과의 소비자이자 상태 판정 주체다. worker가 HTTP로 전달한다.
 - **브라우저**: 제품 API와 탐지 SSE는 `fastapi`를 호출한다. 영상은 허용된 WebRTC
   세션에 한해 MediaMTX에 연결하며 worker를 직접 호출하지 않는다.

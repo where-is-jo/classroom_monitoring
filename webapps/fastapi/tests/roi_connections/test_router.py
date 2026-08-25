@@ -20,7 +20,7 @@ from app.shared.student_identity import StudentIdentity
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
-from .fakes import FakeCameraFrameGrabber
+from .fakes import FakeCameraFrameGrabber, FakeSeatedDetectionSource
 
 
 def make_service(
@@ -65,6 +65,7 @@ def make_service(
         InMemoryRoiConnectionRepository(),
         streams,
         grabber or FakeCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=20,
         clock=lambda: datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
@@ -90,8 +91,10 @@ def test_page_renders_live_editor_controls_and_student_modal(client: TestClient)
     assert 'id="roi-reset" type="button" class="secondary" disabled' in response.text
     assert 'id="roi-cancel" type="button" class="secondary" disabled' in response.text
     assert 'id="roi-classroom-select"' in response.text
-    assert 'id="roi-camera-select"' in response.text
-    assert 'value="camera-a"' in response.text
+    # 좌석 판정 카메라가 한 대뿐이면 고르게 하지 않고 무엇을 쓰는지만 알린다.
+    assert 'id="roi-camera-select"' not in response.text
+    assert 'id="roi-camera-fixed"' in response.text
+    assert 'data-camera-id="camera-a"' in response.text
     assert '<dialog id="roi-student-dialog"' in response.text
     assert 'id="roi-seat-select"' in response.text
     assert 'value="seat"' in response.text

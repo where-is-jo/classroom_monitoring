@@ -24,6 +24,9 @@ prometheus-client>=0.20
 
 # 테스트
 pytest
+# worker ByteTrack과 이벤트 payload부터 FastAPI 학생 상태까지 잇는 합성 통합 테스트.
+numpy>=1.26
+requests>=2.31
 
 # 린트·타입 검사
 ruff

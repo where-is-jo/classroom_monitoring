@@ -138,6 +138,19 @@ docker compose -f .docker/compose.main.dev.pc.yml down
 `classroom-monitoring-dev`에서 `classroom-monitoring-dev-pc`로 바뀌었다. 옮기려면 서버
 쪽 편집기에서 워크플로와 자격 증명을 export한 뒤 여기서 import한다.
 
+**n8n 2.x는 Execute Command 노드를 기본으로 막는다.** `nodes.exclude`의 기본값이 빈 배열이
+아니라 `['n8n-nodes-base.executeCommand', 'n8n-nodes-base.localFileTrigger']`여서, 아무것도
+설정하지 않으면 편집기에 Execute Command가 나타나지 않고 서버 로그에
+`Unrecognized node type: n8n-nodes-base.executeCommand`만 남는다. 기존 워크플로가 이 노드를
+쓰고 있어 `compose.main.dev.pc.yml`이 `NODES_EXCLUDE`로 기본값을 덮어쓴다. **JSON 배열
+문자열이어야 한다.** 서버 설정이라 브라우저가 붙는 기기와는 무관하다 — 한 번 풀면 tailnet의
+모든 기기에서 함께 열린다.
+
+`N8N_PORT`는 **컨테이너 안에서 n8n이 listen할 포트**다. 호스트 노출 포트가 아니다. compose의
+`ports`가 `15678:5678`이므로 이 값은 `5678`이어야 하고, `15678`로 두면 매핑이 가리키는 곳에
+아무도 없어 접속이 끊긴다. `N8N_HOST`는 바인딩 주소가 아니라 n8n이 자기 host로 인식하는
+값이라 tailnet 주소를 넣어도 무방하다.
+
 #### Docker Desktop이 자동 시작되어야 한다
 
 **노트북이라 절전·재부팅이 잦은데, Docker Desktop이 내려가면 스택도 함께 내려간다.**

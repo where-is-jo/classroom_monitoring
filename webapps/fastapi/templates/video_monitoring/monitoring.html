@@ -50,6 +50,7 @@
                    id="camera-panel-{{ stream.camera_id }}"
                    {% if real_streams|length > 1 %}role="tabpanel" aria-labelledby="camera-tab-{{ stream.camera_id }}"{% endif %}
                    data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}"
+                   data-camera-role="{{ stream.role.value }}"
                    {% if not loop.first %}hidden{% endif %}>
             <div class="camera-monitoring-frame">
               <video data-webrtc muted autoplay playsinline aria-label="{{ stream.camera_label }} 실시간 영상"></video>
@@ -61,12 +62,13 @@
                 <h3>{{ stream.camera_label }}</h3>
                 <p>{{ stream.classroom_id }}</p>
               </div>
-              <span class="status-label status-label--{{ 'active' if status_value == 'CONNECTED' else ('stale' if status_value == 'STALE' else ('no-video' if status_value == 'NO_VIDEO' else 'unknown')) }}">{{ '탐지 수신 중' if status_value == 'CONNECTED' else ('탐지 지연' if status_value == 'STALE' else ('최근 탐지 없음' if status_value == 'NO_VIDEO' else '상태 확인 중')) }}</span>
+              <span data-source-status class="status-label status-label--{{ 'active' if status_value == 'CONNECTED' else ('stale' if status_value == 'STALE' else ('no-video' if status_value == 'NO_VIDEO' else 'unknown')) }}">{{ '탐지 수신 중' if status_value == 'CONNECTED' else ('탐지 지연' if status_value == 'STALE' else ('최근 탐지 없음' if status_value == 'NO_VIDEO' else '상태 확인 중')) }}</span>
             </div>
             <p class="card-meta">
               <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime if stream.last_detection_at else '없음' }}</strong></span>
               <span>탐지 <strong data-detection-count>0</strong>건</span>
             </p>
+            <p class="camera-analysis-status" data-analysis-status hidden role="status"></p>
           </article>
         {% endfor %}
       </div>

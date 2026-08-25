@@ -1,9 +1,11 @@
 # 모델 결과 연동 계약
 
-얼굴 식별 모델 작업자는 사람 탐지 결과에 선택 신원 필드를 채워 worker의
-`InferenceResult`로 넘긴다. worker는 이를 기존
-`POST /internal/inference/events` 요청으로 직렬화한다. 모델과 worker는 학생 이름, 학번,
-좌석, 출결 상태를 판단하거나 보내지 않는다.
+카메라 역할에 따라 계약이 둘로 나뉜다. 입구 카메라는 사람 탐지를 거치지 않고 JPEG를
+deeplearning의 `POST /internal/face-identifications`로 보내 얼굴 관측을 받는다. worker는
+그 결과를 `POST /internal/entry-identity-events`에 저장하고 등록 신원을 인계 후보로 둔다.
+CCTV는 YOLO·ByteTrack 결과를 기존 `POST /internal/inference/events`로 보낸다. 인계에
+성공한 CCTV detection에만 `student_id`와 신뢰도가 붙는다. 모델과 worker는 학생 이름,
+학번, 좌석, 출결 상태를 판단하거나 보내지 않는다.
 
 ## 승인 fixture
 
@@ -25,13 +27,27 @@
 | `bbox` | 예 | `[x_min, y_min, x_max, y_max]` 정수 픽셀. 원본 frame 안에서 좌상단보다 우하단이 커야 함 |
 | `student_id` | 아니요 | FastAPI 학생 원장의 내부 ID. 이름이나 학번을 대신 보내지 않음 |
 | `identity_confidence` | 아니요 | 얼굴 식별 신뢰도, `0.0 <= value <= 1.0` |
-| `face_bbox` | 아니요 | 얼굴 영역의 같은 픽셀 좌표계 bbox. 이미지나 embedding은 보내지 않음 |
-| `track_id` | 아니요 | 같은 카메라 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). worker의 사람 ByteTrack은 `person-<번호>`를 채운다. 단독 얼굴 식별은 `face-<번호>`를 폴백으로 쓰며, 사람 ID가 있으면 덮어쓰지 않는다. 신원과 달리 단독으로도 뜻이 있어 미식별 track에도 보낸다 |
+| `face_bbox` | 아니요 | CCTV는 얼굴을 인식하지 않으므로 인계된 detection에서도 비운다 |
+| `track_id` | 아니요 | CCTV 안에서 같은 사람을 이어 보는 식별자([결정 0025](../../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)의 6번). worker의 사람 ByteTrack은 `person-<번호>`를 채운다 |
 
-식별 성공이면 `student_id`와 `identity_confidence`를 함께 채우고 `face_bbox`는 선택으로
-채운다. 미식별이거나 모델 기준 미달이면 세 필드를 모두 `null`로 두거나 생략한다. 가장
+인계 성공이면 CCTV detection의 `student_id`와 `identity_confidence`를 함께 채우고
+`face_bbox`는 비운다. 미식별이거나 모델 기준 미달이면 세 신원 필드를 모두 `null`로
+두거나 생략한다. 가장
 가까운 학생을 억지로 고르지 않는다. worker handler는 불완전한 신원 조합을 미식별로 낮춰
 전송하며, FastAPI는 외부 필드와 불완전한 조합을 422로 거부한다.
+
+## 입구 얼굴 관측 계약
+
+deeplearning 응답은 최상위 `observations` 하나와 얼굴별
+`face_track_id`, `face_bbox`, `detection_confidence`, `identity_status`, `student_id`,
+`similarity`, `margin`, `quality`, `observation_count`, `rejected_reason`만 허용한다.
+`identity_status`는 `REGISTERED`, `UNKNOWN`, `UNCERTAIN` 중 하나다. 사람 bbox·사람
+인덱스·이미지·JPEG·embedding·이름·학번은 허용하지 않는다.
+
+worker의 입구 저장 이벤트는 camera ID, 촬영 시각, sequence, 프레임 크기,
+`SUCCEEDED`/`ANALYZER_UNAVAILABLE`/`INVALID_RESPONSE` 처리 상태와 위 관측만 담는다.
+event ID는 `<camera>-<UTC epoch milliseconds>-<sequence>-entry-face`다. 실패 상태는 빈
+관측으로 저장한다. FastAPI는 활성 `IDENTITY_ONLY` source만 수신하고 7일 뒤 만료한다.
 
 ## 모델을 붙였을 때 어디까지 자동으로 흐르는가
 

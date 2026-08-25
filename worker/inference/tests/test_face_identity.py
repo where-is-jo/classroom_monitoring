@@ -6,31 +6,25 @@ from typing import Any
 import numpy as np
 import pytest
 import requests
-from prometheus_client import REGISTRY
 
 from shared.types import CapturedFrame
-from shared.metrics import METRIC_PREFIX
 
 from ..face_identity import (
-    FaceIdentificationError,
-    FaceIdentityResultHandler,
+    EntryFaceProcessor,
+    FaceIdentificationResponseError,
+    FastAPIEntryIdentityEventHandler,
     HttpFaceIdentifier,
+    build_entry_identity_event_payload,
 )
-from ..types import Detection, InferenceResult
-
-
-def metric_value(name: str, **labels: str) -> float:
-    sampled = REGISTRY.get_sample_value(f"{METRIC_PREFIX}{name}", labels or None)
-    return 0.0 if sampled is None else float(sampled)
+from ..types import (
+    EntryFaceObservationBatch,
+    EntryIdentityProcessingStatus,
+    EntryIdentityStatus,
+)
 
 
 class FakeResponse:
-    def __init__(
-        self,
-        payload: object,
-        *,
-        status_code: int = 200,
-    ) -> None:
+    def __init__(self, payload: object, *, status_code: int = 200) -> None:
         self._payload = payload
         self.status_code = status_code
 
@@ -44,76 +38,146 @@ class FakeResponse:
         return self._payload
 
 
+class InvalidJsonResponse(FakeResponse):
+    def json(self) -> object:
+        raise ValueError("invalid json")
+
+
 def captured() -> CapturedFrame:
     return CapturedFrame(
         camera_id="entry-camera",
         frame=np.full((120, 160, 3), 128, dtype=np.uint8),
-        captured_at=datetime(2026, 8, 22, tzinfo=UTC),
+        captured_at=datetime(2026, 8, 22, 9, 0, 0, 123000, tzinfo=UTC),
         sequence=7,
     )
 
 
-def inference_result() -> InferenceResult:
-    return InferenceResult(
-        frame_shape=(120, 160, 3),
-        detections=(
-            Detection(67, "cell phone", 0.7, (5, 5, 20, 20)),
-            Detection(0, "person", 0.9, (20, 10, 120, 115)),
-        ),
-    )
+def observation(
+    *,
+    status: str = "REGISTERED",
+    student_id: str | None = "student-001",
+    similarity: float | None = 0.86,
+    margin: float | None = 0.31,
+) -> dict[str, object]:
+    return {
+        "face_track_id": "face-3",
+        "face_bbox": [40, 20, 80, 65],
+        "detection_confidence": 0.94,
+        "identity_status": status,
+        "student_id": student_id,
+        "similarity": similarity,
+        "margin": margin,
+        "quality": 0.81,
+        "observation_count": 4,
+        "rejected_reason": None,
+    }
 
 
-def test_등록_학생_식별을_사람_탐지에_보강한다() -> None:
+def identifier_with(payload: object) -> tuple[HttpFaceIdentifier, list[dict[str, Any]]]:
     requests_seen: list[dict[str, Any]] = []
 
-    def post(
-        url: str,
-        *,
-        data: bytes,
-        headers: dict[str, str],
-        timeout: float,
-    ) -> FakeResponse:
-        requests_seen.append(
-            {"url": url, "data": data, "headers": headers, "timeout": timeout}
-        )
-        return FakeResponse(
-            {
-                "identities": [
-                    {
-                        "person_index": 0,
-                        "face_bbox": [40, 20, 80, 65],
-                        "track_id": "face-3",
-                        "student_id": "student-001",
-                        "identity_confidence": 0.86,
-                    }
-                ]
-            }
-        )
+    def post(url: str, **kwargs: Any) -> FakeResponse:
+        requests_seen.append({"url": url, **kwargs})
+        return FakeResponse(payload)
 
-    identifier = HttpFaceIdentifier(
-        "http://deeplearning:8100",
-        timeout_seconds=2,
-        jpeg_quality=90,
-        post=post,  # type: ignore[arg-type]
+    return (
+        HttpFaceIdentifier(
+            "http://deeplearning:8100",
+            timeout_seconds=2,
+            jpeg_quality=90,
+            post=post,  # type: ignore[arg-type]
+        ),
+        requests_seen,
     )
 
-    result = identifier.enrich(captured(), inference_result())
 
-    person = result.detections[1]
-    assert person.student_id == "student-001"
-    assert person.identity_confidence == 0.86
-    assert person.face_bbox == (40, 20, 80, 65)
-    assert person.track_id == "face-3"
-    assert result.detections[0].student_id is None
-    assert requests_seen[0]["headers"]["X-Camera-ID"] == "entry-camera"
-    assert requests_seen[0]["headers"]["X-Person-Bboxes"] == "[[20,10,120,115]]"
+def test_사람_bbox_없이_등록_얼굴_관측을_읽는다() -> None:
+    identifier, requests_seen = identifier_with(
+        {"observations": [observation()]}
+    )
+
+    parsed = identifier.identify(captured())
+
+    assert parsed[0].identity_status is EntryIdentityStatus.REGISTERED
+    assert parsed[0].student_id == "student-001"
+    assert parsed[0].similarity == 0.86
+    headers = requests_seen[0]["headers"]
+    assert headers["X-Camera-ID"] == "entry-camera"
+    assert "X-Person-Bboxes" not in headers
     assert requests_seen[0]["data"] != captured().frame.tobytes()
 
 
-def test_얼굴_서비스_호출_성공과_지연을_기록한다() -> None:
+@pytest.mark.parametrize("status", ["UNKNOWN", "UNCERTAIN"])
+def test_미식별_상태에는_학생_ID를_허용하지_않는다(status: str) -> None:
+    identifier, _ = identifier_with(
+        {
+            "observations": [
+                observation(
+                    status=status,
+                    student_id=None,
+                    similarity=None,
+                    margin=None,
+                )
+            ]
+        }
+    )
+
+    parsed = identifier.identify(captured())
+
+    assert parsed[0].student_id is None
+    assert parsed[0].identity_status.value == status
+
+
+def test_응답에_embedding이나_정의되지_않은_필드가_있으면_거부한다() -> None:
+    item = observation()
+    item["embedding"] = [0.1]
+    identifier, _ = identifier_with({"observations": [item]})
+
+    with pytest.raises(FaceIdentificationResponseError):
+        identifier.identify(captured())
+
+
+def test_REGISTERED_응답에_거절_사유가_있으면_거부한다() -> None:
+    item = observation()
+    item["rejected_reason"] = "threshold"
+    identifier, _ = identifier_with({"observations": [item]})
+
+    with pytest.raises(FaceIdentificationResponseError):
+        identifier.identify(captured())
+
+
+def test_얼굴_서비스_장애를_저장_가능한_처리_상태로_바꾼다() -> None:
     def post(url: str, **kwargs: Any) -> FakeResponse:
         del url, kwargs
-        return FakeResponse({"identities": []})
+        raise requests.ConnectionError("down")
+
+    processor = EntryFaceProcessor(
+        HttpFaceIdentifier(
+            "http://deeplearning:8100",
+            timeout_seconds=2,
+            jpeg_quality=90,
+            post=post,  # type: ignore[arg-type]
+        )
+    )
+
+    batch = processor.process(captured())
+
+    assert batch.processing_status is EntryIdentityProcessingStatus.ANALYZER_UNAVAILABLE
+    assert batch.observations == ()
+
+
+def test_잘못된_응답을_별도_처리_상태로_남긴다() -> None:
+    identifier, _ = identifier_with({"observations": "invalid"})
+
+    batch = EntryFaceProcessor(identifier).process(captured())
+
+    assert batch.processing_status is EntryIdentityProcessingStatus.INVALID_RESPONSE
+
+
+def test_JSON_파싱_실패도_서비스_장애가_아닌_응답_오류로_남긴다() -> None:
+    def post(url: str, **kwargs: Any) -> InvalidJsonResponse:
+        del url, kwargs
+        return InvalidJsonResponse(None)
 
     identifier = HttpFaceIdentifier(
         "http://deeplearning:8100",
@@ -121,222 +185,43 @@ def test_얼굴_서비스_호출_성공과_지연을_기록한다() -> None:
         jpeg_quality=90,
         post=post,  # type: ignore[arg-type]
     )
-    before_ok = metric_value(
-        "face_identification_requests_total", outcome="ok"
-    )
-    before_duration = metric_value("face_identification_duration_seconds_count")
 
-    identifier.enrich(captured(), inference_result())
+    batch = EntryFaceProcessor(identifier).process(captured())
 
-    assert metric_value("face_identification_requests_total", outcome="ok") == (
-        before_ok + 1
-    )
-    assert metric_value("face_identification_duration_seconds_count") == (
-        before_duration + 1
-    )
+    assert batch.processing_status is EntryIdentityProcessingStatus.INVALID_RESPONSE
 
 
-def test_얼굴_서비스_응답_오류를_기록한다() -> None:
+def test_입구_이벤트_ID와_비식별_저장_payload를_만든다() -> None:
+    identifier, _ = identifier_with({"observations": [observation()]})
+    batch = EntryFaceProcessor(identifier).process(captured())
+
+    payload = build_entry_identity_event_payload(captured(), batch)
+
+    assert payload["event_id"] == "entry-camera-1787389200123-7-entry-face"
+    assert payload["processing_status"] == "SUCCEEDED"
+    assert "image" not in str(payload).lower()
+    assert "embedding" not in str(payload).lower()
+
+
+def test_저장_실패가_메모리_인계를_막지_않는다() -> None:
+    observed: list[EntryFaceObservationBatch] = []
+
     def post(url: str, **kwargs: Any) -> FakeResponse:
         del url, kwargs
-        return FakeResponse({"identities": "invalid"})
+        raise requests.ConnectionError("down")
 
-    identifier = HttpFaceIdentifier(
-        "http://deeplearning:8100",
-        timeout_seconds=2,
-        jpeg_quality=90,
+    handler = FastAPIEntryIdentityEventHandler(
+        "http://fastapi:8000",
+        inner=lambda _captured, batch: observed.append(batch),
+        max_retries=0,
         post=post,  # type: ignore[arg-type]
     )
-    before_error = metric_value(
-        "face_identification_requests_total", outcome="error"
+    batch = EntryFaceObservationBatch(
+        frame_shape=captured().frame.shape,
+        processing_status=EntryIdentityProcessingStatus.INVALID_RESPONSE,
+        observations=(),
     )
 
-    with pytest.raises(FaceIdentificationError):
-        identifier.enrich(captured(), inference_result())
+    handler(captured(), batch)
 
-    assert metric_value("face_identification_requests_total", outcome="error") == (
-        before_error + 1
-    )
-
-
-def test_미확정_얼굴은_track만_보강하고_학생을_붙이지_않는다() -> None:
-    def post(url: str, **kwargs: Any) -> FakeResponse:
-        del url, kwargs
-        return FakeResponse(
-            {
-                "identities": [
-                    {
-                        "person_index": 0,
-                        "face_bbox": [40, 20, 80, 65],
-                        "track_id": "face-4",
-                        "student_id": None,
-                        "identity_confidence": None,
-                    }
-                ]
-            }
-        )
-
-    result = HttpFaceIdentifier(
-        "http://deeplearning:8100",
-        timeout_seconds=2,
-        jpeg_quality=90,
-        post=post,  # type: ignore[arg-type]
-    ).enrich(captured(), inference_result())
-
-    person = result.detections[1]
-    assert person.student_id is None
-    assert person.identity_confidence is None
-    assert person.face_bbox is None
-    assert person.track_id == "face-4"
-
-
-def test_사람_ByteTrack_ID를_얼굴_track으로_덮어쓰지_않는다() -> None:
-    def post(url: str, **kwargs: Any) -> FakeResponse:
-        del url, kwargs
-        return FakeResponse(
-            {
-                "identities": [
-                    {
-                        "person_index": 0,
-                        "face_bbox": [40, 20, 80, 65],
-                        "track_id": "face-4",
-                        "student_id": "student-001",
-                        "identity_confidence": 0.9,
-                    }
-                ]
-            }
-        )
-
-    original = inference_result()
-    tracked = InferenceResult(
-        original.frame_shape,
-        (
-            original.detections[0],
-            Detection(
-                0,
-                "person",
-                0.9,
-                (20, 10, 120, 115),
-                track_id="person-7",
-            ),
-        ),
-    )
-
-    enriched = HttpFaceIdentifier(
-        "http://deeplearning:8100",
-        timeout_seconds=2,
-        jpeg_quality=90,
-        post=post,  # type: ignore[arg-type]
-    ).enrich(captured(), tracked)
-
-    assert enriched.detections[1].track_id == "person-7"
-    assert enriched.detections[1].student_id == "student-001"
-
-
-def test_얼굴_식별은_낮은_신뢰도_사람_오탐을_요청에서_제외한다() -> None:
-    requests_seen: list[dict[str, str]] = []
-
-    def post(
-        url: str,
-        *,
-        data: bytes,
-        headers: dict[str, str],
-        timeout: float,
-    ) -> FakeResponse:
-        del url, data, timeout
-        requests_seen.append(headers)
-        return FakeResponse(
-            {
-                "identities": [
-                    {
-                        "person_index": 0,
-                        "face_bbox": [45, 20, 80, 65],
-                        "track_id": "face-9",
-                        "student_id": "student-001",
-                        "identity_confidence": 0.88,
-                    }
-                ]
-            }
-        )
-
-    result = InferenceResult(
-        frame_shape=(120, 160, 3),
-        detections=(
-            Detection(0, "person", 0.41, (35, 10, 105, 110), track_id="person-1"),
-            Detection(0, "person", 0.67, (20, 5, 125, 118), track_id="person-2"),
-        ),
-    )
-
-    enriched = HttpFaceIdentifier(
-        "http://deeplearning:8100",
-        timeout_seconds=2,
-        jpeg_quality=90,
-        minimum_person_confidence=0.5,
-        post=post,  # type: ignore[arg-type]
-    ).enrich(captured(), result)
-
-    assert requests_seen[0]["X-Person-Bboxes"] == "[[20,5,125,118]]"
-    assert enriched.detections[0].student_id is None
-    assert enriched.detections[1].student_id == "student-001"
-    assert enriched.detections[1].track_id == "person-2"
-
-
-def test_중복된_사람_응답은_거부한다() -> None:
-    item = {
-        "person_index": 0,
-        "face_bbox": [40, 20, 80, 65],
-        "track_id": "face-3",
-        "student_id": "student-001",
-        "identity_confidence": 0.86,
-    }
-
-    with pytest.raises(FaceIdentificationError):
-        HttpFaceIdentifier._parse_matches({"identities": [item, item]}, person_count=1)
-
-
-def test_얼굴_서비스_실패는_원래_탐지_전송을_막지_않는다() -> None:
-    class FailingIdentifier:
-        def enrich(
-            self, captured_frame: CapturedFrame, result: InferenceResult
-        ) -> InferenceResult:
-            del captured_frame, result
-            raise FaceIdentificationError("서비스 중단")
-
-    handled: list[InferenceResult] = []
-    handler = FaceIdentityResultHandler(
-        FailingIdentifier(),  # type: ignore[arg-type]
-        camera_ids=frozenset({"entry-camera"}),
-        inner=lambda captured_frame, result: handled.append(result),
-    )
-    original = inference_result()
-
-    handler(captured(), original)
-
-    assert handled == [original]
-
-
-def test_대상이_아닌_카메라는_얼굴_서비스를_호출하지_않는다() -> None:
-    class UnexpectedIdentifier:
-        def enrich(
-            self, captured_frame: CapturedFrame, result: InferenceResult
-        ) -> InferenceResult:
-            del captured_frame, result
-            raise AssertionError("좌석 카메라에서 얼굴 식별을 호출하면 안 됩니다.")
-
-    handled: list[InferenceResult] = []
-    handler = FaceIdentityResultHandler(
-        UnexpectedIdentifier(),  # type: ignore[arg-type]
-        camera_ids=frozenset({"entry-camera"}),
-        inner=lambda captured_frame, result: handled.append(result),
-    )
-    seat_camera = CapturedFrame(
-        camera_id="seat-camera",
-        frame=captured().frame,
-        captured_at=captured().captured_at,
-        sequence=8,
-    )
-    original = inference_result()
-
-    handler(seat_camera, original)
-
-    assert handled == [original]
+    assert observed == [batch]

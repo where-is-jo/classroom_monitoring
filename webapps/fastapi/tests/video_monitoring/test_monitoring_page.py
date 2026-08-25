@@ -124,6 +124,9 @@ def test_monitoring_page_card_has_identity_status_detection_and_webrtc(
     assert 'role="alert"' in response.text
     assert "data-last-detection" in response.text
     assert "data-detection-count" in response.text
+    assert "data-camera-role" in response.text
+    assert "data-source-status" in response.text
+    assert "data-analysis-status" in response.text
     assert "마지막 탐지" in response.text
     # video 접근 가능한 이름에는 카메라 label과 실시간 영상임이 포함된다.
     assert 'aria-label="A101 전면 카메라 실시간 영상"' in response.text

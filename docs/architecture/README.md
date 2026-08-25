@@ -36,28 +36,30 @@
 flowchart TB
     ENTRY["입구 카메라<br/>라즈베리파이 + 웹캠 · 신원을 만든다"]
     CCTV["어안 CCTV<br/>강의실 전체 조망 · 좌석을 판정한다"]
-    STREAM["worker<br/>RTSP 수신 → 샘플링 → 사람 탐지·ByteTrack → 신원 인계 → 결과 전달"]
+    STREAM["worker<br/>RTSP 수신 → 역할 분기 → 신원 인계 → 결과 전달"]
     MODEL["deeplearning<br/>입구 얼굴 탐지 · 얼굴 track · 갤러리 식별"]
     BROWSER(["브라우저<br/>관리자 화면"])
-    API["FastAPI 백엔드<br/>학생·좌석·얼굴 등록·상태 판정·조회 API"]
-    MONGO[("MongoDB<br/>학생 · 좌석 · 얼굴 프로필 · 이벤트 · 상태 이력")]
+    API["FastAPI 백엔드<br/>입구 얼굴 이벤트 저장 · 학생·좌석·상태 판정·조회 API"]
+    MONGO[("MongoDB<br/>학생 · 좌석 · 얼굴 프로필 · 입구/탐지 이벤트 · 상태 이력")]
     MINIO[("MinIO<br/>영상 · 얼굴 등록 이미지")]
 
     ENTRY -->|"RTSP"| STREAM
     CCTV -->|"RTSP"| STREAM
     BROWSER -->|"HTTP"| API
     API <--> MONGO
-    STREAM -->|"입구 JPEG · 사람 bbox · 내부 HTTP"| MODEL
-    MODEL -->|"student_id · 신뢰도 · 얼굴 bbox"| STREAM
-    STREAM -->|"탐지 이벤트 · 내부 HTTP"| API
+    STREAM -->|"입구 JPEG · 내부 HTTP"| MODEL
+    MODEL -->|"얼굴 관측 · student_id · 유사도"| STREAM
+    STREAM -->|"입구 얼굴 이벤트 · CCTV 탐지 이벤트"| API
     MONGO -->|"대표 embedding 읽기 전용"| MODEL
     STREAM -.-> MINIO
     API -.-> MINIO
 ```
 
 실선은 현재 구현된 경로다. 얼굴 식별과 카메라 간 신원 인계는 설정을 명시해야 켜진다.
-worker는 입구·CCTV에 독립 ByteTrack을 두고, 입구에서 식별한 신원을 CCTV 문 영역에서
-유일하게 새로 생긴 track에만 인계한다([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
+worker는 입구에서 YOLO·사람 ByteTrack을 실행하지 않고 얼굴 관측만 만든다. CCTV에서는
+얼굴 모델을 실행하지 않고 YOLO·ByteTrack만 실행하며, 입구에서 식별한 신원을 CCTV 문
+영역에서 유일하게 새로 생긴 track에만 인계한다([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다),
+[0040](./decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)).
 
 **어안 CCTV의 왜곡 보정은 사람 탐지 이전에 한 번만 수행하고, 보정된 좌표계가 ROI와
 bbox의 정본이다.** 구성도에 단계를 그리지 않은 것은 어느 서비스가 수행할지가 아직
@@ -78,10 +80,10 @@ bbox의 정본이다.** 구성도에 단계를 그리지 않은 것은 어느 �
 | 관리자 화면 | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`templates/`) | 강의실 좌석 현황·모니터링·검색 세 화면만 있다 |
 | FastAPI 백엔드 API | [`webapps/fastapi`](../../webapps/fastapi/README.md) (`app/`) | 학생·좌석·얼굴 등록, 탐지 수신, 상태 판정·이력과 관리자 화면 구현 |
 | 카메라 실시간 수신, 프레임 샘플링 | [`worker/stream`](../../worker/stream/README.md) | 동작. 다중 RTSP 소스 수신·재연결·샘플링. 로컬 저장은 개발용이며 기본 꺼짐 |
-| 추론 실행 단계 | [`worker/inference`](../../worker/inference/README.md) | 학습된 사람 탐지, 카메라별 ByteTrack, 입구 얼굴 식별 HTTP 보강, 문 영역·시각 기반 신원 인계, FastAPI 전달 구현. 사람 모델 직접 호출은 이관 대상([결정 0009](./decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)) |
+| 추론 실행 단계 | [`worker/inference`](../../worker/inference/README.md) | 입구 얼굴 관측 HTTP 호출·저장, CCTV 사람 탐지·ByteTrack, 문 영역·시각 기반 신원 인계, FastAPI 전달 구현. 사람 모델 직접 호출은 이관 대상([결정 0009](./decisions.md#0009--추론-책임을-모델과-실행으로-나눈다)) |
 | 사람 탐지 · 얼굴 탐지 · 얼굴 인식 모델 | [`deeplearning`](../../deeplearning/README.md) | 사람 탐지 학습·평가, SCRFD·ArcFace 갤러리 식별·얼굴 추적·MediaPipe 자세 구현. 운영 사람 ByteTrack과 카메라 간 인계는 worker가 담당 |
 | 학생 상태 판정 | `webapps/fastapi` | 구현됨. CCTV의 신원 있는 track을 좌석 ROI 근거와 결합해 수신 시점에 판정·저장·이력을 남긴다([결정 0032](./decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)) |
-| MongoDB 저장 | `webapps/fastapi`의 어댑터 | 학생·강의실·좌석·얼굴 대표 embedding·탐지 이벤트·상태 이력 구현. deeplearning은 대표 embedding만 읽기 전용 조회 |
+| MongoDB 저장 | `webapps/fastapi`의 어댑터 | 학생·강의실·좌석·얼굴 대표 embedding·탐지 이벤트·입구 얼굴 이벤트(7일 TTL)·상태 이력 구현. deeplearning은 대표 embedding만 읽기 전용 조회 |
 | 영상을 객체 저장소에 적재 | [`worker/recorder`](../../worker/recorder/README.md) | 동작하나 **공용 서버에서 실행하지 않는다.** 영상 원본을 저장하지 않기로 했다([결정 0028](./decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)) |
 | 탐지 시점 스냅샷 적재 | [`worker/inference`](../../worker/inference/README.md) | 동작. 탐지 개수가 바뀌면 JPEG를 MinIO에 올린다([결정 0028](./decisions.md#0028--영상-원본을-저장하지-않고-스냅샷만-남긴다)). 기본은 꺼짐 |
 | 스냅샷 조회 화면·API | `webapps/fastapi`의 `app/snapshots/` | 동작. MinIO 목록을 읽어 보여준다. 이미지는 fastapi가 프록시한다 |
@@ -138,18 +140,18 @@ MediaMTX로 영상을 보내는 방향이 필요하다. CCTV 사설망을 GPU �
 ## 지금 동작하는 것과 목표의 거리
 
 ```text
-입구 카메라 → 학습 YOLO 사람 탐지 → 입구 ByteTrack → deeplearning SCRFD·ArcFace
-                                                       ↑ MongoDB 대표 embedding 갤러리
-                                                       ↓ student_id·신뢰도
-                                                            │
-                         문 영역·통과 시각의 유일 후보일 때만 신원 인계
-                                                            ▼
+입구 카메라 → deeplearning SCRFD·ArcFace → 얼굴 track·student_id
+                               ↑ MongoDB 대표 embedding 갤러리
+                               ├→ FastAPI 입구 얼굴 이벤트 7일 저장
+                               │
+                 문 영역·통과 시각의 유일 후보일 때만 신원 인계
+                               ▼
 CCTV → 학습 YOLO 사람 탐지 → CCTV ByteTrack ───────▶ FastAPI ROI·지정 좌석 상태 판정
 ```
 
 입구 카메라 한 화각 안에서 특정 학생을 식별하고([0035](./decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)),
-그 신원을 CCTV의 사람 track으로 넘겨 좌석까지 유지하는 코드 경로가 연결됐다. 얼굴
-track ID는 사람 ByteTrack ID를 덮어쓰지 않는다. 후보 학생이나 CCTV 문 영역의 신규
+그 신원을 CCTV의 사람 track으로 넘겨 좌석까지 유지하는 코드 경로가 연결됐다. 입구 얼굴
+track과 CCTV 사람 ByteTrack은 독립된 ID 공간을 쓴다. 후보 학생이나 CCTV 문 영역의 신규
 track이 둘 이상이면 가까운 대상을 추측하지 않고 미식별로 둔다([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
 
 두 실제 RTSP 경로와 학습 가중치의 worker 설정, CCTV의 H.264 게이트웨이까지 준비됐다.
@@ -241,8 +243,9 @@ HTTP만 호출한다. 사람 탐지는 아직 `worker/inference`가 ultralytics�
 ### 서비스 간 계약은 문서화된 것만 쓴다
 
 각 서비스는 상대의 내부 구조를 모른 채 동작해야 한다.
-worker는 [결정 0035](./decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)에
-따라 입구 JPEG·사람 bbox를 deeplearning 내부 HTTP에 보내 식별 결과를 보강한다. 그 뒤
+worker는 [결정 0040](./decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)에
+따라 입구 JPEG만 deeplearning 내부 HTTP에 보내 얼굴 관측을 받고, 관측 메타데이터를
+FastAPI 내부 HTTP에 저장한다. 그 뒤
 [결정 0027](./decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)에 따라
 FastAPI 내부 HTTP로 탐지 이벤트를 보낸다. embedding과 얼굴 이미지는 두 응답에 넣지
 않는다.
@@ -259,12 +262,12 @@ FastAPI 내부 HTTP로 탐지 이벤트를 보낸다. embedding과 얼굴 이미
 ```text
 카메라 ─RTSP─▶ MediaMTX → OpenCV(worker/stream)
                           → 프레임 샘플링 → 카메라별 최신 프레임 버퍼
-                          → worker/inference ┬→ 학습 YOLO 사람 탐지 → 카메라별 ByteTrack
-                                             │   └→ 지정 입구 프레임만 deeplearning HTTP
-                                             │       └→ MongoDB 대표 embedding 대조
-                                             │           └→ student_id·얼굴 track 보강
-                                             ├→ 문 영역·통과 시각이 유일할 때 CCTV track에 신원 인계
-                                             ├→ FastAPI 탐지 이벤트 HTTP 또는 로그
+                          → worker/inference ┬→ 입구: deeplearning HTTP
+                                             │   └→ SCRFD·MongoDB 대표 embedding 대조
+                                             │       └→ 얼굴 track·판정 → FastAPI 입구 이벤트
+                                             ├→ CCTV: 학습 YOLO 사람 탐지 → ByteTrack
+                                             │   └→ 문 영역·통과 시각이 유일할 때 신원 인계
+                                             ├→ FastAPI CCTV 탐지 이벤트 HTTP 또는 로그
                                              │
                                              └→ 탐지 개수가 바뀌면 JPEG 스냅샷
                                                 → MinIO (lifecycle이 30일 뒤 삭제)
@@ -287,10 +290,11 @@ CCTV `SEAT_JUDGING` track만 좌석의 학생 신원과 상태 근거가 된다.
 | 1. 수집 | 카메라 영상 | 연속 프레임 | worker/stream | 구현됨 |
 | 1-1. 어안 보정 | CCTV 프레임 | 평탄화된 프레임 | 수행 위치 `결정 필요` | `예정`([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)) |
 | 2. 샘플링 | 연속 프레임 | 추론 대상 프레임 | worker/stream | 구현됨 |
-| 3. 사람 탐지 | 프레임 | 사람 ROI·좌표·신뢰도 | deeplearning | `예정`(현재 worker/inference가 대신함) |
-| 3-1. 트래킹 | 프레임별 사람 bbox | 카메라별 `track_id` | worker/inference | 구현됨. 카메라별 독립 ByteTrack, 고·저신뢰도 2단계 연관, 짧은 유실 buffer 적용 |
-| 4. 얼굴 탐지·인식 | **입구 카메라의** JPEG·사람 bbox | `student_id` 또는 미식별·신뢰도·얼굴 track | deeplearning | 구현됨([0035](./decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다)). CCTV에서는 호출하지 않음 |
-| 4-1. 카메라 간 신원 인계 | 입구 track(신원 있음) + CCTV 문 영역 신규 track | 신원이 붙은 CCTV track | worker/inference | 구현됨([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)). 현장 문 ROI·시간 창 보정 필요 |
+| 3. 사람 탐지 | **CCTV 프레임만** | 사람 ROI·좌표·신뢰도 | deeplearning | 모델 소유는 deeplearning, 현재 실행은 worker/inference의 YOLO |
+| 3-1. 트래킹 | CCTV 프레임별 사람 bbox | CCTV `track_id` | worker/inference | 구현됨. 고·저신뢰도 2단계 ByteTrack, 짧은 유실 buffer 적용. 입구에서는 실행하지 않음 |
+| 4. 얼굴 탐지·인식 | **입구 카메라의** JPEG | 얼굴 track별 판정·`student_id`·유사도·품질 | deeplearning | 구현됨([0035](./decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다), [0040](./decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)). CCTV에서는 호출하지 않음 |
+| 4-1. 입구 얼굴 관측 저장 | 처리 상태·얼굴 관측 메타데이터 | 7일 보존 이벤트 | worker → fastapi → MongoDB | 구현됨. 이미지·embedding·학생 이름·학번은 저장하지 않음 |
+| 4-2. 카메라 간 신원 인계 | 등록된 입구 얼굴 track + CCTV 문 영역 신규 사람 track | 신원이 붙은 CCTV track | worker/inference | 구현됨([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)). 현장 문 ROI·시간 창 보정 필요 |
 | 5. 전달 | 탐지 결과 | 수신된 이벤트 | worker → fastapi HTTP | 구현됨([결정 0027](./decisions.md#0027--실시간-관제-전달을-httpwebrtcsse로-구성한다)) |
 | 6. 좌석 대조 | CCTV track 위치 + 좌석 ROI | 현재 좌석 / 지정 좌석 일치 여부 | fastapi | 구현됨 |
 | 7. 상태 판정 | 좌석 근거 + 유예 시간 | 학생 상태 + 근거 + 이력 | fastapi | 구현됨([0032](./decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)). 수업 시간표 결합은 `예정` |
@@ -401,7 +405,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | **GPU 서버가 카메라 사설망에 닿는가** | 사설망 route 대신 개인 PC publisher가 CCTV를 H.264로 바꿔 GPU 서버 MediaMTX로 송출한다([0037](./decisions.md#0037--개인-pc-publisher가-cctv를-gpu-서버-mediamtx로-송출한다)). 공식 dev compose가 이 방향을 사용하며 CCTV 연속 디코딩은 실측했다 | worker, monitoring |
 | 입구 카메라 영상을 넣는 방향 | 현재 송출을 사용할 수 없어 `결정 필요`. 로컬 테스트용 MediaMTX 경로를 공식 배치로 간주하지 않는다 | worker |
 | 실제 CCTV의 화각과 코덱 | 입력은 HEVC(H.265), GPU MediaMTX에 송출되는 경로는 H.264로 변환한다. **어안이 아닌 일반 광각**이라 0024의 어안 전제와 다르다 — 카메라를 바꿀지 전제를 고칠지는 `결정 필요` | worker, deeplearning |
-| 고정 화각 기반 ROI 자동 생성 | 확정·구현됨([0039](./decisions.md#0039--좌석-roi-자동-생성을-좌석-격자와-네-모서리-호모그래피로-한다)). **원본 평면은 배치도 `seat.geometry`가 아니라 좌석 행·열 격자다** — 실제 좌석 문서의 `geometry`가 전부 비어 있고 채울 화면이 없다. 관리자가 캡처 화면에서 좌석 구역 네 모서리를 찍으면 격자를 사영해 좌석마다 ROI를 만들고, 확정 전까지 `needs_review`로 판정에서 뺀다. **실제 CCTV 화면으로는 아직 검증하지 않았다** | fastapi |
+| 고정 화각 기반 ROI 자동 생성 | 확정·구현됨. 경로가 둘이다. **(1) 탐지 밀도**([0041](./decisions.md#0041--좌석-roi를-탐지-밀도에서-찾고-좌석-지정은-사람이-한다)) — 사람이 오래 앉아 있던 자리를 bbox 중심 밀도에서 찾는다. 실제 CCTV 24시간 기록에서 자리 14곳을 찾아 캡처 프레임에 겹쳐 확인했다. **좌석 지정은 사람이 한다** — 카메라는 자리를 알지만 좌석 이름을 알지 못한다. **(2) 좌석 격자 사영**([0039](./decisions.md#0039--좌석-roi-자동-생성을-좌석-격자와-네-모서리-호모그래피로-한다)) — 탐지 기록이 없는 카메라에서 쓴다. 실제 3A컴퓨터실에서는 격자와 배치가 어긋나 잘 맞지 않았다. 두 경로 모두 확정 전까지 `needs_review`로 판정에서 뺀다. **저장한 ROI로 좌석 판정이 맞게 도는지는 아직 확인하지 않았다** | fastapi |
 | 수업 시간표의 원본 관리 주체 | 결정 필요 | fastapi |
 | 카메라 대수와 역할 | 확정([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 전체 조망 CCTV 1대 + 입구 카메라 1대. 현재 CCTV는 일반 광각으로 실측돼 0024의 어안 전제는 재검토가 필요하다 | worker, fastapi |
 | 두 화각의 겹침 | 겹치지 않는다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 7번). 입구 카메라를 문쪽만 보게 두기 때문이며, 이 때문에 겹침 기반 신원 인계를 쓸 수 없다 | worker, deeplearning |

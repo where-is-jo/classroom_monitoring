@@ -13,26 +13,30 @@
 </head>
 <body>
   <!-- 카드 1: 성공 카드 (playback session + signaling + SSE 모두 정상) -->
-  <article class="camera-monitoring-card" data-real-stream data-stream-id="stream-01" data-camera-id="camera-01">
+  <article class="camera-monitoring-card" data-real-stream data-stream-id="stream-01" data-camera-id="camera-01" data-camera-role="IDENTITY_ONLY">
     <div class="camera-monitoring-frame">
       <video data-webrtc muted autoplay playsinline></video>
       <div class="camera-monitoring-error" data-video-error hidden role="alert">기본 오류 문구</div>
     </div>
+    <span data-source-status class="status-label status-label--no-video">최근 탐지 없음</span>
     <p class="card-meta">
       <span>마지막 탐지 <strong data-last-detection>없음</strong></span>
       <span>탐지 <strong data-detection-count>0</strong>건</span>
     </p>
+    <p data-analysis-status hidden role="status"></p>
   </article>
   <!-- 카드 2: 오류 카드 (signaling POST가 503으로 실패한다) -->
-  <article class="camera-monitoring-card" data-real-stream data-stream-id="stream-02" data-camera-id="camera-02">
+  <article class="camera-monitoring-card" data-real-stream data-stream-id="stream-02" data-camera-id="camera-02" data-camera-role="SEAT_JUDGING">
     <div class="camera-monitoring-frame">
       <video data-webrtc muted autoplay playsinline></video>
       <div class="camera-monitoring-error" data-video-error hidden role="alert">기본 오류 문구</div>
     </div>
+    <span data-source-status class="status-label status-label--no-video">최근 탐지 없음</span>
     <p class="card-meta">
       <span>마지막 탐지 <strong data-last-detection>없음</strong></span>
       <span>탐지 <strong data-detection-count>0</strong>건</span>
     </p>
+    <p data-analysis-status hidden role="status"></p>
   </article>
 
   <pre id="test-results"></pre>
@@ -210,25 +214,27 @@
           sigStream01.body && sigStream01.body.indexOf("v=0") !== -1;
         checkpoint("signaling-connected", sigOk, sigStream01 ? JSON.stringify(sigStream01) : "no signaling post");
 
-        /* 3) SSE 구독 (camera_id 기반 detection-events) */
+        /* 3) 역할별 SSE 구독 */
         var sseUrls = window.__eventSources.map(function (es) { return es.url; });
-        var sseCam1 = sseUrls.some(function (u) { return u.indexOf("/camera-01/detection-events") !== -1; });
+        var sseCam1 = sseUrls.some(function (u) { return u.indexOf("/stream-01/entry-identity-events/stream") !== -1; });
         var sseCam2 = sseUrls.some(function (u) { return u.indexOf("/camera-02/detection-events") !== -1; });
         checkpoint("sse-subscribed", sseCam1 && sseCam2, JSON.stringify(sseUrls));
 
-        /* 4) bbox·탐지 수·마지막 탐지 갱신 (camera-01 detection emit) */
-        var esCam1 = findByUrl(/camera-01/);
+        /* 4) 입구 얼굴 bbox·이름·탐지 metadata·분석 오류 상태 */
+        var esCam1 = findByUrl(/stream-01\/entry-identity-events/);
         if (esCam1) {
-          esCam1.emit("detection", {
-            event_id: "evt-100",
+          esCam1.emit("entry-identity", {
+            type: "entry-identity",
+            event_id: "face-100",
             camera_id: "camera-01",
             captured_at: "2026-08-14T12:00:00+09:00",
             frame: { width_pixels: 1280, height_pixels: 720 },
-            detections: [
-              { class_name: "student", display_label: "김로운", track_id: "person-17", confidence: 0.9, bbox: [10, 20, 100, 200] },
-              { class_name: "student", confidence: 0.8, bbox: [300, 50, 400, 250] }
+            processing_status: "SUCCEEDED",
+            observations: [
+              { display_label: "김로운", face_track_id: "face-17", detection_confidence: 0.9, face_bbox: [10, 20, 100, 200] },
+              { display_label: "미등록 얼굴", face_track_id: "face-18", detection_confidence: 0.8, face_bbox: [300, 50, 400, 250] }
             ],
-            detections_count: 2
+            observations_count: 2
           });
         }
         var card1 = document.querySelector('[data-camera-id="camera-01"]');
@@ -240,20 +246,74 @@
           return item.textContent;
         });
         checkpoint("safe-identification-labels",
-          labels[0].indexOf("김로운") !== -1 && labels[1].indexOf("사람") !== -1,
+          labels[0].indexOf("김로운") !== -1 && labels[1].indexOf("미등록 얼굴") !== -1,
           JSON.stringify(labels));
         checkpoint("track-label-visible",
-          labels[0].indexOf("#person-17") !== -1,
+          labels[0].indexOf("#face-17") !== -1,
           JSON.stringify(labels));
         checkpoint("detection-count-updated", countEl.textContent === "2", countEl.textContent);
         checkpoint("last-detection-updated", lastEl.textContent !== "없음", lastEl.textContent);
+        var sourceStatus = card1.querySelector("[data-source-status]");
+        checkpoint("face-source-connected",
+          sourceStatus.textContent === "얼굴 탐지 수신 중" && sourceStatus.classList.contains("status-label--active"),
+          sourceStatus.textContent);
+
+        var analysisStatus = card1.querySelector("[data-analysis-status]");
+        if (esCam1) {
+          esCam1.emit("entry-identity", {
+            type: "entry-identity",
+            event_id: "face-101",
+            camera_id: "camera-01",
+            captured_at: "2026-08-14T12:00:01+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            processing_status: "ANALYZER_UNAVAILABLE",
+            observations: [],
+            observations_count: 0
+          });
+        }
+        checkpoint("face-analysis-error-visible",
+          analysisStatus.hidden === false && analysisStatus.textContent.indexOf("연결할 수 없습니다") !== -1,
+          analysisStatus.textContent);
+        if (esCam1) {
+          esCam1.emit("entry-identity", {
+            type: "entry-identity",
+            event_id: "face-102",
+            camera_id: "camera-01",
+            captured_at: "2026-08-14T12:00:02+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            processing_status: "SUCCEEDED",
+            observations: [],
+            observations_count: 0
+          });
+        }
+        checkpoint("face-analysis-error-cleared", analysisStatus.hidden === true, analysisStatus.textContent);
+
+        /* CCTV는 기존 객체 detection만 처리한다. */
+        var esCam2 = findByUrl(/camera-02\/detection-events/);
+        if (esCam2) {
+          esCam2.emit("detection", {
+            event_id: "evt-200",
+            camera_id: "camera-02",
+            captured_at: "2026-08-14T12:00:00+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            detections: [
+              { display_label: "사람", track_id: "person-7", confidence: 0.88, bbox: [20, 30, 120, 210] }
+            ],
+            detections_count: 1
+          });
+        }
+        var card2 = document.querySelector('[data-camera-id="camera-02"]');
+        checkpoint("cctv-object-detection-kept",
+          card2.querySelectorAll(".bbox-box").length === 1 &&
+          card2.querySelector(".bbox-label").textContent.indexOf("#person-7") !== -1,
+          card2.querySelector(".bbox-label").textContent);
 
         /* 5) 오류 카드 한정: stream-02 signaling 실패는 카드 2에만 표시 */
         var errCam2 = document.querySelector('[data-camera-id="camera-02"] [data-video-error]');
         var errCam1 = document.querySelector('[data-camera-id="camera-01"] [data-video-error]');
         checkpoint("error-isolated", errCam2.hidden === false && errCam1.hidden === true,
           "cam2 hidden=" + errCam2.hidden + ", cam1 hidden=" + errCam1.hidden);
-        var esCam1After = findByUrl(/camera-01/);
+        var esCam1After = findByUrl(/stream-01\/entry-identity-events/);
         checkpoint("other-card-kept",
           !!sigStream01 && esCam1After && esCam1After.readyState === 0,
           "sig=" + !!sigStream01 + ", esClosed=" + (esCam1After && esCam1After.readyState === 2));

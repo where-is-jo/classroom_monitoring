@@ -34,6 +34,8 @@ from app.student_monitoring.service import StudentMonitoringService
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import CameraRole, PlaybackKind, VideoStream
 
+from ..roi_connections.fakes import FakeSeatedDetectionSource
+
 _CLASSROOM_ID = "classroom-a101"
 
 
@@ -153,6 +155,7 @@ def _make_service(
         roi_repository,
         stream_repo,
         UnavailableCameraFrameGrabber(),
+        FakeSeatedDetectionSource(),
         max_upload_bytes=1024,
         page_size_max=200,
         clock=lambda: datetime(2026, 8, 13, 9, 0, tzinfo=UTC),

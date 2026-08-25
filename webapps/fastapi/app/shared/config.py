@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     # 캡처는 RTSP 연결·키프레임 대기를 포함해 실측 4초대가 나온다. 다른 외부 호출(5초)과
     # 같은 값을 쓰면 정상 캡처가 타임아웃으로 잘린다.
     camera_frame_capture_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
+    # --- 탐지 밀도 기반 ROI 자리 찾기 (결정 0041) ---
+    # 한 번 찾을 때 읽을 탐지 이벤트 수의 상한. 실측 CCTV는 프레임당 사람 6~7명을
+    # 담으므로 8000건이면 표본 5만 개쯤 된다. 조회 기간을 길게 잡아도 응답 시간과
+    # 메모리가 예측 가능한 범위에 있도록 건수로 막는다.
+    roi_detection_sample_max_events: int = Field(default=8000, ge=100, le=100_000)
     face_enrollment_required_samples: int = Field(default=120, ge=1, le=2000)
     face_enrollment_augmented_samples: int = Field(default=180, ge=0, le=10000)
     face_pose_front_quota: int = Field(default=32, ge=1)
@@ -119,6 +124,8 @@ class Settings(BaseSettings):
     # Detection event settings
     detection_event_max_detections_per_event: int = Field(default=100, ge=1)
     detection_event_stale_seconds: int = Field(default=300, ge=1)
+    # 입구 얼굴 관측 메타데이터는 원본 이미지·embedding 없이 이 기간만 보관한다.
+    entry_identity_event_retention_days: int = Field(default=7, ge=1, le=90)
     student_identity_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     # --- 학생 상태 판정 시간 정책 (결정 0008) ---
     # 마지막으로 학생을 식별한 뒤 이 시간 동안은 직전 판정을 이어받는다. 앉은 사람도

@@ -16,8 +16,16 @@
 **서버가 꺼져 있으면 배포는 실패가 아니라 건너뛴다** — 서버를 켠 뒤 Actions 탭에서
 `Run workflow`로 다시 돌린다. `env/`와 `models/`는 전송 대상이 아니라 여전히 사람이 올린다.
 
-반영 대상은 compose 파일만이 아니다. **`.docker/` 아래 커밋되는 모든 파일**이며
-(`prometheus/`·`alloy/`·`minio/` 포함) 문서(`.md`)만 제외된다.
+전송 대상은 compose 파일만이 아니다. **`.docker/` 아래 커밋되는 모든 파일**이며
+(`prometheus/`·`alloy/`·`minio/`·`scripts/`와 pc 스택 compose, 문서까지) 이 서버에서
+쓰지 않는 파일도 함께 올라간다.
+
+**무엇이 배포를 깨우는지는 그것과 다르다.** 트리거는 이 서버에 실제로 반영되는 경로로
+한정된다 — 서버 스택 compose 셋, `prometheus/`·`alloy/`·`minio/`·`scripts/`, 그리고
+`worker/`·`deeplearning/` 중 이미지에 들어가는 소스다. **pc 스택 compose나 테스트·문서만
+고치면 이 워크플로우는 돌지 않는다.** 서버 동작이 바뀌지 않는데 14.9GB 재빌드와 컨테이너
+재생성을 부르지 않기 위해서다([결정 0038](../docs/architecture/decisions.md#0038--gpu-서버의-compose-설정을-github-actions가-ssh로-반영한다)의 2번).
+그런 변경까지 서버에 올리고 싶으면 Actions 탭에서 `Run workflow`로 직접 돌린다.
 
 이 서버의 배포 루트는 **홈 디렉터리 자체**다. 저장소 변수 `GPU_SERVER_DEPLOY_PATH`에
 `/home/doyoon`이 들어 있고, 파일은 `~/.docker/`에 놓인다. 배포 직전 백업은
@@ -324,7 +332,7 @@ INFERENCE_TARGET_CLASS_IDS={"0":"person"}
 FASTAPI_URL=http://<개인-PC-Tailscale-IP>:8076
 FACE_IDENTITY_URL=http://deeplearning:8100
 FACE_IDENTITY_CAMERA_IDS=camera-01
-PERSON_TRACKING_CAMERA_IDS=camera-01,classroom-cctv
+PERSON_TRACKING_CAMERA_IDS=classroom-cctv
 IDENTITY_HANDOVER_ROUTES=[{"entry_camera_id":"camera-01","classroom_camera_id":"classroom-cctv","classroom_entry_zone":[0.0,0.0,0.25,1.0]}]
 ```
 
@@ -375,6 +383,12 @@ ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deep
 런타임 검증도 자동 실행한다. 실패하면 설정과 두 `:latest` 태그를 모두 이전 상태로
 되돌린다.
 
+기본 배포 검증의 필수 범위는 GPU 서버 안의 deeplearning 계약·CUDA·worker `/metrics`다.
+개인 PC의 FastAPI는 노트북이 꺼져 있거나 새 `:develop` 이미지를 아직 재적용하지 않았을
+수 있으므로 계약 불일치는 경고만 남기고 GPU 스택을 롤백하지 않는다. 두 호스트를 모두
+올린 뒤 `--require-live-handoff`를 주면 FastAPI의 신원 이벤트 API 계약과 실제 저장 이벤트
+조회도 필수로 검증한다.
+
 ### 4. 실제 인계 확인
 
 1. FastAPI `/identity-handover`에서 `camera-01 → classroom-cctv` route와 실제 문 바닥
@@ -389,8 +403,8 @@ ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deep
    들어갔을 때 학생 상태로 반영되는지 확인한다.
 
 위 3번 실제 동선까지 수행한 뒤 다음 명령을 실행하면 두 camera의 처리 프레임, 성공한
-얼굴 호출, `accepted` 인계가 모두 1건 이상인지 자동 확인한다. URL·MongoDB 자격 증명·
-학생 ID는 출력하지 않는다.
+얼굴 호출, `accepted` 인계, FastAPI에 저장되어 조회되는 입구 얼굴 이벤트가 모두 1건
+이상인지 자동 확인한다. URL·MongoDB 자격 증명·학생 ID는 출력하지 않는다.
 
 ```bash
 python .docker/scripts/verify_face_handover_runtime.py --require-live-handoff
