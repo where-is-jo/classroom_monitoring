@@ -688,6 +688,7 @@ def get_llm_search_service(
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
     classroom_repository: ClassroomRepository = Depends(get_classroom_repository),
     snapshot_service: SnapshotService = Depends(get_snapshot_service),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
     settings: Settings = Depends(get_settings),
 ) -> LlmSearchService | None:
     """자연어 검색 조립. **비활성 환경에서는 `None`이다.**
@@ -698,6 +699,10 @@ def get_llm_search_service(
     비활성을 여기서 판정하는 이유는 **조립 지점이 mode를 아는 유일한 곳**이기
     때문이다(결정 0002). 라우터가 `Settings`를 직접 읽으면 설정 세부가 HTTP 계층으로
     새고, 서비스가 읽으면 "만들어졌는데 쓰면 안 되는 객체"가 생긴다.
+
+    `student_lookup`은 "박무현이 없는 스냅샷"처럼 사람을 지목한 질문 때문에 받는다.
+    모델이 뽑아 준 이름을 학생 원장과 잇는 일이 서비스에 있고, 그 계약은 이미
+    `app/shared/student_identity.py`에 중립 포트로 있어 그대로 쓴다.
 
     예외를 던지지 않고 `None`을 돌려주는 이유는 화면 때문이다. 의존성이 예외를 던지면
     화면도 오류 페이지가 되어, 정작 보여줘야 할 **"왜 못 쓰는지"를 안내할 자리가
@@ -711,6 +716,7 @@ def get_llm_search_service(
         stream_repository,
         classroom_repository,
         snapshot_service,
+        student_lookup,
         max_span_days=settings.llm_search_max_span_days,
         scan_limit=settings.llm_search_scan_limit,
         clock=utc_now,

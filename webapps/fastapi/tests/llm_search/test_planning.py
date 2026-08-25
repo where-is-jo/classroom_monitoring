@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.llm_search.errors import LlmSearchPlanInvalidError
+from app.llm_search.models import PersonPresence
 from app.llm_search.planning import (
     MAX_LIMIT,
     MAX_PLAN_TEXT_BYTES,
@@ -235,6 +236,8 @@ def test_생성_스키마와_검증_규격이_어긋나지_않는다() -> None:
         "from": "2026-08-14T06:00:00+09:00",
         "to": "2026-08-14T07:00:00+09:00",
         "limit": 10,
+        "person_name": None,
+        "person_presence": "any",
     }
     assert set(payload) == set(properties)
 
@@ -250,7 +253,7 @@ def test_스키마가_모르는_키를_막는다() -> None:
     assert _reason(json.dumps({**_VALID, "order_by": "captured_at"})) == "UNKNOWN_FIELD"
 
 
-def test_스키마가_여섯_키를_모두_내게_한다() -> None:
+def test_스키마가_모든_키를_빠짐없이_내게_한다() -> None:
     """optional로 둔 키는 모델이 통째로 생략한다. **검증이 잡지 못하는 실패다.**
 
     2026-08-18 GPU 서버(gemma-2-9b-it Q4_K_M, llama.cpp b10362)에서 실측했다.
@@ -313,9 +316,37 @@ def test_미래를_자를_때는_사유를_남기지_않는다() -> None:
     assert query.notes == ()
 
 
-def test_구간_전체가_미래면_거부한다() -> None:
-    """잘라 낼 수 없다. 조용히 0건을 돌려주면 "그때 아무도 없었다"로 읽힌다."""
-    payload = {**_VALID, "from": "2026-08-20T00:00:00Z", "to": "2026-08-21T00:00:00Z"}
+def test_구간_전체가_미래면_12시간을_되돌려_본다() -> None:
+    """오전·오후 기본값의 뒷정리다. 되돌리면 사용자가 물은 구간이 나온다.
+
+    2026-08-25 GPU 서버(gemma) 실측: KST 14:00에 "오늘 3시부터 4시 사이에 강의실에
+    몇 명 있었어?"가 15:00~16:00으로 나왔고 **재시도까지 같은 값이라 422가 됐다.**
+    지시문으로 막아 보았으나 작은 모델이 "지금"과 생성 중인 시각을 비교하지 못했다.
+    """
+    payload = {
+        **_VALID,
+        "from": "2026-08-14T15:00:00Z",
+        "to": "2026-08-14T16:00:00Z",
+    }
+
+    query = parse_plan(json.dumps(payload), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert query.from_at == datetime(2026, 8, 14, 3, 0, tzinfo=UTC)
+    assert query.to_at == datetime(2026, 8, 14, 4, 0, tzinfo=UTC)
+
+
+def test_되돌린_사실을_반드시_알린다() -> None:
+    """조용히 바꾸면 오후를 정말로 뜻한 사용자가 틀린 결과를 맞는 답으로 읽는다."""
+    payload = {**_VALID, "from": "2026-08-14T15:00:00Z", "to": "2026-08-14T16:00:00Z"}
+
+    query = parse_plan(json.dumps(payload), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert any("오전으로 바꿔 찾았습니다" in note for note in query.notes)
+
+
+def test_12시간을_되돌려도_미래면_거부한다() -> None:
+    """모델이 내일 날짜를 낸 경우다. 오전·오후를 뒤집은 것과 성격이 다르다."""
+    payload = {**_VALID, "from": "2026-08-15T06:00:00Z", "to": "2026-08-15T07:00:00Z"}
 
     assert _reason(json.dumps(payload)) == "FUTURE_RANGE"
 
@@ -328,3 +359,41 @@ def test_지금까지의_구간은_그대로_둔다() -> None:
 
     assert query.to_at == _NOW
     assert query.notes == ()
+
+
+def test_사람_이름과_방향을_읽는다() -> None:
+    """모델이 옮겨 적은 이름을 그대로 통과시킨다. 학생 원장과의 대조는 서비스가 한다."""
+    payload = {**_VALID, "person_name": "박무현", "person_presence": "absent"}
+
+    query = parse_plan(json.dumps(payload), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert query.person_name == "박무현"
+    assert query.person_presence is PersonPresence.ABSENT
+
+
+def test_사람을_말하지_않으면_방향은_any다() -> None:
+    """걸러 낼 대상이 없으므로 방향에 의미가 없다."""
+    query = parse_plan(json.dumps(_VALID), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert query.person_name is None
+    assert query.person_presence is PersonPresence.ANY
+
+
+@pytest.mark.parametrize("value", [None, "", "무엇", 3, "any"])
+def test_이름은_읽었는데_방향이_없으면_있는_쪽으로_읽는다(value: object) -> None:
+    """422로 만들지 않는다. 답을 받을 수 있었던 질문에 "다시 써 주세요"를 듣게 된다.
+
+    사람을 지목한 질문의 압도적 다수가 "있는"이라 그쪽을 기본값으로 둔다.
+    """
+    payload = {**_VALID, "person_name": "박무현", "person_presence": value}
+
+    query = parse_plan(json.dumps(payload), now=_NOW, max_span_days=7, limit_ceiling=20)
+
+    assert query.person_presence is PersonPresence.PRESENT
+
+
+def test_이름이_문장만큼_길면_거부한다() -> None:
+    """그 값은 이름이 아니라 모델이 질문을 통째로 옮긴 것이다. 화면에 그대로 인용된다."""
+    payload = {**_VALID, "person_name": "가" * 33}
+
+    assert _reason(json.dumps(payload)) == "IDENTIFIER_TOO_LONG"

@@ -17,7 +17,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import DetectionHit, IdentifiedStudent, SearchOutcome, SearchQuery
+from .models import (
+    DetectionHit,
+    IdentifiedStudent,
+    PersonSummary,
+    SearchOutcome,
+    SearchQuery,
+)
 from .planning import MAX_LIMIT
 
 
@@ -44,6 +50,12 @@ class SearchPlanResponse(BaseModel):
     from_at: datetime = Field(serialization_alias="from")
     to_at: datetime = Field(serialization_alias="to")
     limit: int
+    person_name: str | None = Field(
+        description="질문이 지목한 사람 이름. 모델이 옮겨 적은 값 그대로이며 대조는 서버가 한다."
+    )
+    person_presence: str = Field(
+        description='그 사람이 있어야 하는지("present") 없어야 하는지("absent"). 지목이 없으면 "any".'
+    )
     notes: list[str] = Field(
         description="요청을 조정했거나 대상을 찾지 못한 사유. 사용자에게 그대로 보여준다."
     )
@@ -57,7 +69,41 @@ class SearchPlanResponse(BaseModel):
             from_at=query.from_at,
             to_at=query.to_at,
             limit=query.limit,
+            person_name=query.person_name,
+            person_presence=query.person_presence.value,
             notes=list(query.notes),
+        )
+
+
+class PersonSummaryResponse(BaseModel):
+    """인물 조건을 어떻게 처리했는지.
+
+    **`applied`를 빼지 않는다.** 이름만 실어 보내면 호출자는 아래 목록이 그 조건으로
+    걸러진 것이라고 읽는데, 얼굴 인식이 붙기 전에는 걸러지지 않는다.
+    """
+
+    name: str
+    presence: str
+    student_id: str | None = Field(description="학생 원장에서 찾은 식별자. 못 찾았으면 null이다.")
+    match_count: int = Field(
+        description="이름이 같은 활성 학생 수. 0이면 명부에 없고, 2 이상이면 누구인지 정하지 못했다."
+    )
+    identity_available: bool = Field(
+        description="조회 구간의 탐지에 신원이 하나라도 실려 있었는지. 거짓이면 유무를 확인할 수 없다."
+    )
+    applied: bool = Field(
+        description="인물 조건을 실제로 걸었는지. 거짓이면 결과는 걸러지지 않았다."
+    )
+
+    @classmethod
+    def from_domain(cls, person: PersonSummary) -> PersonSummaryResponse:
+        return cls(
+            name=person.name,
+            presence=person.presence.value,
+            student_id=person.student_id,
+            match_count=person.match_count,
+            identity_available=person.identity_available,
+            applied=person.applied,
         )
 
 
@@ -117,6 +163,12 @@ class LlmSearchResponse(BaseModel):
     target_label: str = Field(
         description="이번 검색이 대상으로 삼은 곳을 사람이 읽는 한 문장으로 적은 값."
     )
+    briefing: str = Field(
+        description="기간·대상·인물 조건·건수를 사람이 읽는 문장으로 적은 값. 시각은 KST다."
+    )
+    person: PersonSummaryResponse | None = Field(
+        description="사람을 지목한 질문일 때만 채워진다. 조건을 실제로 걸었는지가 함께 담긴다."
+    )
     items: list[DetectionHitResponse]
     total: int = Field(
         description="돌려준 건수다. 조건에 맞는 전체 건수가 아니다 — truncated를 함께 본다."
@@ -134,6 +186,12 @@ class LlmSearchResponse(BaseModel):
             question=question,
             plan=SearchPlanResponse.from_domain(outcome.query),
             target_label=outcome.target_label,
+            briefing=outcome.briefing,
+            person=(
+                None
+                if outcome.person is None
+                else PersonSummaryResponse.from_domain(outcome.person)
+            ),
             items=items,
             total=len(items),
             limit=outcome.query.limit,

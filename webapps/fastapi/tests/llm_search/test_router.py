@@ -14,7 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.llm_search.errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
-from app.llm_search.models import DetectionHit, IdentifiedStudent, SearchOutcome, SearchQuery
+from app.llm_search.models import (
+    DetectionHit,
+    IdentifiedStudent,
+    PersonPresence,
+    PersonSummary,
+    SearchOutcome,
+    SearchQuery,
+)
 from app.main import app
 from app.shared.config import Settings
 from app.shared.dependencies import get_llm_search_service, get_settings
@@ -25,6 +32,8 @@ _QUERY = SearchQuery(
     from_at=datetime(2026, 8, 14, 0, 0, tzinfo=UTC),
     to_at=datetime(2026, 8, 15, 0, 0, tzinfo=UTC),
     limit=20,
+    person_name=None,
+    person_presence=PersonPresence.ANY,
     notes=("조회 기간이 너무 길어 마지막 7일만 찾았습니다.",),
 )
 _HIT = DetectionHit(
@@ -55,11 +64,19 @@ class FakeService:
 
 
 def _outcome(
-    *, hits: tuple[DetectionHit, ...] = (), truncated: bool = False, snapshot_failed: bool = False
+    *,
+    hits: tuple[DetectionHit, ...] = (),
+    truncated: bool = False,
+    snapshot_failed: bool = False,
+    query: SearchQuery = _QUERY,
+    person: PersonSummary | None = None,
+    briefing: str = "2026년 8월 14일 09:00~2026년 8월 15일 09:00 동안 A101 1강의실에서 찾았어요.",
 ) -> SearchOutcome:
     return SearchOutcome(
-        query=_QUERY,
+        query=query,
         target_label="A101 1강의실",
+        person=person,
+        briefing=briefing,
         hits=hits,
         truncated=truncated,
         snapshot_lookup_failed=snapshot_failed,
@@ -197,10 +214,10 @@ def test_화면은_질문_전에_안내를_보여준다(client: TestClient) -> N
 
 def test_화면이_결과_없음과_조회_실패를_구분한다(client: TestClient) -> None:
     _override(FakeService(_outcome()))
-    empty = client.get("/llm-search", params={"q": "오늘"})
+    empty = client.post("/llm-search", data={"question": "오늘"})
 
     _override(FakeService(error=LlmSearchPlannerUnavailableError()))
-    unavailable = client.get("/llm-search", params={"q": "오늘"})
+    unavailable = client.post("/llm-search", data={"question": "오늘"})
 
     assert "탐지 기록이 없습니다" in empty.text
     assert "검색 서버에 닿지 못했습니다" in unavailable.text
@@ -211,7 +228,7 @@ def test_화면이_계획_오류를_따로_보여준다(client: TestClient) -> N
     """질문을 고치면 되는 상황과 그렇지 않은 상황을 구분한다."""
     _override(FakeService(error=LlmSearchPlanInvalidError("NOT_JSON")))
 
-    response = client.get("/llm-search", params={"q": "음"})
+    response = client.post("/llm-search", data={"question": "음"})
 
     assert response.status_code == 200
     assert "검색 조건으로 바꾸지 못했습니다" in response.text
@@ -232,19 +249,20 @@ def test_화면이_이미지_확인_실패를_결과와_함께_알린다(client:
     )
     _override(FakeService(_outcome(hits=(hit,), snapshot_failed=True)))
 
-    response = client.get("/llm-search", params={"q": "오늘"})
+    response = client.post("/llm-search", data={"question": "오늘"})
 
     assert "확인하지 못했다는 뜻입니다" in response.text
     assert "이미지 확인 실패" in response.text
-    assert "식별 미연동" in response.text
+    # 얼굴 인식이 붙기 전에는 식별이 비어 있다. 그 사실을 감추지 않는다.
+    assert "미연동" in response.text
 
 
 def test_화면이_해석한_계획과_조정_사유를_보여준다(client: TestClient) -> None:
     _override(FakeService(_outcome(hits=(_HIT,), truncated=True)))
 
-    response = client.get("/llm-search", params={"q": "이번 달 A101"})
+    response = client.post("/llm-search", data={"question": "이번 달 A101"})
 
-    assert "이렇게 이해했습니다" in response.text
+    assert "이렇게 이해했어요" in response.text
     assert "마지막 7일만 찾았습니다" in response.text
     assert "이것이 전부가 아닙니다" in response.text
 
@@ -258,20 +276,23 @@ def test_화면은_해석한_기간을_한국_시각으로_보여준다(client: 
     """
     _override(FakeService(_outcome(hits=(_HIT,))))
 
-    response = client.get("/llm-search", params={"q": "오늘 A101"})
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
 
     # 계획의 기간: UTC 00:00 -> KST 09:00
-    assert "2026-08-14 09:00:00 KST" in response.text
+    assert "2026-08-14 09:00:00" in response.text
     # 결과 줄의 시각: UTC 06:30 -> KST 15:30
-    assert "2026-08-14 15:30:00 KST" in response.text
+    assert "2026-08-14 15:30:00" in response.text
     assert "UTC" not in response.text
+    # 이 화면의 모든 시각이 KST라 줄마다 꼬리표를 붙이지 않는다. 붙이면 정작 봐야 할
+    # 분·초가 같은 글자 뒤로 묻힌다.
+    assert "KST" not in response.text
 
 
 def test_화면은_강의실을_사람이_읽는_이름으로_보여준다(client: TestClient) -> None:
     """`classroom_id`는 UUID라 그대로 내보내면 아무 정보가 되지 못한다."""
     _override(FakeService(_outcome(hits=(_HIT,))))
 
-    response = client.get("/llm-search", params={"q": "오늘 A101"})
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
 
     assert "A101 1강의실" in response.text
 
@@ -280,7 +301,7 @@ def test_결과가_없으면_기간_확인을_먼저_안내한다(client: TestCl
     """0건의 가장 흔한 원인이 오전·오후 오해다. 저장 여부부터 의심하게 두지 않는다."""
     _override(FakeService(_outcome()))
 
-    response = client.get("/llm-search", params={"q": "오늘 3시부터 4시"})
+    response = client.post("/llm-search", data={"question": "오늘 3시부터 4시"})
 
     assert "탐지 기록이 없습니다" in response.text
     assert "물어보신 시각과 같은지" in response.text
@@ -314,9 +335,148 @@ def test_기능을_끈_환경에서는_질문을_붙여도_검색하지_않는�
     """URL로 q를 직접 붙이는 경로가 남아 있다. 그쪽으로도 새면 안 된다."""
     _disable()
 
-    response = client.get("/llm-search", params={"q": "오늘 A101에 누가 있었어?"})
+    response = client.post("/llm-search", data={"question": "오늘 A101에 누가 있었어?"})
 
     assert response.status_code == 200
     assert "로컬 환경에서는 사용할 수 없습니다" in response.text
     assert "이렇게 이해했습니다" not in response.text
     assert "탐지 기록이 없습니다" not in response.text
+
+
+def test_브리핑을_응답에_함께_싣는다(client: TestClient) -> None:
+    """호출자가 기간·대상·건수를 다시 문장으로 조립하지 않게 한다."""
+    _override(FakeService(_outcome(hits=(_HIT,), briefing="이렇게 찾았어요.")))
+
+    response = client.post("/api/v1/llm-searches", json={"question": "오늘 A101"})
+
+    assert response.json()["briefing"] == "이렇게 찾았어요."
+
+
+def test_인물_조건을_걸었는지까지_응답에_담는다(client: TestClient) -> None:
+    """이름만 실어 보내면 호출자는 아래 목록이 걸러진 것이라고 읽는다."""
+    person = PersonSummary(
+        name="박무현",
+        presence=PersonPresence.ABSENT,
+        student_id="student-1",
+        match_count=1,
+        identity_available=False,
+        applied=False,
+    )
+    _override(FakeService(_outcome(hits=(_HIT,), person=person)))
+
+    body = client.post("/api/v1/llm-searches", json={"question": "박무현 없는 스냅샷"}).json()
+
+    assert body["person"]["name"] == "박무현"
+    assert body["person"]["presence"] == "absent"
+    assert body["person"]["applied"] is False
+
+
+def test_사람을_말하지_않으면_인물_칸이_비어_있다(client: TestClient) -> None:
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    body = client.post("/api/v1/llm-searches", json={"question": "오늘 A101"}).json()
+
+    assert body["person"] is None
+    assert body["plan"]["person_name"] is None
+    assert body["plan"]["person_presence"] == "any"
+
+
+def test_화면이_브리핑_문장을_먼저_보여준다(client: TestClient) -> None:
+    """줄글로 늘어놓으면 사용자가 무엇을 어떻게 이해했는지 한 번에 읽을 수 없다."""
+    _override(
+        FakeService(
+            _outcome(
+                hits=(_HIT,),
+                briefing="2026년 8월 14일 16:30~17:00 동안 A101 1강의실에서 찾았어요.",
+            )
+        )
+    )
+
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert "2026년 8월 14일 16:30~17:00 동안 A101 1강의실에서 찾았어요." in response.text
+
+
+def test_화면이_걸지_못한_인물_조건을_표시한다(client: TestClient) -> None:
+    """조건을 걸지 못했는데 이름만 보이면 아래 목록이 걸러진 것으로 읽힌다."""
+    person = PersonSummary(
+        name="박무현",
+        presence=PersonPresence.ABSENT,
+        student_id="student-1",
+        match_count=1,
+        identity_available=False,
+        applied=False,
+    )
+    _override(FakeService(_outcome(hits=(_HIT,), person=person)))
+
+    response = client.post("/llm-search", data={"question": "박무현 없는 스냅샷"})
+
+    assert "박무현" in response.text
+    assert "조건 적용 안 됨" in response.text
+
+
+def test_화면이_탐지_한_건을_카드_하나로_묶는다(client: TestClient) -> None:
+    """예전에는 이미지·카메라·시각·인원이 한 줄씩 이어져 한 건의 경계가 보이지 않았다."""
+    second = DetectionHit(
+        event_id="event-2",
+        camera_id="camera-01",
+        resolved_classroom_id="A101",
+        resolved_classroom_label="A101 1강의실",
+        captured_at=datetime(2026, 8, 14, 7, 0, tzinfo=UTC),
+        detection_count=5,
+        identified=(),
+        unidentified_count=5,
+        snapshot_key=None,
+    )
+    _override(FakeService(_outcome(hits=(_HIT, second))))
+
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert response.text.count('class="detection-card"') == 2
+
+
+def test_화면은_질문을_주소가_아니라_본문으로_받는다(client: TestClient) -> None:
+    """질문에는 사람 이름과 찾는 시각이 담긴다. 주소에 남으면 방문 기록·접근 로그에 쌓인다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.post("/llm-search", data={"question": "어제 16시 30분 박무현"})
+
+    assert response.status_code == 200
+    assert "어제 16시 30분 박무현" not in str(response.url)
+
+
+def test_화면_폼이_POST로_제출된다(client: TestClient) -> None:
+    """폼이 GET이면 라우터를 고쳐도 브라우저가 질문을 주소에 실어 보낸다."""
+    _override(FakeService(_outcome()))
+
+    response = client.get("/llm-search")
+
+    assert 'method="post"' in response.text
+    assert 'name="question"' in response.text
+    assert 'name="q"' not in response.text
+
+
+def test_주소로_질문을_받는_경로를_남기지_않는다(client: TestClient) -> None:
+    """남겨 두면 그 경로로 들어온 질문이 그대로 주소에 남아 절반만 고쳐진다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.get("/llm-search", params={"q": "오늘 A101"})
+
+    assert response.status_code == 200
+    # 질문 전 화면이다. 결과를 그리지 않는다.
+    assert "질문을 입력하세요" in response.text
+
+
+def test_빈_질문을_보내면_검색하지_않는다(client: TestClient) -> None:
+    """빈 질문을 LLM에게 보내면 모델이 아무 계획이나 지어낸다."""
+
+    class Failing:
+        def search(self, question: str, *, limit: int) -> SearchOutcome:
+            raise AssertionError("빈 질문으로 검색하면 안 된다")
+
+    app.dependency_overrides[get_llm_search_service] = lambda: Failing()
+
+    response = client.post("/llm-search", data={"question": "   "})
+
+    assert response.status_code == 200
+    assert "질문을 입력하세요" in response.text

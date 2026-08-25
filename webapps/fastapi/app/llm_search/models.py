@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,23 @@ class CameraChoice:
     classroom_name: str | None
 
 
+class PersonPresence(StrEnum):
+    """질문이 지목한 사람이 **있어야 하는지 없어야 하는지.**
+
+    "박무현이 있는"과 "박무현이 없는"은 같은 기간·같은 강의실을 보면서 **정반대의
+    결과**를 요구한다. 사람 이름만 뽑고 이 방향을 버리면 두 질문이 서버에서 같아져,
+    "없는 사진"을 물은 사람이 "있는 사진"을 받는다.
+
+    `ANY`는 사람을 말하지 않았을 때다. `None`으로 표현하지 않는 이유는 `person_name`이
+    이미 `None`으로 "아무도 지목하지 않음"을 나타내고 있어, 두 필드가 각각 없음을
+    가지면 조합이 네 가지가 되기 때문이다.
+    """
+
+    ANY = "any"
+    PRESENT = "present"
+    ABSENT = "absent"
+
+
 @dataclass(frozen=True)
 class SearchQuery:
     """검증된 검색 조건.
@@ -46,6 +64,9 @@ class SearchQuery:
 
     `notes`는 사용자에게 그대로 보여줄 한국어 문장이다. 요청을 조정했으면
     (기간 절삭, limit 제한) 반드시 여기에 남긴다. **조용히 줄이지 않는다.**
+
+    `person_name`은 **모델이 질문에서 옮겨 적은 이름 그대로**다. 학생 원장과 대조하는
+    일은 서비스가 한다 — 여기(`planning.py`)는 저장소를 모른다.
     """
 
     camera_id: str | None
@@ -53,6 +74,8 @@ class SearchQuery:
     from_at: datetime
     to_at: datetime
     limit: int
+    person_name: str | None
+    person_presence: PersonPresence
     notes: tuple[str, ...]
 
 
@@ -102,6 +125,33 @@ class DetectionHit:
 
 
 @dataclass(frozen=True)
+class PersonSummary:
+    """질문이 지목한 사람과, 그 조건을 실제로 적용했는지.
+
+    **`applied`가 거짓이면 아래 결과는 사람 조건이 걸리지 않은 목록이다.** 이 값을
+    빼고 이름만 화면에 두면, 걸러지지 않은 목록이 "박무현이 없는 기록"이라는 제목을
+    달고 나간다. 없는 판정을 만들어 내는 셈이라 반드시 함께 돌려준다.
+
+    적용하지 못하는 경우가 셋이다 — 학생 원장에 그 이름이 없을 때, 같은 이름이
+    여럿이라 누구인지 고를 수 없을 때, 그리고 조회 구간의 탐지에 신원이 하나도
+    실려 있지 않을 때(`identity_available is False`). 마지막이 지금의 기본 상태다.
+    얼굴 인식이 아직 연결되지 않아 `Detection.student_id`를 채우는 생산자가 없다.
+
+    앞의 두 경우를 `match_count`로 나누는 이유는 **사용자에게 할 말이 다르기**
+    때문이다. 0이면 오타를 고치면 되고, 2 이상이면 이름만으로는 영영 고를 수 없어
+    학번 같은 다른 단서가 필요하다. `student_id`만 보면 둘이 같아져, 동명이인을
+    물은 사람이 "명부에 없습니다"라는 틀린 안내를 받는다.
+    """
+
+    name: str
+    presence: PersonPresence
+    student_id: str | None
+    match_count: int
+    identity_available: bool
+    applied: bool
+
+
+@dataclass(frozen=True)
 class SearchOutcome:
     """검색 한 번의 결과 전부.
 
@@ -113,10 +163,18 @@ class SearchOutcome:
     "카메라를 콕 집었는가 / 강의실인가 / 전체인가"의 판정과 UUID를 이름으로 바꾸는
     일을 **서비스에서 끝내려고** 둔다. 템플릿이 식별자를 보고 분기하면 같은 판정이
     화면마다 복사되고, 강의실 이름을 붙이려면 템플릿이 저장소를 알아야 한다.
+
+    `briefing`은 같은 내용을 사람이 읽는 한두 문장으로 적은 것이다. 기간·대상·건수가
+    `query`와 `target_label`과 `hits`에 흩어져 있어, 화면이 그것을 문장으로 잇는
+    순간 **표기 규칙(오늘인가 어제인가, 초를 보일 것인가)이 템플릿으로 샌다.**
+    조립을 서비스에서 끝낸다 — 규칙 해석을 템플릿에 두지 않는다는 결정 0001의
+    화면 규칙과 같은 이유다.
     """
 
     query: SearchQuery
     target_label: str
+    person: PersonSummary | None
+    briefing: str
     hits: tuple[DetectionHit, ...]
     truncated: bool
     snapshot_lookup_failed: bool
