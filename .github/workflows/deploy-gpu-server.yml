@@ -367,6 +367,8 @@ jobs:
           fi
           REMOTE
 
+      # 원격 FastAPI(개인 PC) 계약 검증은 --require-live-handoff 없이는 경고로만
+      # 남는다. 그 경고는 stderr로 나오므로 2>&1로 합쳐 요약에서도 보이게 한다.
       # 떠 있는 스택만 다시 올린다. 내려 둔 스택을 CI가 마음대로 켜지 않는다 —
       # 모니터링 스택은 MVP에서 일부러 띄우지 않고 있다(.docker/README.server.md).
       # 그 스택의 파일은 이미 갱신됐으므로 사람이 다음에 up 할 때 반영된다.
@@ -377,7 +379,7 @@ jobs:
           set -euo pipefail
           ssh $SSH_OPTS "$TARGET" \
             "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' STACKS='$SERVER_STACKS' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" \
-            <<'REMOTE' | tee /tmp/apply.log
+            <<'REMOTE' 2>&1 | tee /tmp/apply.log
           set -euo pipefail
           cd "$REMOTE_PATH"
 
