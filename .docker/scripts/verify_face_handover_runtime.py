@@ -21,15 +21,21 @@ _LABEL_PATTERN = re.compile(r'(\w+)="((?:\\.|[^"\\])*)"')
 # 문자열 안의 ``\n``을 그대로 쓰면 바깥 parser가 실제 줄바꿈으로 바꿔 내부 코드의
 # 따옴표를 끊는다. 빈 줄은 별도 print로 출력해 probe 자체가 SyntaxError가 되지 않게 한다.
 WORKER_METRICS_PROBE_CODE = """
-import json
 import os
-import urllib.parse
 import urllib.request
 
 with urllib.request.urlopen("http://127.0.0.1:9101/metrics", timeout=5) as response:
     print(response.read().decode("utf-8"), end="")
 print()
 print("__FACE_CAMERAS__=" + os.environ.get("FACE_IDENTITY_CAMERA_IDS", ""))
+"""
+
+FASTAPI_ENTRY_EVENT_PROBE_CODE = """
+import json
+import os
+import urllib.parse
+import urllib.request
+
 base_url = os.environ["FASTAPI_URL"].rstrip("/")
 face_camera_ids = {
     item.strip()
@@ -46,7 +52,46 @@ for stream in streams:
     url = base_url + "/api/v1/video-streams/" + stream_id + "/entry-identity-events?limit=1"
     with urllib.request.urlopen(url, timeout=5) as response:
         stored_event_count += len(json.load(response)["items"])
-print("__ENTRY_EVENTS__=" + str(stored_event_count))
+print(stored_event_count)
+"""
+
+DEEPLEARNING_CONTRACT_PROBE_CODE = """
+import json
+import urllib.request
+
+with urllib.request.urlopen("http://deeplearning:8100/health/ready", timeout=8) as response:
+    ready = json.load(response)
+assert ready == {"status": "ready", "face_identification": "ready"}
+with urllib.request.urlopen("http://deeplearning:8100/openapi.json", timeout=8) as response:
+    openapi = json.load(response)
+assert "/internal/face-identifications" in openapi["paths"]
+operation = openapi["paths"]["/internal/face-identifications"]["post"]
+assert "X-Person-Bboxes" not in {
+    parameter.get("name") for parameter in operation.get("parameters", [])
+}
+print("deeplearning-contract-ok")
+"""
+
+FASTAPI_CONTRACT_PROBE_CODE = """
+import json
+import os
+import urllib.request
+
+base_url = os.environ["FASTAPI_URL"].rstrip("/")
+with urllib.request.urlopen(base_url + "/health/ready", timeout=8) as response:
+    assert response.status == 200
+with urllib.request.urlopen(base_url + "/openapi.json", timeout=8) as response:
+    openapi = json.load(response)
+assert "/internal/entry-identity-events" in openapi["paths"]
+assert "/api/v1/video-streams/{stream_id}/entry-identity-events" in openapi["paths"]
+print("fastapi-contract-ok")
+"""
+
+WORKER_CUDA_PROBE_CODE = """
+import torch
+assert torch.cuda.is_available()
+assert torch.cuda.device_count() >= 1
+print("cuda-ok")
 """
 
 
@@ -105,6 +150,7 @@ class RuntimeVerifier:
             0.1, worker_readiness_retry_interval_seconds
         )
         self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     def _run(self, command: list[str]) -> str:
         completed = subprocess.run(
@@ -181,39 +227,9 @@ class RuntimeVerifier:
                     self.errors.append("deeplearning이 healthy 상태가 아닙니다.")
 
     def verify_network_and_gpu(self) -> None:
-        python_code = """
-import json
-import os
-import urllib.request
-
-with urllib.request.urlopen("http://deeplearning:8100/health/ready", timeout=8) as response:
-    ready = json.load(response)
-assert ready == {"status": "ready", "face_identification": "ready"}
-with urllib.request.urlopen("http://deeplearning:8100/openapi.json", timeout=8) as response:
-    openapi = json.load(response)
-assert "/internal/face-identifications" in openapi["paths"]
-operation = openapi["paths"]["/internal/face-identifications"]["post"]
-assert "X-Person-Bboxes" not in {
-    parameter.get("name") for parameter in operation.get("parameters", [])
-}
-base_url = os.environ["FASTAPI_URL"].rstrip("/")
-with urllib.request.urlopen(base_url + "/health/ready", timeout=8) as response:
-    assert response.status == 200
-with urllib.request.urlopen(base_url + "/openapi.json", timeout=8) as response:
-    fastapi_openapi = json.load(response)
-assert "/internal/entry-identity-events" in fastapi_openapi["paths"]
-assert "/api/v1/video-streams/{stream_id}/entry-identity-events" in fastapi_openapi["paths"]
-print("http-contracts-ok")
-"""
-        gpu_code = """
-import torch
-assert torch.cuda.is_available()
-assert torch.cuda.device_count() >= 1
-print("cuda-ok")
-"""
         for description, code in (
-            ("서비스 간 HTTP 계약", python_code),
-            ("worker CUDA", gpu_code),
+            ("deeplearning HTTP 계약", DEEPLEARNING_CONTRACT_PROBE_CODE),
+            ("worker CUDA", WORKER_CUDA_PROBE_CODE),
         ):
             try:
                 self._run(
@@ -230,7 +246,27 @@ print("cuda-ok")
             except (OSError, subprocess.CalledProcessError):
                 self.errors.append(f"{description} 검증에 실패했습니다.")
 
-    def worker_metrics(self) -> tuple[str, set[str], int]:
+    def verify_fastapi_contract(self, *, required: bool) -> None:
+        try:
+            self._run(
+                [
+                    *self._compose,
+                    "exec",
+                    "-T",
+                    "inference-worker",
+                    "python",
+                    "-c",
+                    FASTAPI_CONTRACT_PROBE_CODE,
+                ]
+            )
+        except (OSError, subprocess.CalledProcessError):
+            message = "원격 FastAPI HTTP 계약을 확인하지 못했습니다."
+            if required:
+                self.errors.append(message)
+            else:
+                self.warnings.append(message + " GPU 서비스 배포는 계속합니다.")
+
+    def worker_metrics(self) -> tuple[str, set[str]]:
         """모델 초기화 뒤 열리는 worker metrics를 제한 시간 동안 기다린다."""
         # 이 코드는 현재 프로세스의 일부로 실행되지 않고 컨테이너의 `python -c`가
         # 다시 파싱한다. 배포 서버에서 120초 재시도하기 전에 문법 오류를 즉시 드러낸다.
@@ -238,7 +274,7 @@ print("cuda-ok")
             compile(WORKER_METRICS_PROBE_CODE, "<worker-metrics-probe>", "exec")
         except SyntaxError:
             self.errors.append("worker /metrics 검증 코드에 문법 오류가 있습니다.")
-            return "", set(), 0
+            return "", set()
 
         command = [
             *self._compose,
@@ -258,7 +294,7 @@ print("cuda-ok")
                 break
             except OSError:
                 self.errors.append("worker /metrics 검증 명령을 실행하지 못했습니다.")
-                return "", set(), 0
+                return "", set()
             except subprocess.CalledProcessError:
                 now = time.monotonic()
                 if now >= deadline:
@@ -267,7 +303,7 @@ print("cuda-ok")
                         f"worker /metrics가 {timeout}초 안에 준비되지 않았습니다. "
                         f"({attempts}회 시도)"
                     )
-                    return "", set(), 0
+                    return "", set()
                 time.sleep(
                     min(
                         self._worker_readiness_retry_interval_seconds,
@@ -275,24 +311,35 @@ print("cuda-ok")
                     )
                 )
         camera_marker = "\n__FACE_CAMERAS__="
-        event_marker = "\n__ENTRY_EVENTS__="
-        if camera_marker not in output or event_marker not in output:
+        if camera_marker not in output:
             self.errors.append("worker 얼굴 카메라 설정을 확인하지 못했습니다.")
-            return output, set(), 0
-        before_events, raw_event_count = output.rsplit(event_marker, 1)
-        metrics, raw_camera_ids = before_events.rsplit(camera_marker, 1)
+            return output, set()
+        metrics, raw_camera_ids = output.rsplit(camera_marker, 1)
         camera_ids = {
             item.strip() for item in raw_camera_ids.split(",") if item.strip()
         }
+        return metrics, camera_ids
+
+    def fastapi_entry_event_count(self) -> int | None:
         try:
-            stored_event_count = int(raw_event_count.strip())
-        except ValueError:
-            self.errors.append("저장된 입구 얼굴 이벤트 수를 확인하지 못했습니다.")
-            stored_event_count = 0
-        return metrics, camera_ids, stored_event_count
+            output = self._run(
+                [
+                    *self._compose,
+                    "exec",
+                    "-T",
+                    "inference-worker",
+                    "python",
+                    "-c",
+                    FASTAPI_ENTRY_EVENT_PROBE_CODE,
+                ]
+            )
+            return int(output)
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            self.errors.append("FastAPI 입구 얼굴 이벤트 조회에 실패했습니다.")
+            return None
 
     def verify_metrics(self, *, require_live_handoff: bool) -> None:
-        metrics, face_camera_ids, stored_event_count = self.worker_metrics()
+        metrics, face_camera_ids = self.worker_metrics()
         if not metrics:
             return
         required_families = (
@@ -305,6 +352,7 @@ print("cuda-ok")
                 self.errors.append(f"worker 지표 {family}가 없습니다.")
         if not require_live_handoff:
             return
+        stored_event_count = self.fastapi_entry_event_count()
         required_cameras = face_camera_ids | {"classroom-cctv"}
         if not face_camera_ids:
             self.errors.append("FACE_IDENTITY_CAMERA_IDS가 비어 있습니다.")
@@ -335,8 +383,10 @@ print("cuda-ok")
             <= 0
         ):
             self.errors.append("성공한 CCTV 신원 인계가 아직 없습니다.")
-        if stored_event_count <= 0:
-            self.errors.append("FastAPI에서 저장된 입구 얼굴 이벤트를 조회하지 못했습니다.")
+        if stored_event_count is not None and stored_event_count <= 0:
+            self.errors.append(
+                "FastAPI에서 저장된 입구 얼굴 이벤트를 조회하지 못했습니다."
+            )
 
 
 def main() -> int:
@@ -364,7 +414,12 @@ def main() -> int:
     )
     verifier.verify_containers()
     verifier.verify_network_and_gpu()
+    verifier.verify_fastapi_contract(required=args.require_live_handoff)
     verifier.verify_metrics(require_live_handoff=args.require_live_handoff)
+    if verifier.warnings:
+        print("얼굴 식별 → 객체 추적 인계 런타임 검증 경고:", file=sys.stderr)
+        for warning in verifier.warnings:
+            print(f"- {warning}", file=sys.stderr)
     if verifier.errors:
         print("얼굴 식별 → 객체 추적 인계 런타임 검증 실패:", file=sys.stderr)
         for error in verifier.errors:
