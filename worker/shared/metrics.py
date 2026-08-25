@@ -28,7 +28,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 from prometheus_client import REGISTRY, CollectorRegistry, start_http_server
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
@@ -66,16 +66,22 @@ class FrameBufferCollector(Collector):
     뜻이다. `maxsize=1`인 기본 설정에서는 skipped가 거의 나오지 않아야 정상이다.
     """
 
-    def __init__(self, frame_buffer: FrameBuffer) -> None:
-        self._frame_buffer = frame_buffer
+    def __init__(self, frame_buffer: FrameBuffer | Sequence[FrameBuffer]) -> None:
+        self._frame_buffers = (
+            (frame_buffer,)
+            if isinstance(frame_buffer, FrameBuffer)
+            else tuple(frame_buffer)
+        )
+        if not self._frame_buffers:
+            raise ValueError("지표를 등록할 프레임 버퍼가 하나 이상 필요합니다.")
 
     def collect(self) -> Iterator[Metric]:
-        stats = self._frame_buffer.stats
+        stats = [frame_buffer.stats for frame_buffer in self._frame_buffers]
 
         yield CounterMetricFamily(
             f"{METRIC_PREFIX}frames_buffered",
             "stream이 버퍼에 넣는 데 성공한 프레임 수",
-            value=stats.accepted,
+            value=sum(value.accepted for value in stats),
         )
 
         dropped = CounterMetricFamily(
@@ -83,25 +89,27 @@ class FrameBufferCollector(Collector):
             "추론에 닿지 못하고 버려진 프레임 수. 추론이 수신을 못 따라간 양이다",
             labels=["reason"],
         )
-        dropped.add_metric(["dropped"], stats.dropped)
-        dropped.add_metric(["skipped"], stats.skipped)
+        dropped.add_metric(["dropped"], sum(value.dropped for value in stats))
+        dropped.add_metric(["skipped"], sum(value.skipped for value in stats))
         yield dropped
 
         yield CounterMetricFamily(
             f"{METRIC_PREFIX}frames_consumed",
             "소비자가 버퍼에서 꺼내 간 프레임 수",
-            value=stats.consumed,
+            value=sum(value.consumed for value in stats),
         )
 
         yield GaugeMetricFamily(
             f"{METRIC_PREFIX}frame_buffer_depth",
             "지금 버퍼에 남아 있는 프레임 수",
-            value=len(self._frame_buffer),
+            value=sum(len(frame_buffer) for frame_buffer in self._frame_buffers),
         )
 
 
 def register_frame_buffer(
-    frame_buffer: FrameBuffer, *, registry: CollectorRegistry = REGISTRY
+    frame_buffer: FrameBuffer | Sequence[FrameBuffer],
+    *,
+    registry: CollectorRegistry = REGISTRY,
 ) -> FrameBufferCollector:
     """버퍼 지표를 레지스트리에 등록한다.
 

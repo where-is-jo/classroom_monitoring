@@ -39,9 +39,7 @@ def _iou(left: np.ndarray, right: np.ndarray) -> float:
         0.0, intersection_bottom - intersection_top
     )
     left_area = max(0.0, left[2] - left[0]) * max(0.0, left[3] - left[1])
-    right_area = max(0.0, right[2] - right[0]) * max(
-        0.0, right[3] - right[1]
-    )
+    right_area = max(0.0, right[2] - right[0]) * max(0.0, right[3] - right[1])
     union = left_area + right_area - intersection
     return 0.0 if union <= 0.0 else intersection / union
 
@@ -117,24 +115,27 @@ def _minimum_cost_assignment(costs: np.ndarray) -> tuple[tuple[int, int], ...]:
 class _Track:
     track_id: int
     bbox: np.ndarray
+    last_observed_at: float
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float64))
     hits: int = 1
     missed_frames: int = 0
     age_frames: int = 1
 
-    @property
-    def predicted_bbox(self) -> np.ndarray:
-        return self.bbox + self.velocity * (self.missed_frames + 1)
+    def predicted_bbox(self, observed_at: float) -> np.ndarray:
+        elapsed_seconds = max(0.0, observed_at - self.last_observed_at)
+        return self.bbox + self.velocity * elapsed_seconds
 
-    def update(self, bbox: np.ndarray) -> None:
-        elapsed_frames = self.missed_frames + 1
-        observed_velocity = (bbox - self.bbox) / elapsed_frames
-        if self.hits == 1:
-            self.velocity = observed_velocity
-        else:
-            # 짧은 bbox 흔들림보다 최근 이동 방향을 더 오래 유지한다.
-            self.velocity = self.velocity * 0.7 + observed_velocity * 0.3
+    def update(self, bbox: np.ndarray, observed_at: float) -> None:
+        elapsed_seconds = observed_at - self.last_observed_at
+        if elapsed_seconds > 1e-6:
+            observed_velocity = (bbox - self.bbox) / elapsed_seconds
+            if self.hits == 1:
+                self.velocity = observed_velocity
+            else:
+                # 짧은 bbox 흔들림보다 최근 이동 방향을 더 오래 유지한다.
+                self.velocity = self.velocity * 0.7 + observed_velocity * 0.3
         self.bbox = bbox
+        self.last_observed_at = max(self.last_observed_at, observed_at)
         self.hits += 1
         self.missed_frames = 0
 
@@ -176,6 +177,8 @@ class CameraByteTracker:
         self.created_last_update = 0
         self.expired_last_update = 0
         self.expired_lifetimes_last_update: tuple[int, ...] = ()
+        self.expired_track_ids_last_update: tuple[str, ...] = ()
+        self._update_index = 0
 
     @property
     def active_track_count(self) -> int:
@@ -187,13 +190,17 @@ class CameraByteTracker:
         detections: Sequence[tuple[int, Detection]],
         *,
         minimum_iou: float,
+        observed_at: float,
     ) -> tuple[tuple[tuple[int, int], ...], tuple[int, ...], tuple[int, ...]]:
         if not track_ids or not detections:
             return (), tuple(track_ids), tuple(range(len(detections)))
         ious = np.asarray(
             [
                 [
-                    _iou(self._tracks[track_id].predicted_bbox, _bbox_array(detection.bbox))
+                    _iou(
+                        self._tracks[track_id].predicted_bbox(observed_at),
+                        _bbox_array(detection.bbox),
+                    )
                     for _, detection in detections
                 ]
                 for track_id in track_ids
@@ -210,7 +217,11 @@ class CameraByteTracker:
         matched_columns = {column for _, column in matches}
         return (
             matches,
-            tuple(track_ids[row] for row in range(len(track_ids)) if row not in matched_rows),
+            tuple(
+                track_ids[row]
+                for row in range(len(track_ids))
+                if row not in matched_rows
+            ),
             tuple(
                 column
                 for column in range(len(detections))
@@ -218,10 +229,17 @@ class CameraByteTracker:
             ),
         )
 
-    def update(self, result: InferenceResult) -> InferenceResult:
+    def update(
+        self, result: InferenceResult, *, observed_at: float | None = None
+    ) -> InferenceResult:
+        self._update_index += 1
+        current_observed_at = (
+            float(self._update_index) if observed_at is None else observed_at
+        )
         self.created_last_update = 0
         self.expired_last_update = 0
         self.expired_lifetimes_last_update = ()
+        self.expired_track_ids_last_update = ()
         for track in self._tracks.values():
             track.age_frames += 1
         people = [
@@ -248,22 +266,28 @@ class CameraByteTracker:
             track_ids,
             high,
             minimum_iou=self._config.first_match_iou_threshold,
+            observed_at=current_observed_at,
         )
         for track_row, detection_column in first_matches:
             track_id = track_ids[track_row]
             detection_index, detection = high[detection_column]
-            self._tracks[track_id].update(_bbox_array(detection.bbox))
+            self._tracks[track_id].update(
+                _bbox_array(detection.bbox), current_observed_at
+            )
             assignments[detection_index] = track_id
 
         second_matches, still_unmatched_track_ids, _ = self._match(
             unmatched_track_ids,
             low,
             minimum_iou=self._config.second_match_iou_threshold,
+            observed_at=current_observed_at,
         )
         for track_row, detection_column in second_matches:
             track_id = unmatched_track_ids[track_row]
             detection_index, detection = low[detection_column]
-            self._tracks[track_id].update(_bbox_array(detection.bbox))
+            self._tracks[track_id].update(
+                _bbox_array(detection.bbox), current_observed_at
+            )
             assignments[detection_index] = track_id
 
         for track_id in still_unmatched_track_ids:
@@ -275,7 +299,11 @@ class CameraByteTracker:
                 continue
             track_id = self._next_track_id
             self._next_track_id += 1
-            self._tracks[track_id] = _Track(track_id, _bbox_array(detection.bbox))
+            self._tracks[track_id] = _Track(
+                track_id,
+                _bbox_array(detection.bbox),
+                last_observed_at=current_observed_at,
+            )
             assignments[detection_index] = track_id
             self.created_last_update += 1
 
@@ -286,6 +314,9 @@ class CameraByteTracker:
         ]
         self.expired_lifetimes_last_update = tuple(
             self._tracks[track_id].age_frames for track_id in expired
+        )
+        self.expired_track_ids_last_update = tuple(
+            f"person-{track_id}" for track_id in expired
         )
         for track_id in expired:
             del self._tracks[track_id]
@@ -309,12 +340,16 @@ class ByteTrackResultHandler:
         *,
         inner: ResultHandler,
         camera_ids: frozenset[str] | None = None,
-        tracker_factory: Callable[[ByteTrackConfig], CameraByteTracker] = CameraByteTracker,
+        tracker_factory: Callable[
+            [ByteTrackConfig], CameraByteTracker
+        ] = CameraByteTracker,
+        expired_track_handler: Callable[[str, tuple[str, ...]], None] | None = None,
     ) -> None:
         self._config = config
         self._inner = inner
         self._camera_ids = camera_ids
         self._tracker_factory = tracker_factory
+        self._expired_track_handler = expired_track_handler
         self._trackers: dict[str, CameraByteTracker] = {}
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
@@ -325,7 +360,7 @@ class ByteTrackResultHandler:
         if tracker is None:
             tracker = self._tracker_factory(self._config)
             self._trackers[captured.camera_id] = tracker
-        tracked = tracker.update(result)
+        tracked = tracker.update(result, observed_at=captured.captured_at.timestamp())
         if tracker.created_last_update:
             PERSON_TRACKS_CREATED_TOTAL.labels(camera_id=captured.camera_id).inc(
                 tracker.created_last_update
@@ -335,8 +370,12 @@ class ByteTrackResultHandler:
                 tracker.expired_last_update
             )
             for lifetime in tracker.expired_lifetimes_last_update:
-                PERSON_TRACK_LIFETIME_FRAMES.labels(camera_id=captured.camera_id).observe(
-                    lifetime
+                PERSON_TRACK_LIFETIME_FRAMES.labels(
+                    camera_id=captured.camera_id
+                ).observe(lifetime)
+            if self._expired_track_handler is not None:
+                self._expired_track_handler(
+                    captured.camera_id, tracker.expired_track_ids_last_update
                 )
         PERSON_TRACKS_ACTIVE.labels(camera_id=captured.camera_id).set(
             tracker.active_track_count

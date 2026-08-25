@@ -7,22 +7,14 @@
 ```text
 [pipeline 프로세스]
 
-  camera-01 스레드 ─┐
-  camera-02 스레드 ─┼─put─▶ FrameBuffer ─get_latest─▶ inference-consumer 스레드
-  camera-03 스레드 ─┘        (오래된 것 버림)              │
-                                                          ▼
-                     입구 카메라 ──JPEG──▶ deeplearning(SCRFD → ArcFace → 얼굴 track)
-                           │                          │
-                           │                          └── 얼굴 관측·식별 결과
-                           │                                      │
-                           │                         FastAPI 7일 메타데이터 저장
-                           │                                      │
-                           └──────── 신원 후보 ───────────────────┤
-                                                                  ▼
-                     CCTV ──▶ 학습 YOLO(person) ──▶ ByteTrack ──▶ 문 ROI 인계
-                                                                  │
-                                                                  ▼
-                                                    FastAPI 탐지 이벤트·좌석 판정
+ 입구 수신 스레드 ─▶ 얼굴 FrameBuffer ─▶ 얼굴 소비자 ─▶ deeplearning 얼굴 관측 ─┐
+                         최신 한 장                         │                    │
+                                                           └─▶ FastAPI 7일 저장 │
+                                                                                ├─▶ 문 ROI 인계
+ CCTV 수신 스레드 ─▶ 추적 FrameBuffer ─▶ CCTV 소비자 ─▶ YOLO ─▶ ByteTrack ─────┘
+                         최신 한 장                                           │
+                                                                              ▼
+                                                                FastAPI 좌석 판정
 ```
 
 설정을 읽고 객체를 조립하는 코드를 여기 한 곳에 모은다. 워커 안에서 서로를
@@ -73,6 +65,8 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `frame_buffer_maxsize` | 카메라별 최신 프레임 슬롯의 최소 수 | pipeline이 `STREAM_SOURCES` 수 이상으로 자동 확장 |
 | `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
 | `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
+| `face_identity_sample_interval_frames` (`FACE_IDENTITY_SAMPLE_INTERVAL_FRAMES`) | 입구 얼굴 프레임 샘플링 간격 | 기본 20. 20 FPS 입력에서 약 1 FPS. 괄호의 환경변수로 재정의 가능 |
+| `person_tracking_sample_interval_frames` (`PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES`) | CCTV 사람 추적 프레임 샘플링 간격 | 기본 4. 20 FPS 입력에서 약 5 FPS. 괄호의 환경변수로 재정의 가능 |
 | `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
 | `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
@@ -117,13 +111,15 @@ track이 화면 다른 곳에서 먼저 만들어졌더라도 이후 이 영역�
 
 ### 카메라별 최신 한 장만 두는 이유
 
-실시간 파이프라인에서 필요한 것은 **각 카메라의 지금 화면**이다. pipeline은 설정된
-카메라 수만큼 슬롯을 자동 확보하고 카메라마다 최신 한 장만 보존한다. 같은 카메라의
+실시간 파이프라인에서 필요한 것은 **각 카메라의 지금 화면**이다. pipeline은 입구 얼굴과
+CCTV 사람 추적에 별도 버퍼·소비자를 만들고, 각 버퍼 안에서도 설정된 카메라 수만큼 슬롯을
+자동 확보해 카메라마다 최신 한 장만 보존한다. 같은 카메라의
 새 프레임은 그 카메라의 대기 프레임만 교체하므로 빠른 CCTV가 입구 프레임을 덮지 않는다.
-대기 카메라는 공정한 순서로 한 장씩 소비한다.
+대기 카메라는 공정한 순서로 한 장씩 소비한다. 얼굴 HTTP가 느려도 CCTV 소비자는 독립해서
+ByteTrack을 계속 갱신한다.
 
 버린 프레임 수는 종료 시 로그에 남는다. `dropped`가 계속 늘면 추론이 수신을
-못 따라가고 있다는 뜻이므로, 버퍼를 키울 게 아니라 `FRAME_SAMPLE_INTERVAL_FRAMES`를
+못 따라가고 있다는 뜻이므로, 버퍼를 키울 게 아니라 역할별 `*_sample_interval_frames`를
 늘리거나 추론을 GPU로 옮기는 것이 맞다.
 
 ## 지표 노출

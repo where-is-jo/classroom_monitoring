@@ -275,9 +275,25 @@ class TestStreamWorker:
         buffer = FrameBuffer(maxsize=1)
         worker = StreamWorker(build_settings(), frame_buffer=buffer)
 
-        assert all(
-            pipeline._frame_buffer is buffer for pipeline in worker._pipelines
+        assert all(pipeline._frame_buffer is buffer for pipeline in worker._pipelines)
+
+    def test_카메라_역할별_버퍼와_샘플링_주기를_적용한다(self) -> None:
+        entry_buffer = FrameBuffer(maxsize=1)
+        tracking_buffer = FrameBuffer(maxsize=1)
+        worker = StreamWorker(
+            build_settings(),
+            frame_buffers_by_camera_id={
+                "camera-01": entry_buffer,
+                "camera-02": tracking_buffer,
+            },
+            sample_intervals_by_camera_id={"camera-01": 20, "camera-02": 4},
         )
+        pipelines = {pipeline.camera_id: pipeline for pipeline in worker._pipelines}
+
+        assert pipelines["camera-01"]._frame_buffer is entry_buffer
+        assert pipelines["camera-01"]._sample_interval_frames == 20
+        assert pipelines["camera-02"]._frame_buffer is tracking_buffer
+        assert pipelines["camera-02"]._sample_interval_frames == 4
 
     def test_종료_신호를_주입하면_그것을_쓴다(self) -> None:
         """추론이 치명적으로 실패하면 수신도 함께 멈춰야 한다."""

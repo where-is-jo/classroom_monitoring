@@ -60,6 +60,9 @@ worker는 입구에서 YOLO·사람 ByteTrack을 실행하지 않고 얼굴 관�
 얼굴 모델을 실행하지 않고 YOLO·ByteTrack만 실행하며, 입구에서 식별한 신원을 CCTV 문
 영역에서 유일하게 새로 생긴 track에만 인계한다([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다),
 [0040](./decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)).
+입구와 CCTV는 역할별 최신 프레임 버퍼·소비자를 따로 쓰고, 신원은 새 관측이 지지하는
+얼굴 track과 살아 있는 동일 CCTV track에만 유지한다
+([0042](./decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)).
 
 **어안 CCTV의 왜곡 보정은 사람 탐지 이전에 한 번만 수행하고, 보정된 좌표계가 ROI와
 bbox의 정본이다.** 구성도에 단계를 그리지 않은 것은 어느 서비스가 수행할지가 아직
@@ -289,9 +292,9 @@ CCTV `SEAT_JUDGING` track만 좌석의 학생 신원과 상태 근거가 된다.
 | --- | --- | --- | --- | --- |
 | 1. 수집 | 카메라 영상 | 연속 프레임 | worker/stream | 구현됨 |
 | 1-1. 어안 보정 | CCTV 프레임 | 평탄화된 프레임 | 수행 위치 `결정 필요` | `예정`([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)) |
-| 2. 샘플링 | 연속 프레임 | 추론 대상 프레임 | worker/stream | 구현됨 |
+| 2. 샘플링 | 연속 프레임 | 역할별 최신 추론 프레임 | worker/stream | 구현됨. 입구 얼굴과 CCTV 사람 추적이 별도 버퍼·소비자·샘플링 주기를 사용([0042](./decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)) |
 | 3. 사람 탐지 | **CCTV 프레임만** | 사람 ROI·좌표·신뢰도 | deeplearning | 모델 소유는 deeplearning, 현재 실행은 worker/inference의 YOLO |
-| 3-1. 트래킹 | CCTV 프레임별 사람 bbox | CCTV `track_id` | worker/inference | 구현됨. 고·저신뢰도 2단계 ByteTrack, 짧은 유실 buffer 적용. 입구에서는 실행하지 않음 |
+| 3-1. 트래킹 | CCTV 프레임별 사람 bbox·촬영 시각 | CCTV `track_id` | worker/inference | 구현됨. 고·저신뢰도 2단계 ByteTrack, 실제 촬영 시간 기반 이동 예측, 짧은 유실 buffer 적용. 만료 시 인계 신원도 즉시 제거. 입구에서는 실행하지 않음 |
 | 4. 얼굴 탐지·인식 | **입구 카메라의** JPEG | 얼굴 track별 판정·`student_id`·유사도·품질 | deeplearning | 구현됨([0035](./decisions.md#0035--입구-얼굴-식별은-worker에서-deeplearning-내부-http로-호출한다), [0040](./decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)). CCTV에서는 호출하지 않음 |
 | 4-1. 입구 얼굴 관측 저장 | 처리 상태·얼굴 관측 메타데이터 | 7일 보존 이벤트 | worker → fastapi → MongoDB | 구현됨. 이미지·embedding·학생 이름·학번은 저장하지 않음 |
 | 4-2. 카메라 간 신원 인계 | 등록된 입구 얼굴 track + CCTV 문 영역 신규 사람 track | 신원이 붙은 CCTV track | worker/inference | 구현됨([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)). 현장 문 ROI·시간 창 보정 필요 |
@@ -414,7 +417,7 @@ MVP의 제품 사용자는 관리자 한 종류다
 | 작은 얼굴 대응 — Super Resolution 도입 여부 | 핵심 경로에서 빠졌다([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 얼굴 인식을 얼굴이 크게 잡히는 입구에서만 한다 | deeplearning |
 | **카메라 간 신원 인계 방법**(입구 track → CCTV track) | 확정·구현됨([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)). CCTV 문 영역 + 촬영 시각 창에서 학생·신규 track 쌍이 각각 하나일 때만 인계한다. 복수 후보는 미식별 유지 | worker, deeplearning, fastapi |
 | 어안 왜곡 보정 수행 위치와 캘리브레이션 파라미터 확보 절차 | 결정 필요. 후보: `worker/stream` / `worker/inference` / 카메라·미디어 서버([0024](./decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)의 4번) | worker |
-| 트래킹 구현 위치 | 사람 ByteTrack·카메라 간 신원 인계는 `worker/inference`, 얼굴 bbox+embedding track은 `deeplearning`으로 확정·구현됨([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)) | worker, deeplearning |
+| 트래킹 구현 위치 | 사람 ByteTrack·카메라 간 신원 인계는 `worker/inference`, 얼굴 bbox+embedding track은 `deeplearning`으로 확정·구현됨([0036](./decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다), [0042](./decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)) | worker, deeplearning |
 | 입구에서 식별에 실패한 학생의 관리자 수동 지정 경로 | 결정 필요. 없으면 그날의 오판을 되돌릴 방법이 없다 | fastapi |
 | 좌석을 비운 학생을 `ABSENT`로 볼지 `IN_CLASSROOM`으로 볼지 | 결정 필요. 유예 시간 정책과 함께 정한다 | fastapi |
 | Tracking 도입과 `IN_CLASSROOM` | 확정([0025](./decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)). 트래킹이 신원 유지의 핵심 경로가 되어 MVP로 편입됐다 | worker, deeplearning, fastapi |

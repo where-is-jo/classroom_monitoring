@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
-
 from shared.types import CapturedFrame
 
 from ..identity_handover import (
@@ -118,6 +117,18 @@ def test_인계한_신원은_문_ROI를_벗어나도_같은_track에_유지한�
         captured("classroom-cctv", 6),
         result(person("person-12", (120, 20, 190, 100))),
     )
+
+    assert handled[-1][1].detections[0].student_id == "student-001"
+
+
+def test_ByteTrack_만료를_받으면_신원을_즉시_정리하고_새_인계를_허용한다() -> None:
+    active, handled = handler()
+    active.observe_entry(captured("entry-camera", 1), batch(face("face-1")))
+    active(captured("classroom-cctv", 2), result(person("person-12", (0, 5, 50, 95))))
+
+    active.expire_classroom_tracks("classroom-cctv", ("person-12",))
+    active.observe_entry(captured("entry-camera", 3), batch(face("face-2")))
+    active(captured("classroom-cctv", 4), result(person("person-13", (0, 5, 50, 95))))
 
     assert handled[-1][1].detections[0].student_id == "student-001"
 

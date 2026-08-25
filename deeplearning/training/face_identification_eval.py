@@ -22,11 +22,17 @@ import os
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 from typing import Protocol
 
 import numpy as np
 
+from deeplearning.face_identification import (
+    FaceGalleryUnavailable,
+    FaceModelMetadata,
+    MongoFaceGalleryLoader,
+)
 from deeplearning.face_identity import FaceGallery, GalleryEntry, normalize_embedding
 
 UNKNOWN_LABEL = "UNKNOWN"
@@ -135,7 +141,9 @@ def validate_evaluation_inputs(
     }
     if not known_ids <= gallery_ids:
         # 학생 ID 목록은 오류 메시지나 CI 로그로 내보내지 않는다.
-        raise ValueError("known 평가 학생이 MongoDB gallery에 모두 등록되어 있지 않습니다.")
+        raise ValueError(
+            "known 평가 학생이 MongoDB gallery에 모두 등록되어 있지 않습니다."
+        )
 
     resolved_paths = [
         image.path.resolve() for images in splits.values() for image in images
@@ -210,10 +218,33 @@ def select_threshold_for_far(
 
     threshold = math.nextafter(boundary, math.inf)
     if threshold > maximum_threshold:
-        raise ValueError(
-            "런타임 임계값 범위 안에서 목표 FAR을 만족할 수 없습니다."
-        )
+        raise ValueError("런타임 임계값 범위 안에서 목표 FAR을 만족할 수 없습니다.")
     return max(0.0, threshold)
+
+
+def collect_track_pair_similarities(
+    images: Iterable[ProbeImage], embedder: Embedder
+) -> tuple[list[float], list[float]]:
+    """known validation에서 동일인·타인 얼굴 쌍의 cosine 분포를 만든다."""
+    samples: list[tuple[str, np.ndarray]] = []
+    for image in images:
+        if image.true_id is None:
+            raise ValueError("얼굴 track 임계값에는 labeled known 이미지가 필요합니다.")
+        embedding, _ = embedder(image.path)
+        if embedding is not None:
+            samples.append((image.true_id, normalize_embedding(embedding)))
+
+    same_identity: list[float] = []
+    different_identity: list[float] = []
+    for (left_id, left), (right_id, right) in combinations(samples, 2):
+        similarity = float(np.dot(left, right))
+        destination = same_identity if left_id == right_id else different_identity
+        destination.append(similarity)
+    if not same_identity or not different_identity:
+        raise ValueError(
+            "얼굴 track 임계값에는 동일인 쌍과 서로 다른 사람 쌍이 모두 필요합니다."
+        )
+    return same_identity, different_identity
 
 
 def classify_failure(true_id: str, predicted_id: str) -> str:
@@ -349,7 +380,9 @@ def write_thresholds(
     *,
     similarity_threshold: float,
     margin_threshold: float,
+    track_similarity_threshold: float,
     target_far: float,
+    track_target_false_association: float,
     model_name: str,
     model_version: str,
     preprocessing_version: str,
@@ -359,8 +392,12 @@ def write_thresholds(
         raise ValueError("similarity threshold는 0과 1 사이여야 합니다.")
     if not 0.0 <= margin_threshold <= 2.0:
         raise ValueError("margin threshold는 0과 2 사이여야 합니다.")
+    if not 0.0 <= track_similarity_threshold <= 1.0:
+        raise ValueError("track similarity threshold는 0과 1 사이여야 합니다.")
     if not 0.0 <= target_far <= 1.0:
         raise ValueError("target FAR은 0과 1 사이여야 합니다.")
+    if not 0.0 <= track_target_false_association <= 1.0:
+        raise ValueError("track false association 목표는 0과 1 사이여야 합니다.")
     if not model_name or not model_version or not preprocessing_version:
         raise ValueError("threshold metadata는 비어 있을 수 없습니다.")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -369,7 +406,9 @@ def write_thresholds(
             {
                 "similarity_threshold": similarity_threshold,
                 "margin_threshold": margin_threshold,
+                "track_similarity_threshold": track_similarity_threshold,
                 "target_far": target_far,
+                "track_target_false_association": (track_target_false_association),
                 "model_name": model_name,
                 "model_version": model_version,
                 "preprocessing_version": preprocessing_version,
@@ -476,14 +515,11 @@ def build_embedder(*, providers: list[str] | None = None) -> Embedder:
 
 
 def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGallery:
-    """MongoDB `FACE_EMBEDDING_COLLECTION`에서 등록 학생 gallery를 읽는다.
+    """런타임과 같은 필터로 MongoDB 등록 학생 gallery를 읽는다.
 
     ArcFace/AdaFace는 임베딩 공간이 다르므로 gallery 조회 시 반드시 모델별로
     분리한다 — `expected_model_name`을 안 주면 `FACE_RECOGNIZER`(기본 arcface)를 쓴다.
     """
-    from pymongo import MongoClient
-    from pymongo.errors import PyMongoError
-
     if expected_model_name is None:
         expected_model_name = os.environ.get(
             "FACE_EMBEDDING_MODEL_NAME", os.environ.get("FACE_RECOGNIZER", "arcface")
@@ -507,49 +543,23 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
         raise RuntimeError("MongoDB gallery에는 MONGODB_DATABASE가 필요합니다.")
     collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
 
-    entries: list[GalleryEntry] = []
-    client = MongoClient(
-        mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000
+    loader = MongoFaceGalleryLoader(
+        database_url=mongodb_uri,
+        database_name=mongodb_database,
+        collection_name=collection_name,
+        expected_metadata=FaceModelMetadata(
+            expected_model_name,
+            expected_model_version,
+            expected_preprocessing_version,
+        ),
+        timeout_seconds=10.0,
     )
     try:
-        client.admin.command("ping")
-        projection = {
-            "_id": 0,
-            "student_id": 1,
-            "vector": 1,
-            "dimension": 1,
-            "normalized": 1,
-            "model_name": 1,
-            "model_version": 1,
-            "preprocessing_version": 1,
-        }
-        for document in client[mongodb_database][collection_name].find({}, projection):
-            student_id = document.get("student_id")
-            if (
-                not isinstance(student_id, str)
-                or not student_id
-                or document.get("dimension") != 512
-                or document.get("normalized") is not True
-                or document.get("model_name") != expected_model_name
-                or document.get("model_version") != expected_model_version
-                or document.get("preprocessing_version")
-                != expected_preprocessing_version
-            ):
-                raise RuntimeError(
-                    f"{student_id!r} 얼굴 벡터가 {expected_model_name} gallery 조건과 다릅니다."
-                )
-            entries.append(
-                GalleryEntry(
-                    student_id, np.asarray(document.get("vector"), dtype=np.float32)
-                )
-            )
-    except PyMongoError as exc:
-        raise RuntimeError("MongoDB 연결/조회에 실패했습니다.") from exc
-    finally:
-        client.close()
-    if not entries:
-        raise RuntimeError(f"{expected_model_name} 등록 얼굴 gallery가 비어 있습니다.")
-    return FaceGallery.from_entries(entries)
+        snapshot = loader.load()
+    except FaceGalleryUnavailable as error:
+        # 학생 ID·벡터·저장소 세부 오류는 평가 로그로 내보내지 않는다.
+        raise RuntimeError("MongoDB 등록 얼굴 gallery를 사용할 수 없습니다.") from error
+    return FaceGallery.from_entries(snapshot.entries)
 
 
 def build_embedder_and_gallery(
@@ -570,6 +580,9 @@ def main() -> None:
     known_test_dir = Path(os.environ["FACE_EVAL_KNOWN_TEST_DIR"])
     unknown_test_dir = Path(os.environ["FACE_EVAL_UNKNOWN_TEST_DIR"])
     target_far = float(os.environ.get("FACE_EVAL_TARGET_FAR", "0.001"))
+    track_target_false_association = float(
+        os.environ.get("FACE_EVAL_TRACK_TARGET_FALSE_ASSOCIATION", "0.001")
+    )
     output_csv = Path(
         os.environ.get("FACE_EVAL_OUTPUT_CSV")
         or Path(__file__).resolve().parents[1]
@@ -637,6 +650,20 @@ def main() -> None:
         if wrong_known_validation_scores
         else 0.0
     )
+    same_identity_similarities, different_identity_similarities = (
+        collect_track_pair_similarities(known_validation, embedder)
+    )
+    track_similarity_threshold = select_threshold_for_far(
+        different_identity_similarities,
+        target_far=track_target_false_association,
+    )
+    track_same_identity_accept_rate = _safe_ratio(
+        sum(
+            similarity >= track_similarity_threshold
+            for similarity in same_identity_similarities
+        ),
+        len(same_identity_similarities),
+    )
 
     test_images = known_test + unknown_test
     rows = evaluate_split(
@@ -662,7 +689,9 @@ def main() -> None:
         threshold_output,
         similarity_threshold=similarity_threshold,
         margin_threshold=margin_threshold,
+        track_similarity_threshold=track_similarity_threshold,
         target_far=target_far,
+        track_target_false_association=track_target_false_association,
         model_name=model_name,
         model_version=model_version,
         preprocessing_version=preprocessing_version,
@@ -671,6 +700,8 @@ def main() -> None:
 
     print(f"selected_similarity_threshold={similarity_threshold:.4f}")
     print(f"selected_margin_threshold={margin_threshold:.4f}")
+    print(f"selected_track_similarity_threshold={track_similarity_threshold:.4f}")
+    print(f"track_same_identity_accept_rate={track_same_identity_accept_rate:.4f}")
     print(f"registered_success_rate={metrics.registered_success_rate:.4f}")
     print(f"registered_false_reject_rate={metrics.registered_false_reject_rate:.4f}")
     print(f"unknown_false_accept_rate={metrics.unknown_false_accept_rate:.4f}")

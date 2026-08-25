@@ -13,8 +13,6 @@ import sys
 import threading
 from types import FrameType
 
-from pydantic import ValidationError
-
 from inference.config import DEFAULT_DATA_DIR as INFERENCE_DATA_DIR
 from inference.config import InferenceSettings
 from inference.consumer import (
@@ -40,6 +38,7 @@ from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
 from inference.tracking import ByteTrackConfig, ByteTrackResultHandler
 from inference.types import EntryFaceObservationBatch
+from pydantic import ValidationError
 from shared.config_errors import format_validation_error
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
@@ -147,9 +146,7 @@ def build_result_handlers(
         handler = FastAPIResultHandler(fastapi_url, inner=handler)
 
     coordinator: (
-        IdentityHandoverResultHandler
-        | RefreshingIdentityHandoverResultHandler
-        | None
+        IdentityHandoverResultHandler | RefreshingIdentityHandoverResultHandler | None
     ) = None
     if identity_handover_config_url is not None:
         logger.info(
@@ -197,6 +194,9 @@ def build_result_handlers(
             person_tracking_config,
             camera_ids=person_tracking_camera_ids,
             inner=handler,
+            expired_track_handler=(
+                coordinator.expire_classroom_tracks if coordinator is not None else None
+            ),
         )
     entry_handler: EntryResultHandler | None = None
     if face_identity_url is not None:
@@ -225,12 +225,6 @@ def build_runner(
     """설정에서 파이프라인을 조립한다. 모델은 여기서 한 번만 로딩한다."""
     shutdown_event = threading.Event()
     camera_sources = stream_settings.camera_sources
-    # 카메라마다 최신 한 장을 보존한다. 전역 최신 한 장만 두면 프레임 속도가 빠른
-    # CCTV가 입구 카메라를 계속 덮어써 얼굴 식별과 인계가 시작조차 못할 수 있다.
-    frame_buffer = FrameBuffer(
-        maxsize=max(pipeline_settings.frame_buffer_maxsize, len(camera_sources)),
-        per_camera=True,
-    )
 
     if pipeline_settings.person_tracking_enabled and not any(
         class_name.casefold() == "person"
@@ -322,18 +316,50 @@ def build_runner(
             if unassigned:
                 raise ValueError(
                     "모든 STREAM_SOURCES 카메라는 얼굴 전용 또는 사람 추적 역할이 "
-                    "필요합니다: "
-                    + ", ".join(sorted(unassigned))
+                    "필요합니다: " + ", ".join(sorted(unassigned))
                 )
-        classroom_route_ids = {
-            route.classroom_camera_id for route in handover_routes
-        }
+        classroom_route_ids = {route.classroom_camera_id for route in handover_routes}
         untracked_classroom_ids = classroom_route_ids - tracking_camera_ids
         if untracked_classroom_ids:
             raise ValueError(
                 "신원 인계 route의 교실 카메라에는 ByteTrack이 필요합니다: "
                 + ", ".join(sorted(untracked_classroom_ids))
             )
+
+    # 얼굴 HTTP와 YOLO를 같은 소비자에서 순서대로 실행하면 입구 요청 지연만큼 CCTV
+    # track 갱신도 멈춘다. 역할마다 최신 프레임 버퍼와 소비자를 따로 둔다.
+    tracking_buffer = FrameBuffer(
+        maxsize=max(pipeline_settings.frame_buffer_maxsize, len(tracking_camera_ids)),
+        per_camera=True,
+    )
+    entry_buffer = (
+        FrameBuffer(
+            maxsize=max(
+                pipeline_settings.frame_buffer_maxsize,
+                len(face_identity_camera_ids),
+            ),
+            per_camera=True,
+        )
+        if face_identity_url is not None
+        else None
+    )
+    frame_buffers_by_camera_id = {
+        camera_id: tracking_buffer for camera_id in tracking_camera_ids
+    }
+    if entry_buffer is not None:
+        frame_buffers_by_camera_id.update(
+            {camera_id: entry_buffer for camera_id in face_identity_camera_ids}
+        )
+    sample_intervals_by_camera_id = {
+        camera_id: pipeline_settings.person_tracking_sample_interval_frames
+        for camera_id in tracking_camera_ids
+    }
+    sample_intervals_by_camera_id.update(
+        {
+            camera_id: pipeline_settings.face_identity_sample_interval_frames
+            for camera_id in face_identity_camera_ids
+        }
+    )
 
     person_tracking_config = (
         ByteTrackConfig(
@@ -405,27 +431,59 @@ def build_runner(
         else None
     )
 
-    consumer = InferenceConsumer(
-        frame_buffer=frame_buffer,
-        processor=InferenceProcessor(detector),
-        shutdown_event=shutdown_event,
-        poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
-        max_consecutive_failures=pipeline_settings.inference_max_consecutive_failures,
-        result_handler=result_handler,
-        entry_processor=entry_processor,
-        entry_camera_ids=face_identity_camera_ids,
-        entry_result_handler=entry_result_handler,
-    )
+    inference_processor = InferenceProcessor(detector)
+    consumers: list[InferenceConsumer] = []
+    consumer_buffers: list[FrameBuffer] = []
+    if tracking_camera_ids:
+        consumers.append(
+            InferenceConsumer(
+                frame_buffer=tracking_buffer,
+                processor=inference_processor,
+                shutdown_event=shutdown_event,
+                poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
+                max_consecutive_failures=(
+                    pipeline_settings.inference_max_consecutive_failures
+                ),
+                result_handler=result_handler,
+            )
+        )
+        consumer_buffers.append(tracking_buffer)
+    if entry_buffer is not None:
+        assert entry_processor is not None
+        assert entry_result_handler is not None
+        consumers.append(
+            InferenceConsumer(
+                frame_buffer=entry_buffer,
+                processor=inference_processor,
+                shutdown_event=shutdown_event,
+                poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
+                max_consecutive_failures=(
+                    pipeline_settings.inference_max_consecutive_failures
+                ),
+                result_handler=result_handler,
+                entry_processor=entry_processor,
+                entry_camera_ids=face_identity_camera_ids,
+                entry_result_handler=entry_result_handler,
+            )
+        )
+        consumer_buffers.append(entry_buffer)
+    if not consumers:
+        raise ValueError("추론할 카메라 역할이 하나 이상 필요합니다.")
+
     stream_worker = StreamWorker(
         stream_settings,
         publisher=build_publisher(stream_settings),
-        frame_buffer=frame_buffer,
+        frame_buffer=consumer_buffers[0],
+        frame_buffers_by_camera_id=frame_buffers_by_camera_id,
+        sample_intervals_by_camera_id=sample_intervals_by_camera_id,
         shutdown_event=shutdown_event,
     )
     return PipelineRunner(
         stream_worker=stream_worker,
-        consumer=consumer,
-        frame_buffer=frame_buffer,
+        consumer=consumers[0],
+        frame_buffer=consumer_buffers[0],
+        additional_consumers=consumers[1:],
+        additional_frame_buffers=consumer_buffers[1:],
         shutdown_event=shutdown_event,
     )
 
@@ -441,7 +499,7 @@ def enable_metrics(runner: PipelineRunner, settings: PipelineSettings) -> None:
         logger.info("지표 노출이 꺼져 있다(METRICS_ENABLED=false).")
         return
 
-    register_frame_buffer(runner.frame_buffer)
+    register_frame_buffer(runner.frame_buffers)
     start_metrics_server(host=settings.metrics_host, port=settings.metrics_port)
 
 

@@ -33,11 +33,14 @@ HTTP 계약만 호출한다. 사람 탐지는 아직 `model.py`가 ultralytics�
 `pipeline`은 카메라 역할에 따라 실행 경로를 완전히 나눈다. 입구 카메라는 YOLO와
 ByteTrack을 호출하지 않고 전체 JPEG를 deeplearning에 보내 얼굴 탐지→ArcFace 식별→얼굴
 track 관측을 받는다. CCTV는 얼굴 서비스를 호출하지 않고 YOLO 사람 탐지와 ByteTrack만
-실행한다. 등록 얼굴 관측은 인계 메모리에 먼저 반영한 뒤 FastAPI의 입구 신원 이벤트로
+실행한다. 각 역할은 별도 최신 프레임 버퍼·소비자를 사용한다. 등록 얼굴 관측은 인계
+메모리에 먼저 반영한 뒤 FastAPI의 입구 신원 이벤트로
 저장한다. 인계 route가 있으면 CCTV 사람 track의 하단 중앙점이 문
 영역에 처음 들어오는 순간 그 신원을 넘겨 같은 track이 좌석까지 이동하는 동안 유지한다.
 track이 문 영역 밖에서 먼저 만들어진 경우도 이후 경계 진입을 감지한다.
-활성 학생 한 명은 CCTV track 하나에만 인계한다.
+활성 학생 한 명은 CCTV track 하나에만 인계한다. ByteTrack은 실제 촬영 시각 차이로 이동을
+예측하고, track 만료 시 신원과 인계 상태를 즉시 지운다. 끊긴 새 track에는 과거 신원을
+자동 복원하지 않는다.
 얼굴 서비스나 입구 이벤트 저장이 실패해도 CCTV 사람 탐지와 좌석 점유 경로는
 멈추지 않는다. `FASTAPI_URL`을 설정하면 CCTV 결과를 `/internal/inference/events`로
 전송하며, 설정하지 않으면 로그만 출력한다. track 생성·만료·활성 수와 수명, 인계 결과
@@ -59,8 +62,8 @@ track이 문 영역 밖에서 먼저 만들어진 경우도 이후 경계 진입
 | `consumer.py` | 프레임 버퍼에서 최신 프레임을 꺼내 도는 소비자 루프 |
 | `handler.py` | 결과를 FastAPI 내부 API 계약으로 직렬화하고 제한 재시도 |
 | `face_identity.py` | 입구 JPEG를 deeplearning에 보내 얼굴 관측 계약을 검증하고 FastAPI 입구 이벤트로 저장. 저장보다 메모리 인계를 먼저 수행 |
-| `tracking.py` | 사람 bbox를 카메라별 ByteTrack 두 단계 매칭으로 이어 `person-<번호>` 부여 |
-| `identity_handover.py` | FastAPI route를 주기적으로 읽고 입구 신원을 CCTV 문 영역에 진입한 유일한 track에 인계해 track 수명 동안 유지 |
+| `tracking.py` | 사람 bbox를 실제 촬영 시각 기반 카메라별 ByteTrack 두 단계 매칭으로 이어 `person-<번호>` 부여. 갱신마다 만료 ID 공개 |
+| `identity_handover.py` | FastAPI route를 주기적으로 읽고 입구 신원을 CCTV 문 영역에 진입한 유일한 track에 인계해 track 수명 동안 유지. 만료 ID 상태는 즉시 제거 |
 | `metrics.py` | 추론·ByteTrack·신원 인계 Prometheus 지표 정의 |
 | `fixtures/` | 얼굴·영상 없는 모델 연동 계약 fixture |
 | `main.py` | 이미지 파일 한 장을 검사하는 진입점 |
@@ -295,7 +298,8 @@ python -m pytest inference/tests -q
 - `test_handler.py` — 승인 fixture와 payload 일치, 멱등 ID, HTTP 제한 재시도 검증
 - `test_face_identity.py` — 식별 결과 보강, 미식별 track, 응답 검증, 대상 카메라 제한과 장애 시 원본 탐지 통과
 - `test_tracking.py` — ByteTrack 고·저신뢰도 2단계 매칭, 짧은 미탐 회복, 만료, 카메라 격리
-- `test_identity_handover.py` — 입구→CCTV 인계, 좌석까지 유지, 역순 프레임, 다중 후보 거부
+- `test_identity_handover.py` — 입구→CCTV 인계, 좌석까지 유지, 역순 프레임, 다중 후보 거부,
+  track 만료 즉시 신원 제거와 새 track 재인계
 - `test_metrics.py` — 지연·탐지 신뢰도·처리 결과 계측. 실패한 추론이 지연 분포에
   들어가지 않는 것과 연속 실패 Gauge가 성공 시 0으로 돌아가는 것을 함께 본다
 

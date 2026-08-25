@@ -50,6 +50,26 @@ def test_연속된_사람_bbox에_같은_track_id를_붙인다() -> None:
     assert second.detections[0].track_id == "person-1"
 
 
+def test_실제_촬영_간격으로_빠르게_이동한_bbox를_예측한다() -> None:
+    tracker = CameraByteTracker(config())
+
+    first = tracker.update(result(person(0.9, (0, 10, 20, 180))), observed_at=0.0)
+    tracker.update(result(person(0.9, (10, 10, 30, 180))), observed_at=0.2)
+    third = tracker.update(result(person(0.9, (50, 10, 70, 180))), observed_at=1.0)
+
+    assert third.detections[0].track_id == first.detections[0].track_id
+
+
+def test_예측으로_설명되지_않는_큰_단절은_새_track으로_둔다() -> None:
+    tracker = CameraByteTracker(config())
+
+    first = tracker.update(result(person(0.9, (0, 10, 20, 180))), observed_at=0.0)
+    tracker.update(result(person(0.9, (10, 10, 30, 180))), observed_at=0.2)
+    third = tracker.update(result(person(0.9, (180, 10, 200, 180))), observed_at=1.0)
+
+    assert third.detections[0].track_id != first.detections[0].track_id
+
+
 def test_낮은_신뢰도_탐지도_2단계에서_기존_track을_유지한다() -> None:
     tracker = CameraByteTracker(config())
     tracker.update(result(person(0.9, (10, 10, 80, 180))))
@@ -85,6 +105,7 @@ def test_buffer를_넘긴_track은_만료하고_새_id를_만든다() -> None:
     tracker.update(result(person(0.9, (10, 10, 80, 180))))
     tracker.update(result())
     tracker.update(result())
+    assert tracker.expired_track_ids_last_update == ("person-1",)
 
     recreated = tracker.update(result(person(0.9, (10, 10, 80, 180))))
 
@@ -114,6 +135,23 @@ def test_카메라마다_track_id_상태를_분리한다() -> None:
     assert handled[0][1].detections[0].track_id == "person-1"
     assert handled[1][1].detections[0].track_id == "person-1"
     assert set(handler._trackers) == {"entry-camera", "classroom-cctv"}
+
+
+def test_만료한_track_ID를_인계_상태_정리기로_전달한다() -> None:
+    expired: list[tuple[str, tuple[str, ...]]] = []
+    handler = ByteTrackResultHandler(
+        config(track_buffer_frames=1),
+        inner=lambda _frame, _value: None,
+        expired_track_handler=lambda camera_id, track_ids: expired.append(
+            (camera_id, track_ids)
+        ),
+    )
+
+    handler(captured("classroom-cctv", 0), result(person(0.9, (10, 10, 80, 180))))
+    handler(captured("classroom-cctv", 1), result())
+    handler(captured("classroom-cctv", 2), result())
+
+    assert expired == [("classroom-cctv", ("person-1",))]
 
 
 def test_잘못된_threshold_조합은_거부한다() -> None:

@@ -6,6 +6,8 @@
 > 현재 상태: SCRFD 얼굴 검출, ArcFace embedding·오픈셋 갤러리 대조, 얼굴 단위 시간
 > 추적과 MediaPipe 자세 분석이 구현됐다. worker가 지정된 입구 카메라 프레임을 내부
 > HTTP로 보내면 FastAPI가 만든 대표 embedding 갤러리와 대조해 `student_id`를 돌려준다.
+> 갤러리는 활성·얼굴 등록 학생만 포함하고, 얼굴 track은 bbox와 embedding의 전역 1:1
+> 할당으로 연결한다. 낮은 품질 관측에는 과거 신원을 노출하지 않는다.
 > AdaFace 어댑터·고정 split 평가 하네스와 카메라 간 인계 실험 코드도 있다. 운영
 > 카메라별 사람 ByteTrack과 문 영역·통과 시각 기반 인계는 `worker/inference`가 담당하며,
 > 복장 re-ID는 아직 실험 경로로만 유지한다.
@@ -35,18 +37,17 @@
 ## 목표 파이프라인
 
 ```text
-프레임
+입구 전체 프레임
   │
-  ▼ Person Detection            사람이 어디 있는가
-사람 ROI
-  │
-  ▼ Face Detection              그 사람의 얼굴이 어디 있는가
+  ▼ Face Detection              얼굴이 어디 있는가
 얼굴 crop ──얼굴 없음──▶ 미식별 결과
   │
   ▼ Face Recognition            얼굴을 벡터로
 embedding
   │
-  ▼ Face Gallery 대조           등록된 학생 중 누구인가
+  ├─▶ 얼굴 track 연결           이전 관측과 같은 얼굴인가
+  │
+  ▼ Face Gallery 대조           활성·등록 학생 중 누구인가
 student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 ```
 
@@ -95,7 +96,7 @@ student_id + 신뢰도 ──기준 미만──▶ 신원 필드 없음
 | Face Detection | SCRFD | 등록·실시간 식별에 구현됨. 모델 버전 확정은 `결정 필요` |
 | Face Recognition | ArcFace(현재), AdaFace R50 | 둘 다 평가 가능. 운영 기본은 기존 등록 embedding과 같은 ArcFace이며 최종 선택은 비교 후 결정 |
 | Head Pose | Landmark/Pose 모델 | `후보`. 얼굴 등록 시점의 각도 보정용 |
-| Tracking | 얼굴 bbox+embedding 시간 추적 + worker 사람 ByteTrack | 입구·CCTV는 독립 tracker를 쓰며, 얼굴 식별은 사람 track ID를 덮어쓰지 않는다([결정 0025](../docs/architecture/decisions.md#0025--강의실-안-신원-유지를-bytetrack-트래킹으로-하고-인계-실패는-unknown으로-둔다)) |
+| Tracking | 얼굴 bbox+embedding 전역 1:1 시간 추적 + worker 사람 ByteTrack | 다른 얼굴 embedding은 위치가 같아도 새 얼굴 track으로 만들고 낮은 품질 관측은 과거 신원을 노출하지 않는다. 입구·CCTV는 독립 tracker를 쓴다([결정 0042](../docs/architecture/decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)) |
 | 카메라 간 신원 인계 | CCTV 문 영역+통과 시각 운영 경로, 시간·기하·복장 re-ID 실험 | 운영 경로는 유일 후보일 때만 인계하고 모호하면 미식별로 둔다. re-ID는 실험 코드로 유지한다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)) |
 | Super Resolution | 별도 모델 | **핵심 경로에서 빠졌다.** 얼굴 인식을 입구에서만 한다([결정 0024](../docs/architecture/decisions.md#0024--카메라-구성을-전체-조망-cctv와-입구-카메라로-바꾸고-학생-식별을-입구-1회로-한정한다)). 아래 참고 |
 
@@ -195,12 +196,15 @@ python -m uvicorn app:app --port 8100
 | `MAX_BATCH_SIZE` | 배치 크기 | 배치 처리 도입 시 |
 | `FACE_IDENTIFICATION_ENABLED` | 실시간 갤러리 식별 활성화 | 기본 `false` |
 | `FACE_GALLERY_DATABASE_URL`, `_NAME` | FastAPI 대표 embedding 갤러리 조회 | 읽기 전용 MongoDB 자격 증명 권장 |
-| `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 유사도·margin 임계값 | 식별을 켤 때 파일 또는 아래 두 값이 필수 |
-| `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD` | 임계값 파일을 쓰지 않을 때의 값 | 근거 없는 기본값 없음 |
+| `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 갤러리 유사도·margin·track 유사도 임계값 | 식별을 켤 때 파일 또는 아래 세 값이 필수 |
+| `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD`, `_TRACK_SIMILARITY_THRESHOLD` | 임계값 파일을 쓰지 않을 때의 값 | 근거 없는 기본값 없음 |
 
 `GET /health`는 프로세스 liveness만 확인한다. Docker와 배포 검증은
 `GET /health/ready`를 사용한다. 식별이 켜진 배포에서는 이 경로가 MongoDB 갤러리를 실제로
-읽고, 비어 있거나 현재 ArcFace metadata와 다른 embedding이 있으면 503을 반환한다.
+읽고, 활성·얼굴 등록 학생의 현재 ArcFace metadata와 맞는 embedding만 사용한다. 유효
+갤러리가 비어 있으면 503을 반환하며, 성공 응답에는 `gallery_entries`와
+`excluded_gallery_entries`가 포함된다. 제외된 고아·비활성·미등록 embedding은 삭제하지
+않고 후보에서만 뺀다.
 식별이 꺼진 배포에서는 `face_identification=disabled`로 200을 반환한다.
 
 갤러리의 누구인지 결정하는 유사도·margin 임계값은 `deeplearning` 설정이다. 식별된
@@ -282,11 +286,14 @@ bbox 기반 크기 비율, 검출 신뢰도, 안내 타원 포함 여부, MediaP
 `POST /internal/face-identifications`는 입구 카메라의 JPEG 바이트와 `X-Camera-ID`만
 받는다. 사람 bbox나 사람 track은 입력 계약에 없다. 기능이 켜져 있으면 FastAPI의
 `face_embeddings` 컬렉션을
-주기적으로 읽어 현재 ArcFace 메타데이터와 정확히 맞는 대표 벡터만 갤러리에 넣는다.
+주기적으로 읽고 `students`의 활성·얼굴 등록 상태와 조인해 현재 ArcFace 메타데이터와
+정확히 맞는 대표 벡터만 갤러리에 넣는다.
 응답의 `observations`에는 얼굴 track ID·bbox·검출 신뢰도, `REGISTERED`/`UNKNOWN`/
 `UNCERTAIN`, 기준을 통과한 `student_id`, ArcFace 유사도·margin, 품질·관측 수·거절 사유가
 있고 사람 탐지 결과·이미지·embedding은 없다. 갤러리 조회 실패·빈 갤러리·호환되지 않는
-문서는 503으로 닫힌다.
+문서는 503으로 닫힌다. 현재 얼굴 embedding이 기존 track을 지지하지 않으면 같은 위치라도
+새 track을 만들고, embedding을 만들 수 없는 낮은 품질 관측은 과거 `student_id` 없이
+`UNCERTAIN`으로 반환한다.
 임계값은 `training/face_identification_eval.py`가 만든 산출물을 사용한다.
 
 ## 관련 문서

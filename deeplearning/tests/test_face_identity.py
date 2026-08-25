@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from deeplearning.face_degradation import DegradationConfig, degrade_image
@@ -197,6 +199,61 @@ def test_tracker_uses_multiple_observations_before_confirming_identity() -> None
     assert second.status is IdentityStatus.REGISTERED
     assert first.track_id == second.track_id
     assert second.student_id == "student-a"
+
+
+def test_tracker는_같은_위치의_다른_얼굴을_새_track으로_분리한다() -> None:
+    engine = _engine(_vector(0), similarity=0.3, margin=0.1)
+    tracker = MultiFaceIdentityTracker(
+        engine, minimum_observations=1, track_similarity_threshold=0.8
+    )
+    first_detection = engine.identify(np.zeros((30, 30, 3), dtype=np.uint8))[0]
+
+    first = tracker.update([first_detection])[0]
+    second = tracker.update(
+        [replace(first_detection, embedding=_vector(1), student_id="student-b")]
+    )[0]
+
+    assert first.track_id != second.track_id
+    assert first.student_id == "student-a"
+    assert second.student_id == "student-b"
+
+
+def test_tracker는_현재_얼굴_근거가_없으면_이전_이름을_노출하지_않는다() -> None:
+    engine = _engine(_vector(0), similarity=0.3, margin=0.1)
+    tracker = MultiFaceIdentityTracker(engine, minimum_observations=1)
+    detection = engine.identify(np.zeros((30, 30, 3), dtype=np.uint8))[0]
+
+    confirmed = tracker.update([detection])[0]
+    uncertain = tracker.update(
+        [replace(detection, embedding=None, quality=0.0, rejected_reason="low_quality")]
+    )[0]
+
+    assert confirmed.track_id == uncertain.track_id
+    assert uncertain.status is IdentityStatus.UNCERTAIN
+    assert uncertain.student_id is None
+
+
+def test_tracker는_교차하는_얼굴을_embedding으로_일대일_연결한다() -> None:
+    engine = _engine(_vector(0), similarity=0.3, margin=0.1)
+    tracker = MultiFaceIdentityTracker(
+        engine, minimum_observations=1, track_similarity_threshold=0.8
+    )
+    base = engine.identify(np.zeros((30, 30, 3), dtype=np.uint8))[0]
+    student_a_left = replace(base, bbox=(0, 0, 20, 20), embedding=_vector(0))
+    student_b_right = replace(
+        base, bbox=(80, 0, 100, 20), embedding=_vector(1), student_id="student-b"
+    )
+    first = tracker.update([student_a_left, student_b_right])
+
+    second = tracker.update(
+        [
+            replace(student_a_left, bbox=(80, 0, 100, 20)),
+            replace(student_b_right, bbox=(0, 0, 20, 20)),
+        ]
+    )
+
+    assert second[0].track_id == first[0].track_id
+    assert second[1].track_id == first[1].track_id
 
 
 def test_tiled_identification_removes_duplicate_box() -> None:

@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 EXPECTED_THRESHOLD_METADATA = {
     "model_name": "arcface",
     "model_version": "insightface-buffalo_l-w600k_r50-v0.7",
@@ -89,7 +88,11 @@ def validate_thresholds(path: Path) -> list[str]:
     for key, expected in EXPECTED_THRESHOLD_METADATA.items():
         if values.get(key) != expected:
             errors.append(f"thresholds.json의 {key}가 현재 ArcFace 모델과 다릅니다.")
-    for key, upper in (("similarity_threshold", 1.0), ("margin_threshold", 2.0)):
+    for key, upper in (
+        ("similarity_threshold", 1.0),
+        ("margin_threshold", 2.0),
+        ("track_similarity_threshold", 1.0),
+    ):
         value = values.get(key)
         if (
             not isinstance(value, (int, float))
@@ -106,6 +109,16 @@ def validate_thresholds(path: Path) -> list[str]:
         or not 0.0 <= float(target_far) <= 1.0
     ):
         errors.append("thresholds.json의 target_far 범위가 올바르지 않습니다.")
+    track_target = values.get("track_target_false_association")
+    if (
+        not isinstance(track_target, (int, float))
+        or isinstance(track_target, bool)
+        or not math.isfinite(float(track_target))
+        or not 0.0 <= float(track_target) <= 0.001
+    ):
+        errors.append(
+            "thresholds.json의 track_target_false_association은 0.001 이하여야 합니다."
+        )
     return errors
 
 
@@ -157,7 +170,9 @@ def validate(docker_root: Path) -> list[str]:
         errors.append("GPU 서버의 INFERENCE_DEVICE는 cuda여야 합니다.")
     face_identity_url = worker_env.get("FACE_IDENTITY_URL", "").rstrip("/")
     if face_identity_url and face_identity_url != "http://deeplearning:8100":
-        errors.append("FACE_IDENTITY_URL은 compose 내부 주소 http://deeplearning:8100이어야 합니다.")
+        errors.append(
+            "FACE_IDENTITY_URL은 compose 내부 주소 http://deeplearning:8100이어야 합니다."
+        )
     fastapi_url = urlparse(worker_env.get("FASTAPI_URL", ""))
     if fastapi_url.scheme not in {"http", "https"} or not fastapi_url.netloc:
         errors.append("FASTAPI_URL이 올바른 HTTP URL이 아닙니다.")
@@ -184,7 +199,9 @@ def validate(docker_root: Path) -> list[str]:
     }
     missing_face_cameras = face_camera_ids - camera_ids
     if missing_face_cameras:
-        errors.append("FACE_IDENTITY_CAMERA_IDS가 STREAM_SOURCES에 모두 포함되지 않습니다.")
+        errors.append(
+            "FACE_IDENTITY_CAMERA_IDS가 STREAM_SOURCES에 모두 포함되지 않습니다."
+        )
     if "classroom-cctv" not in camera_ids:
         errors.append("STREAM_SOURCES에 classroom-cctv 스트림이 필요합니다.")
     if not face_camera_ids or face_camera_ids == {"classroom-cctv"}:
@@ -197,14 +214,18 @@ def validate(docker_root: Path) -> list[str]:
     }
     missing_tracking_cameras = tracking_ids - camera_ids
     if missing_tracking_cameras:
-        errors.append("PERSON_TRACKING_CAMERA_IDS가 STREAM_SOURCES에 모두 포함되지 않습니다.")
+        errors.append(
+            "PERSON_TRACKING_CAMERA_IDS가 STREAM_SOURCES에 모두 포함되지 않습니다."
+        )
     if face_camera_ids & tracking_ids:
         errors.append("입구 얼굴 카메라와 사람 탐지 카메라 역할은 겹칠 수 없습니다.")
     if "classroom-cctv" not in tracking_ids:
         errors.append("PERSON_TRACKING_CAMERA_IDS에 classroom-cctv가 필요합니다.")
     unassigned_cameras = camera_ids - face_camera_ids - tracking_ids
     if unassigned_cameras:
-        errors.append("모든 STREAM_SOURCES는 얼굴 전용 또는 사람 탐지 역할이어야 합니다.")
+        errors.append(
+            "모든 STREAM_SOURCES는 얼굴 전용 또는 사람 탐지 역할이어야 합니다."
+        )
 
     raw_routes = worker_env.get("IDENTITY_HANDOVER_ROUTES", "").strip()
     if raw_routes:
@@ -214,7 +235,7 @@ def validate(docker_root: Path) -> list[str]:
                 raise ValueError
             for route in routes:
                 if not isinstance(route, dict):
-                    raise ValueError
+                    raise TypeError
                 entry_id = route.get("entry_camera_id")
                 classroom_id = route.get("classroom_camera_id")
                 zone = route.get("classroom_entry_zone")
@@ -234,7 +255,9 @@ def validate(docker_root: Path) -> list[str]:
                 ):
                     raise ValueError
         except (TypeError, ValueError, json.JSONDecodeError):
-            errors.append("IDENTITY_HANDOVER_ROUTES의 카메라 또는 ROI 형식이 올바르지 않습니다.")
+            errors.append(
+                "IDENTITY_HANDOVER_ROUTES의 카메라 또는 ROI 형식이 올바르지 않습니다."
+            )
 
     for container_path in FACE_MODEL_PATHS:
         path = host_model_path(docker_root, container_path)

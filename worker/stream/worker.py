@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
 from shared.frame_buffer import FrameBuffer
@@ -122,11 +122,15 @@ class StreamWorker:
         *,
         publisher: RtspPublisher | None = None,
         frame_buffer: FrameBuffer | None = None,
+        frame_buffers_by_camera_id: Mapping[str, FrameBuffer] | None = None,
+        sample_intervals_by_camera_id: Mapping[str, int] | None = None,
         shutdown_event: threading.Event | None = None,
     ) -> None:
         self._settings = settings
         self._publisher = publisher
         self._frame_buffer = frame_buffer
+        self._frame_buffers_by_camera_id = dict(frame_buffers_by_camera_id or {})
+        self._sample_intervals_by_camera_id = dict(sample_intervals_by_camera_id or {})
         # 조립 진입점이 소비자와 같은 신호를 공유하도록 주입할 수 있게 한다.
         # 추론이 치명적으로 실패하면 수신도 함께 멈춰야 한다.
         self._shutdown_event = shutdown_event or threading.Event()
@@ -206,8 +210,12 @@ class StreamWorker:
             reader=reader,
             shutdown_event=self._shutdown_event,
             retry_delay_seconds=settings.stream_reconnect_delay_seconds,
-            sample_interval_frames=settings.frame_sample_interval_frames,
+            sample_interval_frames=self._sample_intervals_by_camera_id.get(
+                source.camera_id, settings.frame_sample_interval_frames
+            ),
             recorder=recorder,
             frame_capture=frame_capture,
-            frame_buffer=self._frame_buffer,
+            frame_buffer=self._frame_buffers_by_camera_id.get(
+                source.camera_id, self._frame_buffer
+            ),
         )

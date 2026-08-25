@@ -269,7 +269,8 @@ chmod 600 .docker/env/*.env
 
 - MongoDB `face_embeddings`: 얼굴 등록 때 FastAPI가 저장한 학생별 대표 embedding이다.
 - `thresholds.json`: 별도의 known/unknown validation으로 허용 오인식률에 맞춰 고른
-  similarity·margin 기준이다. **등록 embedding을 JSON으로 덤프한 파일이 아니다.**
+  gallery similarity·margin과 얼굴 track similarity 기준이다. track 기준은 다른 학생
+  얼굴 쌍의 허용 오연결률로 고른다. **등록 embedding을 JSON으로 덤프한 파일이 아니다.**
 
 ### 1. 평가 실행 호스트에서 thresholds.json 생성
 
@@ -288,6 +289,7 @@ FACE_EVAL_KNOWN_TEST_DIR=<student_id/*.jpg 루트>
 FACE_EVAL_UNKNOWN_TEST_DIR=<미등록 test 이미지 루트>
 FACE_DETECTION_MODEL_PATH=<scrfd_10g_bnkps.onnx 절대경로>
 FACE_RECOGNITION_MODEL_PATH=<w600k_r50.onnx 절대경로>
+FACE_EVAL_TRACK_TARGET_FALSE_ASSOCIATION=0.001
 FACE_EVAL_THRESHOLD_OUTPUT=<thresholds.json 출력 절대경로>
 ```
 
@@ -314,7 +316,8 @@ deeplearning은 similarity와 margin을 모두 통과한 신원만 반환하지�
 ### 2. GPU 서버 환경과 모델 배치
 
 `.docker/env/deeplearning.dev.env`에는 아래 두 비밀값만 필수로 둔다. MongoDB 계정은
-가능하면 `face_embeddings` 읽기 권한만 부여한다.
+가능하면 `face_embeddings`와 `students` 읽기 권한만 부여한다. 활성 상태이며 얼굴 등록이
+완료된 학생의 embedding만 갤러리에 넣기 때문에 두 컬렉션 모두 필요하다.
 
 ```dotenv
 FACE_GALLERY_DATABASE_URL=<MongoDB URI>
@@ -376,9 +379,11 @@ worker는 YOLO·GPU 모델과 카메라 파이프라인 조립을 마친 뒤 `/m
 컨테이너가 막 생성된 정상 기동을 실패로 오판하지 않도록 기본 120초 동안 2초 간격으로
 준비 완료를 기다린다. 제한 시간은 `--worker-readiness-timeout-seconds`로 조정할 수 있다.
 
-deeplearning healthcheck는 모델 파일 존재만이 아니라 MongoDB 갤러리가 비어 있지 않고
-ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deeplearning이 healthy가 된
-뒤 시작한다. GPU 배포 workflow도 서버에서 같은 사전점검을 실행하므로 env·모델·임계값이
+deeplearning healthcheck는 모델 파일 존재만이 아니라 MongoDB에서 활성·얼굴 등록 학생의
+유효 갤러리가 비어 있지 않고 ArcFace metadata가 일치하는지까지 확인한다. 응답의
+`gallery_entries`와 `excluded_gallery_entries`로 유효·제외 항목 수를 확인할 수 있다.
+그래서 worker는 deeplearning이 healthy가 된 뒤 시작한다. GPU 배포 workflow도 서버에서
+같은 사전점검을 실행하므로 env·모델·세 임계값과 track 목표 오연결률이
 빠진 Compose를 자동 재적용하지 않는다. 실행 중인 main GPU 스택을 재적용한 뒤에는 기본
 런타임 검증도 자동 실행한다. 실패하면 설정과 두 `:latest` 태그를 모두 이전 상태로
 되돌린다.
