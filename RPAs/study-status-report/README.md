@@ -57,7 +57,7 @@ Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` �
 | --- | --- |
 | `reports/study_status_management_sample.xlsx` | 검증용 관리 문서 샘플 |
 | `reports/study_status_<date>_<classroom>.xlsx` | 운영 시 생성되는 일자별 관리 문서 |
-| `logs/*.json` | 상태 변화 기록과 실행 이력. 실제 학생 개인정보와 토큰은 저장하지 않는다. |
+| `logs/run-<날짜>.json` | 상태 변화 기록과 실행 이력. 하루 한 파일에 JSON 한 줄씩 쌓인다. 실행기가 쓴다. **학생 이름과 좌석은 남기지 않고 내부 `student_id`만 쓴다.** 저장소에는 커밋하지 않는다 |
 
 ## 관리 문서 구성
 
@@ -106,6 +106,7 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 - `runner/server.py`: 위 두 스크립트를 HTTP로 감싸는 실행기 (아래 참고)
 - `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
+- `templates/schedule-sample.md`: 시간표 문서 형식과 예시
 - `.env.example`: n8n/스크립트 환경변수 예시
 
 ## 실행 구조 — 왜 사이드카가 있나
@@ -128,7 +129,12 @@ n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -
 | --- | --- |
 | `GET /health` | 살아 있는지와 저장소 마운트 경로 확인 |
 | `POST /workbook` | `create_management_workbook.py` 실행 |
-| `POST /slack-upload` | `slack_upload_file.py` 실행 |
+| `POST /slack-upload` | `slack_upload_file.py`로 관리 문서 전송 |
+| `POST /slack-message` | 첨부 없이 텍스트만 전송. 시간표를 읽지 못했을 때의 오류 알림용 |
+
+오류 알림은 Incoming Webhook 대신 Bot token의 `chat:write`로 보낸다. 파일 업로드에
+이미 쓰는 토큰이라 별도 발급이 필요 없기 때문이다. `SLACK_WEBHOOK_URL`을 설정하면
+`--webhook-only` 경로도 그대로 쓸 수 있다.
 
 경로는 저장소 안으로 제한하고(밖을 가리키면 400), Slack 토큰은 요청 본문으로 받지
 않는다 — 마운트된 `.env`에서 스크립트가 직접 읽는다. n8n 실행 이력에 비밀값이 남지
@@ -141,10 +147,14 @@ n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -
 
 | 파일 | 내용 | 없으면 |
 | --- | --- | --- |
-| `RPAs/study-status-report/.env` | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Slack 업로드 단계에서 실패한다 |
-| `individual_tasks/시간표.md` | 시간표 문서 | 워크플로는 멈추지 않고 기본 시간표로 동작한다 |
+| `RPAs/study-status-report/.env` | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Slack 전송 단계에서 실패한다 |
+| `individual_tasks/시간표.md` | 시간표 문서 | Slack에 알린 뒤 기록을 중단한다 |
 
-둘 다 `.gitignore` 대상이라 `git pull`로는 생기지 않는다.
+둘 다 `.gitignore` 대상이라 `git pull`로는 생기지 않는다. 시간표 형식과 예시는
+[`templates/schedule-sample.md`](./templates/schedule-sample.md)에 있다.
+
+**시간표를 못 읽었을 때 기본 시간표로 넘어가지 않는다.** 실제와 다른 시간표로 출결을
+기록하면 잘못된 기록이 남고, 그것이 관리자 확인 대상 목록으로 이어지기 때문이다.
 
 ```bash
 docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner n8n
