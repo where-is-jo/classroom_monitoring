@@ -49,7 +49,7 @@
 
 Slack 앱 권한은 `.xlsx` 파일 업로드를 위해 `files:write`가 필요하다. 채널 ID를 자동으로 조회하려면 추가로 `channels:read` 또는 대상 채널 유형에 맞는 조회 권한이 필요하지만, 운영에서는 `SLACK_CHANNEL_ID`를 명시하는 방식을 기본으로 한다.
 
-Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` 형태라면 마지막 경로 값이 채널 ID다. 현재 입력 문서의 채널 URL 기준 채널 ID는 `C0BMM4X8BJT`다.
+Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` 형태라면 마지막 경로 값이 채널 ID다. 현재 대상 채널은 `https://app.slack.com/client/T0BMM4ZFGUB/C0BRSFJ6SSK`(채널 ID `C0BRSFJ6SSK`)다 — 값은 각자 `.env`에 넣고 이 문서에는 채널 ID까지만 남긴다.
 
 ## 출력
 
@@ -57,7 +57,7 @@ Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` �
 | --- | --- |
 | `reports/study_status_management_sample.xlsx` | 검증용 관리 문서 샘플 |
 | `reports/study_status_<date>_<classroom>.xlsx` | 운영 시 생성되는 일자별 관리 문서 |
-| `logs/*.json` | 상태 변화 기록과 실행 이력. 실제 학생 개인정보와 토큰은 저장하지 않는다. |
+| `logs/run-<날짜>.json` | 상태 변화 기록과 실행 이력. 하루 한 파일에 JSON 한 줄씩 쌓인다. 실행기가 쓴다. **학생 이름과 좌석은 남기지 않고 내부 `student_id`만 쓴다.** 저장소에는 커밋하지 않는다 |
 
 ## 관리 문서 구성
 
@@ -103,8 +103,70 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 - `scripts/create_management_workbook.py`: `.xlsx` 생성 스크립트
 - `scripts/slack_upload_file.py`: Slack 외부 업로드 API 기반 `.xlsx` 전송 스크립트
 - `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
+- `runner/server.py`: 위 두 스크립트를 HTTP로 감싸는 실행기 (아래 참고)
+- `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
+- `templates/schedule-sample.md`: 시간표 문서 형식과 예시
 - `.env.example`: n8n/스크립트 환경변수 예시
+
+## 실행 구조 — 왜 사이드카가 있나
+
+```text
+n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -->  .xlsx / Slack
+```
+
+처음에는 n8n의 Execute Command 노드가 스크립트를 직접 부르는 구조였다. **n8n 2.33.5
+공식 이미지에는 파이썬이 없고 패키지 관리자(apk)까지 제거돼 있어** 컨테이너 안에서
+`python`을 부를 수 없다(실측: `python`·`python3`·`/sbin/apk` 모두 없음). 그래서
+파이썬만 있는 작은 컨테이너(`rpa-runner`)를 따로 두고 워크플로가 HTTP로 부른다.
+
+이 구조의 결과로 **n8n에서 Execute Command 노드를 열어 둘 필요가 없다.** 임의 명령
+실행 권한을 주지 않아도 되므로 `NODES_EXCLUDE`는 기본값 그대로 둔다.
+
+실행기가 여는 엔드포인트는 셋뿐이다.
+
+| 경로 | 하는 일 |
+| --- | --- |
+| `GET /health` | 살아 있는지와 저장소 마운트 경로 확인 |
+| `POST /workbook` | `create_management_workbook.py` 실행 |
+| `POST /slack-upload` | `slack_upload_file.py`로 관리 문서 전송 |
+| `POST /slack-message` | 첨부 없이 텍스트만 전송. 시간표를 읽지 못했을 때의 오류 알림용 |
+
+오류 알림은 Incoming Webhook 대신 Bot token의 `chat:write`로 보낸다. 파일 업로드에
+이미 쓰는 토큰이라 별도 발급이 필요 없기 때문이다. `SLACK_WEBHOOK_URL`을 설정하면
+`--webhook-only` 경로도 그대로 쓸 수 있다.
+
+**경로는 `reports/` 안으로 제한한다**(밖을 가리키면 400). 저장소 전체를 허용하면
+같은 저장소에 있는 `.env`를 Slack에 올리라고 시킬 수 있기 때문이다. Slack 토큰은
+요청 본문으로 받지 않고 마운트된 `.env`에서 스크립트가 직접 읽는다 — n8n 실행
+이력에 비밀값이 남지 않게 하려는 것이다.
+
+`/slack-message`는 **같은 `reason`을 쿨다운(기본 6시간) 동안 한 번만 보낸다.**
+시간표가 없는 상태는 사람이 고칠 때까지 이어지는데 워크플로는 5분마다 돌아서,
+그대로 두면 하루 수백 건이 쌓여 정작 봐야 할 알림이 묻힌다. 값은
+`RUNNER_MESSAGE_COOLDOWN_SECONDS`로 조정한다.
+
+## 배포 (개발 PC compose)
+
+`.docker/compose.main.dev.pc.yml`에 `rpa-runner` 서비스와 n8n의 환경변수·마운트가
+이미 들어 있다. 처음 띄울 때 **이 노트북에 두 파일을 직접 만들어 둬야 한다.**
+
+| 파일 | 내용 | 없으면 |
+| --- | --- | --- |
+| `RPAs/study-status-report/.env` | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Slack 전송 단계에서 실패한다 |
+| `individual_tasks/시간표.md` | 시간표 문서 | Slack에 알린 뒤 기록을 중단한다 |
+
+둘 다 `.gitignore` 대상이라 `git pull`로는 생기지 않는다. 시간표 형식과 예시는
+[`templates/schedule-sample.md`](./templates/schedule-sample.md)에 있다.
+
+**시간표를 못 읽었을 때 기본 시간표로 넘어가지 않는다.** 실제와 다른 시간표로 출결을
+기록하면 잘못된 기록이 남고, 그것이 관리자 확인 대상 목록으로 이어지기 때문이다.
+
+```bash
+docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner n8n
+```
+
+대상 강의실을 바꾸려면 compose의 `CLASSROOM_ID`·`CLASSROOM_NAME`을 고친다.
 
 ## 검증
 
@@ -123,3 +185,60 @@ python RPAs/study-status-report/scripts/validate_workflow_artifacts.py
 Slack 파일 업로드는 Slack의 현재 파일 업로드 방식인 `files.getUploadURLExternal`와 `files.completeUploadExternal`를 사용한다. Bot token만으로 인증 확인은 가능하지만, 파일을 관리자 채널에 공유하려면 `files:write` 권한과 `SLACK_CHANNEL_ID`가 반드시 필요하다. Incoming Webhook은 텍스트 메시지 전송만 지원하므로 `.xlsx` 첨부 전송의 대체 수단으로 쓰지 않는다.
 
 2026-08-22 검증 결과, 입력 문서의 Bot token과 채널 URL에서 추출한 채널 ID로 샘플 관리 문서 업로드가 성공했다. 검증 출력에는 Slack 파일 ID만 남기고 토큰, 웹훅, signing secret은 남기지 않는다.
+
+### 실행기(rpa-runner) 검증
+
+실행기는 컨테이너 없이도 확인할 수 있다. 저장소 루트에서 띄우고 호출한다.
+
+```bash
+REPO_DIR="$(pwd)" python RPAs/study-status-report/runner/server.py &
+curl -s localhost:8099/health
+```
+
+2026-08-25 확인한 것: `/health` 응답, `/workbook`으로 샘플 이벤트 관리 문서 생성 성공,
+`/slack-upload`로 새 채널(`C0BRSFJ6SSK`) 업로드 성공, 저장소 밖 경로·필수값 누락·없는
+파일 요청은 400으로 거부.
+
+컨테이너로도 같은 확인을 마쳤다. 이미지 빌드, 저장소 마운트(`/repo/RPAs`), 컨테이너
+안 파이썬으로 워크북 생성, 마운트된 `.env`의 토큰으로 Slack 업로드까지 성공했다
+(file ID `F0BSF2C264S`). `docker compose config`로 compose 문법과 최종 반영값도
+확인했다.
+
+### 전체 사슬 검증 (2026-08-25)
+
+실행기를 개발자 PC에서 띄우고 n8n이 tailnet 주소로 부르게 해서 워크플로 전체를 한 번
+돌렸다. 컨테이너 배포 전에 배선을 확인하려는 것이었다.
+
+```text
+n8n → 시간표 읽기 → 구간 판정 → fastapi student-states → 상태 변화 집계
+    → 실행기 워크북 생성 → 실행기 Slack 업로드
+```
+
+모든 노드가 통과했고 Slack 업로드까지 성공했다(file ID `F0BSJN0LDN0`). 이때 시간표
+파일이 없는 상태였는데 기본 시간표로 넘어가 멈추지 않았다.
+
+**이 검증에서 드러난 것들이 아래 "알려진 제약"에 반영돼 있다.** 검증은 `$env`를 실제
+값으로 치환하고 공부 시간 구간을 강제한 사본으로 했다 — 그 두 가지가 아직 서버에서
+동작하지 않기 때문이며, compose를 반영해 재기동하면 사본 없이 그대로 돈다.
+
+**아직 확인하지 못한 것:** 실제 공부 시간 구간에서 스케줄 트리거가 스스로 도는 것과,
+같은 학생·같은 상태를 두 번 기록하지 않는 중복 방지가 여러 주기에 걸쳐 동작하는 것.
+둘 다 compose 반영 후 하루를 돌려 봐야 확인된다.
+
+## 알려진 제약과 서버 설정
+
+컨테이너에서 실측해 확인한 것들이다. 셋 다 `.docker/compose.main.dev.pc.yml`에
+반영해 두었으므로 **재기동하면 해소된다.**
+
+| 확인한 것 | 증상 | 반영한 설정 |
+| --- | --- | --- |
+| 컨테이너 시계가 UTC | 시간표가 9시간 어긋나 공부 시간에 안 걸린다 | `TZ`, `GENERIC_TIMEZONE`을 `Asia/Seoul`로 |
+| **Code 노드가 `TZ`를 따르지 않는다** | 위 설정을 줘도 `new Date()`가 `GMT+0000`을 낸다. n8n 2.x가 Code 노드를 별도 러너 프로세스에서 돌리는데 그쪽이 `TZ`를 물려받지 않는다 | 컨테이너 설정이 아니라 **코드에서 KST로 고정**했다(`Parse Schedule`, `Build Daily Report`). 실행 환경이 무엇이든 같은 결과가 나온다 |
+| Code 노드의 `$env` 접근이 기본 차단 | `access to env vars denied`로 워크플로가 멈춘다 | `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` |
+| 파일 노드의 경로 접근이 기본 차단 | 시간표 읽기가 `Access to the file is not allowed.`로 실패 | `N8N_RESTRICT_FILE_ACCESS_TO=/repo/individual_tasks` |
+| 바이너리가 파일시스템에 저장됨 | 항목에 13바이트 참조만 실려 와 시간표 내용을 파싱할 수 없다 | `N8N_DEFAULT_BINARY_DATA_MODE=default` |
+| n8n 이미지에 파이썬·apk 없음 | 스크립트를 부를 수 없다 | `rpa-runner` 사이드카 |
+
+앞의 넷은 개발자 PC에서 같은 이미지를 띄워 하나씩 확인했고, **운영 중인 n8n
+인스턴스에서도 같은 증상이 재현되는 것을 확인했다.** 넷 다 컨테이너 재생성이
+있어야 적용된다.

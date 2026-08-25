@@ -138,25 +138,85 @@ services:
       # Execute Command 노드가 편집기에 나타나지 않는다. 서버 로그에는
       # "Unrecognized node type: n8n-nodes-base.executeCommand"로 찍힌다.
       #
-      # RPA 워크플로에서 Execute Command가 필요해 기본값을 덮어쓴다.
+      # **워크플로가 사이드카(rpa-runner)를 HTTP로 부르게 바뀌어 Execute Command는 더 이상
+      # 필요하지 않다.** 다른 워크플로가 쓰지 않는다면 이 줄을 지워 기본값(둘 다 차단)으로
+      # 되돌려도 된다 — 편집기에 붙을 수 있는 사람이면 누구나 이 컨테이너 안에서 셸 명령을
+      # 실행할 수 있게 되는 설정이라, 필요가 사라지면 닫는 편이 낫다.
       # **JSON 배열 문자열이어야 한다.** 빈 값이나 콤마 나열은 파싱되지 않는다.
-      # localFileTrigger는 쓸 일이 없어 제외한 채로 남긴다. 둘 다 열려면 '[]'로 바꾼다.
-      #
-      # Execute Command는 이 컨테이너 안에서 셸 명령을 실행한다. 호스트가 아니라
-      # 컨테이너 안이고, 편집기에 붙을 수 있는 사람이면 누구나 실행할 수 있다.
       NODES_EXCLUDE: '["n8n-nodes-base.localFileTrigger"]'
+      # **컨테이너 기본 시계가 UTC라 시간표가 9시간 어긋난다.** 워크플로의 Parse
+      # Schedule은 `new Date().setHours(...)`로 공부 시간 구간을 판정하므로, TZ가
+      # UTC면 오전 10시(KST)를 01시로 보고 어느 구간에도 들지 않는다. 실측으로
+      # 확인했다 — 컨테이너 시각이 `Tue Aug 25 2026 01:50 GMT+0000`이었다.
+      # GENERIC_TIMEZONE은 스케줄 트리거가, TZ는 Node의 시계가 쓴다. 둘 다 준다.
+      TZ: Asia/Seoul
+      GENERIC_TIMEZONE: Asia/Seoul
+      # **기본값이 차단이라 워크플로의 $env가 전부 실패한다.** 확인 결과 Code 노드에서
+      # `ExpressionError: access to env vars denied`가 났다. 아래 값들을 워크플로가
+      # $env로 읽으므로 열어 준다. 이 n8n은 인터넷에 공개하지 않고 tailnet 안에만
+      # 있으며, 여기 담기는 값은 강의실 id와 내부 주소로 비밀값이 아니다.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # **파일 노드는 기본으로 모든 경로가 막혀 있다.** 시간표를 읽으려다
+      # `Access to the file is not allowed.`로 실패한다. 읽어야 하는 디렉터리만
+      # 허용 목록에 넣는다 — 저장소 전체를 열지 않는다.
+      N8N_RESTRICT_FILE_ACCESS_TO: /repo/individual_tasks
+      # **기본값(filesystem)에서는 Code 노드가 파일 내용을 볼 수 없다.** 항목에는
+      # 13바이트짜리 참조만 실려 오고 실제 내용은 디스크에 남아, 시간표를 읽어도
+      # 파싱할 것이 없다. 여기서 다루는 바이너리는 시간표 문서 한 개(1.5KB)뿐이라
+      # 메모리에 담아도 부담이 없다.
+      N8N_DEFAULT_BINARY_DATA_MODE: default
+      # --- study-status-report 워크플로가 $env로 읽는 값 ---
+      # 비밀값이 아니라 어느 강의실을 보는지의 문제라 결정 0018대로 여기 직접 적는다.
+      # 대상 강의실을 바꾸려면 이 두 값을 고친다(fastapi의 강의실 목록 id·이름).
+      CLASSROOM_ID: f5a51e8e-2fe6-4056-b6d5-84a6a9804dbb
+      CLASSROOM_NAME: 4A 강의실
+      # 컨테이너끼리는 같은 network 안에서 서비스 이름으로 부른다. 호스트 포트(8076)를
+      # 쓰면 Tailscale이 내려갈 때 같이 끊긴다.
+      FASTAPI_BASE_URL: http://fastapi:8001
+      # 시간표 문서는 gitignore 대상이라 저장소에 없다. 이 노트북에 직접 두어야 한다 —
+      # 읽지 못하면 Slack에 알리고 기록을 중단한다(RPA README의 실패 조건).
+      SCHEDULE_FILE_PATH: /repo/individual_tasks/시간표.md
+      # 파이썬 스크립트를 대신 실행하는 사이드카. 아래 rpa-runner 서비스다.
+      RPA_RUNNER_URL: http://rpa-runner:8099
     volumes:
       # **GPU 서버에 있던 워크플로는 따라오지 않는다.** 볼륨은 기계에 묶여 있고
       # project name도 달라졌다(classroom-monitoring-dev_n8n-data ->
       # classroom-monitoring-dev-pc_n8n-data). 옮기려면 편집기에서 워크플로와
       # 자격 증명을 export/import 하거나, 서버의 볼륨을 tar로 떠서 옮긴다.
       - n8n-data:/home/node/.n8n
+      # 시간표 문서만 읽는다. 쓰기는 rpa-runner가 하므로 여기서는 읽기 전용이다.
+      - ../individual_tasks:/repo/individual_tasks:ro
+    depends_on:
+      - rpa-runner
     ports:
       - "127.0.0.1:15678:5678"
       - "100.119.241.93:15678:5678"
     networks:
       # fastapi와 같은 network에 둔다. n8n -> fastapi 호출은 경계를 넘지 않으므로
       # (결정 0026의 3번) 워크플로 안에서는 http://fastapi:8001 로 부르면 된다.
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
+  rpa-runner:
+    # **n8n 안에서 파이썬을 못 돌려서 생긴 서비스다.** n8n 2.33.5 공식 이미지에는
+    # 파이썬이 없고 패키지 관리자(apk)까지 빠져 있어 Execute Command로 스크립트를
+    # 부를 수 없다. 그래서 파이썬만 있는 작은 컨테이너를 두고, 워크플로는 이걸
+    # HTTP Request 노드로 부른다(RPA_RUNNER_URL).
+    build:
+      context: ../RPAs/study-status-report/runner
+    environment:
+      REPO_DIR: /repo
+    volumes:
+      # 스크립트와 산출물이 모두 여기 있다. 보고서를 쓰므로 읽기 전용이 아니다.
+      #
+      # **Slack 토큰도 이 마운트로 들어온다.** scripts/slack_upload_file.py가
+      # RPAs/study-status-report/.env를 읽는다 — 그 파일은 gitignore 대상이라
+      # 저장소에 없고, 이 노트북에 직접 만들어 둬야 한다(RPA README 참고).
+      - ../RPAs:/repo/RPAs
+    # **호스트 포트로 내보내지 않는다.** 이 서비스는 스크립트를 실행하므로 n8n만
+    # 부를 수 있으면 된다. 사설망이나 tailnet에 열 이유가 없다.
+    networks:
       - backend
     logging: *default-logging
     restart: unless-stopped
