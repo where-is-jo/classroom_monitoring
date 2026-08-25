@@ -228,4 +228,10 @@ n8n → 시간표 읽기 → 구간 판정 → fastapi student-states → 상태
 | --- | --- | --- |
 | 컨테이너 시계가 UTC | 시간표가 9시간 어긋나 공부 시간에 안 걸린다 | `TZ`, `GENERIC_TIMEZONE`을 `Asia/Seoul`로 |
 | Code 노드의 `$env` 접근이 기본 차단 | `access to env vars denied`로 워크플로가 멈춘다 | `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` |
+| 파일 노드의 경로 접근이 기본 차단 | 시간표 읽기가 `Access to the file is not allowed.`로 실패 | `N8N_RESTRICT_FILE_ACCESS_TO=/repo/individual_tasks` |
+| 바이너리가 파일시스템에 저장됨 | 항목에 13바이트 참조만 실려 와 시간표 내용을 파싱할 수 없다 | `N8N_DEFAULT_BINARY_DATA_MODE=default` |
 | n8n 이미지에 파이썬·apk 없음 | 스크립트를 부를 수 없다 | `rpa-runner` 사이드카 |
+
+앞의 넷은 개발자 PC에서 같은 이미지를 띄워 하나씩 확인했고, **운영 중인 n8n
+인스턴스에서도 같은 증상이 재현되는 것을 확인했다.** 넷 다 컨테이너 재생성이
+있어야 적용된다.

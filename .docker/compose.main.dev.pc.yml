@@ -145,6 +145,15 @@ services:
       # $env로 읽으므로 열어 준다. 이 n8n은 인터넷에 공개하지 않고 tailnet 안에만
       # 있으며, 여기 담기는 값은 강의실 id와 내부 주소로 비밀값이 아니다.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # **파일 노드는 기본으로 모든 경로가 막혀 있다.** 시간표를 읽으려다
+      # `Access to the file is not allowed.`로 실패한다. 읽어야 하는 디렉터리만
+      # 허용 목록에 넣는다 — 저장소 전체를 열지 않는다.
+      N8N_RESTRICT_FILE_ACCESS_TO: /repo/individual_tasks
+      # **기본값(filesystem)에서는 Code 노드가 파일 내용을 볼 수 없다.** 항목에는
+      # 13바이트짜리 참조만 실려 오고 실제 내용은 디스크에 남아, 시간표를 읽어도
+      # 파싱할 것이 없다. 여기서 다루는 바이너리는 시간표 문서 한 개(1.5KB)뿐이라
+      # 메모리에 담아도 부담이 없다.
+      N8N_DEFAULT_BINARY_DATA_MODE: default
       # --- study-status-report 워크플로가 $env로 읽는 값 ---
       # 비밀값이 아니라 어느 강의실을 보는지의 문제라 결정 0018대로 여기 직접 적는다.
       # 대상 강의실을 바꾸려면 이 두 값을 고친다(fastapi의 강의실 목록 id·이름).
