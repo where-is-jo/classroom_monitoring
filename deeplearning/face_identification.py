@@ -118,6 +118,7 @@ class MongoFaceGalleryLoader:
             projection = {
                 "_id": 0,
                 "student_id": 1,
+                "student_number": 1,
                 "vector": 1,
                 "dimension": 1,
                 "normalized": 1,
@@ -130,7 +131,12 @@ class MongoFaceGalleryLoader:
             student_documents = list(
                 database["students"].find(
                     {"is_active": True, "face_registered": True},
-                    {"_id": 1, "is_active": 1, "face_registered": 1},
+                    {
+                        "_id": 1,
+                        "student_number": 1,
+                        "is_active": 1,
+                        "face_registered": 1,
+                    },
                 )
             )
             documents = list(database[self._collection_name].find({}, projection))
@@ -143,6 +149,7 @@ class MongoFaceGalleryLoader:
                 client.close()
 
         active_student_ids: set[str] = set()
+        active_student_ids_by_number: dict[str, str] = {}
         for document in student_documents:
             raw_student_id = document.get("_id")
             if (
@@ -157,7 +164,20 @@ class MongoFaceGalleryLoader:
             # FastAPI의 Mongo 저장소는 신규 문서에 문자열 UUID를 쓰지만, 기존 학생
             # 문서에는 MongoDB ObjectId가 남아 있다. 얼굴 embedding은 도메인 모델의
             # 문자열 student_id를 저장하므로 양쪽을 같은 문자열 표현으로 연결한다.
-            active_student_ids.add(str(raw_student_id))
+            student_id = str(raw_student_id)
+            active_student_ids.add(student_id)
+            student_number = document.get("student_number")
+            if student_number is None:
+                continue
+            if not isinstance(student_number, str) or not student_number.strip():
+                raise FaceGalleryUnavailable(
+                    "활성 학생 얼굴 등록 정보가 올바르지 않습니다."
+                )
+            if student_number in active_student_ids_by_number:
+                raise FaceGalleryUnavailable(
+                    "활성 학생 얼굴 등록 정보가 올바르지 않습니다."
+                )
+            active_student_ids_by_number[student_number] = student_id
 
         entries: list[GalleryEntry] = []
         revision: list[tuple[str, str]] = []
@@ -166,8 +186,25 @@ class MongoFaceGalleryLoader:
         for document in sorted(
             documents, key=lambda value: str(value.get("student_id", ""))
         ):
-            student_id = document.get("student_id")
-            if student_id not in active_student_ids:
+            stored_student_id = document.get("student_id")
+            stored_student_number = document.get("student_number")
+            number_student_id = (
+                active_student_ids_by_number.get(stored_student_number)
+                if isinstance(stored_student_number, str)
+                else None
+            )
+            if stored_student_id in active_student_ids:
+                student_id = stored_student_id
+                if number_student_id is not None and number_student_id != student_id:
+                    raise FaceGalleryUnavailable(
+                        "현재 학생 정보와 얼굴 갤러리 연결이 올바르지 않습니다."
+                    )
+            else:
+                # 기존 학생 문서가 ObjectId였던 시기의 embedding은 이후 학생 문서가
+                # 문자열 UUID로 바뀌어도 student_number가 유지된다. 학번이 현재 활성
+                # 학생 한 명과 유일하게 일치할 때만 현재 student_id로 논리 연결한다.
+                student_id = number_student_id
+            if student_id is None:
                 excluded_entries += 1
                 continue
             metadata = FaceModelMetadata(
