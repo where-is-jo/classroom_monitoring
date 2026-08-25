@@ -28,6 +28,11 @@ from typing import Protocol
 
 import numpy as np
 
+from deeplearning.face_identification import (
+    FaceGalleryUnavailable,
+    FaceModelMetadata,
+    MongoFaceGalleryLoader,
+)
 from deeplearning.face_identity import FaceGallery, GalleryEntry, normalize_embedding
 
 UNKNOWN_LABEL = "UNKNOWN"
@@ -510,14 +515,11 @@ def build_embedder(*, providers: list[str] | None = None) -> Embedder:
 
 
 def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGallery:
-    """MongoDB `FACE_EMBEDDING_COLLECTION`에서 등록 학생 gallery를 읽는다.
+    """런타임과 같은 필터로 MongoDB 등록 학생 gallery를 읽는다.
 
     ArcFace/AdaFace는 임베딩 공간이 다르므로 gallery 조회 시 반드시 모델별로
     분리한다 — `expected_model_name`을 안 주면 `FACE_RECOGNIZER`(기본 arcface)를 쓴다.
     """
-    from pymongo import MongoClient
-    from pymongo.errors import PyMongoError
-
     if expected_model_name is None:
         expected_model_name = os.environ.get(
             "FACE_EMBEDDING_MODEL_NAME", os.environ.get("FACE_RECOGNIZER", "arcface")
@@ -541,49 +543,23 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
         raise RuntimeError("MongoDB gallery에는 MONGODB_DATABASE가 필요합니다.")
     collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
 
-    entries: list[GalleryEntry] = []
-    client = MongoClient(
-        mongodb_uri, serverSelectionTimeoutMS=10_000, connectTimeoutMS=10_000
+    loader = MongoFaceGalleryLoader(
+        database_url=mongodb_uri,
+        database_name=mongodb_database,
+        collection_name=collection_name,
+        expected_metadata=FaceModelMetadata(
+            expected_model_name,
+            expected_model_version,
+            expected_preprocessing_version,
+        ),
+        timeout_seconds=10.0,
     )
     try:
-        client.admin.command("ping")
-        projection = {
-            "_id": 0,
-            "student_id": 1,
-            "vector": 1,
-            "dimension": 1,
-            "normalized": 1,
-            "model_name": 1,
-            "model_version": 1,
-            "preprocessing_version": 1,
-        }
-        for document in client[mongodb_database][collection_name].find({}, projection):
-            student_id = document.get("student_id")
-            if (
-                not isinstance(student_id, str)
-                or not student_id
-                or document.get("dimension") != 512
-                or document.get("normalized") is not True
-                or document.get("model_name") != expected_model_name
-                or document.get("model_version") != expected_model_version
-                or document.get("preprocessing_version")
-                != expected_preprocessing_version
-            ):
-                raise RuntimeError(
-                    f"{student_id!r} 얼굴 벡터가 {expected_model_name} gallery 조건과 다릅니다."
-                )
-            entries.append(
-                GalleryEntry(
-                    student_id, np.asarray(document.get("vector"), dtype=np.float32)
-                )
-            )
-    except PyMongoError as exc:
-        raise RuntimeError("MongoDB 연결/조회에 실패했습니다.") from exc
-    finally:
-        client.close()
-    if not entries:
-        raise RuntimeError(f"{expected_model_name} 등록 얼굴 gallery가 비어 있습니다.")
-    return FaceGallery.from_entries(entries)
+        snapshot = loader.load()
+    except FaceGalleryUnavailable as error:
+        # 학생 ID·벡터·저장소 세부 오류는 평가 로그로 내보내지 않는다.
+        raise RuntimeError("MongoDB 등록 얼굴 gallery를 사용할 수 없습니다.") from error
+    return FaceGallery.from_entries(snapshot.entries)
 
 
 def build_embedder_and_gallery(

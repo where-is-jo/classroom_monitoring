@@ -7,7 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from deeplearning.face_identification import FaceGallerySnapshot, FaceModelMetadata
 from deeplearning.face_identity import FaceGallery, GalleryEntry
+from deeplearning.training import face_identification_eval as eval_module
 from deeplearning.training.face_identification_eval import (
     ProbeImage,
     aggregate_metrics,
@@ -414,3 +416,35 @@ def test_mongodb_gallery는_DB_이름이_없으면_연결_전에_거부한다(
 
     with pytest.raises(RuntimeError, match="MONGODB_DATABASE"):
         build_mongo_gallery()
+
+
+def test_mongodb_평가_갤러리는_런타임과_같은_학생_필터를_사용한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeLoader:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def load(self) -> FaceGallerySnapshot:
+            return FaceGallerySnapshot(
+                entries=(GalleryEntry("student-a", _vector(0)),),
+                revision=(("student-a", "revision"),),
+                excluded_entries=2,
+            )
+
+    monkeypatch.setattr(eval_module, "MongoFaceGalleryLoader", FakeLoader)
+    monkeypatch.setenv("MONGODB_URI", "mongodb://example.invalid")
+    monkeypatch.setenv("MONGODB_DATABASE", "classroom")
+    monkeypatch.setenv("FACE_EMBEDDING_COLLECTION", "face_embeddings")
+    monkeypatch.setenv("FACE_EMBEDDING_MODEL_VERSION", "model-v1")
+    monkeypatch.setenv("FACE_EMBEDDING_PREPROCESSING_VERSION", "crop-v1")
+
+    gallery = build_mongo_gallery(expected_model_name="arcface")
+
+    assert gallery.entries[0].student_id == "student-a"
+    assert captured["collection_name"] == "face_embeddings"
+    assert captured["expected_metadata"] == FaceModelMetadata(
+        "arcface", "model-v1", "crop-v1"
+    )

@@ -149,7 +149,8 @@ MongoDB를 건드리지 않는 dry-run은 `FACE_EVAL_GALLERY_SOURCE=directory`�
 
 MongoDB에 저장된 등록 embedding을 갤러리로 쓰려면 `FACE_EVAL_GALLERY_SOURCE=mongodb`,
 `MONGODB_URI`, `MONGODB_DATABASE`, `FACE_EMBEDDING_COLLECTION`을 설정한다. **MongoDB
-embedding만으로 임계값을 만들 수는 없다.** 오인식률을 측정할 별도의 known/unknown
+평가도 실시간 런타임과 같은 규칙으로 활성·얼굴 등록 학생의 embedding만 사용한다.**
+embedding만으로 임계값을 만들 수는 없다. 오인식률을 측정할 별도의 known/unknown
 validation과 test 이미지가 네 디렉터리에 모두 있어야 한다. 로컬 Windows에서 실행하면
 `FACE_EVAL_*_DIR`와 모델 경로도 Windows 절대경로여야 하며, `/home/...` 경로는 GPU 서버에서
 실행할 때만 유효하다.
