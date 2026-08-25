@@ -16,8 +16,16 @@
 **서버가 꺼져 있으면 배포는 실패가 아니라 건너뛴다** — 서버를 켠 뒤 Actions 탭에서
 `Run workflow`로 다시 돌린다. `env/`와 `models/`는 전송 대상이 아니라 여전히 사람이 올린다.
 
-반영 대상은 compose 파일만이 아니다. **`.docker/` 아래 커밋되는 모든 파일**이며
-(`prometheus/`·`alloy/`·`minio/` 포함) 문서(`.md`)만 제외된다.
+전송 대상은 compose 파일만이 아니다. **`.docker/` 아래 커밋되는 모든 파일**이며
+(`prometheus/`·`alloy/`·`minio/`·`scripts/`와 pc 스택 compose, 문서까지) 이 서버에서
+쓰지 않는 파일도 함께 올라간다.
+
+**무엇이 배포를 깨우는지는 그것과 다르다.** 트리거는 이 서버에 실제로 반영되는 경로로
+한정된다 — 서버 스택 compose 셋, `prometheus/`·`alloy/`·`minio/`·`scripts/`, 그리고
+`worker/`·`deeplearning/` 중 이미지에 들어가는 소스다. **pc 스택 compose나 테스트·문서만
+고치면 이 워크플로우는 돌지 않는다.** 서버 동작이 바뀌지 않는데 14.9GB 재빌드와 컨테이너
+재생성을 부르지 않기 위해서다([결정 0038](../docs/architecture/decisions.md#0038--gpu-서버의-compose-설정을-github-actions가-ssh로-반영한다)의 2번).
+그런 변경까지 서버에 올리고 싶으면 Actions 탭에서 `Run workflow`로 직접 돌린다.
 
 이 서버의 배포 루트는 **홈 디렉터리 자체**다. 저장소 변수 `GPU_SERVER_DEPLOY_PATH`에
 `/home/doyoon`이 들어 있고, 파일은 `~/.docker/`에 놓인다. 배포 직전 백업은

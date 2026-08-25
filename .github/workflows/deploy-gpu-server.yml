@@ -14,13 +14,34 @@ name: GPU 서버 배포
 on:
   push:
     branches: [develop]
+    # **호스트 축으로 좁힌다.** 이 워크플로우가 바꾸는 것은 GPU 서버뿐인데, 전에는
+    # `.docker/**` 통짜라 개인 PC 쪽 절반(결정 0026)이나 이미지에 들어가지도 않는
+    # 파일이 배포를 깨웠다. 실제로 compose.main.dev.pc.yml만 고친 n8n 설정 변경이
+    # 14.9GB 이미지 재빌드와 컨테이너 강제 재생성까지 끌고 갔다.
     paths:
-      - '.docker/**'
-      - '!.docker/**/*.md'
+      # 서버에서 실행하거나 컨테이너가 마운트하는 것만 고른다. pc 스택 둘은 여기
+      # 없다 — rsync로 올라가기는 하지만 이 서버에서 검증도 실행도 하지 않는다.
+      - '.docker/compose.main.dev.gpu.yml'
+      - '.docker/compose.llm.dev.yml'
+      - '.docker/compose.monitoring.dev.yml'
+      - '.docker/alloy/**'
+      - '.docker/prometheus/**'
+      - '.docker/minio/**'
+      - '.docker/scripts/**'
+      # 배포 검증 스크립트의 테스트는 CI 러너에서만 돈다. 서버 동작을 바꾸지 않는다.
+      - '!.docker/scripts/tests/**'
+      # 서버에서 이미지로 빌드되는 소스. .dockerignore가 빼는 것은 여기서도 뺀다 —
+      # 이미지에 들어가지 않는 파일을 위해 재빌드할 이유가 없다.
       - 'worker/**'
+      - '!worker/**/tests/**'
       - '!worker/**/*.md'
+      # deeplearning/Dockerfile은 app.py·face_identity.py·face_identification.py·
+      # metrics.py만 COPY한다. tests/와 training/은 이미지 밖이다.
       - 'deeplearning/**'
+      - '!deeplearning/tests/**'
+      - '!deeplearning/training/**'
       - '!deeplearning/**/*.md'
+      - '!deeplearning/**/*.ps1'
       - '.github/workflows/deploy-gpu-server.yml'
   workflow_dispatch:
 
