@@ -173,6 +173,16 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 ## 환경변수
 
 값의 취급과 명명 규칙은 [환경변수 규칙](../docs/conventions/environment-convention.md)을 따른다.
+로컬 직접 실행 값은 `deeplearning/.env.example`을 복사한 `deeplearning/.env`에 채운다.
+OS에서 먼저 주입한 값이 있으면 그 값이 `.env`보다 우선한다. Docker Compose는 이 파일을
+읽지 않고 `.docker/env/deeplearning.dev.env`를 주입한다. 두 실제 파일 모두 Git에서
+제외하고, 로컬 `.env`는 Docker 빌드 컨텍스트에서도 제외한다.
+
+```bash
+cd deeplearning
+cp .env.example .env
+python -m uvicorn app:app --port 8100
+```
 
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
@@ -187,6 +197,11 @@ MinIO에서 내려받는 방식이 후보에 포함된다. 이미지 내 포함,
 | `FACE_GALLERY_DATABASE_URL`, `_NAME` | FastAPI 대표 embedding 갤러리 조회 | 읽기 전용 MongoDB 자격 증명 권장 |
 | `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 유사도·margin 임계값 | 식별을 켤 때 파일 또는 아래 두 값이 필수 |
 | `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD` | 임계값 파일을 쓰지 않을 때의 값 | 근거 없는 기본값 없음 |
+
+`GET /health`는 프로세스 liveness만 확인한다. Docker와 배포 검증은
+`GET /health/ready`를 사용한다. 식별이 켜진 배포에서는 이 경로가 MongoDB 갤러리를 실제로
+읽고, 비어 있거나 현재 ArcFace metadata와 다른 embedding이 있으면 503을 반환한다.
+식별이 꺼진 배포에서는 `face_identification=disabled`로 200을 반환한다.
 
 갤러리의 누구인지 결정하는 유사도·margin 임계값은 `deeplearning` 설정이다. 식별된
 결과를 학생 상태 근거로 받아들일지 정하는 `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`는
@@ -233,6 +248,7 @@ curl -s http://127.0.0.1:8100/metrics | grep classroom_monitoring_
 
 ```bash
 # 저장소 최상위에서. mediapipe·insightface가 설치돼 있어야 한다.
+python -m pip install -r deeplearning/requirements-test.txt
 python -m pytest deeplearning/tests -q
 
 # 모델 의존성 없이 지표 정의만 확인할 때

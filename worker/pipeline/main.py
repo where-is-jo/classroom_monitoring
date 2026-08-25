@@ -101,7 +101,7 @@ def build_result_handler(
     face_identity_camera_ids: frozenset[str] = frozenset(),
     face_identity_timeout_seconds: float = 5.0,
     face_identity_jpeg_quality: int = 95,
-    face_identity_min_person_confidence: float = 0.0,
+    face_identity_min_person_confidence: float = 0.5,
     person_tracking_config: ByteTrackConfig | None = None,
     person_tracking_camera_ids: frozenset[str] | None = None,
     identity_handover_routes: tuple[IdentityHandoverRoute, ...] = (),
@@ -111,7 +111,8 @@ def build_result_handler(
     identity_handover_max_delay_seconds: float = 8.0,
     identity_handover_clock_skew_seconds: float = 0.5,
     identity_handover_track_stale_seconds: float = 30.0,
-    identity_handover_min_confidence: float = 0.6,
+    identity_handover_min_confidence: float = 0.0,
+    available_camera_ids: frozenset[str] | None = None,
 ) -> ResultHandler:
     """탐지 결과를 무엇으로 받을지 정한다.
 
@@ -151,6 +152,7 @@ def build_result_handler(
             clock_skew_seconds=identity_handover_clock_skew_seconds,
             track_stale_seconds=identity_handover_track_stale_seconds,
             minimum_identity_confidence=identity_handover_min_confidence,
+            available_camera_ids=available_camera_ids,
         )
     elif identity_handover_routes:
         logger.info(
@@ -216,6 +218,15 @@ def build_runner(
         raise ValueError(
             "ByteTrack을 켜려면 INFERENCE_TARGET_CLASS_IDS에 person 클래스가 필요합니다."
         )
+    if (
+        pipeline_settings.person_tracking_enabled
+        and inference_settings.inference_confidence_threshold
+        >= pipeline_settings.bytetrack_high_confidence_threshold
+    ):
+        raise ValueError(
+            "ByteTrack 2단계 매칭을 유지하려면 INFERENCE_CONFIDENCE_THRESHOLD가 "
+            "BYTETRACK_HIGH_CONFIDENCE_THRESHOLD보다 낮아야 합니다."
+        )
 
     # 모델 로딩은 프로세스 시작 시 1회다. 프레임마다 불러오면 추론이 멈춘다.
     detector = Yolo8nDetector(
@@ -252,6 +263,14 @@ def build_runner(
             "신원 인계 route의 카메라가 STREAM_SOURCES에 없습니다: "
             + ", ".join(sorted(missing_camera_ids))
         )
+    face_identity_camera_ids = pipeline_settings.parsed_face_identity_camera_ids
+    if face_identity_url is not None:
+        missing_face_camera_ids = face_identity_camera_ids - configured_camera_ids
+        if missing_face_camera_ids:
+            raise ValueError(
+                "FACE_IDENTITY_CAMERA_IDS의 카메라가 STREAM_SOURCES에 없습니다: "
+                + ", ".join(sorted(missing_face_camera_ids))
+            )
     tracking_camera_ids = pipeline_settings.parsed_person_tracking_camera_ids
     if tracking_camera_ids is not None:
         missing_tracking_ids = tracking_camera_ids - configured_camera_ids
@@ -278,7 +297,7 @@ def build_runner(
             fastapi_url=fastapi_url,
             face_identity_url=face_identity_url,
             face_identity_camera_ids=(
-                pipeline_settings.parsed_face_identity_camera_ids
+                face_identity_camera_ids
             ),
             face_identity_timeout_seconds=(
                 pipeline_settings.face_identity_timeout_seconds
@@ -335,6 +354,7 @@ def build_runner(
             identity_handover_min_confidence=(
                 pipeline_settings.identity_handover_min_confidence
             ),
+            available_camera_ids=frozenset(configured_camera_ids),
         ),
     )
     stream_worker = StreamWorker(

@@ -95,6 +95,8 @@ def load_split(root: Path, *, labeled: bool) -> list[ProbeImage]:
     labeled=True면 `root/<student_id>/*.jpg` 구조에서 true_id를 폴더명으로 채운다(known).
     labeled=False면 root 바로 아래 이미지 전부를 true_id=None으로 채운다(unknown).
     """
+    if not root.is_dir():
+        raise FileNotFoundError(f"얼굴 평가 split 디렉터리를 찾을 수 없습니다: {root}")
     images: list[ProbeImage] = []
     if labeled:
         for student_dir in sorted(path for path in root.iterdir() if path.is_dir()):
@@ -104,6 +106,42 @@ def load_split(root: Path, *, labeled: bool) -> list[ProbeImage]:
         for image_path in sorted(_iter_images(root)):
             images.append(ProbeImage(image_path, None))
     return images
+
+
+def validate_evaluation_inputs(
+    gallery: FaceGallery,
+    *,
+    known_validation: list[ProbeImage],
+    unknown_validation: list[ProbeImage],
+    known_test: list[ProbeImage],
+    unknown_test: list[ProbeImage],
+) -> None:
+    """빈 split·gallery 불일치·validation/test 재사용을 산출물 생성 전에 막는다."""
+    splits = {
+        "known validation": known_validation,
+        "unknown validation": unknown_validation,
+        "known test": known_test,
+        "unknown test": unknown_test,
+    }
+    empty_splits = [name for name, images in splits.items() if not images]
+    if empty_splits:
+        raise ValueError("얼굴 평가 split이 비어 있습니다: " + ", ".join(empty_splits))
+
+    gallery_ids = {entry.student_id for entry in gallery.entries}
+    known_ids = {
+        image.true_id
+        for image in known_validation + known_test
+        if image.true_id is not None
+    }
+    if not known_ids <= gallery_ids:
+        # 학생 ID 목록은 오류 메시지나 CI 로그로 내보내지 않는다.
+        raise ValueError("known 평가 학생이 MongoDB gallery에 모두 등록되어 있지 않습니다.")
+
+    resolved_paths = [
+        image.path.resolve() for images in splits.values() for image in images
+    ]
+    if len(resolved_paths) != len(set(resolved_paths)):
+        raise ValueError("validation과 test split에 같은 이미지 파일이 중복되었습니다.")
 
 
 def _iter_images(directory: Path) -> Iterable[Path]:
@@ -139,21 +177,43 @@ def select_threshold_for_far(
     unknown_top1_cosines: Iterable[float],
     *,
     target_far: float = 0.001,
+    maximum_threshold: float = 1.0,
 ) -> float:
     """미등록(unknown) validation의 top-1 cosine 분포에서 목표 FAR 이하를 만족하는
     가장 낮은(관대한) similarity threshold를 고른다.
 
-    동점(tie)이 있으면 실제 FAR이 목표보다 살짝 높아질 수 있다 — 이 경우 목표
-    허용치를 하나 줄여 다시 계산해야 한다는 뜻이므로 호출부에서 결과 FAR을
-    반드시 재확인한다.
+    경계 점수에 동점(tie)이 있으면 경계 바로 위의 representable float를 사용해 실제
+    허용 수가 목표를 넘지 않게 한다. 런타임 범위 안에서 경계 점수를 배제할 수 없으면
+    임의 파일을 만들지 않고 실패한다.
     """
     values = sorted(unknown_top1_cosines, reverse=True)
+    if not 0.0 <= target_far <= 1.0:
+        raise ValueError("target FAR은 0과 1 사이여야 합니다.")
+    if maximum_threshold <= 0.0:
+        raise ValueError("threshold 상한은 0보다 커야 합니다.")
     if not values:
         raise ValueError("unknown validation 점수가 비어 있습니다.")
+    if any(
+        not math.isfinite(value) or not -1.0 <= value <= maximum_threshold
+        for value in values
+    ):
+        raise ValueError("validation 점수가 임계값 범위를 벗어났습니다.")
     allowed_false_accepts = math.floor(target_far * len(values))
     if allowed_false_accepts <= 0:
-        return values[0] + 1e-6
-    return values[allowed_false_accepts - 1]
+        boundary = values[0]
+        accepted_at_boundary = sum(value >= boundary for value in values)
+    else:
+        boundary = values[allowed_false_accepts - 1]
+        accepted_at_boundary = sum(value >= boundary for value in values)
+        if accepted_at_boundary <= allowed_false_accepts:
+            return max(0.0, boundary)
+
+    threshold = math.nextafter(boundary, math.inf)
+    if threshold > maximum_threshold:
+        raise ValueError(
+            "런타임 임계값 범위 안에서 목표 FAR을 만족할 수 없습니다."
+        )
+    return max(0.0, threshold)
 
 
 def classify_failure(true_id: str, predicted_id: str) -> str:
@@ -295,6 +355,14 @@ def write_thresholds(
     preprocessing_version: str,
 ) -> None:
     """실시간 런타임이 그대로 읽을 수 있는 임계값 산출물을 쓴다."""
+    if not 0.0 <= similarity_threshold <= 1.0:
+        raise ValueError("similarity threshold는 0과 1 사이여야 합니다.")
+    if not 0.0 <= margin_threshold <= 2.0:
+        raise ValueError("margin threshold는 0과 2 사이여야 합니다.")
+    if not 0.0 <= target_far <= 1.0:
+        raise ValueError("target FAR은 0과 1 사이여야 합니다.")
+    if not model_name or not model_version or not preprocessing_version:
+        raise ValueError("threshold metadata는 비어 있을 수 없습니다.")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -433,6 +501,10 @@ def build_mongo_gallery(*, expected_model_name: str | None = None) -> FaceGaller
     mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get(
         "DATABASE_NAME", ""
     )
+    if not mongodb_uri.strip():
+        raise RuntimeError("MongoDB gallery에는 MONGODB_URI가 필요합니다.")
+    if not mongodb_database.strip():
+        raise RuntimeError("MongoDB gallery에는 MONGODB_DATABASE가 필요합니다.")
     collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
 
     entries: list[GalleryEntry] = []
@@ -524,6 +596,15 @@ def main() -> None:
 
     known_validation = load_split(known_validation_dir, labeled=True)
     unknown_validation = load_split(unknown_validation_dir, labeled=False)
+    known_test = load_split(known_test_dir, labeled=True)
+    unknown_test = load_split(unknown_test_dir, labeled=False)
+    validate_evaluation_inputs(
+        gallery,
+        known_validation=known_validation,
+        unknown_validation=unknown_validation,
+        known_test=known_test,
+        unknown_test=unknown_test,
+    )
     validation_scores = [
         score
         for score in (
@@ -551,14 +632,13 @@ def main() -> None:
                 for score in wrong_known_validation_scores
             ),
             target_far=target_far,
+            maximum_threshold=2.0,
         )
         if wrong_known_validation_scores
         else 0.0
     )
 
-    test_images = load_split(known_test_dir, labeled=True) + load_split(
-        unknown_test_dir, labeled=False
-    )
+    test_images = known_test + unknown_test
     rows = evaluate_split(
         test_images,
         embedder,

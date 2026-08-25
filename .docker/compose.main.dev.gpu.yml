@@ -78,13 +78,23 @@ services:
   # 고정하고 있어 GPU를 줘도 쓰지 않는다. 그래서 inference-worker와 달리
   # 드라이버 조건이 없고 GPU가 없는 호스트에서도 뜬다.
   deeplearning:
+    # 서버에서 현재 develop 소스로 빌드한 :latest를 같은 이름으로 덮어쓴다.
+    # registry에서 받지 않고 GPU 서버가 방금 빌드한 image ID만 사용한다.
     image: ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+    pull_policy: never
+    env_file:
+      # MongoDB URL·DB 이름만 서버에서 주입한다. 변수 기준은 deeplearning/.env.example.
+      - ./env/deeplearning.dev.env
     environment:
       # 가중치는 이미지에도 저장소에도 없다. .docker/models/face에 미리 올려 둔다.
       # 셋 다 실제 파일이어야 하며, 없으면 기동 시점에 죽는다(app.py의 lifespan).
       FACE_DETECTION_MODEL_PATH: /models/face/scrfd/scrfd_10g_bnkps.onnx
       FACE_LANDMARKER_MODEL_PATH: /models/face/mediapipe/face_landmarker.task
       FACE_RECOGNITION_MODEL_PATH: /models/face/buffalo_l/w600k_r50.onnx
+      # 식별을 켜면 readiness가 MongoDB 갤러리와 metadata까지 실제로 읽는다.
+      FACE_IDENTIFICATION_ENABLED: "true"
+      FACE_IDENTITY_THRESHOLD_FILE: /models/face/config/thresholds.json
+      FACE_EMBEDDING_COLLECTION: face_embeddings
     volumes:
       - ./models:/models:ro
     # **호스트 분할로 새로 열게 된 포트다.** 전에는 fastapi가 같은 network 안에서
@@ -105,10 +115,11 @@ services:
     # fastapi로 보내는 코드(FASTAPI_URL / inference.handler)가 아예 없어서, 추론은
     # 도는데 이벤트가 한 건도 도달하지 않았다.
     #
-    # 태그에 날짜를 박아 어느 소스로 빌드했는지 되짚을 수 있게 한다. :latest로 두면
-    # 다음 `docker compose pull`이 낡은 GHCR 이미지로 조용히 되돌린다.
-    #   빌드: cd ~/worker-build/worker && docker build -t classroom-monitoring-worker:local-20260823 .
-    image: classroom-monitoring-worker:local-20260823
+    # 같은 :latest 이름으로 다시 빌드하면 기존 태그가 새 image ID를 가리킨다.
+    # registry의 오래된 이미지로 돌아가지 않도록 pull도 금지한다.
+    #   빌드: docker build -t ghcr.io/where-is-jo/classroom-monitoring-worker:latest worker
+    image: ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+    pull_policy: never
     env_file:
       # 변수 목록의 기준은 worker/pipeline/.env.example이다(조립 실행이라 pipeline 것을 쓴다).
       # STREAM_SOURCES에 카메라 자격 증명이 들어가므로 이 파일 전체가 비밀값이다.
@@ -125,7 +136,11 @@ services:
     networks:
       - backend
     depends_on:
-      - mediamtx
+      mediamtx:
+        condition: service_started
+      # MongoDB 갤러리와 thresholds.json까지 준비된 뒤에만 얼굴 호출 워커를 시작한다.
+      deeplearning:
+        condition: service_healthy
     deploy:
       resources:
         reservations:

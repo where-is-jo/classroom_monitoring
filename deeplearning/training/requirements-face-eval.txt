@@ -1,0 +1,5 @@
+# 얼굴 식별 임계값 평가 전용 의존성.
+# SCRFD·ArcFace·MongoDB gallery 계약은 실시간 deeplearning과 같으므로 런타임
+# requirements를 재사용하고, .env 로딩만 평가 도구에 추가한다.
+-r ../requirements.txt
+python-dotenv>=1.0

@@ -6,8 +6,10 @@ from typing import Any
 import numpy as np
 import pytest
 import requests
+from prometheus_client import REGISTRY
 
 from shared.types import CapturedFrame
+from shared.metrics import METRIC_PREFIX
 
 from ..face_identity import (
     FaceIdentificationError,
@@ -15,6 +17,11 @@ from ..face_identity import (
     HttpFaceIdentifier,
 )
 from ..types import Detection, InferenceResult
+
+
+def metric_value(name: str, **labels: str) -> float:
+    sampled = REGISTRY.get_sample_value(f"{METRIC_PREFIX}{name}", labels or None)
+    return 0.0 if sampled is None else float(sampled)
 
 
 class FakeResponse:
@@ -101,6 +108,55 @@ def test_등록_학생_식별을_사람_탐지에_보강한다() -> None:
     assert requests_seen[0]["headers"]["X-Camera-ID"] == "entry-camera"
     assert requests_seen[0]["headers"]["X-Person-Bboxes"] == "[[20,10,120,115]]"
     assert requests_seen[0]["data"] != captured().frame.tobytes()
+
+
+def test_얼굴_서비스_호출_성공과_지연을_기록한다() -> None:
+    def post(url: str, **kwargs: Any) -> FakeResponse:
+        del url, kwargs
+        return FakeResponse({"identities": []})
+
+    identifier = HttpFaceIdentifier(
+        "http://deeplearning:8100",
+        timeout_seconds=2,
+        jpeg_quality=90,
+        post=post,  # type: ignore[arg-type]
+    )
+    before_ok = metric_value(
+        "face_identification_requests_total", outcome="ok"
+    )
+    before_duration = metric_value("face_identification_duration_seconds_count")
+
+    identifier.enrich(captured(), inference_result())
+
+    assert metric_value("face_identification_requests_total", outcome="ok") == (
+        before_ok + 1
+    )
+    assert metric_value("face_identification_duration_seconds_count") == (
+        before_duration + 1
+    )
+
+
+def test_얼굴_서비스_응답_오류를_기록한다() -> None:
+    def post(url: str, **kwargs: Any) -> FakeResponse:
+        del url, kwargs
+        return FakeResponse({"identities": "invalid"})
+
+    identifier = HttpFaceIdentifier(
+        "http://deeplearning:8100",
+        timeout_seconds=2,
+        jpeg_quality=90,
+        post=post,  # type: ignore[arg-type]
+    )
+    before_error = metric_value(
+        "face_identification_requests_total", outcome="error"
+    )
+
+    with pytest.raises(FaceIdentificationError):
+        identifier.enrich(captured(), inference_result())
+
+    assert metric_value("face_identification_requests_total", outcome="error") == (
+        before_error + 1
+    )
 
 
 def test_미확정_얼굴은_track만_보강하고_학생을_붙이지_않는다() -> None:

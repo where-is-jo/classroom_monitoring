@@ -15,6 +15,7 @@ from typing import Any
 import cv2
 import mediapipe as mp
 import numpy as np
+from dotenv import load_dotenv
 from face_identification import (
     FaceGalleryUnavailable,
     FaceIdentificationConfig,
@@ -38,6 +39,11 @@ from metrics import (
     render_metrics,
 )
 from pydantic import BaseModel
+
+# 로컬 직접 실행은 deeplearning/.env를 읽는다. 컨테이너에서는 별도의 Docker env 파일을
+# Compose가 먼저 주입하므로 override=False가 그 값을 보존한다. 로컬 .env는 이미지 안에
+# 복사하지 않는다(Dockerfile·.dockerignore).
+load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
 FACE_MODEL_METADATA = FaceModelMetadata(
     model_name="arcface",
@@ -628,6 +634,23 @@ async def identify_faces(request: Request) -> FaceIdentificationResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def readiness(request: Request) -> dict[str, str]:
+    """모델과, 활성화된 경우 MongoDB 얼굴 갤러리까지 사용할 수 있는지 확인한다."""
+    runtime: FaceIdentificationRuntime | None = getattr(
+        request.app.state, "face_identification_runtime", None
+    )
+    if runtime is None:
+        return {"status": "ready", "face_identification": "disabled"}
+    try:
+        runtime.ensure_ready()
+    except FaceGalleryUnavailable:
+        raise HTTPException(
+            status_code=503, detail="얼굴 갤러리를 사용할 수 없습니다."
+        ) from None
+    return {"status": "ready", "face_identification": "ready"}
 
 
 # **끄면 라우트 자체를 만들지 않는다.** 404를 돌려주는 경로를 남기면 "지표가 있는데

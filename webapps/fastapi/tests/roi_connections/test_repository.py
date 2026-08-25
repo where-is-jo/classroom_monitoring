@@ -172,3 +172,46 @@ def test_delete_reports_when_there_was_nothing_to_remove() -> None:
     repository = _repository(FakeDatabase())
 
     assert repository.delete("room", "camera-a", "seat-a") is False
+
+
+def test_auto_generated_flag_survives_a_save_and_read() -> None:
+    """확정 전이라는 사실이 저장에서 사라지면, 재시작 뒤 계산값이 판정에 들어간다."""
+    database = FakeDatabase()
+    repository = _repository(database)
+
+    saved = repository.save(
+        RoiConnection(
+            classroom_id="room",
+            camera_id="camera-a",
+            seat_id="seat-a",
+            student_id=None,
+            polygon=(Point(0.1, 0.1), Point(0.8, 0.1), Point(0.4, 0.8)),
+            reference_image_revision=3,
+            updated_at=NOW,
+            auto_generated=True,
+        )
+    )
+
+    assert saved.auto_generated is True
+    assert database.collection.documents[0]["auto_generated"] is True
+    assert repository.list_by_camera("room", "camera-a")[0].auto_generated is True
+
+
+def test_document_saved_before_the_flag_existed_counts_as_manual() -> None:
+    """예전 문서는 사람이 그린 ROI다. 재검토 대상으로 바꾸면 멀쩡한 ROI가 판정에서 빠진다."""
+    database = FakeDatabase()
+    database.collection.documents.append(
+        {
+            "classroom_id": "room",
+            "camera_id": "camera-a",
+            "seat_id": "seat-a",
+            "student_id": "student-a",
+            "polygon": [{"x": 0.1, "y": 0.1}, {"x": 0.8, "y": 0.1}, {"x": 0.4, "y": 0.8}],
+            "reference_image_revision": 0,
+            "updated_at": NOW,
+        }
+    )
+
+    restored = _repository(database).list_by_camera("room", "camera-a")
+
+    assert restored[0].auto_generated is False

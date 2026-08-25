@@ -33,19 +33,28 @@ jobs:
     outputs:
       fastapi: ${{ steps.filter.outputs.fastapi }}
       worker: ${{ steps.filter.outputs.worker }}
+      deeplearning: ${{ steps.filter.outputs.deeplearning }}
+      deployment: ${{ steps.filter.outputs.deployment }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # 이 워크플로우 파일 자신을 양쪽 필터에 넣는다. 넣지 않으면 ci.yml만 고친 PR이
-          # 두 검사 job 모두 스킵되어 아무 검증 없이 병합된다.
+          # 이 워크플로우 파일 자신을 모든 필터에 넣는다. 넣지 않으면 ci.yml만 고친 PR이
+          # 검사 job을 모두 건너뛰어 아무 검증 없이 병합된다.
           filters: |
             fastapi:
               - 'webapps/fastapi/**'
               - '.github/workflows/ci.yml'
             worker:
               - 'worker/**'
+              - '.github/workflows/ci.yml'
+            deeplearning:
+              - 'deeplearning/**'
+              - '.github/workflows/ci.yml'
+            deployment:
+              - '.docker/**'
+              - '.github/workflows/deploy-gpu-server.yml'
               - '.github/workflows/ci.yml'
 
   fastapi-checks:
@@ -93,13 +102,53 @@ jobs:
       - run: python -m pip install -r pipeline/requirements.txt -r recorder/requirements.txt
       - run: python -m pytest -q
 
+  deeplearning-checks:
+    name: deeplearning 테스트
+    needs: changes
+    if: needs.changes.outputs.deeplearning == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            deeplearning/requirements.txt
+            deeplearning/requirements-test.txt
+      - run: python -m pip install -r deeplearning/requirements-test.txt
+      # 패키지 import가 저장소 루트를 기준으로 하므로 working-directory를 바꾸지 않는다.
+      - run: python -m pytest deeplearning/tests -q
+
+  deployment-checks:
+    name: GPU 배포 설정 테스트
+    needs: changes
+    if: needs.changes.outputs.deployment == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - run: python -m pytest .docker/scripts/tests -q
+      - name: Compose 문법 검증
+        run: |
+          set -euo pipefail
+          { grep -ho '\./env/[A-Za-z0-9._-]*\.env' .docker/*.yml || :; } | sort -u \
+            | while read -r p; do mkdir -p ".docker/$(dirname "$p")"; : > ".docker/$p"; done
+          docker compose -f .docker/compose.main.dev.gpu.yml config --quiet
+          docker compose -f .docker/compose.llm.dev.yml config --quiet
+          docker compose -f .docker/compose.monitoring.dev.yml config --quiet
+
   # 브랜치 보호 규칙에는 이 job 하나만 필수 체크로 등록한다.
   # 깃허브의 필수 체크는 job id가 아니라 job의 name 표시값으로 등록되므로,
-  # 위 두 job의 name을 바꾸면 필수 체크가 조용히 이름 불일치가 되어 풀린다.
+  # 위 검사 job의 name을 바꾸면 필수 체크가 조용히 이름 불일치가 되어 풀린다.
   # 이름이 고정된 게이트를 하나 두면 검사 job을 자유롭게 늘리고 고칠 수 있다.
   ci-gate:
     name: ci-gate
-    needs: [changes, fastapi-checks, worker-checks]
+    needs:
+      [changes, fastapi-checks, worker-checks, deeplearning-checks, deployment-checks]
     # 스킵된 job도 결과를 받아 판정해야 하므로 always()가 필요하다.
     if: always()
     runs-on: ubuntu-latest
@@ -109,6 +158,8 @@ jobs:
           echo "changes:        ${{ needs.changes.result }}"
           echo "fastapi-checks: ${{ needs['fastapi-checks'].result }}"
           echo "worker-checks:  ${{ needs['worker-checks'].result }}"
+          echo "deeplearning:   ${{ needs['deeplearning-checks'].result }}"
+          echo "deployment:     ${{ needs['deployment-checks'].result }}"
       # skipped는 통과로 본다. 문서 전용 변경이 그 경우다.
       - name: 실패한 검증이 있으면 게이트를 닫는다
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

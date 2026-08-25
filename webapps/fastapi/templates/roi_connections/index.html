@@ -10,6 +10,9 @@
   <div class="roi-filter-line" aria-label="ROI 등록 도구">
     <div class="roi-action-buttons">
       <button id="roi-capture" type="button"{% if not classroom or not cameras %} disabled{% endif %}>현재 화면 캡처</button>
+      <button id="roi-auto" type="button" disabled>자동 생성</button>
+      <button id="roi-auto-save" type="button" hidden>미리보기 저장</button>
+      <button id="roi-auto-confirm" type="button" class="secondary" hidden>자동 생성 확정</button>
       <button id="roi-start" type="button" disabled>등록 시작</button>
       <button id="roi-finish" type="button" disabled>선택 완료</button>
       <button id="roi-reset" type="button" class="secondary" disabled>초기화</button>
@@ -22,6 +25,9 @@
         {% for item in classrooms %}<option value="{{ item.id }}"{% if classroom and classroom.id == item.id %} selected{% endif %}>{{ item.name }}</option>{% endfor %}
       </select>
     </label>
+    <label class="roi-classroom-filter roi-seat-fill" title="좌석 칸을 얼마나 채울지 정합니다. 줄이면 이웃 좌석과 사이가 벌어집니다.">좌석 크기
+      <input id="roi-seat-fill" type="number" min="30" max="100" step="5" value="80" inputmode="numeric"><span aria-hidden="true">%</span>
+    </label>
     <label class="roi-classroom-filter">카메라
       <select id="roi-camera-select"{% if not cameras %} disabled{% endif %}>
         {% if not cameras %}<option value="">연결된 카메라가 없습니다</option>{% endif %}
@@ -33,7 +39,7 @@
   <div id="roi-media-stage" class="roi-media-stage" data-state="empty">
     <img id="roi-reference-image" alt="ROI를 그릴 기준이 되는 카메라 캡처 화면" hidden>
     <div id="roi-media-placeholder" class="roi-media-placeholder" role="status"><strong>캡처된 화면이 없습니다</strong><span>‘현재 화면 캡처’를 눌러 ROI를 그릴 기준 화면을 가져오세요.</span></div>
-    <svg id="roi-live-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"><g id="roi-saved-shapes"></g><polygon id="roi-live-polygon" points=""></polygon><g id="roi-live-points"></g></svg>
+    <svg id="roi-live-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"><g id="roi-saved-shapes"></g><g id="roi-auto-preview"></g><polygon id="roi-live-polygon" points=""></polygon><g id="roi-live-points"></g></svg>
     <div id="roi-saved-labels" class="roi-saved-labels"></div>
   </div>
   <p id="roi-live-status" class="roi-live-status" role="status" aria-live="polite"></p>

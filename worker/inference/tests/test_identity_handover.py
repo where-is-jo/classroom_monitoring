@@ -439,6 +439,23 @@ def test_FastAPI_관리_화면의_route를_읽는다() -> None:
     assert routes == (ROUTE,)
 
 
+def test_FastAPI의_빈_route_목록은_정상적인_인계_끄기다() -> None:
+    class EmptyResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"items": []}
+
+    provider = HttpIdentityHandoverRouteProvider(
+        "http://fastapi:8001",
+        timeout_seconds=2,
+        get=lambda *args, **kwargs: EmptyResponse(),  # type: ignore[arg-type]
+    )
+
+    assert provider.load() == ()
+
+
 def test_관리_화면_route를_실행_중에_반영한다() -> None:
     class Provider:
         def load(self) -> tuple[IdentityHandoverRoute, ...]:
@@ -472,3 +489,47 @@ def test_관리_화면_route를_실행_중에_반영한다() -> None:
     )
 
     assert handled[-1][1].detections[0].student_id == "student-001"
+
+
+def test_관리_화면에서_route를_모두_지우면_실행_중_인계를_끈다() -> None:
+    class Provider:
+        def load(self) -> tuple[IdentityHandoverRoute, ...]:
+            return ()
+
+    handled: list[tuple[CapturedFrame, InferenceResult]] = []
+    active = RefreshingIdentityHandoverResultHandler(
+        (ROUTE,),
+        provider=Provider(),
+        inner=lambda frame, value: handled.append((frame, value)),
+        refresh_seconds=5,
+        monotonic=lambda: 0,
+    )
+
+    original = result(person("person-12", (0, 5, 50, 95)))
+    active(captured("classroom-cctv", 3), original)
+
+    assert handled[-1][1] is original
+    assert active._active is None  # type: ignore[attr-defined]
+
+
+def test_동적_route가_없는_카메라를_가리키면_직전_설정을_유지한다() -> None:
+    invalid = IdentityHandoverRoute(
+        "entry-camera", "missing-classroom", (0.0, 0.0, 0.3, 1.0)
+    )
+
+    class Provider:
+        def load(self) -> tuple[IdentityHandoverRoute, ...]:
+            return (invalid,)
+
+    active = RefreshingIdentityHandoverResultHandler(
+        (ROUTE,),
+        provider=Provider(),
+        inner=lambda frame, value: None,
+        refresh_seconds=5,
+        available_camera_ids=frozenset({"entry-camera", "classroom-cctv"}),
+        monotonic=lambda: 0,
+    )
+
+    active(captured("classroom-cctv", 3), result())
+
+    assert active._routes == (ROUTE,)  # type: ignore[attr-defined]

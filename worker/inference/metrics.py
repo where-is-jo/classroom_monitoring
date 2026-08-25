@@ -3,7 +3,7 @@
 **정의를 여기 한곳에 모은다.** 계측 코드가 로직에 흩어지면 어떤 지표가 어디서
 올라오는지 추적할 수 없고, label을 바꿀 때 고칠 곳도 흩어진다. 실제 계측은
 `processor.py`(모델 호출), `consumer.py`(루프), `tracking.py`(track 수명),
-`identity_handover.py`(인계 결과)에 있다.
+`face_identity.py`(얼굴 서비스 호출), `identity_handover.py`(인계 결과)에 있다.
 
 프레임 버퍼 지표는 여기 없다. stream과 함께 쓰는 값이라 `shared/metrics.py`에 있다.
 
@@ -17,6 +17,8 @@
 | `inference_duration_seconds` | 없음 | 1 |
 | `inference_consecutive_failures` | 없음 | 1 |
 | `person_tracks_*` | `camera_id` | 카메라 대수 |
+| `face_identification_requests_total` | `outcome` | 2 (`ok`, `error`) |
+| `face_identification_duration_seconds` | 없음 | 1 |
 | `identity_handoff_total` | `outcome` | 4 |
 
 `camera_id`는 `STREAM_SOURCES`에 적은 카메라만 나오므로 대수가 고정이다. **프레임
@@ -35,6 +37,8 @@ __all__ = [
     "DETECTIONS_TOTAL",
     "DETECTION_CONFIDENCE",
     "FRAMES_PROCESSED_TOTAL",
+    "FACE_IDENTIFICATION_DURATION_SECONDS",
+    "FACE_IDENTIFICATION_REQUESTS_TOTAL",
     "IDENTITY_HANDOFF_TOTAL",
     "INFERENCE_DURATION_SECONDS",
     "PERSON_TRACKS_ACTIVE",
@@ -118,6 +122,21 @@ PERSON_TRACK_LIFETIME_FRAMES = Histogram(
     "만료된 ByteTrack이 유지된 처리 프레임 수",
     labelnames=("camera_id",),
     buckets=(5, 10, 20, 30, 60, 120, 300, 600, 1800, 3600),
+)
+
+# 얼굴 서비스 장애는 사람 탐지 흐름을 막지 않는 fail-open이라 컨테이너 상태만 보면
+# 놓친다. 실제 HTTP 요청의 성공/실패와 지연을 따로 노출한다. camera/student 식별자는
+# label에 넣지 않아 카디널리티와 개인정보 노출을 제한한다.
+FACE_IDENTIFICATION_REQUESTS_TOTAL = Counter(
+    f"{METRIC_PREFIX}face_identification_requests_total",
+    "deeplearning 얼굴 식별 서비스 호출 결과",
+    labelnames=("outcome",),
+)
+
+FACE_IDENTIFICATION_DURATION_SECONDS = Histogram(
+    f"{METRIC_PREFIX}face_identification_duration_seconds",
+    "얼굴 식별 서비스 호출과 응답 검증에 걸린 시간",
+    buckets=(0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
 
 # outcome은 accepted / no_candidate / ambiguous_candidates / ambiguous_tracks 네

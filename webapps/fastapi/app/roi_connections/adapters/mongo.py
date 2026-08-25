@@ -131,6 +131,7 @@ def _to_document(connection: RoiConnection) -> MongoDocument:
         "polygon": [{"x": point.x, "y": point.y} for point in connection.polygon],
         "reference_image_revision": connection.reference_image_revision,
         "updated_at": connection.updated_at,
+        "auto_generated": connection.auto_generated,
     }
 
 
@@ -152,6 +153,10 @@ def _to_domain(document: MongoDocument) -> RoiConnection:
             polygon.append(Point(float(x), float(y)))
         revision = document["reference_image_revision"]
         updated_at = document["updated_at"]
+        # 이 필드가 생기기 전에 저장된 문서는 사람이 그린 ROI다.
+        auto_generated = document.get("auto_generated", False)
+        if not isinstance(auto_generated, bool):
+            raise TypeError
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise TypeError
         if not isinstance(updated_at, datetime) or updated_at.tzinfo is None:
@@ -164,6 +169,7 @@ def _to_domain(document: MongoDocument) -> RoiConnection:
             polygon=tuple(polygon),
             reference_image_revision=revision,
             updated_at=updated_at,
+            auto_generated=auto_generated,
         )
     except (KeyError, TypeError, ValueError):
         raise RepositoryDataError() from None
