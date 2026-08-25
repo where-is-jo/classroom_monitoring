@@ -40,7 +40,7 @@ def roi_connections_page(
     selected = classroom_id or (classrooms[0].id if classrooms else None)
     classroom = service.get_classroom(selected) if selected else None
     seats = service.list_seats(selected) if selected else []
-    cameras = service.list_camera_options(selected) if selected else []
+    cameras = service.list_roi_camera_options(selected) if selected else []
     students = service.list_students()
     return templates.TemplateResponse(
         request=request,
