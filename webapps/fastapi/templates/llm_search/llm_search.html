@@ -27,11 +27,13 @@
     </p>
   </div>
 {% else %}
-<form class="filter-bar" method="get" action="/llm-search">
+{# **POST로 보낸다.** GET이면 질문이 주소창에 남아 방문 기록·북마크·접근 로그에
+   그대로 쌓인다. 이 기능의 질문에는 사람 이름과 찾는 시각이 담긴다(router.py). #}
+<form class="filter-bar" method="post" action="/llm-search">
   <label for="question">질문</label>
   <input
     id="question"
-    name="q"
+    name="question"
     type="text"
     maxlength="200"
     value="{{ question }}"

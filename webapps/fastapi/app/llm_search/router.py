@@ -5,11 +5,26 @@
 검색을 `POST`로 두는 이유는 질문이 본문에 들어가기 때문이다. api-convention이
 "부작용 없는 조회에 본문이 필요하면 동작을 리소스로 만들고 POST를 쓴다"고 정했고
 `POST /api/v1/video-searches`가 같은 형태다. 생성이 아니므로 상태 코드는 200이다.
+
+## 화면도 질문을 본문으로 받는다
+
+예전에는 `GET /llm-search?q=...`였다. **질문이 주소창에 그대로 남는다.** 이 기능의
+질문에는 사람 이름과 찾는 시각이 담기므로("어제 16시 30분 박무현"), 주소가 브라우저
+방문 기록·북마크·화면 공유·중계 서버 접근 로그에 그대로 쌓인다. 조회이지 생성이
+아니라 GET이 형식상 맞지만, 여기서는 그 대가가 크다.
+
+그래서 화면도 폼을 `POST`로 보낸다. 이 저장소에서 화면이 폼을 POST하는 첫 자리다 —
+다른 화면의 쓰기는 JS가 API를 부르는 방식이다. 여기서 그 방식을 쓰지 않는 이유는
+**결과를 그리는 일이 통째로 JS로 넘어가기 때문이다.** 지금은 서비스가 만든 요약
+문장과 판정을 Jinja2가 그대로 받아 쓰는데, JS로 옮기면 같은 해석이 두 벌이 된다.
+
+`q` 파라미터는 남기지 않는다. 남겨 두면 그 경로로 들어온 질문이 그대로 주소에
+남아, 고치려던 문제가 절반만 고쳐진다.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import Response
 
 from ..shared.dependencies import get_llm_search_service
@@ -40,9 +55,31 @@ def search_detections(
 @page_router.get("/llm-search")
 def llm_search_page(
     request: Request,
-    q: str | None = Query(default=None, max_length=200),
     service: LlmSearchService | None = Depends(get_llm_search_service),
 ) -> Response:
+    """질문 입력 화면. **여기서는 검색하지 않는다.**
+
+    질문은 아래 `POST`가 본문으로 받는다. 주소로 질문을 받는 경로를 남기지 않는 것이
+    이 화면을 둘로 나눈 이유다.
+    """
+    return _render(request, service=service, question="")
+
+
+@page_router.post("/llm-search")
+def llm_search_submit(
+    request: Request,
+    question: str = Form(default="", max_length=200),
+    service: LlmSearchService | None = Depends(get_llm_search_service),
+) -> Response:
+    """질문을 본문으로 받아 결과까지 그린다.
+
+    폼 값이 비어 있으면 검색하지 않고 안내 화면으로 되돌린다. 빈 질문을 LLM에게
+    보내면 모델이 아무 계획이나 지어내고, 사용자는 자기가 묻지 않은 결과를 받는다.
+    """
+    return _render(request, service=service, question=question.strip())
+
+
+def _render(request: Request, *, service: LlmSearchService | None, question: str) -> Response:
     """질문·해석·결과를 한 화면에 보여준다.
 
     화면이 구분해야 하는 상태가 여섯이다. 기능 비활성 / 질문 전 / 결과 없음 /
@@ -52,9 +89,11 @@ def llm_search_page(
 
     비활성일 때 **200으로 안내 화면을 돌려준다.** 오류 페이지로 보내면 "고장"으로
     읽히는데, 실제로는 이 환경의 정상 상태다. API가 503을 쓰는 것과 갈리는 지점이다.
+
+    GET과 POST가 같은 화면을 그린다. 둘의 차이는 질문을 받았는지 하나뿐이라, 분기를
+    라우터 함수에 복사하면 상태 여섯 개의 처리가 두 벌이 된다.
     """
     enabled = service is not None
-    question = (q or "").strip()
     outcome = None
     planner_error = False
     plan_error = False
