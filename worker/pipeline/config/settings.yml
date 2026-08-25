@@ -15,6 +15,16 @@ inference_max_consecutive_failures: 5
 face_identity_sample_interval_frames: 20
 person_tracking_sample_interval_frames: 4
 
+# --- 결과 전송 분리 ---
+# 탐지 결과를 FastAPI로 보내는 일을 추론 소비자 스레드에서 떼어낸다.
+# 실측(2026-08-25): 추론은 16ms인데 FastAPI 내부 API 한 번이 199ms였고(MongoDB
+# Atlas 왕복 5~6회), 그 대기 때문에 들어온 프레임의 73%를 버렸다. 근거는
+# worker/inference/dispatch.py의 모듈 주석에 있다.
+result_dispatch_enabled: true
+# 전송이 밀렸을 때 들고 있을 최대 건수. 넘치면 오래된 것부터 버린다.
+result_dispatch_queue_maxsize: 32
+result_dispatch_close_timeout_seconds: 5.0
+
 # 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의
 # FACE_IDENTITY_URL이 소유하고, 비워 두면 기능을 끈다. 실패해도 CCTV 사람 탐지는
 # 독립적으로 계속한다.
