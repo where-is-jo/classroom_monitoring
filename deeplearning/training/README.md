@@ -126,7 +126,10 @@ Ultralytics 모델에 직접 전달하므로 N1을 그 경로에 그대로 배�
 
 `face_identification_eval.py`는 등록 학생(known)과 미등록 인원(unknown)을 validation/test로
 고정 분리해 ArcFace 또는 AdaFace를 같은 조건으로 평가한다. validation으로 유사도와
-1·2위 margin 임계값을 고르고, test 결과 CSV와 런타임용 `thresholds.json`을 만든다.
+1·2위 margin 임계값을 고른다. known validation 안의 같은 학생·다른 학생 이미지 쌍으로
+얼굴 track 연결 유사도도 고르며, 다른 학생 쌍의 허용 오연결률은
+`FACE_EVAL_TRACK_TARGET_FALSE_ASSOCIATION`으로 제한한다. test 결과 CSV와 런타임용
+`thresholds.json`에는 세 임계값과 목표 오연결률이 함께 들어간다.
 test 결과를 보고 다시 임계값을 고르지 않는다.
 
 ```bash
@@ -153,7 +156,10 @@ validation과 test 이미지가 네 디렉터리에 모두 있어야 한다. 로
 
 생성된 임계값 파일에는 모델명·모델 버전·전처리 버전이 함께 들어간다. 실시간 서비스의
 `FACE_IDENTITY_THRESHOLD_FILE`로 연결하며, 현재 런타임 메타데이터와 하나라도 다르면
-기동을 거부한다. 실측 데이터가 없으면 임의 임계값으로 학생 이름을 붙이지 않는다.
+기동을 거부한다. `similarity_threshold`, `margin_threshold`,
+`track_similarity_threshold` 중 하나라도 없거나 track 목표 오연결률이 배포 기준보다
+느슨하면 배포 검증도 실패한다. 실측 데이터가 없으면 임의 임계값으로 학생 이름을 붙이지
+않는다.
 
 AdaFace ONNX는 `prepare_adaface_model.py`, person re-ID 가중치는
 `prepare_person_reid.py`로 준비한다. `cross_camera_demo.py`와 tracking 노트북은 카메라 간

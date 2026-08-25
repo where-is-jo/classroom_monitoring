@@ -52,7 +52,8 @@
   `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
   전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 그 카메라는 YOLO 없이
   deeplearning의 SCRFD→ArcFace→얼굴 track만 실행한다. CCTV는 YOLO 사람 탐지와
-  ByteTrack만 실행한다. 입구 얼굴 관측은 FastAPI에 7일 메타데이터로 저장한다.
+  ByteTrack만 실행한다. 두 역할은 별도 최신 프레임 버퍼·소비자를 사용해 얼굴 HTTP가
+  느려도 CCTV 추적을 막지 않는다. 입구 얼굴 관측은 FastAPI에 7일 메타데이터로 저장한다.
   FastAPI의 `/identity-handover`
   화면에서 저장한 CCTV 문 ROI를 주기적으로 읽어 입구 신원을 CCTV ByteTrack으로
   넘기며, 설정 조회가 잠시 실패하면 마지막 정상값을 유지한다. 기본값은 꺼져 있다.
@@ -86,7 +87,10 @@ FastAPI는 외부 의존 없는 local memory mode와 MongoDB metadata mode를 �
 CCTV detection의 `student_id`와 `track_id`는 FastAPI의 ROI·좌석 판정을 거쳐 저장·SSE·
 화면까지 전달된다. `/identity-handover`에서 CCTV 현재 화면에 문 영역을 겹쳐 보고 다시
 그리면 worker가 재시작 없이 반영한다. 입구 사람 track ID가 바뀌더라도 활성 학생 하나를
-CCTV track 하나에만 인계한다. 다만 배포 환경별 실제 입구 카메라·CCTV 종단 간 검증,
+CCTV track 하나에만 인계한다. 얼굴 track은 위치와 embedding을 함께 확인하고 낮은 품질의
+새 관측에는 과거 이름을 노출하지 않으며, CCTV track이 만료되면 인계 신원도 즉시 지운다
+([결정 0042](./docs/architecture/decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)).
+다만 배포 환경별 실제 입구 카메라·CCTV 종단 간 검증,
 문 영역·인계 시간 창 보정, 시간표 기반 `ABSENT`는 남아 있다.
 아직 정해지지 않은 항목은 [결정되지 않은 항목](#아직-결정되지-않은-항목)을 참고한다.
 

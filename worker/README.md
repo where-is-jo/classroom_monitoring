@@ -59,14 +59,10 @@
 실행은 [`pipeline`](./pipeline/README.md) 진입점이다.
 
 ```text
-카메라 ─RTSP─▶ stream ─샘플링─▶ FrameBuffer ─카메라별 최신 1장─▶ inference
-                                 같은 카메라의 오래된 것 버림        │
-                                                                      ▼
-                 입구: 얼굴 탐지·식별 ──신원 후보──┐
-                 CCTV: 사람 탐지·ByteTrack ─문 ROI─┴─▶ 신원 인계
-                                                                      │
-                                                                      ▼
-                                                        로그 + 선택적 FastAPI HTTP
+입구 ─RTSP─▶ stream ─20프레임마다─▶ 얼굴 버퍼 ─▶ 얼굴 소비자 ─▶ 얼굴 탐지·식별 ─┐
+                                                                                 ├─▶ 신원 인계
+CCTV ─RTSP─▶ stream ──4프레임마다─▶ 추적 버퍼 ─▶ CCTV 소비자 ─▶ YOLO·ByteTrack ─┘
+                              각 버퍼는 카메라별 최신 1장만 유지
 ```
 
 `recorder`는 별도 진입점으로 돈다. MediaMTX에서 직접 RTSP를 받아 세그먼트를 만들고
@@ -75,13 +71,18 @@
 입구 카메라는 `FACE_IDENTITY_URL`과 `FACE_IDENTITY_CAMERA_IDS`를 설정하면 사람 탐지 없이
 deeplearning의 SCRFD·ArcFace·얼굴 track 관측을 호출한다. 관측 메타데이터는 FastAPI에
 7일 보존하고, 등록 신원은 메모리 인계 후보가 된다. 얼굴 식별·저장 장애는 CCTV 사람 탐지
-전송을 막지 않는다
-([결정 0040](../docs/architecture/decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다)).
+전송을 막지 않는다. 두 역할은 별도 버퍼와 소비자를 사용해 느린 얼굴 HTTP가 CCTV
+ByteTrack 갱신을 막지 않는다
+([결정 0040](../docs/architecture/decisions.md#0040--입구는-얼굴-관측-cctv는-사람-추적으로-실행-경로를-분리한다),
+[0042](../docs/architecture/decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)).
 
 사람 탐지와 ByteTrack은 `PERSON_TRACKING_CAMERA_IDS`의 CCTV에만 붙인다. 입구에서 확인된 `student_id`는 설정한 시간
 창 안에 CCTV 문 영역에서 **유일하게 새로 생긴 track**에만 인계한다. 후보 학생이나 신규
 track이 둘 이상이면 추측하지 않고 신원 없이 둔다. 인계된 신원은 같은 CCTV track이
-유지되는 동안 좌석 ROI까지 전달된다([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다)).
+유지되는 동안 좌석 ROI까지 전달된다. ByteTrack이 만료되면 그 track의 신원·문 영역 상태도
+같은 갱신에서 즉시 지우고, 새 track에는 새 인계가 성립해야만 신원을 붙인다
+([결정 0036](../docs/architecture/decisions.md#0036--문-영역과-통과-시각으로-입구-신원을-cctv-bytetrack에-보수적으로-인계한다),
+[0042](../docs/architecture/decisions.md#0042--얼굴과-cctv의-신원-수명을-각-track의-관측-근거에-묶는다)).
 
 ## 워커 사이의 경계
 
@@ -106,6 +107,8 @@ track이 둘 이상이면 추측하지 않고 신원 없이 둔다. 인계된 �
 - 버퍼가 가득 차면 **가장 오래된 프레임을 버린다.** 수신은 추론을 기다리지 않는다.
 - 소비자는 **가장 최근 프레임만** 가져간다. 밀린 프레임을 추론하면 결과가 계속
   과거를 가리킨다.
+- 입구 얼굴과 CCTV 사람 추적은 **각자 버퍼와 소비자**를 가진다. 한쪽 호출 지연이 다른
+  역할의 최신 프레임 소비를 막지 않는다.
 
 우리가 원하는 것은 "모든 프레임"이 아니라 "지금 누가 어느 자리에 있는가"다. 배경은
 [결정 0006](../docs/architecture/decisions.md#0006--워커-사이-프레임-전달을-최신-우선-버퍼로-한다)에 있다.
