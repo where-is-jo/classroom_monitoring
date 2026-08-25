@@ -7,7 +7,10 @@
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [-860, -80]
+      "position": [
+        -860,
+        -80
+      ]
     },
     {
       "parameters": {
@@ -24,7 +27,10 @@
       "name": "Every 5 Minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-860, 120]
+      "position": [
+        -860,
+        120
+      ]
     },
     {
       "parameters": {
@@ -41,28 +47,38 @@
       "name": "Daily End Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-860, 340]
+      "position": [
+        -860,
+        340
+      ]
     },
     {
       "parameters": {
         "operation": "read",
-        "filePath": "={{$env.SCHEDULE_FILE_PATH || 'individual_tasks/시간표.md'}}"
+        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/individual_tasks/시간표.md'}}"
       },
       "id": "66a2e33a-aa9d-4d94-9df3-c70d5df1b601",
       "name": "Read Schedule File",
       "type": "n8n-nodes-base.readWriteFile",
       "typeVersion": 1,
-      "position": [-620, 20]
+      "position": [
+        -620,
+        20
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const now = new Date();\nconst today = now.toISOString().slice(0, 10);\nconst scheduleText = Buffer.from($binary.data.data, 'base64').toString('utf8');\nconst defaultPeriods = [\n  { name: 'morning-study', start: '08:00', end: '08:40' },\n  { name: 'period-1', start: '08:40', end: '10:10' },\n  { name: 'period-2', start: '10:20', end: '11:50' },\n  { name: 'period-3', start: '13:00', end: '14:30' },\n  { name: 'period-4', start: '14:40', end: '16:10' },\n  { name: 'period-5', start: '16:20', end: '17:50' },\n  { name: 'night-period-1', start: '19:00', end: '20:30' },\n  { name: 'night-period-2', start: '20:40', end: '22:00' }\n];\nconst parsed = [];\nconst lineRegex = /\\*\\*(\\d{2}:\\d{2})\\s*~\\s*(\\d{2}:\\d{2})\\*\\*\\s*\\|\\s*([^|]+)/g;\nlet match;\nlet index = 0;\nwhile ((match = lineRegex.exec(scheduleText)) !== null) {\n  const label = match[3].trim();\n  if (!/(자습|교시|study|period)/i.test(label)) continue;\n  parsed.push({ name: label || `period-${++index}`, start: match[1], end: match[2] });\n}\nconst periods = parsed.length ? parsed : defaultPeriods;\nfunction at(time) {\n  const [hour, minute] = time.split(':').map(Number);\n  const value = new Date(now);\n  value.setHours(hour, minute, 0, 0);\n  return value;\n}\nconst active = periods.find((period) => now >= at(period.start) && now <= at(period.end));\nconst ended = periods.find((period) => {\n  const end = at(period.end).getTime();\n  return now.getTime() >= end && now.getTime() < end + 5 * 60 * 1000;\n});\nreturn [{ json: { today, periods, activePeriod: active || null, endedPeriod: ended || null, classroomId: $env.CLASSROOM_ID, classroomName: $env.CLASSROOM_NAME || $env.CLASSROOM_ID } }];"
+        "jsCode": "const now = new Date();\nconst today = now.toISOString().slice(0, 10);\n// 시간표 파일은 저장소에 커밋되지 않는다(gitignore). 없으면 아래 기본 시간표로 넘어간다.\nlet scheduleText = '';\ntry {\n  if ($binary && $binary.data && $binary.data.data) {\n    scheduleText = Buffer.from($binary.data.data, 'base64').toString('utf8');\n  }\n} catch (error) {\n  scheduleText = '';\n}\nconst defaultPeriods = [\n  { name: 'morning-study', start: '08:00', end: '08:40' },\n  { name: 'period-1', start: '08:40', end: '10:10' },\n  { name: 'period-2', start: '10:20', end: '11:50' },\n  { name: 'period-3', start: '13:00', end: '14:30' },\n  { name: 'period-4', start: '14:40', end: '16:10' },\n  { name: 'period-5', start: '16:20', end: '17:50' },\n  { name: 'night-period-1', start: '19:00', end: '20:30' },\n  { name: 'night-period-2', start: '20:40', end: '22:00' }\n];\nconst parsed = [];\nconst lineRegex = /\\*\\*(\\d{2}:\\d{2})\\s*~\\s*(\\d{2}:\\d{2})\\*\\*\\s*\\|\\s*([^|]+)/g;\nlet match;\nlet index = 0;\nwhile ((match = lineRegex.exec(scheduleText)) !== null) {\n  const label = match[3].trim();\n  if (!/(자습|교시|study|period)/i.test(label)) continue;\n  parsed.push({ name: label || `period-${++index}`, start: match[1], end: match[2] });\n}\nconst periods = parsed.length ? parsed : defaultPeriods;\nfunction at(time) {\n  const [hour, minute] = time.split(':').map(Number);\n  const value = new Date(now);\n  value.setHours(hour, minute, 0, 0);\n  return value;\n}\nconst active = periods.find((period) => now >= at(period.start) && now <= at(period.end));\nconst ended = periods.find((period) => {\n  const end = at(period.end).getTime();\n  return now.getTime() >= end && now.getTime() < end + 5 * 60 * 1000;\n});\nreturn [{ json: { today, periods, activePeriod: active || null, endedPeriod: ended || null, classroomId: $env.CLASSROOM_ID, classroomName: $env.CLASSROOM_NAME || $env.CLASSROOM_ID } }];"
       },
       "id": "ce94bc0e-5ac7-4952-9b8c-338884e79801",
       "name": "Parse Schedule",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-380, 20]
+      "position": [
+        -380,
+        20
+      ]
     },
     {
       "parameters": {
@@ -90,11 +106,14 @@
       "name": "Inside Study Window",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [-140, 20]
+      "position": [
+        -140,
+        20
+      ]
     },
     {
       "parameters": {
-        "url": "={{($env.FASTAPI_BASE_URL || 'http://localhost:8000') + '/api/v1/classrooms/' + $json.classroomId + '/student-states'}}",
+        "url": "={{($env.FASTAPI_BASE_URL || 'http://fastapi:8001') + '/api/v1/classrooms/' + $json.classroomId + '/student-states'}}",
         "options": {
           "timeout": 30000
         }
@@ -103,27 +122,43 @@
       "name": "Get Student States",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [120, -20]
+      "position": [
+        120,
+        -20
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\nconst workflowData = $getWorkflowStaticData('global');\nworkflowData.events = workflowData.events || [];\nworkflowData.lastState = workflowData.lastState || {};\nconst now = new Date().toISOString();\nconst period = input.activePeriod || input.endedPeriod || { name: 'manual-run' };\nconst meaningfulStates = new Set(['ABSENT', 'WRONG_SEAT', 'IN_CLASSROOM', 'UNKNOWN', 'PRESENT']);\nconst newEvents = [];\nfor (const state of input.states || []) {\n  const studentId = state.student_id;\n  const current = state.current_state || 'UNKNOWN';\n  if (!studentId || !meaningfulStates.has(current)) continue;\n  const last = workflowData.lastState[studentId];\n  const changed = !last || last.state !== current;\n  workflowData.lastState[studentId] = { state: current, at: now };\n  if (!changed) continue;\n  const seatNumber = state.assigned_seat_label || state.current_seat_label || state.assigned_seat_id || state.current_seat_id || '';\n  const key = [input.today, input.classroomId, period.name, studentId, current, state.last_observed_at || now].join('|');\n  if (workflowData.events.some((event) => event.key === key)) continue;\n  const event = {\n    key,\n    period: period.name,\n    observed_at: state.last_observed_at || now,\n    seat_number: seatNumber,\n    student_id: studentId,\n    student_name: state.student_name,\n    student_state: current\n  };\n  workflowData.events.push(event);\n  newEvents.push(event);\n}\nconst allEvents = workflowData.events.filter((event) => event.key && event.key.startsWith(input.today + '|' + input.classroomId + '|'));\nconst eventsBase64 = Buffer.from(JSON.stringify(allEvents), 'utf8').toString('base64');\nconst workbookPath = `RPAs/study-status-report/reports/study_status_${input.today}_${input.classroomId}.xlsx`;\nconst command = `python RPAs/study-status-report/scripts/create_management_workbook.py --date ${input.today} --classroom \"${input.classroomName}\" --events-base64 ${eventsBase64} --out ${workbookPath}`;\nreturn [{ json: { ...input, newEvents, allEvents, command, workbookPath, shouldSendPeriodReport: Boolean(input.endedPeriod) } }];"
+        "jsCode": "const input = $input.first().json;\nconst workflowData = $getWorkflowStaticData('global');\nworkflowData.events = workflowData.events || [];\nworkflowData.lastState = workflowData.lastState || {};\nconst now = new Date().toISOString();\nconst period = input.activePeriod || input.endedPeriod || { name: 'manual-run' };\nconst meaningfulStates = new Set(['ABSENT', 'WRONG_SEAT', 'IN_CLASSROOM', 'UNKNOWN', 'PRESENT']);\nconst newEvents = [];\nfor (const state of input.states || []) {\n  const studentId = state.student_id;\n  const current = state.current_state || 'UNKNOWN';\n  if (!studentId || !meaningfulStates.has(current)) continue;\n  const last = workflowData.lastState[studentId];\n  const changed = !last || last.state !== current;\n  workflowData.lastState[studentId] = { state: current, at: now };\n  if (!changed) continue;\n  const seatNumber = state.assigned_seat_label || state.current_seat_label || state.assigned_seat_id || state.current_seat_id || '';\n  const key = [input.today, input.classroomId, period.name, studentId, current, state.last_observed_at || now].join('|');\n  if (workflowData.events.some((event) => event.key === key)) continue;\n  const event = {\n    key,\n    period: period.name,\n    observed_at: state.last_observed_at || now,\n    seat_number: seatNumber,\n    student_id: studentId,\n    student_name: state.student_name,\n    student_state: current\n  };\n  workflowData.events.push(event);\n  newEvents.push(event);\n}\nconst allEvents = workflowData.events.filter((event) => event.key && event.key.startsWith(input.today + '|' + input.classroomId + '|'));\nconst eventsBase64 = Buffer.from(JSON.stringify(allEvents), 'utf8').toString('base64');\nconst workbookPath = `RPAs/study-status-report/reports/study_status_${input.today}_${input.classroomId}.xlsx`;\nconst uploadTitle = `Study status - ${input.classroomName} ${input.today}`;\nconst uploadComment = `Study period finished. Period: ${(input.endedPeriod && input.endedPeriod.name) || period.name}`;\nreturn [{ json: { ...input, newEvents, allEvents, eventsBase64, workbookPath, uploadTitle, uploadComment, shouldSendPeriodReport: Boolean(input.endedPeriod) } }];\n"
       },
       "id": "cc7e1cd6-983a-46ee-8c79-4000d65a0e01",
       "name": "Build Change Events",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [360, -20]
+      "position": [
+        360,
+        -20
+      ]
     },
     {
       "parameters": {
-        "command": "={{$json.command}}"
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/workbook' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ date: $json.today, classroom: $json.classroomName, events_base64: $json.eventsBase64, out: $json.workbookPath }) }}",
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "603cd98b-29ba-4d90-b4ed-df4bd95e0b01",
       "name": "Create Workbook",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [600, -20]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        -20
+      ]
     },
     {
       "parameters": {
@@ -151,105 +186,245 @@
       "name": "Period End?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [840, -20]
+      "position": [
+        840,
+        -20
+      ]
     },
     {
       "parameters": {
-        "command": "=python RPAs/study-status-report/scripts/slack_upload_file.py --file {{$json.workbookPath}} --title \"Study status - {{$json.classroomName}} {{$json.today}}\" --comment \"Study period finished. Period: {{$json.endedPeriod.name}}\""
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-upload' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ file: $json.workbook_path, title: $('Build Change Events').item.json.uploadTitle, comment: $('Build Change Events').item.json.uploadComment }) }}",
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "d7d3c03f-d897-4f5a-97c1-b13a7cbfb701",
       "name": "Upload Workbook to Slack",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [1080, -120]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        -120
+      ]
     },
     {
       "parameters": {
         "operation": "read",
-        "filePath": "={{$env.SCHEDULE_FILE_PATH || 'individual_tasks/시간표.md'}}"
+        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/individual_tasks/시간표.md'}}"
       },
       "id": "fcf9c81b-d29a-4eaa-bebd-1bce276f5d01",
       "name": "Read Schedule For Daily Report",
       "type": "n8n-nodes-base.readWriteFile",
       "typeVersion": 1,
-      "position": [-620, 340]
+      "position": [
+        -620,
+        340
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const today = new Date().toISOString().slice(0, 10);\nconst workflowData = $getWorkflowStaticData('global');\nconst classroomId = $env.CLASSROOM_ID;\nconst classroomName = $env.CLASSROOM_NAME || classroomId;\nconst allEvents = (workflowData.events || []).filter((event) => event.key && event.key.startsWith(today + '|' + classroomId + '|'));\nconst eventsBase64 = Buffer.from(JSON.stringify(allEvents), 'utf8').toString('base64');\nconst workbookPath = `RPAs/study-status-report/reports/study_status_${today}_${classroomId}.xlsx`;\nconst command = `python RPAs/study-status-report/scripts/create_management_workbook.py --date ${today} --classroom \"${classroomName}\" --events-base64 ${eventsBase64} --out ${workbookPath}`;\nreturn [{ json: { today, classroomId, classroomName, allEvents, command, workbookPath } }];"
+        "jsCode": "const today = new Date().toISOString().slice(0, 10);\nconst workflowData = $getWorkflowStaticData('global');\nconst classroomId = $env.CLASSROOM_ID;\nconst classroomName = $env.CLASSROOM_NAME || classroomId;\nconst allEvents = (workflowData.events || []).filter((event) => event.key && event.key.startsWith(today + '|' + classroomId + '|'));\nconst eventsBase64 = Buffer.from(JSON.stringify(allEvents), 'utf8').toString('base64');\nconst workbookPath = `RPAs/study-status-report/reports/study_status_${today}_${classroomId}.xlsx`;\nconst uploadTitle = `Daily study report - ${classroomName} ${today}`;\nconst uploadComment = 'Daily self-study report. See the daily report sheet for leave-rate statistics.';\nreturn [{ json: { today, classroomId, classroomName, allEvents, eventsBase64, workbookPath, uploadTitle, uploadComment } }];\n"
       },
       "id": "bc267679-89be-49df-a225-09cc37617701",
       "name": "Build Daily Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-380, 340]
+      "position": [
+        -380,
+        340
+      ]
     },
     {
       "parameters": {
-        "command": "={{$json.command}}"
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/workbook' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ date: $json.today, classroom: $json.classroomName, events_base64: $json.eventsBase64, out: $json.workbookPath }) }}",
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "2deffb1f-5b72-4e96-b474-a538c66b2a01",
       "name": "Create Daily Workbook",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [-140, 340]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        340
+      ]
     },
     {
       "parameters": {
-        "command": "=python RPAs/study-status-report/scripts/slack_upload_file.py --file {{$json.workbookPath}} --title \"Daily study report - {{$json.classroomName}} {{$json.today}}\" --comment \"Daily self-study report. See the daily report sheet for leave-rate statistics.\""
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-upload' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ file: $json.workbook_path, title: $('Build Daily Report').item.json.uploadTitle, comment: $('Build Daily Report').item.json.uploadComment }) }}",
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "f7b6df67-140e-4b2a-aab1-8657ea924901",
       "name": "Upload Daily Report to Slack",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [100, 340]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        100,
+        340
+      ]
     }
   ],
   "connections": {
     "Manual Trigger": {
-      "main": [[{"node": "Read Schedule File", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Read Schedule File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Every 5 Minutes": {
-      "main": [[{"node": "Read Schedule File", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Read Schedule File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Daily End Trigger": {
-      "main": [[{"node": "Read Schedule For Daily Report", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Read Schedule For Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Read Schedule File": {
-      "main": [[{"node": "Parse Schedule", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Parse Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Parse Schedule": {
-      "main": [[{"node": "Inside Study Window", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Inside Study Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Inside Study Window": {
       "main": [
-        [{"node": "Get Student States", "type": "main", "index": 0}],
+        [
+          {
+            "node": "Get Student States",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
     "Get Student States": {
-      "main": [[{"node": "Build Change Events", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Build Change Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Change Events": {
-      "main": [[{"node": "Create Workbook", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Create Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Create Workbook": {
-      "main": [[{"node": "Period End?", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Period End?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Period End?": {
       "main": [
-        [{"node": "Upload Workbook to Slack", "type": "main", "index": 0}],
+        [
+          {
+            "node": "Upload Workbook to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
     "Read Schedule For Daily Report": {
-      "main": [[{"node": "Build Daily Report", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Build Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Daily Report": {
-      "main": [[{"node": "Create Daily Workbook", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Create Daily Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Create Daily Workbook": {
-      "main": [[{"node": "Upload Daily Report to Slack", "type": "main", "index": 0}]]
+      "main": [
+        [
+          {
+            "node": "Upload Daily Report to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "pinData": {},
@@ -257,7 +432,14 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": [{"name": "RPA"}, {"name": "study-status"}],
+  "tags": [
+    {
+      "name": "RPA"
+    },
+    {
+      "name": "study-status"
+    }
+  ],
   "triggerCount": 3,
   "updatedAt": "2026-08-22T00:00:00.000Z",
   "versionId": "study-status-report-v1"

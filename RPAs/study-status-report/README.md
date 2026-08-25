@@ -103,8 +103,54 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 - `scripts/create_management_workbook.py`: `.xlsx` 생성 스크립트
 - `scripts/slack_upload_file.py`: Slack 외부 업로드 API 기반 `.xlsx` 전송 스크립트
 - `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
+- `runner/server.py`: 위 두 스크립트를 HTTP로 감싸는 실행기 (아래 참고)
+- `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
 - `.env.example`: n8n/스크립트 환경변수 예시
+
+## 실행 구조 — 왜 사이드카가 있나
+
+```text
+n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -->  .xlsx / Slack
+```
+
+처음에는 n8n의 Execute Command 노드가 스크립트를 직접 부르는 구조였다. **n8n 2.33.5
+공식 이미지에는 파이썬이 없고 패키지 관리자(apk)까지 제거돼 있어** 컨테이너 안에서
+`python`을 부를 수 없다(실측: `python`·`python3`·`/sbin/apk` 모두 없음). 그래서
+파이썬만 있는 작은 컨테이너(`rpa-runner`)를 따로 두고 워크플로가 HTTP로 부른다.
+
+이 구조의 결과로 **n8n에서 Execute Command 노드를 열어 둘 필요가 없다.** 임의 명령
+실행 권한을 주지 않아도 되므로 `NODES_EXCLUDE`는 기본값 그대로 둔다.
+
+실행기가 여는 엔드포인트는 셋뿐이다.
+
+| 경로 | 하는 일 |
+| --- | --- |
+| `GET /health` | 살아 있는지와 저장소 마운트 경로 확인 |
+| `POST /workbook` | `create_management_workbook.py` 실행 |
+| `POST /slack-upload` | `slack_upload_file.py` 실행 |
+
+경로는 저장소 안으로 제한하고(밖을 가리키면 400), Slack 토큰은 요청 본문으로 받지
+않는다 — 마운트된 `.env`에서 스크립트가 직접 읽는다. n8n 실행 이력에 비밀값이 남지
+않게 하려는 것이다.
+
+## 배포 (개발 PC compose)
+
+`.docker/compose.main.dev.pc.yml`에 `rpa-runner` 서비스와 n8n의 환경변수·마운트가
+이미 들어 있다. 처음 띄울 때 **이 노트북에 두 파일을 직접 만들어 둬야 한다.**
+
+| 파일 | 내용 | 없으면 |
+| --- | --- | --- |
+| `RPAs/study-status-report/.env` | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Slack 업로드 단계에서 실패한다 |
+| `individual_tasks/시간표.md` | 시간표 문서 | 워크플로는 멈추지 않고 기본 시간표로 동작한다 |
+
+둘 다 `.gitignore` 대상이라 `git pull`로는 생기지 않는다.
+
+```bash
+docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner n8n
+```
+
+대상 강의실을 바꾸려면 compose의 `CLASSROOM_ID`·`CLASSROOM_NAME`을 고친다.
 
 ## 검증
 
@@ -123,3 +169,17 @@ python RPAs/study-status-report/scripts/validate_workflow_artifacts.py
 Slack 파일 업로드는 Slack의 현재 파일 업로드 방식인 `files.getUploadURLExternal`와 `files.completeUploadExternal`를 사용한다. Bot token만으로 인증 확인은 가능하지만, 파일을 관리자 채널에 공유하려면 `files:write` 권한과 `SLACK_CHANNEL_ID`가 반드시 필요하다. Incoming Webhook은 텍스트 메시지 전송만 지원하므로 `.xlsx` 첨부 전송의 대체 수단으로 쓰지 않는다.
 
 2026-08-22 검증 결과, 입력 문서의 Bot token과 채널 URL에서 추출한 채널 ID로 샘플 관리 문서 업로드가 성공했다. 검증 출력에는 Slack 파일 ID만 남기고 토큰, 웹훅, signing secret은 남기지 않는다.
+
+### 실행기(rpa-runner) 검증
+
+실행기는 컨테이너 없이도 확인할 수 있다. 저장소 루트에서 띄우고 호출한다.
+
+```bash
+REPO_DIR="$(pwd)" python RPAs/study-status-report/runner/server.py &
+curl -s localhost:8099/health
+```
+
+2026-08-25 확인한 것: `/health` 응답, `/workbook`으로 샘플 이벤트 관리 문서 생성 성공,
+`/slack-upload`로 새 채널(`C0BRSFJ6SSK`) 업로드 성공, 저장소 밖 경로·필수값 누락·없는
+파일 요청은 400으로 거부. **컨테이너로 띄운 상태에서의 검증은 아직 하지 않았다** —
+도커가 이 PC에 없어 이미지 빌드와 마운트는 확인하지 못했다.
