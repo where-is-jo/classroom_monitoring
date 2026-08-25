@@ -1,8 +1,10 @@
 """학생 대표 얼굴 embedding MongoDB 저장소."""
 
 from datetime import datetime
+from typing import ClassVar
 
 from pymongo import ASCENDING, ReturnDocument
+from pymongo.collection import Collection
 from pymongo.errors import PyMongoError
 
 from ...shared.database import MongoDatabase, MongoDocument, document_id
@@ -11,30 +13,40 @@ from ..models import FaceEmbedding
 
 
 class MongoFaceEmbeddingRepository:
-    collection_name = "face_embeddings"
+    collection_names: ClassVar[dict[str, str]] = {
+        "arcface": "face_embeddings_arcface",
+        "adaface": "face_embeddings_adaface",
+    }
+    legacy_collection_name = "face_embeddings"
 
     def __init__(self, database: MongoDatabase) -> None:
-        self._collection = database[self.collection_name]
+        self._collections = {
+            model_name: database[collection_name]
+            for model_name, collection_name in self.collection_names.items()
+        }
+        self._legacy_collection = database[self.legacy_collection_name]
 
     @staticmethod
     def ensure_indexes(database: MongoDatabase) -> None:
-        collection = database[MongoFaceEmbeddingRepository.collection_name]
-        collection.create_index(
-            [("student_id", ASCENDING)],
-            name="uq_face_embeddings_student_id",
-            unique=True,
-        )
-        collection.create_index(
-            [("student_number", ASCENDING)],
-            name="ix_face_embeddings_student_number",
-        )
+        for model_name, collection_name in MongoFaceEmbeddingRepository.collection_names.items():
+            collection = database[collection_name]
+            collection.create_index(
+                [("student_id", ASCENDING)],
+                name=f"uq_face_embeddings_{model_name}_student_id",
+                unique=True,
+            )
+            collection.create_index(
+                [("student_number", ASCENDING)],
+                name=f"ix_face_embeddings_{model_name}_student_number",
+            )
 
     def save(self, embedding: FaceEmbedding) -> FaceEmbedding:
+        collection = self._collection_for(embedding.model_name)
         values = _to_document(embedding)
         created_at = values.pop("created_at")
         values.pop("_id")
         try:
-            document = self._collection.find_one_and_update(
+            document = collection.find_one_and_update(
                 {"student_id": embedding.student_id},
                 {
                     "$set": values,
@@ -49,18 +61,39 @@ class MongoFaceEmbeddingRepository:
             raise RepositoryUnavailableError()
         return _to_domain(document)
 
-    def find_by_student(self, student_id: str) -> FaceEmbedding | None:
+    def find_by_student(self, student_id: str, model_name: str) -> FaceEmbedding | None:
         try:
-            document = self._collection.find_one({"student_id": student_id})
+            document = self._collection_for(model_name).find_one({"student_id": student_id})
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if document is None else _to_domain(document)
 
-    def delete_by_student(self, student_id: str) -> None:
+    def list_student_ids(self, model_name: str) -> set[str]:
         try:
-            self._collection.delete_one({"student_id": student_id})
+            documents = self._collection_for(model_name).find({}, {"_id": 0, "student_id": 1})
+            student_ids: set[str] = set()
+            for document in documents:
+                student_id = document.get("student_id")
+                if not isinstance(student_id, str) or not student_id:
+                    raise RepositoryDataError()
+                student_ids.add(student_id)
         except PyMongoError:
             raise RepositoryUnavailableError() from None
+        return student_ids
+
+    def delete_by_student(self, student_id: str) -> None:
+        try:
+            for collection in self._collections.values():
+                collection.delete_one({"student_id": student_id})
+            self._legacy_collection.delete_one({"student_id": student_id})
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+
+    def _collection_for(self, model_name: str) -> Collection[MongoDocument]:
+        try:
+            return self._collections[model_name]
+        except KeyError:
+            raise RepositoryDataError() from None
 
 
 def _to_document(value: FaceEmbedding) -> MongoDocument:

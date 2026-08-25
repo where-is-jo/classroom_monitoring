@@ -158,6 +158,20 @@ def test_stored_sample_keeps_masked_frame_and_uses_readable_name() -> None:
 
     assert storage._samples[enrollment_id] == {"student-01_right_000001": b"RIGHT-aligned-jpeg"}
 
+    assert storage.read_originals(
+        enrollment_id=enrollment_id,
+        student_id="student 01",
+        student_number="ST-001",
+    ) == [b"RIGHT-aligned-jpeg"]
+    assert (
+        storage.read_originals(
+            enrollment_id=enrollment_id,
+            student_id="another-student",
+            student_number="ST-002",
+        )
+        == []
+    )
+
 
 def test_filled_pose_is_paused_until_other_pose_quotas_are_complete() -> None:
     service = make_service()

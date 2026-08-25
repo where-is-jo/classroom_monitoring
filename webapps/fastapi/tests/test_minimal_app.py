@@ -437,6 +437,14 @@ def test_occupancy_summary_does_not_truncate_after_one_repository_page() -> None
             },
             "LLM_SEARCH_URL",
         ),
+        (
+            {
+                "app_env": "local",
+                "database_mode": "memory",
+                "face_recognizer": "adaface",
+            },
+            "STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE",
+        ),
     ],
 )
 def test_settings_reject_unsafe_or_incomplete_modes(
@@ -457,3 +465,15 @@ def test_pose_quota_total_must_equal_required_sample_count() -> None:
             database_mode="memory",
             face_enrollment_required_samples=301,
         )
+
+
+def test_활성_모델에_맞는_학생_식별_임계값을_선택한다() -> None:
+    arcface = Settings(_env_file=None)  # type: ignore[call-arg]
+    adaface = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        face_recognizer="adaface",
+        student_identity_confidence_threshold_adaface=0.37,
+    )
+
+    assert arcface.active_student_identity_confidence_threshold == 0.5
+    assert adaface.active_student_identity_confidence_threshold == 0.37

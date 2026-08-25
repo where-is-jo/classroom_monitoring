@@ -69,7 +69,7 @@ def test_embedding_is_saved_before_student_becomes_complete() -> None:
     service, students = make_service()
 
     updated = service.create_for_student("student-uuid", "enrollment-uuid")
-    embedding = service.find_by_student("student-uuid")
+    embedding = service.find_by_student("student-uuid", "arcface")
 
     assert embedding is not None
     assert embedding.id == "embedding-uuid"
@@ -80,13 +80,36 @@ def test_embedding_is_saved_before_student_becomes_complete() -> None:
     assert students.get_student("student-uuid").face_enrollment_id == "enrollment-uuid"
 
 
+def test_registered_student_ids_are_separated_by_model() -> None:
+    service, _ = make_service()
+
+    service.create_for_student("student-uuid", "enrollment-uuid")
+
+    assert service.registered_student_ids("arcface") == {"student-uuid"}
+    assert service.registered_student_ids("adaface") == set()
+
+
+def test_active_model_mismatch_does_not_save_or_complete_student() -> None:
+    service, students = make_service()
+
+    with pytest.raises(FaceEmbeddingInputError, match="활성 모델"):
+        service.create_for_student(
+            "student-uuid",
+            "enrollment-uuid",
+            expected_model_name="adaface",
+        )
+
+    assert service.find_by_student("student-uuid", "arcface") is None
+    assert students.get_student("student-uuid").face_registered is False
+
+
 def test_too_few_valid_samples_does_not_complete_student() -> None:
     service, students = make_service(count=4)
 
     with pytest.raises(FaceEmbeddingInputError):
         service.create_for_student("student-uuid", "enrollment-uuid")
 
-    assert service.find_by_student("student-uuid") is None
+    assert service.find_by_student("student-uuid", "arcface") is None
     assert students.get_student("student-uuid").face_registered is False
 
 
@@ -96,4 +119,29 @@ def test_deleting_face_embedding_removes_student_from_gallery_source() -> None:
 
     service.delete_for_student("student-uuid")
 
-    assert service.find_by_student("student-uuid") is None
+    assert service.find_by_student("student-uuid", "arcface") is None
+
+
+def test_서로_다른_모델_metadata가_섞이면_저장하지_않는다() -> None:
+    class MixedAnalyzer(Analyzer):
+        def create(self, image: bytes) -> SampleEmbedding:
+            sample = super().create(image)
+            if image == b"image-5":
+                return SampleEmbedding(
+                    vector=sample.vector,
+                    dimension=sample.dimension,
+                    normalized=sample.normalized,
+                    model_name="adaface",
+                    model_version="adaface-test",
+                    preprocessing_version="adaface-test-preprocessing",
+                )
+            return sample
+
+    service, students = make_service()
+    service._analyzer = MixedAnalyzer()
+
+    with pytest.raises(FaceEmbeddingInputError, match="metadata"):
+        service.create_for_student("student-uuid", "enrollment-uuid")
+
+    assert service.find_by_student("student-uuid", "arcface") is None
+    assert students.get_student("student-uuid").face_registered is False
