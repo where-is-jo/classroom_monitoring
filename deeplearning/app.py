@@ -184,12 +184,13 @@ def _face_detection_threshold() -> float:
     return value
 
 
-def _identity_thresholds() -> tuple[float, float]:
+def _identity_thresholds() -> tuple[float, float, float]:
     configured_path = os.environ.get("FACE_IDENTITY_THRESHOLD_FILE", "").strip()
     if not configured_path:
         return (
             float(_required_environment("FACE_IDENTITY_SIMILARITY_THRESHOLD")),
             float(_required_environment("FACE_IDENTITY_MARGIN_THRESHOLD")),
+            float(_required_environment("FACE_IDENTITY_TRACK_SIMILARITY_THRESHOLD")),
         )
     path = Path(configured_path)
     if not path.is_file():
@@ -206,6 +207,7 @@ def _identity_thresholds() -> tuple[float, float]:
         return (
             float(values["similarity_threshold"]),
             float(values["margin_threshold"]),
+            float(values["track_similarity_threshold"]),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         raise RuntimeError(
@@ -218,7 +220,9 @@ def _build_face_identification_runtime(
 ) -> FaceIdentificationRuntime | None:
     if not _environment_bool("FACE_IDENTIFICATION_ENABLED"):
         return None
-    similarity_threshold, margin_threshold = _identity_thresholds()
+    similarity_threshold, margin_threshold, track_similarity_threshold = (
+        _identity_thresholds()
+    )
     gallery_loader = MongoFaceGalleryLoader(
         database_url=_required_environment("FACE_GALLERY_DATABASE_URL"),
         database_name=_required_environment("FACE_GALLERY_DATABASE_NAME"),
@@ -230,6 +234,7 @@ def _build_face_identification_runtime(
         # 평가 하네스로 고른 값만 넣게 한다. 근거 없는 기본값으로 이름을 붙이지 않는다.
         similarity_threshold=similarity_threshold,
         margin_threshold=margin_threshold,
+        track_similarity_threshold=track_similarity_threshold,
         gallery_refresh_seconds=float(
             os.environ.get("FACE_GALLERY_REFRESH_SECONDS", "30")
         ),
@@ -619,12 +624,17 @@ def readiness(request: Request) -> dict[str, str]:
     if runtime is None:
         return {"status": "ready", "face_identification": "disabled"}
     try:
-        runtime.ensure_ready()
+        gallery_status = runtime.ensure_ready()
     except FaceGalleryUnavailable:
         raise HTTPException(
             status_code=503, detail="얼굴 갤러리를 사용할 수 없습니다."
         ) from None
-    return {"status": "ready", "face_identification": "ready"}
+    return {
+        "status": "ready",
+        "face_identification": "ready",
+        "gallery_entries": str(gallery_status.gallery_entries),
+        "excluded_gallery_entries": str(gallery_status.excluded_gallery_entries),
+    }
 
 
 # **끄면 라우트 자체를 만들지 않는다.** 404를 돌려주는 경로를 남기면 "지표가 있는데

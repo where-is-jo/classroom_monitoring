@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
@@ -47,6 +47,13 @@ class FaceGalleryUnavailable(RuntimeError):
 class FaceGallerySnapshot:
     entries: tuple[GalleryEntry, ...]
     revision: GalleryRevision
+    excluded_entries: int = 0
+
+
+@dataclass(frozen=True)
+class FaceGalleryReadiness:
+    gallery_entries: int
+    excluded_gallery_entries: int
 
 
 class FaceGalleryLoader(Protocol):
@@ -118,9 +125,14 @@ class MongoFaceGalleryLoader:
                 "preprocessing_version": 1,
                 "updated_at": 1,
             }
-            documents = list(
-                client[self._database_name][self._collection_name].find({}, projection)
+            database = client[self._database_name]
+            student_documents = list(
+                database["students"].find(
+                    {"is_active": True, "face_registered": True},
+                    {"_id": 1, "is_active": 1, "face_registered": 1},
+                )
             )
+            documents = list(database[self._collection_name].find({}, projection))
         except repository_errors as error:
             raise FaceGalleryUnavailable(
                 "얼굴 갤러리 저장소를 조회하지 못했습니다."
@@ -129,13 +141,31 @@ class MongoFaceGalleryLoader:
             if client is not None:
                 client.close()
 
+        active_student_ids: set[str] = set()
+        for document in student_documents:
+            student_id = document.get("_id")
+            if (
+                not isinstance(student_id, str)
+                or not student_id
+                or document.get("is_active") is not True
+                or document.get("face_registered") is not True
+            ):
+                raise FaceGalleryUnavailable(
+                    "활성 학생 얼굴 등록 정보가 올바르지 않습니다."
+                )
+            active_student_ids.add(student_id)
+
         entries: list[GalleryEntry] = []
         revision: list[tuple[str, str]] = []
         seen_student_ids: set[str] = set()
+        excluded_entries = 0
         for document in sorted(
             documents, key=lambda value: str(value.get("student_id", ""))
         ):
             student_id = document.get("student_id")
+            if student_id not in active_student_ids:
+                excluded_entries += 1
+                continue
             metadata = FaceModelMetadata(
                 model_name=str(document.get("model_name", "")),
                 model_version=str(document.get("model_version", "")),
@@ -174,13 +204,16 @@ class MongoFaceGalleryLoader:
 
         if not entries:
             raise FaceGalleryUnavailable("등록된 학생 얼굴 갤러리가 비어 있습니다.")
-        return FaceGallerySnapshot(tuple(entries), tuple(revision))
+        return FaceGallerySnapshot(
+            tuple(entries), tuple(revision), excluded_entries=excluded_entries
+        )
 
 
 @dataclass(frozen=True)
 class FaceIdentificationConfig:
     similarity_threshold: float
     margin_threshold: float
+    track_similarity_threshold: float
     gallery_refresh_seconds: float = 30.0
     detection_threshold: float = 0.4
     identity_min_detection_confidence: float = 0.6
@@ -201,6 +234,8 @@ class FaceIdentificationConfig:
             raise ValueError("실시간 식별 유사도 임계값은 0과 1 사이여야 합니다.")
         if not 0.0 <= self.margin_threshold <= 2.0:
             raise ValueError("실시간 식별 margin 임계값은 0과 2 사이여야 합니다.")
+        if not 0.0 <= self.track_similarity_threshold <= 1.0:
+            raise ValueError("얼굴 track 유사도 임계값은 0과 1 사이여야 합니다.")
         if self.gallery_refresh_seconds <= 0:
             raise ValueError("gallery refresh 주기는 0보다 커야 합니다.")
 
@@ -225,6 +260,7 @@ class FaceIdentificationRuntime:
         self._engine: FaceIdentityEngine | None = None
         self._gallery_revision: GalleryRevision | None = None
         self._gallery_loaded_at: float | None = None
+        self._gallery_readiness: FaceGalleryReadiness | None = None
         self._gallery_lock = RLock()
         self._trackers: dict[str, MultiFaceIdentityTracker] = {}
 
@@ -238,14 +274,18 @@ class FaceIdentificationRuntime:
             if (
                 self._engine is not None
                 and self._gallery_loaded_at is not None
-                and now - self._gallery_loaded_at
-                < self._config.gallery_refresh_seconds
+                and now - self._gallery_loaded_at < self._config.gallery_refresh_seconds
             ):
                 return self._engine
 
             snapshot = self._gallery_loader.load()
+            readiness = FaceGalleryReadiness(
+                gallery_entries=len(snapshot.entries),
+                excluded_gallery_entries=snapshot.excluded_entries,
+            )
             if self._engine is not None and snapshot.revision == self._gallery_revision:
                 self._gallery_loaded_at = now
+                self._gallery_readiness = readiness
                 return self._engine
 
             try:
@@ -277,11 +317,12 @@ class FaceIdentificationRuntime:
             )
             self._gallery_revision = snapshot.revision
             self._gallery_loaded_at = now
+            self._gallery_readiness = readiness
             # 학생 추가·수정·삭제 뒤에는 이전 갤러리에서 쌓은 증거를 재사용하지 않는다.
             self._trackers.clear()
             return self._engine
 
-    def ensure_ready(self) -> None:
+    def ensure_ready(self) -> FaceGalleryReadiness:
         """현재 MongoDB 갤러리를 실제 엔진으로 만들 수 있는지 확인한다.
 
         모델 파일 존재만 보는 `/health`와 달리 readiness에서 호출한다. 갤러리가
@@ -289,6 +330,8 @@ class FaceIdentificationRuntime:
         표시한다.
         """
         self._refresh_gallery()
+        assert self._gallery_readiness is not None
+        return self._gallery_readiness
 
     def identify(
         self,
@@ -304,6 +347,7 @@ class FaceIdentificationRuntime:
                 engine,
                 history_size=self._config.tracker_history_size,
                 minimum_observations=self._config.tracker_minimum_observations,
+                track_similarity_threshold=(self._config.track_similarity_threshold),
                 stale_frames=self._config.tracker_stale_frames,
             )
             self._trackers[camera_id] = tracker

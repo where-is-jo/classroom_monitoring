@@ -29,35 +29,62 @@ class _FakeAdmin:
 
 
 class _FakeCollection:
-    def __init__(self, documents: list[dict[str, Any]]) -> None:
+    def __init__(self, name: str, documents: list[dict[str, Any]]) -> None:
+        self._name = name
         self._documents = documents
 
     def find(
         self, query: dict[str, Any], projection: dict[str, int]
     ) -> list[dict[str, Any]]:
-        assert query == {}
-        assert projection["vector"] == 1
+        if self._name == "students":
+            assert query == {"is_active": True, "face_registered": True}
+            assert projection["_id"] == 1
+        else:
+            assert query == {}
+            assert projection["vector"] == 1
         return self._documents
 
 
 class _FakeDatabase:
-    def __init__(self, documents: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        documents: list[dict[str, Any]],
+        students: list[dict[str, Any]],
+    ) -> None:
         self._documents = documents
+        self._students = students
 
     def __getitem__(self, name: str) -> _FakeCollection:
-        assert name == "face_embeddings"
-        return _FakeCollection(self._documents)
+        assert name in {"face_embeddings", "students"}
+        return _FakeCollection(
+            name, self._students if name == "students" else self._documents
+        )
 
 
 class _FakeClient:
-    def __init__(self, documents: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        documents: list[dict[str, Any]],
+        students: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.admin = _FakeAdmin()
         self._documents = documents
+        self._students = (
+            students
+            if students is not None
+            else [
+                {
+                    "_id": "student-a",
+                    "is_active": True,
+                    "face_registered": True,
+                }
+            ]
+        )
         self.closed = False
 
     def __getitem__(self, name: str) -> _FakeDatabase:
         assert name == "classroom"
-        return _FakeDatabase(self._documents)
+        return _FakeDatabase(self._documents, self._students)
 
     def close(self) -> None:
         self.closed = True
@@ -96,6 +123,7 @@ def test_Mongo_갤러리는_FastAPI_대표_embedding_계약을_그대로_읽는�
 
     assert snapshot.entries[0].student_id == "student-a"
     assert snapshot.revision == (("student-a", "2026-08-22T00:00:00+00:00"),)
+    assert snapshot.excluded_entries == 0
     assert factory_arguments["tz_aware"] is True
     assert client.closed is True
 
@@ -114,6 +142,41 @@ def test_Mongo_갤러리는_정규화_표시와_실제_벡터가_다르면_거�
         loader.load()
 
     assert client.closed is True
+
+
+def test_Mongo_갤러리는_활성_얼굴등록_학생이_아닌_embedding을_제외한다() -> None:
+    active = _gallery_document(_vector(0))
+    inactive = {**_gallery_document(_vector(1)), "student_id": "student-old"}
+    client = _FakeClient(
+        [active, inactive],
+        students=[{"_id": "student-a", "is_active": True, "face_registered": True}],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    snapshot = loader.load()
+
+    assert [entry.student_id for entry in snapshot.entries] == ["student-a"]
+    assert snapshot.excluded_entries == 1
+
+
+def test_Mongo_갤러리는_유효한_활성_학생_embedding이_없으면_거부한다() -> None:
+    client = _FakeClient([_gallery_document(_vector(0))], students=[])
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    with pytest.raises(FaceGalleryUnavailable, match="비어"):
+        loader.load()
 
 
 class GalleryLoader:
@@ -160,6 +223,7 @@ def runtime(loader: GalleryLoader, clock: list[float]) -> FaceIdentificationRunt
         config=FaceIdentificationConfig(
             similarity_threshold=0.5,
             margin_threshold=0.1,
+            track_similarity_threshold=0.5,
             gallery_refresh_seconds=10,
             minimum_face_size=1,
             preferred_face_size=2,

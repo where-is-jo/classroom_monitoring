@@ -169,6 +169,72 @@ def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
     return max(0, bbox[2] - bbox[0]) * max(0, bbox[3] - bbox[1])
 
 
+def _minimum_cost_assignment(costs: np.ndarray) -> tuple[tuple[int, int], ...]:
+    """직사각 비용 행렬의 최소 일대일 배정을 Hungarian 알고리즘으로 구한다."""
+    if costs.ndim != 2:
+        raise ValueError("배정 비용은 2차원이어야 합니다.")
+    row_count, column_count = costs.shape
+    if row_count == 0 or column_count == 0:
+        return ()
+
+    transposed = row_count > column_count
+    matrix = costs.T if transposed else costs
+    rows, columns = matrix.shape
+    row_potential = np.zeros(rows + 1, dtype=np.float64)
+    column_potential = np.zeros(columns + 1, dtype=np.float64)
+    matched_row = np.zeros(columns + 1, dtype=np.int64)
+    previous_column = np.zeros(columns + 1, dtype=np.int64)
+
+    for row in range(1, rows + 1):
+        matched_row[0] = row
+        column = 0
+        minimum = np.full(columns + 1, np.inf, dtype=np.float64)
+        used = np.zeros(columns + 1, dtype=bool)
+        while True:
+            used[column] = True
+            current_row = int(matched_row[column])
+            delta = np.inf
+            next_column = 0
+            for candidate in range(1, columns + 1):
+                if used[candidate]:
+                    continue
+                reduced = (
+                    matrix[current_row - 1, candidate - 1]
+                    - row_potential[current_row]
+                    - column_potential[candidate]
+                )
+                if reduced < minimum[candidate]:
+                    minimum[candidate] = reduced
+                    previous_column[candidate] = column
+                if minimum[candidate] < delta:
+                    delta = minimum[candidate]
+                    next_column = candidate
+            for candidate in range(columns + 1):
+                if used[candidate]:
+                    row_potential[matched_row[candidate]] += delta
+                    column_potential[candidate] -= delta
+                else:
+                    minimum[candidate] -= delta
+            column = next_column
+            if matched_row[column] == 0:
+                break
+        while True:
+            previous = int(previous_column[column])
+            matched_row[column] = matched_row[previous]
+            column = previous
+            if column == 0:
+                break
+
+    pairs = [
+        (int(matched_row[column]) - 1, column - 1)
+        for column in range(1, columns + 1)
+        if matched_row[column] != 0
+    ]
+    if transposed:
+        return tuple((column, row) for row, column in pairs)
+    return tuple(pairs)
+
+
 class FaceIdentityEngine:
     """한 프레임에서 모든 얼굴을 검출하고 3상태로 식별한다."""
 
@@ -521,6 +587,16 @@ class _Track:
     last_seen: int
     embeddings: deque[tuple[np.ndarray, float]]
 
+    @property
+    def prototype(self) -> np.ndarray | None:
+        if not self.embeddings:
+            return None
+        vectors = np.stack([item[0] for item in self.embeddings])
+        weights = np.asarray(
+            [max(item[1], 1e-3) for item in self.embeddings], dtype=np.float32
+        )
+        return normalize_embedding(np.average(vectors, axis=0, weights=weights))
+
 
 class MultiFaceIdentityTracker:
     """bbox와 임베딩으로 얼굴을 연결하고 품질 가중 특징을 누적한다."""
@@ -534,10 +610,13 @@ class MultiFaceIdentityTracker:
         minimum_evidence_quality: float = 0.2,
         maximum_center_distance: float = 120.0,
         minimum_iou: float = 0.05,
+        track_similarity_threshold: float = 0.5,
         stale_frames: int = 10,
     ) -> None:
         if history_size < minimum_observations or minimum_observations < 1:
             raise ValueError("history_size는 minimum_observations 이상이어야 합니다.")
+        if not 0.0 <= track_similarity_threshold <= 1.0:
+            raise ValueError("얼굴 track 유사도 임계값은 0과 1 사이여야 합니다.")
 
         self._engine = engine
         self._history_size = history_size
@@ -545,28 +624,13 @@ class MultiFaceIdentityTracker:
         self._minimum_evidence_quality = minimum_evidence_quality
         self._maximum_center_distance = maximum_center_distance
         self._minimum_iou = minimum_iou
+        self._track_similarity_threshold = track_similarity_threshold
         self._stale_frames = stale_frames
         self._tracks: dict[int, _Track] = {}
         self._next_track_id = 1
         self._frame_index = 0
 
-    def _assign(self, detection: FaceIdentityDetection, used: set[int]) -> int:
-        center = _bbox_center(detection.bbox)
-        candidates: list[tuple[float, int]] = []
-        for track_id, track in self._tracks.items():
-            if track_id in used:
-                continue
-            distance = math.dist(center, _bbox_center(track.bbox))
-            overlap = _bbox_iou(detection.bbox, track.bbox)
-            if (
-                distance <= self._maximum_center_distance
-                or overlap >= self._minimum_iou
-            ):
-                candidates.append((distance - 50.0 * overlap, track_id))
-
-        if candidates:
-            return min(candidates)[1]
-
+    def _new_track(self, detection: FaceIdentityDetection) -> int:
         track_id = self._next_track_id
         self._next_track_id += 1
         self._tracks[track_id] = _Track(
@@ -576,28 +640,88 @@ class MultiFaceIdentityTracker:
         )
         return track_id
 
+    def _assignment_cost(
+        self, detection: FaceIdentityDetection, track: _Track
+    ) -> float | None:
+        distance = math.dist(_bbox_center(detection.bbox), _bbox_center(track.bbox))
+        overlap = _bbox_iou(detection.bbox, track.bbox)
+        if distance > self._maximum_center_distance and overlap < self._minimum_iou:
+            return None
+
+        geometry_cost = distance / self._maximum_center_distance - overlap
+        has_usable_embedding = (
+            detection.embedding is not None
+            and detection.quality >= self._minimum_evidence_quality
+        )
+        prototype = track.prototype
+        if has_usable_embedding and prototype is not None:
+            embedding = normalize_embedding(detection.embedding)
+            similarity = float(np.dot(embedding, prototype))
+            if similarity < self._track_similarity_threshold:
+                return None
+            return geometry_cost + 2.0 * (1.0 - similarity)
+        if not has_usable_embedding:
+            # 현재 얼굴 근거가 없는 관측이 좋은 임베딩 관측보다 기존 track을 먼저
+            # 차지하지 않게 한다. 매칭되더라도 아래 update에서 신원은 내보내지 않는다.
+            return geometry_cost + 0.75
+        return geometry_cost
+
+    def _assignments(
+        self, detections: Sequence[FaceIdentityDetection]
+    ) -> dict[int, int]:
+        track_ids = tuple(sorted(self._tracks))
+        if not detections or not track_ids:
+            return {}
+        invalid_cost = 1_000_000.0
+        costs = np.full(
+            (len(detections), len(track_ids)), invalid_cost, dtype=np.float64
+        )
+        for detection_index, detection in enumerate(detections):
+            for track_index, track_id in enumerate(track_ids):
+                cost = self._assignment_cost(detection, self._tracks[track_id])
+                if cost is not None:
+                    costs[detection_index, track_index] = cost
+        return {
+            detection_index: track_ids[track_index]
+            for detection_index, track_index in _minimum_cost_assignment(costs)
+            if costs[detection_index, track_index] < invalid_cost
+        }
+
     def update(
         self,
         detections: Sequence[FaceIdentityDetection],
     ) -> tuple[TrackedIdentity, ...]:
         self._frame_index += 1
-        used: set[int] = set()
+        assignments = self._assignments(detections)
         results: list[TrackedIdentity] = []
 
-        for detection in detections:
-            track_id = self._assign(detection, used)
-            used.add(track_id)
+        for detection_index, detection in enumerate(detections):
+            track_id = assignments.get(detection_index)
+            if track_id is None:
+                track_id = self._new_track(detection)
             track = self._tracks[track_id]
             track.bbox = detection.bbox
             track.last_seen = self._frame_index
 
-            if (
+            has_usable_embedding = (
                 detection.embedding is not None
                 and detection.quality >= self._minimum_evidence_quality
-            ):
-                track.embeddings.append((detection.embedding, detection.quality))
+            )
+            if has_usable_embedding:
+                assert detection.embedding is not None
+                track.embeddings.append(
+                    (normalize_embedding(detection.embedding), detection.quality)
+                )
 
-            if len(track.embeddings) < self._minimum_observations:
+            if not has_usable_embedding:
+                status = IdentityStatus.UNCERTAIN
+                student_id = None
+                similarity = None
+                margin = None
+                rejected_reason = (
+                    detection.rejected_reason or "insufficient_current_quality"
+                )
+            elif len(track.embeddings) < self._minimum_observations:
                 status = IdentityStatus.UNCERTAIN
                 student_id = None
                 similarity = None
@@ -606,14 +730,12 @@ class MultiFaceIdentityTracker:
                     detection.rejected_reason or "insufficient_observations"
                 )
             else:
-                vectors = np.stack([item[0] for item in track.embeddings])
                 weights = np.asarray(
                     [max(item[1], 1e-3) for item in track.embeddings],
                     dtype=np.float32,
                 )
-                averaged = normalize_embedding(
-                    np.average(vectors, axis=0, weights=weights)
-                )
+                averaged = track.prototype
+                assert averaged is not None
                 aggregate_quality = float(np.average(weights, weights=weights))
                 status, student_id, similarity, margin, rejected_reason = (
                     self._engine.match_embedding(

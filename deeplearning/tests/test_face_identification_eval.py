@@ -14,6 +14,7 @@ from deeplearning.training.face_identification_eval import (
     build_gallery_from_directory,
     build_mongo_gallery,
     classify_failure,
+    collect_track_pair_similarities,
     evaluate_split,
     load_split,
     score_probe,
@@ -332,7 +333,9 @@ def test_write_thresholds_creates_runtime_artifact(tmp_path: Path) -> None:
         output_path,
         similarity_threshold=0.61,
         margin_threshold=0.08,
+        track_similarity_threshold=0.72,
         target_far=0.001,
+        track_target_false_association=0.001,
         model_name="arcface",
         model_version="model-v1",
         preprocessing_version="crop-v1",
@@ -341,11 +344,35 @@ def test_write_thresholds_creates_runtime_artifact(tmp_path: Path) -> None:
     assert json.loads(output_path.read_text(encoding="utf-8")) == {
         "similarity_threshold": 0.61,
         "margin_threshold": 0.08,
+        "track_similarity_threshold": 0.72,
         "target_far": 0.001,
+        "track_target_false_association": 0.001,
         "model_name": "arcface",
         "model_version": "model-v1",
         "preprocessing_version": "crop-v1",
     }
+
+
+def test_track_임계값용_동일인과_타인_쌍을_분리한다(tmp_path: Path) -> None:
+    images = [
+        ProbeImage(tmp_path / "a-1.jpg", "student-a"),
+        ProbeImage(tmp_path / "a-2.jpg", "student-a"),
+        ProbeImage(tmp_path / "b-1.jpg", "student-b"),
+        ProbeImage(tmp_path / "b-2.jpg", "student-b"),
+    ]
+    vectors = {
+        "a-1.jpg": _vector(0),
+        "a-2.jpg": _vector(0),
+        "b-1.jpg": _vector(1),
+        "b-2.jpg": _vector(1),
+    }
+
+    same, different = collect_track_pair_similarities(
+        images, lambda path: (vectors[path.name], 1.0)
+    )
+
+    assert same == [1.0, 1.0]
+    assert different == [0.0, 0.0, 0.0, 0.0]
 
 
 def test_write_thresholds는_런타임이_거부할_값을_쓰지_않는다(
@@ -356,7 +383,9 @@ def test_write_thresholds는_런타임이_거부할_값을_쓰지_않는다(
             tmp_path / "thresholds.json",
             similarity_threshold=1.1,
             margin_threshold=0.1,
+            track_similarity_threshold=0.7,
             target_far=0.001,
+            track_target_false_association=0.001,
             model_name="arcface",
             model_version="model-v1",
             preprocessing_version="crop-v1",

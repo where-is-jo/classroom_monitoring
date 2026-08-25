@@ -20,6 +20,7 @@ pytest.importorskip("insightface", reason="모델 의존성이 없는 환경에�
 import cv2
 import metrics
 import numpy as np
+from face_identification import FaceGalleryReadiness
 from face_identity import IdentityStatus, TrackedIdentity
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
@@ -210,8 +211,9 @@ def test_readiness는_활성_갤러리를_실제로_확인한다(client: TestCli
         def __init__(self) -> None:
             self.ready_calls = 0
 
-        def ensure_ready(self) -> None:
+        def ensure_ready(self) -> FaceGalleryReadiness:
             self.ready_calls += 1
+            return FaceGalleryReadiness(gallery_entries=2, excluded_gallery_entries=1)
 
     runtime = Runtime()
     app_module.app.state.face_identification_runtime = runtime
@@ -222,6 +224,8 @@ def test_readiness는_활성_갤러리를_실제로_확인한다(client: TestCli
     assert response.json() == {
         "status": "ready",
         "face_identification": "ready",
+        "gallery_entries": "2",
+        "excluded_gallery_entries": "1",
     }
     assert runtime.ready_calls == 1
 

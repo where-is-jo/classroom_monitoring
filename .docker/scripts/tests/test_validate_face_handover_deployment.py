@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from validate_face_handover_deployment import (  # noqa: E402
+from validate_face_handover_deployment import (
     EXPECTED_THRESHOLD_METADATA,
     validate,
 )
@@ -50,7 +50,9 @@ def build_deployment(tmp_path: Path) -> Path:
         **EXPECTED_THRESHOLD_METADATA,
         "similarity_threshold": 0.5,
         "margin_threshold": 0.1,
+        "track_similarity_threshold": 0.7,
         "target_far": 0.001,
+        "track_target_false_association": 0.001,
     }
     (models / "face" / "config" / "thresholds.json").write_text(
         json.dumps(thresholds), encoding="utf-8"
@@ -73,6 +75,18 @@ def test_thresholds_json이_없으면_실패한다(tmp_path: Path) -> None:
     assert any("임계값 파일이 없습니다" in error for error in errors)
 
 
+def test_track_임계값이_누락되면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    threshold_path = docker_root / "models" / "face" / "config" / "thresholds.json"
+    thresholds = json.loads(threshold_path.read_text(encoding="utf-8"))
+    del thresholds["track_similarity_threshold"]
+    threshold_path.write_text(json.dumps(thresholds), encoding="utf-8")
+
+    errors = validate(docker_root)
+
+    assert any("track_similarity_threshold" in error for error in errors)
+
+
 def test_입구_카메라가_스트림에_없으면_실패한다(tmp_path: Path) -> None:
     docker_root = build_deployment(tmp_path)
     worker_env = docker_root / "env" / "worker.dev.env"
@@ -93,8 +107,7 @@ def test_잘못된_정적_인계_route는_실패한다(tmp_path: Path) -> None:
     docker_root = build_deployment(tmp_path)
     worker_env = docker_root / "env" / "worker.dev.env"
     worker_env.write_text(
-        worker_env.read_text(encoding="utf-8")
-        + "IDENTITY_HANDOVER_ROUTES=[]\n",
+        worker_env.read_text(encoding="utf-8") + "IDENTITY_HANDOVER_ROUTES=[]\n",
         encoding="utf-8",
     )
 
