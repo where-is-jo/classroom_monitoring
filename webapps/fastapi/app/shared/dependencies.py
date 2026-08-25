@@ -800,11 +800,15 @@ def get_video_stream_service(
 def get_entry_identity_event_service(
     repository: EntryIdentityEventRepository = Depends(get_entry_identity_event_repository),
     stream_repository: VideoStreamRepository = Depends(get_video_stream_repository),
+    broadcaster: InMemoryBroadcaster = Depends(get_broadcaster),
+    student_lookup: StudentLookupPort = Depends(get_student_lookup),
     settings: Settings = Depends(get_settings),
 ) -> EntryIdentityEventService:
     return EntryIdentityEventService(
         repository,
         stream_repository,
+        broadcaster,
+        student_lookup,
         retention_days=settings.entry_identity_event_retention_days,
         page_size_max=settings.page_size_max,
         clock=utc_now,

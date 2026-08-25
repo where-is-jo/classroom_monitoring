@@ -3,7 +3,7 @@
  * 각 real card에 대해:
  *   1. FastAPI playback session 생성 (POST /api/v1/video-streams/{stream_id}/playback-sessions)
  *   2. 생성 응답의 FastAPI signaling URL로만 WebRTC(WHEP) offer 전송 (결정 0014)
- *   3. camera_id 기반 탐지 SSE 구독 → bbox overlay·탐지 수·마지막 탐지 갱신
+ *   3. 역할별 탐지 SSE 구독 → bbox overlay·탐지 수·마지막 탐지 갱신
  *   4. unload에서 EventSource·RTCPeerConnection·playback session을 모두 정리
  *
  * 브라우저는 MediaMTX 주소·포트·RTSP URL·credential을 구성하거나
@@ -189,18 +189,34 @@
   /* ── SSE 구독 (camera_id 기반 탐지 수신, MON-005) ───────────────────── */
 
   function subscribeSSE(ctx) {
-    const url =
-      "/api/v1/video-streams/" + encodeURIComponent(ctx.cameraId) + "/detection-events";
+    const isEntryCamera = ctx.role === "IDENTITY_ONLY";
+    const url = isEntryCamera
+      ? "/api/v1/video-streams/" +
+        encodeURIComponent(ctx.streamId) +
+        "/entry-identity-events/stream"
+      : "/api/v1/video-streams/" +
+        encodeURIComponent(ctx.cameraId) +
+        "/detection-events";
     const eventSource = new EventSource(url);
     ctx.eventSource = eventSource;
 
-    eventSource.addEventListener("detection", function (event) {
+    eventSource.addEventListener(isEntryCamera ? "entry-identity" : "detection", function (event) {
       try {
         const data = JSON.parse(event.data);
-        if (data.frame && data.detections) {
-          drawBbox(ctx.overlay, data.detections, data.frame.width_pixels, data.frame.height_pixels);
+        if (isEntryCamera) {
+          handleEntryIdentity(ctx, data);
+        } else {
+          if (data.frame && data.detections) {
+            drawBbox(
+              ctx.overlay,
+              data.detections,
+              data.frame.width_pixels,
+              data.frame.height_pixels
+            );
+          }
+          updateDetectionInfo(ctx, data);
+          markSourceConnected(ctx, "객체 탐지 수신 중");
         }
-        updateDetectionInfo(ctx, data);
       } catch (err) {
         /* malformed event는 해당 event만 무시한다 (SPEC §4). */
         console.error("SSE 데이터 파싱 오류:", err);
@@ -211,6 +227,60 @@
       /* EventSource 기본 재연결 동작에 맡긴다 (SPEC §4). */
       console.warn("SSE 연결 끊김:", ctx.cameraId, "- 자동 재연결 시도");
     };
+  }
+
+  function handleEntryIdentity(ctx, data) {
+    const observations = Array.isArray(data.observations) ? data.observations : [];
+    const detections = observations.map(function (observation) {
+      return {
+        bbox: observation.face_bbox,
+        confidence: observation.detection_confidence,
+        track_id: observation.face_track_id,
+        display_label: observation.display_label,
+      };
+    });
+    if (data.frame) {
+      drawBbox(
+        ctx.overlay,
+        detections,
+        data.frame.width_pixels,
+        data.frame.height_pixels
+      );
+    }
+    updateDetectionInfo(ctx, {
+      captured_at: data.captured_at,
+      detections_count:
+        data.observations_count != null ? data.observations_count : detections.length,
+    });
+    markSourceConnected(ctx, "얼굴 탐지 수신 중");
+    updateAnalysisStatus(ctx, data.processing_status);
+  }
+
+  function markSourceConnected(ctx, text) {
+    const statusEl = ctx.card.querySelector("[data-source-status]");
+    if (!statusEl) return;
+    statusEl.classList.remove(
+      "status-label--stale",
+      "status-label--no-video",
+      "status-label--unknown"
+    );
+    statusEl.classList.add("status-label--active");
+    statusEl.textContent = text;
+  }
+
+  function updateAnalysisStatus(ctx, processingStatus) {
+    const statusEl = ctx.card.querySelector("[data-analysis-status]");
+    if (!statusEl) return;
+    if (processingStatus === "SUCCEEDED") {
+      statusEl.textContent = "";
+      statusEl.hidden = true;
+      return;
+    }
+    statusEl.textContent =
+      processingStatus === "ANALYZER_UNAVAILABLE"
+        ? "얼굴 분석 서비스에 일시적으로 연결할 수 없습니다."
+        : "얼굴 분석 응답을 처리할 수 없습니다.";
+    statusEl.hidden = false;
   }
 
   function updateDetectionInfo(ctx, data) {
@@ -239,6 +309,7 @@
   function initCard(card) {
     const streamId = card.dataset.streamId;
     const cameraId = card.dataset.cameraId;
+    const role = card.dataset.cameraRole || "SEAT_JUDGING";
     if (!streamId || !cameraId) return;
     if (players.has(cameraId)) return;
 
@@ -247,6 +318,7 @@
       card: card,
       streamId: streamId,
       cameraId: cameraId,
+      role: role,
       videoEl: videoEl,
       overlay: videoEl ? createOverlayContainer(videoEl) : null,
       signalingUrl: null,

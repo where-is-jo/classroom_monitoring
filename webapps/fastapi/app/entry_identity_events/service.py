@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+from ..shared.broadcaster import InMemoryBroadcaster
+from ..shared.student_identity import StudentLookupPort
 from ..video_monitoring.errors import VideoStreamNotFoundError
 from ..video_monitoring.models import CameraRole
 from ..video_monitoring.ports import VideoStreamRepository
@@ -20,12 +23,16 @@ from .models import (
 )
 from .ports import EntryIdentityEventRepository
 
+logger = logging.getLogger(__name__)
+
 
 class EntryIdentityEventService:
     def __init__(
         self,
         repository: EntryIdentityEventRepository,
         stream_repository: VideoStreamRepository,
+        broadcaster: InMemoryBroadcaster,
+        student_lookup: StudentLookupPort,
         *,
         retention_days: int,
         page_size_max: int,
@@ -33,6 +40,8 @@ class EntryIdentityEventService:
     ) -> None:
         self._repository = repository
         self._stream_repository = stream_repository
+        self._broadcaster = broadcaster
+        self._student_lookup = student_lookup
         self._retention_days = retention_days
         self._page_size_max = page_size_max
         self._clock = clock
@@ -73,7 +82,22 @@ class EntryIdentityEventService:
             expires_at=received_at + timedelta(days=self._retention_days),
         )
         saved, created = self._repository.save(event)
+        # 저장 뒤 상태 갱신이 실패해 worker가 재전송해도 복구할 수 있도록 duplicate에서도
+        # 이 멱등 갱신을 수행한다. 저장소는 더 오래된 시각으로 되돌아가지 않아야 한다.
+        self._stream_repository.update_last_detection(saved.camera_id, saved.captured_at)
+        if created:
+            self._broadcaster.publish(self._to_realtime_event(saved))
         return EntryIdentityEventSaveResult(saved, created)
+
+    def resolve_realtime_camera_id(self, stream_id: str) -> str:
+        """얼굴 SSE를 열 수 있는 활성 입구 stream인지 확인하고 camera ID를 반환한다."""
+        stream = self._stream_repository.find_by_id(
+            stream_id
+        ) or self._stream_repository.find_by_camera_id(stream_id)
+        if stream is None:
+            raise VideoStreamNotFoundError()
+        self._require_identity_only_stream(stream.role, enabled=stream.enabled)
+        return stream.camera_id
 
     def list_events(
         self,
@@ -121,3 +145,45 @@ class EntryIdentityEventService:
     def _require_identity_only_stream(role: CameraRole, *, enabled: bool) -> None:
         if not enabled or role is not CameraRole.IDENTITY_ONLY:
             raise EntryIdentityCameraRoleError()
+
+    def _to_realtime_event(self, event: EntryIdentityEvent) -> dict[str, object]:
+        """저장 계약에서 생체 원본·내부 ID를 빼고 화면용 얼굴 관측만 만든다."""
+        observations = [
+            {
+                "face_track_id": observation.face_track_id,
+                "face_bbox": list(observation.face_bbox),
+                "detection_confidence": observation.detection_confidence,
+                "identity_status": observation.identity_status.value,
+                "display_label": self._display_label(observation),
+            }
+            for observation in event.observations
+        ]
+        return {
+            "type": "entry-identity",
+            "event_id": event.event_id,
+            "camera_id": event.camera_id,
+            "captured_at": event.captured_at.isoformat(),
+            "sequence": event.sequence,
+            "frame": {
+                "width_pixels": event.frame.width_pixels,
+                "height_pixels": event.frame.height_pixels,
+            },
+            "processing_status": event.processing_status.value,
+            "observations": observations,
+            "observations_count": len(observations),
+        }
+
+    def _display_label(self, observation: EntryFaceObservation) -> str:
+        if observation.identity_status is EntryIdentityStatus.UNKNOWN:
+            return "미등록 얼굴"
+        if observation.identity_status is EntryIdentityStatus.UNCERTAIN:
+            return "판정 보류"
+        if observation.student_id is None:
+            return "등록 얼굴"
+        try:
+            student = self._student_lookup.find_by_id(observation.student_id)
+        except Exception:
+            # 학생 이름·번호·내부 ID는 로그에 남기지 않는다.
+            logger.warning("입구 얼굴 실시간 라벨 보강 중 학생 조회에 실패했습니다.")
+            return "등록 얼굴"
+        return student.name if student is not None and student.is_active else "등록 얼굴"

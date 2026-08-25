@@ -269,6 +269,8 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .state-active { color: #004f3d; background: #c8ede2; }
 .state-inactive { color: #384753; background: #edf1f5; }
 .card-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 6px 18px 18px; font-size: .8rem; }
+.camera-analysis-status { margin: -8px 18px 18px; padding: 9px 11px; color: #674300; background: #fff3cd; border-radius: 8px; font-size: .82rem; font-weight: 700; }
+.camera-analysis-status[hidden] { display: none; }
 .match-reason { margin: 10px 18px; padding: 10px 12px; color: #264e49; background: var(--primary-soft); border-radius: 9px; font-size: .85rem; }
 .example-list { display: grid; gap: 10px; margin-bottom: 0; }
 

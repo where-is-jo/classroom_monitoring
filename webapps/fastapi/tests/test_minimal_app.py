@@ -199,6 +199,7 @@ def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> No
         "/api/v1/video-streams/{stream_id}",
         "/api/v1/video-streams/{stream_id}/detections",
         "/api/v1/video-streams/{stream_id}/detection-events",
+        "/api/v1/video-streams/{stream_id}/entry-identity-events/stream",
         "/api/v1/video-streams/{stream_id}/playback-sessions",
         "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
         "/api/v1/video-searches",

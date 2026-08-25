@@ -11,9 +11,28 @@ from app.entry_identity_events.adapters.memory import (
 )
 from app.entry_identity_events.service import EntryIdentityEventService
 from app.main import app
+from app.shared.broadcaster import InMemoryBroadcaster
 from app.shared.dependencies import get_entry_identity_event_service
+from app.shared.student_identity import StudentIdentity, StudentIdentityPage
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import CameraRole, PlaybackKind, VideoStream
+
+
+class FakeStudentLookup:
+    def find_by_id(self, student_id: str) -> StudentIdentity | None:
+        if student_id != "student-001":
+            return None
+        return StudentIdentity(
+            id=student_id,
+            student_no="2026001",
+            name="테스트 학생",
+            is_active=True,
+        )
+
+    def list_active(self, *, limit: int, offset: int) -> StudentIdentityPage:
+        student = self.find_by_id("student-001")
+        assert student is not None
+        return StudentIdentityPage(items=[student][offset : offset + limit], total=1)
 
 
 @pytest.fixture
@@ -75,6 +94,8 @@ def client_and_clock() -> Iterator[tuple[TestClient, list[datetime]]]:
     service = EntryIdentityEventService(
         repository,
         streams,
+        InMemoryBroadcaster(),
+        FakeStudentLookup(),
         retention_days=7,
         page_size_max=200,
         clock=lambda: clock[0],
