@@ -45,6 +45,18 @@ def test_입구와_CCTV는_역할별_샘플링_주기를_쓴다() -> None:
     assert settings.person_tracking_sample_interval_frames == 4
 
 
+def test_역할별_샘플링_주기는_환경변수로_재정의할_수_있다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACE_IDENTITY_SAMPLE_INTERVAL_FRAMES", "16")
+    monkeypatch.setenv("PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES", "3")
+
+    settings = build_settings()
+
+    assert settings.face_identity_sample_interval_frames == 16
+    assert settings.person_tracking_sample_interval_frames == 3
+
+
 def test_지표_노출_기본값은_켜짐이다() -> None:
     """저장 기능과 달리 개인정보가 나가지 않아 기본으로 켠다."""
     settings = build_settings()

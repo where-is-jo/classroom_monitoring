@@ -65,8 +65,8 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `frame_buffer_maxsize` | 카메라별 최신 프레임 슬롯의 최소 수 | pipeline이 `STREAM_SOURCES` 수 이상으로 자동 확장 |
 | `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
 | `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
-| `face_identity_sample_interval_frames` | 입구 얼굴 프레임 샘플링 간격 | 기본 20. 20 FPS 입력에서 약 1 FPS |
-| `person_tracking_sample_interval_frames` | CCTV 사람 추적 프레임 샘플링 간격 | 기본 4. 20 FPS 입력에서 약 5 FPS |
+| `face_identity_sample_interval_frames` (`FACE_IDENTITY_SAMPLE_INTERVAL_FRAMES`) | 입구 얼굴 프레임 샘플링 간격 | 기본 20. 20 FPS 입력에서 약 1 FPS. 괄호의 환경변수로 재정의 가능 |
+| `person_tracking_sample_interval_frames` (`PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES`) | CCTV 사람 추적 프레임 샘플링 간격 | 기본 4. 20 FPS 입력에서 약 5 FPS. 괄호의 환경변수로 재정의 가능 |
 | `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
 | `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
