@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from bson import ObjectId
 
 from deeplearning.face_identification import (
     FaceGallerySnapshot,
@@ -39,9 +40,11 @@ class _FakeCollection:
         if self._name == "students":
             assert query == {"is_active": True, "face_registered": True}
             assert projection["_id"] == 1
+            assert projection["student_number"] == 1
         else:
             assert query == {}
             assert projection["vector"] == 1
+            assert projection["student_number"] == 1
         return self._documents
 
 
@@ -93,6 +96,7 @@ class _FakeClient:
 def _gallery_document(vector: np.ndarray) -> dict[str, Any]:
     return {
         "student_id": "student-a",
+        "student_number": "20260001",
         "vector": vector.tolist(),
         "dimension": 512,
         "normalized": True,
@@ -163,6 +167,111 @@ def test_Mongo_갤러리는_활성_얼굴등록_학생이_아닌_embedding을_�
 
     assert [entry.student_id for entry in snapshot.entries] == ["student-a"]
     assert snapshot.excluded_entries == 1
+
+
+def test_Mongo_갤러리는_ObjectId_학생을_문자열_embedding과_연결한다() -> None:
+    student_id = ObjectId()
+    document = {
+        **_gallery_document(_vector(0)),
+        "student_id": str(student_id),
+    }
+    client = _FakeClient(
+        [document],
+        students=[{"_id": student_id, "is_active": True, "face_registered": True}],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    snapshot = loader.load()
+
+    assert [entry.student_id for entry in snapshot.entries] == [str(student_id)]
+
+
+def test_Mongo_갤러리는_embedding이_없는_ObjectId_학생때문에_실패하지_않는다() -> None:
+    client = _FakeClient(
+        [_gallery_document(_vector(0))],
+        students=[
+            {"_id": ObjectId(), "is_active": True, "face_registered": True},
+            {"_id": "student-a", "is_active": True, "face_registered": True},
+        ],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    snapshot = loader.load()
+
+    assert [entry.student_id for entry in snapshot.entries] == ["student-a"]
+
+
+def test_Mongo_갤러리는_이전_student_id를_학번으로_현재_학생에_연결한다() -> None:
+    document = {
+        **_gallery_document(_vector(0)),
+        "student_id": "legacy-student-id",
+    }
+    client = _FakeClient(
+        [document],
+        students=[
+            {
+                "_id": "current-student-id",
+                "student_number": "20260001",
+                "is_active": True,
+                "face_registered": True,
+            }
+        ],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    snapshot = loader.load()
+
+    assert [entry.student_id for entry in snapshot.entries] == ["current-student-id"]
+    assert snapshot.revision[0][0] == "current-student-id"
+    assert snapshot.excluded_entries == 0
+
+
+def test_Mongo_갤러리는_ID와_학번이_서로_다른_학생을_가리키면_거부한다() -> None:
+    client = _FakeClient(
+        [_gallery_document(_vector(0))],
+        students=[
+            {
+                "_id": "student-a",
+                "student_number": "20260002",
+                "is_active": True,
+                "face_registered": True,
+            },
+            {
+                "_id": "student-b",
+                "student_number": "20260001",
+                "is_active": True,
+                "face_registered": True,
+            },
+        ],
+    )
+    loader = MongoFaceGalleryLoader(
+        database_url="mongodb://example.invalid",
+        database_name="classroom",
+        collection_name="face_embeddings",
+        expected_metadata=FaceModelMetadata("arcface", "model-v1", "crop-v1"),
+        client_factory=lambda *_args, **_kwargs: client,
+    )
+
+    with pytest.raises(FaceGalleryUnavailable, match="연결"):
+        loader.load()
 
 
 def test_Mongo_갤러리는_유효한_활성_학생_embedding이_없으면_거부한다() -> None:
