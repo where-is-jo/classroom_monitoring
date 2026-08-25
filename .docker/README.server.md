@@ -254,7 +254,8 @@ chmod 600 .docker/env/*.env
 
 ### 지금 이대로는 기동하지 않는 값
 
-- **`.docker/models/`에 가중치 파일이 없다.** `MODEL_PATH=/models/yolo11m.pt`와
+- **`.docker/models/`에 가중치와 계약 파일이 없다.** `MODEL_PATH`,
+  `MODEL_CONTRACT_PATH`와
   `LLAMA_ARG_MODEL=/models/gemma.gguf`가 가리키는 파일을 호스트에 두어야 한다.
   읽기 전용 마운트라 ultralytics가 자동으로 내려받지 못한다. 의도한 것이다 —
   가중치는 이미지에도 저장소에도 넣지 않는다.
@@ -267,10 +268,52 @@ chmod 600 .docker/env/*.env
 
 이 경로에는 서로 다른 두 종류의 데이터가 필요하다.
 
-- MongoDB `face_embeddings`: 얼굴 등록 때 FastAPI가 저장한 학생별 대표 embedding이다.
+- MongoDB `face_embeddings_arcface` 또는 `face_embeddings_adaface`: 활성 모델과 같은
+  모델로 만든 학생별 대표 embedding이다. 레거시 `face_embeddings`는 마이그레이션 뒤에도
+  삭제하지 않는다.
 - `thresholds.json`: 별도의 known/unknown validation으로 허용 오인식률에 맞춰 고른
   gallery similarity·margin과 얼굴 track similarity 기준이다. track 기준은 다른 학생
   얼굴 쌍의 허용 오연결률로 고른다. **등록 embedding을 JSON으로 덤프한 파일이 아니다.**
+
+### 0. 모델과 갤러리 준비
+
+기존 ArcFace 갤러리는 먼저 dry-run한 뒤 새 컬렉션으로 멱등 복사한다. 명령 출력에는
+학생 ID·이름·학번·embedding이 포함되지 않는다.
+
+```bash
+cd webapps/fastapi
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  migrate-arcface-gallery
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  migrate-arcface-gallery --apply
+```
+
+AdaFace 모델은 저자 계정의 CVLFace IR50 WebFace4M 고정 revision과 가중치 SHA-256을
+검증한 뒤 ONNX로 변환한다. 최종 단계에서 CPU 출력 `(N, 512)`도 확인한다.
+
+```bash
+python -m pip install -r deeplearning/training/requirements-face-eval.txt
+python -m deeplearning.training.prepare_adaface_model \
+  --output .docker/models/face/adaface/adaface_ir50_webface4m.onnx
+```
+
+AdaFace 갤러리는 저장소 밖의 manifest와 동의된 원본 폴더로 만든다. manifest는
+`schema_version: 1`과 `students: [{student_id, image_dir}]` 형식이고 `image_dir`은 반드시
+절대경로다. 학생마다 정렬된 파일 순서에서 최대 25장을 균등 선택하며 유효 샘플 5장
+미만이면 전체 쓰기 전에 실패한다.
+
+```bash
+cd webapps/fastapi
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  build-gallery --model adaface \
+  --manifest <외부 절대경로>/adaface-gallery.json \
+  --analyzer-url http://<GPU-Tailscale-IP>:18100
+# dry-run 결과와 개인정보 동의 범위를 확인한 뒤에만 실행한다.
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  build-gallery --model adaface \
+  --manifest <외부 절대경로>/adaface-gallery.json \
+  --analyzer-url http://<GPU-Tailscale-IP>:18100 --apply
+```
 
 ### 1. 평가 실행 호스트에서 thresholds.json 생성
 
@@ -282,15 +325,18 @@ chmod 600 .docker/env/*.env
 FACE_EVAL_GALLERY_SOURCE=mongodb
 MONGODB_URI=<등록 embedding MongoDB URI>
 MONGODB_DATABASE=<DB 이름>
-FACE_EMBEDDING_COLLECTION=face_embeddings
+FACE_RECOGNIZER=arcface
+FACE_RECOGNITION_MODEL_VERSION=insightface-buffalo_l-w600k_r50-v0.7
+FACE_EMBEDDING_COLLECTION=face_embeddings_arcface
 FACE_EVAL_KNOWN_VALIDATION_DIR=<student_id/*.jpg 루트>
 FACE_EVAL_UNKNOWN_VALIDATION_DIR=<미등록 validation 이미지 루트>
 FACE_EVAL_KNOWN_TEST_DIR=<student_id/*.jpg 루트>
 FACE_EVAL_UNKNOWN_TEST_DIR=<미등록 test 이미지 루트>
 FACE_DETECTION_MODEL_PATH=<scrfd_10g_bnkps.onnx 절대경로>
-FACE_RECOGNITION_MODEL_PATH=<w600k_r50.onnx 절대경로>
+FACE_RECOGNITION_MODEL_PATH=<활성 ArcFace/AdaFace ONNX 절대경로>
 FACE_EVAL_TRACK_TARGET_FALSE_ASSOCIATION=0.001
 FACE_EVAL_THRESHOLD_OUTPUT=<thresholds.json 출력 절대경로>
+FACE_EVAL_SUMMARY_OUTPUT=<모델별 summary.json 출력 절대경로>
 ```
 
 ```bash
@@ -298,15 +344,27 @@ python -m pip install -r deeplearning/training/requirements-face-eval.txt
 python -m deeplearning.training.face_identification_eval
 ```
 
+동일한 네 split으로 ArcFace와 AdaFace를 각각 실행해 서로 다른 summary 경로에 저장한 뒤,
+전환 정확도 게이트를 실행한다. 두 평가의 target FAR이 같고 0.001 이하이며, 양쪽 test FAR과
+track 실제 오연결률이 목표 이하여야 한다. AdaFace known 성공률이 ArcFace보다 낮으면
+실패한다.
+
+```bash
+python -m deeplearning.training.verify_face_model_comparison \
+  --arcface-summary <ArcFace summary.json 절대경로> \
+  --adaface-summary <AdaFace summary.json 절대경로>
+```
+
 test 결과를 보고 임계값을 다시 고르지 않는다. 생성된 파일을 GPU 서버의
 `.docker/models/face/config/thresholds.json`으로 복사한다. 얼굴 이미지, embedding,
 MongoDB 자격 증명, JSON 산출물은 Git에 커밋하지 않는다.
 
-개인 PC에서 실행하는 FastAPI의 `.docker/env/fastapi.dev.env`에는 생성된 JSON의
-`similarity_threshold`와 같은 값을 넣고 FastAPI를 재기동한다.
+개인 PC에서 실행하는 FastAPI의 `.docker/env/fastapi.dev.env`에는 활성 모델을 넣는다.
+AdaFace일 때만 생성된 JSON의 `similarity_threshold`와 같은 전용 값을 함께 넣는다.
 
 ```dotenv
-STUDENT_IDENTITY_CONFIDENCE_THRESHOLD=<thresholds.json의 similarity_threshold>
+FACE_RECOGNIZER=adaface
+STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE=<thresholds.json의 similarity_threshold>
 ```
 
 deeplearning은 similarity와 margin을 모두 통과한 신원만 반환하지만 FastAPI의 기본값
@@ -315,13 +373,32 @@ deeplearning은 similarity와 margin을 모두 통과한 신원만 반환하지�
 
 ### 2. GPU 서버 환경과 모델 배치
 
-`.docker/env/deeplearning.dev.env`에는 아래 두 비밀값만 필수로 둔다. MongoDB 계정은
-가능하면 `face_embeddings`와 `students` 읽기 권한만 부여한다. 활성 상태이며 얼굴 등록이
-완료된 학생의 embedding만 갤러리에 넣기 때문에 두 컬렉션 모두 필요하다.
+`.docker/env/deeplearning.dev.env`에는 MongoDB 비밀값과 활성 모델 계약을 함께 둔다.
+MongoDB 계정은 가능하면 선택한 embedding 컬렉션과 `students` 읽기 권한만 부여한다.
 
 ```dotenv
 FACE_GALLERY_DATABASE_URL=<MongoDB URI>
 FACE_GALLERY_DATABASE_NAME=<DB 이름>
+FACE_RECOGNIZER=arcface
+FACE_RECOGNITION_MODEL_PATH=/models/face/buffalo_l/w600k_r50.onnx
+FACE_RECOGNITION_MODEL_VERSION=insightface-buffalo_l-w600k_r50-v0.7
+FACE_IDENTIFICATION_ENABLED=true
+FACE_IDENTITY_THRESHOLD_FILE=/models/face/config/thresholds.json
+FACE_EMBEDDING_COLLECTION=face_embeddings_arcface
+```
+
+unknown validation과 test는 각각 얼굴 검출에 성공한 probe가 최소 1,000개여야 하고,
+track 임계값에는 서로 다른 사람의 유효 얼굴 쌍이 최소 1,000쌍 필요하다. 이 기준보다
+적으면 CSV와 threshold 파일을 만들기 전에 평가가 실패한다.
+
+AdaFace 전환 시 위 마지막 여섯 값 중 모델 관련 네 값을 다음으로 바꾼다. 임계값 파일도
+AdaFace validation 결과여야 하며 `target_far`는 `0.001` 이하여야 한다.
+
+```dotenv
+FACE_RECOGNIZER=adaface
+FACE_RECOGNITION_MODEL_PATH=/models/face/adaface/adaface_ir50_webface4m.onnx
+FACE_RECOGNITION_MODEL_VERSION=cvlface-adaface-ir50-webface4m-fe7718c6
+FACE_EMBEDDING_COLLECTION=face_embeddings_adaface
 ```
 
 `.docker/env/worker.dev.env`에는 입구와 교실 CCTV가 모두 있어야 한다. 아래 camera ID는
@@ -329,9 +406,11 @@ FastAPI 카메라 설정 및 인계 ROI 설정의 ID와 정확히 같아야 한�
 
 ```dotenv
 STREAM_SOURCES=camera-01=rtsp://mediamtx:8554/camera-01,classroom-cctv=rtsp://mediamtx:8554/classroom-cctv
-MODEL_PATH=/models/person-yolo11n-n1-v008.pt
+MODEL_PATH=/models/person-yolo11n-original-v005.pt
+MODEL_CONTRACT_PATH=/models/person-yolo11n-original-v005.contract.json
 INFERENCE_DEVICE=cuda
 INFERENCE_TARGET_CLASS_IDS={"0":"person"}
+INFERENCE_CONFIDENCE_THRESHOLD=0.30
 FASTAPI_URL=http://<개인-PC-Tailscale-IP>:8076
 FACE_IDENTITY_URL=http://deeplearning:8100
 FACE_IDENTITY_CAMERA_IDS=camera-01
@@ -339,21 +418,28 @@ PERSON_TRACKING_CAMERA_IDS=classroom-cctv
 IDENTITY_HANDOVER_ROUTES=[{"entry_camera_id":"camera-01","classroom_camera_id":"classroom-cctv","classroom_entry_zone":[0.0,0.0,0.25,1.0]}]
 ```
 
-`INFERENCE_CONFIDENCE_THRESHOLD`는 환경파일에서 제거해 이미지의 검증값 0.25를 쓰거나,
-직접 둘 경우 반드시 ByteTrack high 0.5보다 낮게 둔다. 0.5이면 2단계 매칭용 탐지가
-YOLO 출력에서 이미 사라지며 이제 worker가 기동을 거부한다.
+원본 v005 모델의 고정 validation F1 최적 `INFERENCE_CONFIDENCE_THRESHOLD`는 0.30이다.
+반드시 ByteTrack high 0.5보다 낮게 둔다. 0.5이면 2단계 매칭용 탐지가 YOLO 출력에서 이미
+사라지며 worker가 기동을 거부한다.
 
 필수 파일은 다음과 같다.
 
 ```text
 .docker/models/
-├── person-yolo11n-n1-v008.pt
+├── person-yolo11n-original-v005.pt
+├── person-yolo11n-original-v005.contract.json
 └── face/
     ├── scrfd/scrfd_10g_bnkps.onnx
     ├── mediapipe/face_landmarker.task
     ├── buffalo_l/w600k_r50.onnx
+    ├── adaface/adaface_ir50_webface4m.onnx
     └── config/thresholds.json
 ```
+
+사람 탐지 계약은 학습 결과의 `model_contract.json`을 가중치와 같은 이름으로 복사한
+것이다. 배포 사전점검과 worker가 가중치 SHA-256, `INFERENCE_TARGET_CLASS_IDS`, 필수
+전처리 여부를 모두 검사한다. 현재 worker 입력은 원본 프레임이므로 픽셀화를 요구하는
+기존 N1 계약을 지정하면 기동하지 않는다.
 
 ### 3. GPU 서버에서 현재 소스로 이미지 빌드와 기동
 
@@ -373,7 +459,20 @@ python .docker/scripts/validate_face_handover_deployment.py
 docker compose -f .docker/compose.main.dev.gpu.yml config --quiet
 docker compose -f .docker/compose.main.dev.gpu.yml up -d
 python .docker/scripts/verify_face_handover_runtime.py
+python -m deeplearning.training.verify_face_cutover \
+  --url http://127.0.0.1:18100 \
+  --image <동의된 실제 입구 JPEG 절대경로> \
+  --expected-model adaface \
+  --maximum-seconds 5
 ```
+
+AdaFace cutover는 validation에서 FAR 0.1% 이하를 만족하고, 사전점검·readiness·실제 입구
+종단 검증을 모두 통과한 뒤에만 한다. 문제가 있으면 두 env의 `FACE_RECOGNIZER`와 AI 서버의
+모델 경로·버전·컬렉션·임계값 파일을 ArcFace 조합으로 되돌리고 재기동한다. ArcFace 전용
+컬렉션과 가중치는 삭제하지 않으므로 DB 역변환은 필요 없다.
+종단 검증 CLI는 readiness의 활성 모델과 갤러리 누락 0건을 먼저 확인한 뒤 실제
+`/internal/face-identifications` 요청 전체 왕복 시간이 5초 이내인지 검사한다. 출력에는
+이미지 경로·얼굴 관측 세부값·학생 식별자를 남기지 않는다.
 
 worker는 YOLO·GPU 모델과 카메라 파이프라인 조립을 마친 뒤 `/metrics`를 연다. 위 검증은
 컨테이너가 막 생성된 정상 기동을 실패로 오판하지 않도록 기본 120초 동안 2초 간격으로
