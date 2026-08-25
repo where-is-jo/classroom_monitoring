@@ -9,12 +9,12 @@
 >
   <div class="roi-filter-line" aria-label="ROI 등록 도구">
     <div class="roi-action-buttons">
+      <button id="roi-detect" type="button"{% if not cameras %} disabled{% endif %}>탐지로 자리 찾기</button>
+      <button id="roi-detect-save" type="button" hidden>찾은 자리 저장</button>
+      <button id="roi-auto-confirm" type="button" class="secondary" hidden>자동 생성 확정</button>
       <button id="roi-capture" type="button"{% if not classroom or not cameras %} disabled{% endif %}>현재 화면 캡처</button>
-      <button id="roi-detect" type="button">탐지로 자리 찾기</button>
-      <button id="roi-detect-save" type="button" hidden>지정한 좌석으로 저장</button>
       <button id="roi-auto" type="button" disabled>격자로 생성</button>
       <button id="roi-auto-save" type="button" hidden>미리보기 저장</button>
-      <button id="roi-auto-confirm" type="button" class="secondary" hidden>자동 생성 확정</button>
       <button id="roi-start" type="button" disabled>등록 시작</button>
       <button id="roi-finish" type="button" disabled>선택 완료</button>
       <button id="roi-reset" type="button" class="secondary" disabled>초기화</button>
@@ -22,23 +22,29 @@
       <button id="roi-redraw" type="button" class="secondary" disabled>다시 그리기</button>
       <button id="roi-delete" type="button" class="danger" disabled>삭제</button>
     </div>
-    <label class="roi-classroom-filter">강의실
-      <select id="roi-classroom-select"{% if not classrooms %} disabled{% endif %}>
-        {% for item in classrooms %}<option value="{{ item.id }}"{% if classroom and classroom.id == item.id %} selected{% endif %}>{{ item.name }}</option>{% endfor %}
-      </select>
-    </label>
-    <label class="roi-classroom-filter roi-seat-fill" title="탐지 기록을 몇 시간 거슬러 볼지 정합니다. 길수록 자리가 또렷해집니다.">탐지 기간
-      <input id="roi-lookback" type="number" min="1" max="336" step="1" value="24" inputmode="numeric"><span aria-hidden="true">시간</span>
-    </label>
-    <label class="roi-classroom-filter roi-seat-fill" title="격자로 생성할 때 좌석 칸을 얼마나 채울지 정합니다.">좌석 크기
-      <input id="roi-seat-fill" type="number" min="30" max="100" step="5" value="80" inputmode="numeric"><span aria-hidden="true">%</span>
-    </label>
-    <label class="roi-classroom-filter">카메라
-      <select id="roi-camera-select"{% if not cameras %} disabled{% endif %}>
-        {% if not cameras %}<option value="">연결된 카메라가 없습니다</option>{% endif %}
-        {% for camera in cameras %}<option value="{{ camera.camera_id }}" data-camera-label="{{ camera.camera_label }}" data-capture-available="{{ 'true' if camera.capture_available else 'false' }}">{{ camera.camera_label }}{% if not camera.capture_available %} (접속 정보 없음){% endif %}</option>{% endfor %}
-      </select>
-    </label>
+    <div class="roi-filter-fields">
+      <label class="roi-classroom-filter">강의실
+        <select id="roi-classroom-select"{% if not classrooms %} disabled{% endif %}>
+          {% for item in classrooms %}<option value="{{ item.id }}"{% if classroom and classroom.id == item.id %} selected{% endif %}>{{ item.name }}</option>{% endfor %}
+        </select>
+      </label>
+      {# 좌석 ROI는 좌석 판정 카메라(SEAT_JUDGING)에만 의미가 있다. 한 대뿐이면 고르게 하지 않고 무엇을 쓰는지만 알린다. #}
+      {% if cameras|length == 1 %}
+      <p class="roi-camera-fixed" id="roi-camera-fixed"
+         data-camera-id="{{ cameras[0].camera_id }}"
+         data-camera-label="{{ cameras[0].camera_label }}"
+         data-capture-available="{{ 'true' if cameras[0].capture_available else 'false' }}">
+        카메라 <strong>{{ cameras[0].camera_label }}</strong>{% if not cameras[0].capture_available %} <span class="roi-camera-warning">접속 정보 없음</span>{% endif %}
+      </p>
+      {% else %}
+      <label class="roi-classroom-filter">카메라
+        <select id="roi-camera-select"{% if not cameras %} disabled{% endif %}>
+          {% if not cameras %}<option value="">좌석 판정 카메라가 없습니다</option>{% endif %}
+          {% for camera in cameras %}<option value="{{ camera.camera_id }}" data-camera-label="{{ camera.camera_label }}" data-capture-available="{{ 'true' if camera.capture_available else 'false' }}">{{ camera.camera_label }}{% if not camera.capture_available %} (접속 정보 없음){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
   </div>
 
   <div id="roi-media-stage" class="roi-media-stage" data-state="empty">
@@ -55,7 +61,7 @@
       <h2 id="roi-detect-title">찾은 자리에 좌석 지정</h2>
       <p id="roi-detect-summary" class="summary"></p>
     </div>
-    <p class="summary">카메라는 사람이 앉는 자리를 알지만 그 자리가 몇 번 좌석인지는 알지 못합니다. 화면의 번호를 보고 좌석을 골라 주세요. 비워 둔 자리는 저장하지 않습니다.</p>
+    <p class="summary">좌석은 찾은 순서대로 미리 붙여 두었습니다. <strong>카메라는 자리를 알지만 그 자리가 몇 번 좌석인지는 알지 못하므로 추측입니다</strong> — 화면과 대조해 다른 자리는 바꿔 주세요. 비워 둔 자리는 저장하지 않습니다. 저장한 뒤에도 ‘자동 생성 확정’ 전까지는 좌석 판정에 쓰이지 않습니다.</p>
     <ul id="roi-detect-list" class="roi-detect-list"></ul>
   </section>
 

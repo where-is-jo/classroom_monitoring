@@ -354,4 +354,44 @@ def test_page_offers_detection_controls(client: TestClient) -> None:
     assert 'id="roi-detect"' in response.text
     assert 'id="roi-detect-save"' in response.text
     assert 'id="roi-detect-panel"' in response.text
-    assert 'id="roi-lookback"' in response.text
+    # 탐지 기간·좌석 크기는 화면에서 고르지 않는다. 서버 기본값을 쓴다.
+    assert 'id="roi-lookback"' not in response.text
+    assert 'id="roi-seat-fill"' not in response.text
+
+
+def test_only_seat_judging_cameras_can_hold_seat_rois() -> None:
+    """입구 카메라의 탐지는 좌석 판정에 참여하지 않는다(결정 0024의 3번).
+
+    화면이 그 카메라를 기본으로 골라 사람이 지나다니기만 하는 화각에서 자리를 찾던
+    문제를 막는다.
+    """
+    from app.video_monitoring.models import CameraRole
+
+    service = make_service()
+    streams = service._streams
+    streams.save(
+        VideoStream(
+            id="stream-entry",
+            camera_id="entry-camera",
+            classroom_id="room",
+            camera_label="입구 카메라",
+            playback_kind=PlaybackKind.WEBRTC,
+            playback_path="/webrtc/entry-camera",
+            enabled=True,
+            last_frame_at=None,
+            last_detection_at=None,
+            is_demo=False,
+            created_at=NOW,
+            updated_at=NOW,
+            role=CameraRole.IDENTITY_ONLY,
+        )
+    )
+
+    roi_cameras = [option.camera_id for option in service.list_roi_camera_options("room")]
+
+    assert roi_cameras == ["camera-a"]
+    # 일반 카메라 목록은 그대로다 — 신원 인계 화면이 입구 카메라를 찾는 데 쓴다.
+    assert {option.camera_id for option in service.list_camera_options("room")} == {
+        "camera-a",
+        "entry-camera",
+    }

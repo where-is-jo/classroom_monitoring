@@ -144,3 +144,52 @@ def test_detection_preview_is_not_signalled_by_colour_alone() -> None:
     assert '"탐지"' in source
     assert "polygon[data-spot-index]" in style
     assert "stroke-dasharray: 6 3" in style
+
+
+def test_finding_spots_captures_the_screen_by_itself() -> None:
+    """찾기를 누르면 바탕까지 갖춰져야 한다. 캡처를 따로 누르게 하면 빈 화면에 좌표만 뜬다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "captureFrame({quiet: true})" in source
+    assert "referenceRevision === null && captureAvailable()" in source
+
+
+def test_found_spots_get_a_seat_so_only_saving_is_left() -> None:
+    """자리마다 좌석을 손으로 고르게 하면 스무 번 클릭이 남는다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "const assignSeats" in source
+    # 추측이므로 바꿀 수 있어야 한다.
+    assert "저장하지 않음" in source
+
+
+def test_recapture_warning_ignores_rois_that_do_not_depend_on_the_screen() -> None:
+    """탐지 기반 ROI는 재캡처로 무효가 되지 않는다. 무관한 것까지 경고하면 경고가 무뎌진다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "item.reference_image_revision > 0" in source
+
+
+def test_camera_is_fixed_when_only_one_seat_judging_camera_exists() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "#roi-camera-fixed" in source
+    assert "fixedCamera?.dataset.cameraId" in source
+
+
+def test_capture_stage_is_scaled_to_fit_the_page() -> None:
+    """1280x1944 원본을 그대로 두면 페이지가 한없이 길어진다.
+
+    stage와 이미지의 상자가 같아야 ROI 좌표가 맞으므로 stage 크기를 이미지가 정한다.
+    """
+    style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
+
+    assert "max-height: 72vh" in style
+    assert "width: fit-content" in style
+
+
+def test_toolbar_flows_horizontally_instead_of_stacking() -> None:
+    style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
+
+    assert ".roi-action-buttons { display: flex; flex-wrap: wrap;" in style
+    assert "flex-direction: column-reverse" not in style

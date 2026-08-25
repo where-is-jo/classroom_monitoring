@@ -20,13 +20,12 @@
   const autoButton = document.querySelector("#roi-auto");
   const autoSaveButton = document.querySelector("#roi-auto-save");
   const autoConfirmButton = document.querySelector("#roi-auto-confirm");
-  const seatFillInput = document.querySelector("#roi-seat-fill");
   const detectButton = document.querySelector("#roi-detect");
   const detectSaveButton = document.querySelector("#roi-detect-save");
   const detectPanel = document.querySelector("#roi-detect-panel");
   const detectList = document.querySelector("#roi-detect-list");
   const detectSummary = document.querySelector("#roi-detect-summary");
-  const lookbackInput = document.querySelector("#roi-lookback");
+  const fixedCamera = document.querySelector("#roi-camera-fixed");
   const classroomSelect = document.querySelector("#roi-classroom-select");
   const cameraSelect = document.querySelector("#roi-camera-select");
   const dialog = document.querySelector("#roi-student-dialog");
@@ -52,27 +51,16 @@
   let previewSeats = [];
   let previewCorners = [];
 
-  // 탐지에서 찾은 자리. 좌석이 아직 정해지지 않아 좌석 목록과 짝지어 저장한다.
+  // 탐지에서 찾은 자리. 화면에 얹어 보여주고 좌석을 붙여 저장한다.
   let detectedSpots = [];
 
-  const lookbackHours = () => {
-    const hours = Number(lookbackInput?.value);
-    if (!Number.isFinite(hours)) return 24;
-    return Math.min(336, Math.max(1, Math.round(hours)));
-  };
-
-  // 좌석 칸을 얼마나 채울지. 서버 기본값과 같은 값에서 시작한다.
-  const seatFillRatio = () => {
-    const percent = Number(seatFillInput?.value);
-    if (!Number.isFinite(percent)) return 0.8;
-    return Math.min(1, Math.max(0.3, percent / 100));
-  };
-
   const selectedClassroomId = () => classroomSelect?.value || editor.dataset.classroomId;
-  const selectedCameraId = () => cameraSelect?.value || "";
-  const selectedCameraOption = () => cameraSelect?.selectedOptions?.[0] || null;
-  const selectedCameraLabel = () => selectedCameraOption()?.dataset.cameraLabel || selectedCameraId();
-  const captureAvailable = () => selectedCameraOption()?.dataset.captureAvailable === "true";
+  // 좌석 판정 카메라가 한 대뿐이면 화면에 선택 상자를 두지 않는다. 그 경우 고정 값을 읽는다.
+  const cameraSource = () => cameraSelect?.selectedOptions?.[0] || fixedCamera || null;
+  const selectedCameraId = () =>
+    cameraSelect?.value || fixedCamera?.dataset.cameraId || "";
+  const selectedCameraLabel = () => cameraSource()?.dataset.cameraLabel || selectedCameraId();
+  const captureAvailable = () => cameraSource()?.dataset.captureAvailable === "true";
   const isRegistering = () => stage.classList.contains("is-registering");
   const seatLabel = (seatId) => {
     const option = seatSelect?.querySelector(`option[value="${CSS.escape(seatId)}"]`);
@@ -298,7 +286,7 @@
     status.textContent = message;
   };
 
-  const captureFrame = async () => {
+  const captureFrame = async ({quiet = false} = {}) => {
     const classroomId = selectedClassroomId();
     const cameraId = selectedCameraId();
     if (!classroomId || !cameraId) {
@@ -309,10 +297,15 @@
       status.textContent = `${selectedCameraLabel()}의 접속 정보가 설정되어 있지 않아 화면을 가져올 수 없습니다.`;
       return;
     }
-    // 다시 캡처하면 기존 ROI가 모두 재검토 대상이 된다. 조용히 무효가 되면
+    // 다시 캡처하면 기준 화면에 매인 ROI가 재검토 대상이 된다. 조용히 무효가 되면
     // 스무 개를 그려 놓고도 이유를 모른 채 판정이 비게 된다.
-    const live = savedConnections.filter((item) => !item.needs_review).length;
-    if (live > 0) {
+    //
+    // **탐지 기반 ROI(revision 0)는 대상이 아니다.** 그 좌표의 근거는 캡처 화면이
+    // 아니라 탐지 기록이라 재캡처와 무관하다. 무관한 것까지 경고하면 경고가 무뎌진다.
+    const live = savedConnections.filter(
+      (item) => !item.needs_review && item.reference_image_revision > 0,
+    ).length;
+    if (live > 0 && !quiet) {
       const proceed = window.confirm(
         `이미 등록된 ROI ${live}개가 재검토 대상이 되어 좌석 판정에서 빠집니다.\n` +
         "기준 화면이 바뀌면 같은 좌표가 다른 좌석을 가리킬 수 있기 때문입니다.\n\n" +
@@ -392,6 +385,34 @@
     renderSaved();
   };
 
+
+
+  // 좌석 선택 상자의 순서 = 서버가 준 좌석 순서(행·열). 화면에서 위에서 아래로 찾은
+  // 자리에 이 순서대로 좌석을 붙인다.
+  const seatOptionValues = () =>
+    [...(seatSelect?.querySelectorAll("option[value]") || [])]
+      .map((option) => option.value)
+      .filter((value) => value !== "");
+
+  /**
+   * 찾은 자리에 좌석을 미리 붙인다. **추측이므로 화면에서 바꿀 수 있어야 한다.**
+   * 이미 그 자리에 ROI가 있으면 그 좌석을 먼저 쓰고, 나머지는 남은 좌석을 순서대로 준다.
+   */
+  const assignSeats = (proposals) => {
+    const used = new Set(
+      proposals.map((proposal) => proposal.suggested_seat_id).filter(Boolean),
+    );
+    const available = seatOptionValues().filter((seatId) => !used.has(seatId));
+    let next = 0;
+    return proposals.map((proposal) => {
+      let seatId = proposal.suggested_seat_id || null;
+      if (seatId === null && next < available.length) {
+        seatId = available[next];
+        next += 1;
+      }
+      return {...proposal, seat_id: seatId};
+    });
+  };
 
   const detectPath = () =>
     `/api/v1/classrooms/${encodeURIComponent(selectedClassroomId())}` +
@@ -475,31 +496,39 @@
     }
     detectButton.disabled = true;
     detectButton.textContent = "찾는 중";
-    status.textContent = "탐지 기록에서 사람이 앉았던 자리를 찾는 중입니다. 몇 초 걸립니다.";
     try {
+      // 찾은 자리를 얹어 볼 바탕이 없으면 먼저 잡는다. 관리자가 캡처를 따로 누르지
+      // 않아도 "찾기 → 보기 → 저장"으로 끝나게 하려는 것이다.
+      if (referenceRevision === null && captureAvailable()) {
+        status.textContent = `${selectedCameraLabel()}의 현재 화면을 가져오는 중입니다. 몇 초 걸립니다.`;
+        await captureFrame({quiet: true});
+      }
+      status.textContent = "탐지 기록에서 사람이 앉았던 자리를 찾는 중입니다. 몇 초 걸립니다.";
       const response = await fetch(detectPath(), {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({camera_id: cameraId, lookback_hours: lookbackHours()}),
+        body: JSON.stringify({camera_id: cameraId}),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message || "자리를 찾지 못했습니다.");
-      detectedSpots = body.proposals.map((proposal) => ({
-        ...proposal,
-        seat_id: proposal.suggested_seat_id || null,
-      }));
+      detectedSpots = assignSeats(body.proposals);
       showDetectedSpots();
       renderDetectPanel();
       if (detectedSpots.length === 0) {
         // "자리가 없다"와 "탐지가 없다"를 구분해서 알린다.
         status.textContent = body.sample_count === 0
-          ? `최근 ${lookbackHours()}시간 동안 이 카메라의 탐지 기록이 없습니다. 기간을 늘리거나 worker가 도는지 확인해 주세요.`
+          ? "최근 하루 동안 이 카메라의 탐지 기록이 없습니다. worker가 돌고 있는지 확인해 주세요."
           : `탐지 ${body.sample_count.toLocaleString("ko-KR")}개를 봤지만 자리로 인정할 만큼 오래 머문 곳이 없었습니다.`;
       } else {
+        const background = referenceRevision === null
+          ? "현재 화면을 가져오지 못해 바탕 없이 좌표만 표시합니다. "
+          : "";
         status.textContent =
-          `탐지 ${body.sample_count.toLocaleString("ko-KR")}개 중 ` +
-          `앉아 있던 ${body.stationary_count.toLocaleString("ko-KR")}개로 자리 ${detectedSpots.length}개를 찾았습니다. ` +
-          "아래에서 각 자리의 좌석을 골라 주세요.";
+          background +
+          `자리 ${detectedSpots.length}개를 찾아 화면에 표시했습니다 ` +
+          `(탐지 ${body.sample_count.toLocaleString("ko-KR")}개 중 앉아 있던 ` +
+          `${body.stationary_count.toLocaleString("ko-KR")}개 기준). ` +
+          "좌석은 순서대로 미리 붙여 두었습니다 — 그대로 저장하거나 아래에서 바꿔 주세요.";
       }
     } catch (reason) {
       console.error("탐지 자리 찾기 실패", reason);
@@ -566,7 +595,6 @@
           camera_id: selectedCameraId(),
           corners: previewCorners,
           reference_image_revision: referenceRevision,
-          seat_fill_ratio: seatFillRatio(),
           dry_run: dryRun,
         }),
       });

@@ -11,7 +11,7 @@ from threading import RLock
 from ..classrooms.models import Classroom, Seat
 from ..classrooms.service import ClassroomService
 from ..shared.student_identity import StudentIdentity, StudentLookupPort
-from ..video_monitoring.models import VideoStream
+from ..video_monitoring.models import CameraRole, VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
 from .auto_layout import MIN_AUTO_POLYGON_AREA, SeatGridCell, plan_auto_roi
 from .detection_layout import plan_detection_rois
@@ -112,6 +112,27 @@ class RoiConnectionService:
                 capture_available=self._frames.is_available(stream.camera_id),
             )
             for stream in self.list_streams(classroom_id)
+        ]
+
+    def list_roi_camera_options(self, classroom_id: str) -> list[RoiCameraOption]:
+        """좌석 ROI를 그릴 수 있는 카메라만 고른다.
+
+        좌석 ROI는 좌석 판정에 쓰이는 좌표이므로 `SEAT_JUDGING` 카메라에만 의미가 있다
+        (결정 0024의 3번). 입구 카메라의 탐지는 좌석 점유·좌석 대조에 참여하지 않아
+        거기에 ROI를 그려도 판정에 쓰이지 않는다.
+
+        **실제로 이것 때문에 자리 찾기가 빈손으로 끝났다.** 카메라 목록이 식별자 순으로
+        정렬돼 입구 카메라가 먼저 왔고, 화면이 그것을 기본으로 골라 사람이 지나다니기만
+        하는 화각에서 자리를 찾고 있었다.
+        """
+        return [
+            RoiCameraOption(
+                camera_id=stream.camera_id,
+                camera_label=stream.camera_label,
+                capture_available=self._frames.is_available(stream.camera_id),
+            )
+            for stream in self.list_streams(classroom_id)
+            if stream.role is CameraRole.SEAT_JUDGING
         ]
 
     def save_reference_image(
