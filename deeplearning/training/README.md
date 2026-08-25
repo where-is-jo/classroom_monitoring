@@ -19,10 +19,12 @@ CLI로 반복 실행할 수 있다.
 
 ## Python 파이프라인 경계
 
-원본 강의실 영상은 GPU 서버로 보내지 않는다. 다음 두 실행 경계를 유지한다.
+원본 강의실 영상은 GPU 서버로 보내지 않는다. 승인된 학생 프레임은 승인 범위와 보존
+기한을 manifest로 검증한 뒤에만 원본 프레임 학습 export에 포함할 수 있다. 다음 두 실행
+경계를 유지한다.
 
-1. 로컬 PC: 세션 분리 → 프레임 추출 → N1 자동 라벨링 → 사람 검수 → 비식별 ZIP 생성
-2. GPU 서버: 비식별 ZIP과 SHA-256 검증 → 1 epoch smoke → YOLO11n 정식 학습 → 결과 ZIP 생성
+1. 로컬 PC: 세션 분리 → 프레임 추출 → 자동 라벨링 → 사람 검수 → 비식별 또는 승인된 원본 프레임 ZIP 생성
+2. GPU 서버: ZIP·승인/전처리 계약·SHA-256 검증 → 1 epoch smoke → YOLO11n 또는 YOLO26n 정식 학습 → 결과 ZIP 생성
 
 이 CLI는 운영자가 직접 실행하는 오프라인 작업이다. 예약 실행이나 자동 재학습 서비스가
 아니며, 기존 서버 Docker 구성과도 연결되지 않는다.
@@ -109,18 +111,72 @@ python -m auto_labeling pipeline-train --config /absolute/path/to/training.yml
 
 학습 명령이 쓰는 위치는 설정의 `extract_root`와 `output_root`뿐이다. `mode: smoke-full`은
 1 epoch smoke가 끝난 뒤 정식 학습을 이어가며, 완료 시 `best.pt`, 학습 영수증, validation
-F1 threshold, 결과 ZIP과 각 SHA-256 영수증을 남긴다. 서버가 오프라인이면
+F1 threshold, `model_contract.json`, 결과 ZIP과 각 SHA-256 영수증을 남긴다. 모델 계약에는
+가중치 해시, 대상 클래스와 학습 데이터의 전처리 계약이 들어간다. 서버가 오프라인이면
 `base_model`에 미리 준비한 `yolo11n.pt`의 절대 경로를, `base_model_sha256`에 실제 해시를
 지정한다.
 
-### N1 추론 배포 전 확인
+### N1 원본 프레임 교체 계약
 
-N1 데이터셋은 `uniform-full-frame-pixelation-v1`, block size 8로 학습됐고
-`inference_preprocessing_required: true`다. 따라서 운영 추론에서도 BGR 프레임 전체에 같은
-전처리를 적용한 뒤 모델에 전달해야 한다. 현재 `worker/inference/model.py`는 원본 프레임을
-Ultralytics 모델에 직접 전달하므로 N1을 그 경로에 그대로 배치하지 않는다. 모델 전처리
-소유 경계는 `deeplearning`이며, worker 통합 전에 전처리 어댑터와 원본 좌표계 유지 테스트를
-별도 변경으로 완료해야 한다. 운영 confidence는 N1 validation 기준 `0.25`다.
+기존 N1 데이터셋은 `uniform-full-frame-pixelation-v1`, block size 8로 학습돼 원본 프레임을
+직접 받는 worker와 호환되지 않는다. 교체 모델은 같은 승인 데이터·라벨·train/val 분할을
+유지하되 이미지 바이트만 원본으로 내보낸 `original-frame-v1` 계약으로 학습한다. 원본
+export는 모든 항목이 학생 데이터, 사람 탐지 학습 범위, 사람 검수 승인, 유효한 보존 기한을
+가져야 하며 하나라도 빠지면 생성하지 않는다.
+
+배포할 때 `best.pt`와 같은 결과의 `model_contract.json`을 함께 복사한다. dev/prod worker와
+GPU 배포 사전점검은 모델 해시·클래스·전처리 계약을 확인하고, 해시가 다르거나
+`inference_preprocessing_required: true`인 기존 픽셀화 모델이면 기동하지 않는다.
+
+2026-08-25에 승인된 `person-v0002` 320장(train 240 / val 80), seed 42, 640px로 50 epoch
+학습한 원본 v005 best 가중치는 SHA-256
+`dd658747ab201211047b57cb8c30e54a8cc59a4769ccd5fc031ae0b6b1703ef7`이다. 고정 validation
+80장·1,045 instances에서 precision 0.936, recall 0.918, mAP50 0.957, mAP50-95 0.515였고,
+confidence sweep의 최고 F1 0.927은 confidence 0.30에서 나왔다.
+
+### 원본 CCTV 500장 YOLO26n 준비 계약
+
+[`person_500_yolo26n.local.example.yml`](./auto_labeling/config/person_500_yolo26n.local.example.yml)은
+픽셀화하지 않은 원본 프레임 500장을 `train 350 / val 75 / 고정 test 75`로 준비한다.
+`train`과 `val`만 학습 ZIP에 들어가고 `test`는 별도 디렉터리에서 사람이 검수한 뒤
+SHA-256으로 동결한다. 여러 모델 버전 비교에서는 동결된 test를 복사·재선정하지 않고 같은
+영수증 해시를 사용한다.
+
+분할 우선순위는 이미지 장수보다 촬영 세션 격리다. 먼저 세션 전체를 dataset/train,
+dataset/val, benchmark/test, excluded 중 하나로 정한 뒤, 각 split 안에서 영상별로 균등
+배분하고 시간축 등간격으로 프레임을 선택한다. 모든 원본의 해시, 해상도, FPS, 첫 프레임
+디코딩을 검사하고, 추출 시 보고된 전체 프레임 수보다 0.1% 이상 일찍 디코더가 끝나면
+실패한다. 선택 프레임에는 손상·단색·검은 화면·색상 붕괴 품질 검사와 정확한 이미지 해시
+중복 제거를 적용한다.
+
+이번 로컬 원본은 37개 MP4, 8개 촬영 세션이며 해상도는 모두 1280×1944다. 명목
+프레임레이트와 실제 평균 FPS가 다른 가변/드롭 프레임 영상이 있으므로 영상별 FPS를 읽어
+2초 간격을 계산한다. 자동 라벨링과 학습은 원본 해상도를 보존하고 `imgsz=1280`을
+명시한다. 이는 모델 텐서를 정확히 1280×1944로 고정한다는 뜻이 아니라 Ultralytics의
+비율 유지 letterbox 입력 상한을 1280으로 맞춘다는 뜻이다.
+
+이 프로필은 `require_session_approval_metadata: false`로 설정해 로컬 프레임 추출과
+YOLO 자동 라벨링까지는 `approval_reference`, `retention_expires_at`, `subject_category`를
+요구하지 않는다. 빈 값을 승인된 값으로 바꾸거나 추정하지 않으며, 외부 반출·학습 export의
+개인정보 검증은 별도 단계에 그대로 유지한다.
+
+```powershell
+cd deeplearning/training
+python -m auto_labeling pipeline-local `
+  --config data/person-pipeline-workflows/person-original-500-v001/local-pipeline.yml
+```
+
+상태가 `waiting-for-human-review`가 되면 학습용 `review-main` 425장과 `05-fixed-test`
+75장의 후보 bbox를 모두 검수한다. 빈 장면은 빈 `.txt`가 정답이고, 겹친 사람이 실제로
+여럿이면 각 사람 bbox를 유지하며, 같은 사람을 중복으로 감싼 bbox는 하나만 남긴다.
+검수 완료 후 `reviewer_id`, `labelimg_executable`, `labelimg_smoke_confirmed`를 채우고
+`--complete-review`로 재실행한다. 이때 test와 train/val 간 exact·근접 중복 검사를 통과해야
+test 동결 영수증과 학습 ZIP이 생성된다.
+
+학습은
+[`person_500_yolo26n.training.example.yml`](./auto_labeling/config/person_500_yolo26n.training.example.yml)을
+복사해 실제 ZIP 해시와 서버 경로를 채운다. 기본안은 YOLO26n, seed 42, `imgsz=1280`,
+100 epochs, patience 20이며 먼저 1 epoch smoke가 성공해야 정식 학습으로 넘어간다.
 
 ## 얼굴 식별 모델 평가와 임계값 산출
 
