@@ -24,6 +24,13 @@
 "이번 달"은 일상적인 질문인데 매번 422를 돌려주면 쓸 수 없다. 다만 조용히 줄이면
 사용자가 잘못된 답을 맞는 답으로 읽으므로 `notes`에 반드시 남긴다.
 
+## 사람 조건은 여기서 판정하지 않는다
+
+`person_name`은 모델이 질문에서 옮겨 적은 이름 그대로 통과시킨다. 학생 원장에 있는
+이름인지 대조하는 일은 서비스가 한다 — 이 파일은 저장소를 모르고, 그래야 LLM 없이
+검증만 시험할 수 있다. `person_presence`("있는"인가 "없는"인가)는 값이 빠지거나
+목록 밖이어도 거부하지 않는다. 이유는 `_person_presence`에 적었다.
+
 ## 미래는 잘라 낸다
 
 모델이 "지난 한 달"을 앞으로 한 달로 잡는 일이 실제로 있었다(2026-08-18 실측).
@@ -49,7 +56,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 from .errors import LlmSearchPlanInvalidError
-from .models import SearchQuery
+from .models import PersonPresence, SearchQuery
 
 # 정상 응답은 200바이트 남짓이다. 이 상한은 "조금 장황한 모델"이 아니라
 # "멈추지 않는 모델"을 걸러내기 위한 것이라 넉넉하게 잡는다.
@@ -60,8 +67,25 @@ MAX_PLAN_TEXT_BYTES: Final = 8192
 MAX_LIMIT: Final = 50
 
 _INTENT: Final = "detection_search"
-_ALLOWED_KEYS: Final = frozenset({"intent", "camera_id", "classroom_id", "from", "to", "limit"})
+_ALLOWED_KEYS: Final = frozenset(
+    {
+        "intent",
+        "camera_id",
+        "classroom_id",
+        "from",
+        "to",
+        "limit",
+        "person_name",
+        "person_presence",
+    }
+)
 _MAX_IDENTIFIER_LENGTH: Final = 128
+
+# 사람 이름 상한을 식별자와 따로 두는 이유는 값의 성격이 다르기 때문이다. 식별자는
+# UUID라 128자가 넉넉하지만, 사람 이름이 그만큼 길게 오면 그것은 이름이 아니라
+# 모델이 질문 문장을 통째로 옮긴 것이다. 그 값이 학생 원장 조회로 흘러가도 결과는
+# 언제나 "찾지 못함"이라 해롭지는 않으나, 화면에 그대로 인용되므로 짧게 자른다.
+_MAX_PERSON_NAME_LENGTH: Final = 32
 
 # 오전·오후를 뒤집는 폭. `_pull_back_half_day`가 유일한 사용처다.
 _HALF_DAY: Final = timedelta(hours=12)
@@ -97,8 +121,19 @@ PLAN_JSON_SCHEMA: Final[dict[str, object]] = {
         "from": {"type": "string"},
         "to": {"type": "string"},
         "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT},
+        "person_name": {"type": ["string", "null"]},
+        "person_presence": {"enum": [member.value for member in PersonPresence]},
     },
-    "required": ["intent", "camera_id", "classroom_id", "from", "to", "limit"],
+    "required": [
+        "intent",
+        "camera_id",
+        "classroom_id",
+        "from",
+        "to",
+        "limit",
+        "person_name",
+        "person_presence",
+    ],
     "additionalProperties": False,
 }
 
@@ -163,12 +198,15 @@ def parse_plan(
     if limit_note is not None:
         notes.append(limit_note)
 
+    person_name = _optional_identifier(payload, "person_name", max_length=_MAX_PERSON_NAME_LENGTH)
     return SearchQuery(
         camera_id=_optional_identifier(payload, "camera_id"),
         classroom_id=_optional_identifier(payload, "classroom_id"),
         from_at=from_at,
         to_at=to_at,
         limit=limit,
+        person_name=person_name,
+        person_presence=_person_presence(payload, person_name),
         notes=tuple(notes),
     )
 
@@ -238,7 +276,9 @@ def _slice_braces(text: str) -> str:
     return text[start : end + 1]
 
 
-def _optional_identifier(payload: dict[str, Any], key: str) -> str | None:
+def _optional_identifier(
+    payload: dict[str, Any], key: str, *, max_length: int = _MAX_IDENTIFIER_LENGTH
+) -> str | None:
     value = payload.get(key)
     if value is None:
         return None
@@ -248,9 +288,36 @@ def _optional_identifier(payload: dict[str, Any], key: str) -> str | None:
     if not trimmed:
         # 모델이 "특정하지 않음"을 빈 문자열로 표현하는 일이 잦다. null과 같게 본다.
         return None
-    if len(trimmed) > _MAX_IDENTIFIER_LENGTH:
+    if len(trimmed) > max_length:
         raise LlmSearchPlanInvalidError("IDENTIFIER_TOO_LONG")
     return trimmed
+
+
+def _person_presence(payload: dict[str, Any], person_name: str | None) -> PersonPresence:
+    """ "있는"인가 "없는"인가를 읽는다. **알 수 없으면 오류로 만들지 않는다.**
+
+    이름을 옮기는 데는 성공했는데 방향을 빠뜨린 응답이 422가 되면, 사용자는 답을
+    받을 수 있었던 질문에 "다시 써 주세요"를 듣는다. 그래서 값이 없거나 허용 목록
+    밖이면 `PRESENT`로 읽는다 — **사람을 지목한 질문의 압도적 다수가 "있는"이다.**
+
+    이름이 없는데 방향만 온 경우는 `ANY`다. 걸러 낼 대상이 없으므로 방향에 의미가
+    없고, 그대로 두면 서비스가 이름 `None`으로 필터를 만들려다 갈라진다.
+
+    허용 목록 밖의 값을 거부하지 않는 것은 이 필드가 **저장소로 흘러가지 않기**
+    때문이다. 서비스는 이 enum으로 분기만 하고 값을 조회 조건에 싣지 않는다.
+    """
+    if person_name is None:
+        return PersonPresence.ANY
+    value = payload.get("person_presence")
+    if not isinstance(value, str):
+        return PersonPresence.PRESENT
+    try:
+        presence = PersonPresence(value.strip().lower())
+    except ValueError:
+        return PersonPresence.PRESENT
+    # 이름을 지목했는데 any가 오면 모델이 방향을 판단하지 못한 것이다. 걸러 내지
+    # 않으면 이름을 화면에만 적고 결과는 전체를 주게 되므로 기본값으로 되돌린다.
+    return PersonPresence.PRESENT if presence is PersonPresence.ANY else presence
 
 
 def _required_datetime(payload: dict[str, Any], key: str) -> datetime:

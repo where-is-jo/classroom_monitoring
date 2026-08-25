@@ -35,7 +35,7 @@
     type="text"
     maxlength="200"
     value="{{ question }}"
-    placeholder="예) 오늘 6시부터 7시 사이에 A101에 누가 있었어?">
+    placeholder="예) 어제 16시 30분부터 17시 사이에 A101에 누가 있었어?">
   <button type="submit">검색</button>
 </form>
 
@@ -64,29 +64,50 @@
     </p>
   </div>
 {% else %}
-  <section class="state-panel" aria-labelledby="plan-heading">
-    <h2 id="plan-heading">이렇게 이해했습니다</h2>
-    <dl class="plan-summary">
-      {# 질문은 한국 시각으로 들어온다. 여기서 UTC로 보여주면 사용자가 자기가 물은
-         시각과 대조하려고 암산으로 9시간을 더해야 하고, 잘못 해석된 구간을 알아채지
-         못한다. 다른 화면과 같은 kst_datetime 필터를 쓴다. #}
-      <dt>기간</dt>
-      <dd>
-        <time datetime="{{ outcome.query.from_at.isoformat() }}">
-          {{ outcome.query.from_at|kst_datetime }}
-        </time>
-        ~
-        <time datetime="{{ outcome.query.to_at.isoformat() }}">
-          {{ outcome.query.to_at|kst_datetime }}
-        </time>
-      </dd>
-      <dt>대상</dt>
-      {# 카메라인지 강의실인지 전체인지의 판정과 UUID를 이름으로 바꾸는 일은
-         service.py의 _resolve_targets가 끝냈다. #}
-      <dd>{{ outcome.target_label }}</dd>
+  <section class="briefing" aria-labelledby="plan-heading">
+    <h2 id="plan-heading" class="briefing__heading">이렇게 이해했어요</h2>
+    {# 문장 조립은 service.py의 build_briefing이 끝냈다. 기간 표기 규칙(같은 날이면
+       날짜를 한 번만, 초는 0이 아닐 때만)을 템플릿이 다시 판단하면 화면마다 복사된다. #}
+    <p class="briefing__sentence">{{ outcome.briefing }}</p>
+
+    {# 문장은 읽고 넘기는 것이고, 아래 표는 대조하는 것이다. 사용자가 "내가 물은
+       시각이 맞나"를 확인하는 자리라 값을 그대로 늘어놓는다. #}
+    <dl class="briefing__facts">
+      <div>
+        <dt>기간</dt>
+        <dd>
+          <time datetime="{{ outcome.query.from_at.isoformat() }}">
+            {{ outcome.query.from_at|kst_datetime_plain }}
+          </time>
+          <span aria-hidden="true">~</span>
+          <time datetime="{{ outcome.query.to_at.isoformat() }}">
+            {{ outcome.query.to_at|kst_datetime_plain }}
+          </time>
+        </dd>
+      </div>
+      <div>
+        <dt>대상</dt>
+        {# 카메라인지 강의실인지 전체인지의 판정과 UUID를 이름으로 바꾸는 일은
+           service.py의 _resolve_targets가 끝냈다. #}
+        <dd>{{ outcome.target_label }}</dd>
+      </div>
+      {% if outcome.person %}
+        <div>
+          <dt>인물</dt>
+          <dd>
+            {{ outcome.person.name }}
+            {% if outcome.person.presence == 'absent' %}없음{% else %}있음{% endif %}
+            {# 조건을 걸지 못했는데 이름만 보여주면 아래 목록이 걸러진 것으로 읽힌다. #}
+            {% if not outcome.person.applied %}
+              <span class="briefing__badge">조건 적용 안 됨</span>
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
     </dl>
+
     {% if outcome.query.notes %}
-      <ul class="plan-notes">
+      <ul class="briefing__notes">
         {% for note in outcome.query.notes %}
           <li>{{ note }}</li>
         {% endfor %}
@@ -110,7 +131,7 @@
       <h2>해당 기간에 탐지 기록이 없습니다</h2>
       <p>
         조회는 성공했고 결과가 없습니다.
-        <strong>위 "이렇게 이해했습니다"의 기간이 물어보신 시각과 같은지 먼저 확인해 주세요.</strong>
+        <strong>위 "이렇게 이해했어요"의 기간이 물어보신 시각과 같은지 먼저 확인해 주세요.</strong>
         {# 오전·오후를 밝히지 않은 질문은 오후로 읽는다(prompts.py). 사용자가 오전을
            뜻했다면 여기서 기간을 보고 알아채는 것이 유일한 방법이다. #}
         오전을 물으셨다면 "오전 3시"처럼 밝혀 주세요.
@@ -120,55 +141,78 @@
       </p>
     </div>
   {% else %}
-    <p class="result-count">
-      {{ outcome.hits | length }}건
-      {% if outcome.truncated %}
-        · <strong>상한에 걸려 잘렸습니다. 이것이 전부가 아닙니다.</strong>
-      {% endif %}
-    </p>
-    <ul class="snapshot-grid">
+    {% if outcome.truncated %}
+      <p class="result-count result-count--warning">
+        <strong>상한에 걸려 잘렸습니다. 이것이 전부가 아닙니다.</strong>
+      </p>
+    {% endif %}
+
+    {# 탐지 한 건이 카드 하나다. 예전에는 이미지·카메라·시각·인원이 한 줄씩 이어져
+       어디서 한 건이 끝나는지 보이지 않았다. #}
+    <ol class="detection-list">
       {% for hit in outcome.hits %}
-        <li class="snapshot-card">
-          {% if hit.snapshot_key %}
-            <img
-              class="snapshot-image"
-              src="/api/v1/snapshots/image/{{ hit.snapshot_key }}"
-              alt="{{ hit.camera_id }} 카메라의 {{ hit.captured_at|kst_datetime }} 스냅샷"
-              loading="lazy">
-          {% else %}
-            <p class="state-empty">
-              {% if outcome.snapshot_lookup_failed %}
-                이미지 확인 실패
-              {% else %}
-                이 시각의 스냅샷 없음
-              {% endif %}
-            </p>
-          {% endif %}
-          <div class="snapshot-meta">
-            <p class="snapshot-camera">
-              {{ hit.camera_id }}
-              {% if hit.resolved_classroom_label %}· {{ hit.resolved_classroom_label }}{% endif %}
-            </p>
-            <p class="snapshot-time">
+        <li class="detection-card">
+          <p class="detection-card__index" aria-hidden="true">{{ loop.index }}</p>
+
+          <div class="detection-card__figure">
+            {% if hit.snapshot_key %}
+              <img
+                class="detection-card__image"
+                src="/api/v1/snapshots/image/{{ hit.snapshot_key }}"
+                alt="{{ hit.camera_id }} 카메라의 {{ hit.captured_at|kst_datetime_plain }} 스냅샷"
+                loading="lazy">
+            {% else %}
+              {# "없다"와 "못 봤다"를 카드 안에서도 구분한다. 같은 회색 상자로 두면
+                 저장소 장애가 데이터 없음으로 읽힌다. #}
+              <p class="detection-card__no-image">
+                {% if outcome.snapshot_lookup_failed %}
+                  이미지 확인 실패
+                {% else %}
+                  이 시각의 스냅샷 없음
+                {% endif %}
+              </p>
+            {% endif %}
+          </div>
+
+          <div class="detection-card__body">
+            <p class="detection-card__time">
               <time datetime="{{ hit.captured_at.isoformat() }}">
-                {{ hit.captured_at|kst_datetime }}
+                {{ hit.captured_at|kst_datetime_plain }}
               </time>
             </p>
-            {# 식별된 학생을 먼저 보여준다. 얼굴 인식이 붙으면 같은 자리에 이름이 뜬다.
-               지금은 채우는 생산자가 없어 항상 미식별로 나온다. 그 사실을 숨기지 않는다. #}
-            <p class="snapshot-size">
-              탐지 {{ hit.detection_count }}명
-              {% if hit.identified %}
-                · 식별 {{ hit.identified | map(attribute='student_id') | join(', ') }}
-                {% if hit.unidentified_count %}· 미식별 {{ hit.unidentified_count }}명{% endif %}
-              {% else %}
-                · 식별 미연동
+            <p class="detection-card__place">
+              {% if hit.resolved_classroom_label %}
+                <strong>{{ hit.resolved_classroom_label }}</strong>
               {% endif %}
+              <span class="detection-card__camera">{{ hit.camera_id }}</span>
             </p>
+            <dl class="detection-card__facts">
+              <div>
+                <dt>탐지 인원</dt>
+                <dd>{{ hit.detection_count }}명</dd>
+              </div>
+              <div>
+                <dt>식별</dt>
+                {# 식별된 학생을 먼저 보여준다. 얼굴 인식이 붙으면 같은 자리에 이름이
+                   뜬다. 지금은 채우는 생산자가 없어 항상 미연동이다. 숨기지 않는다. #}
+                <dd>
+                  {% if hit.identified %}
+                    {{ hit.identified | map(attribute='student_id') | join(', ') }}
+                    {% if hit.unidentified_count %}
+                      <span class="detection-card__muted">
+                        · 미식별 {{ hit.unidentified_count }}명
+                      </span>
+                    {% endif %}
+                  {% else %}
+                    <span class="detection-card__muted">미연동</span>
+                  {% endif %}
+                </dd>
+              </div>
+            </dl>
           </div>
         </li>
       {% endfor %}
-    </ul>
+    </ol>
   {% endif %}
 {% endif %}
 {% endif %}

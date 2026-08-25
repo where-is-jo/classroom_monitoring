@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -23,6 +23,8 @@ from app.snapshots.ports import ObjectContent, StoredObject
 from app.snapshots.service import SnapshotService
 from app.student_monitoring.adapters.memory_repository import MemoryDetectionEventRepository
 from app.student_monitoring.models import Detection, DetectionEvent, FrameInfo
+from app.students.adapters.memory import InMemoryStudentRepository
+from app.students.models import Student
 from app.video_monitoring.adapters.memory_repository import MemoryVideoStreamRepository
 from app.video_monitoring.models import PlaybackKind, VideoStream
 
@@ -95,6 +97,24 @@ def _stream(camera_id: str, classroom_id: str, *, enabled: bool = True) -> Video
     )
 
 
+def _student(student_id: str, name: str) -> Student:
+    """학생 원장 한 명. 이름으로 사람을 찾는 경로에만 쓴다."""
+    return Student(
+        id=student_id,
+        student_number=student_id,
+        name=name,
+        birth_date=date(2008, 3, 1),
+        classroom_name="A101",
+        phone=None,
+        guardian_phone="010-0000-0000",
+        face_enrollment_id=None,
+        face_registered=False,
+        is_active=True,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+
+
 def _classroom(classroom_id: str, code: str, name: str) -> Classroom:
     return Classroom(
         id=classroom_id,
@@ -146,6 +166,7 @@ def _build(
     snapshot_keys: list[str] | None = None,
     snapshot_fails: bool = False,
     scan_limit: int = 500,
+    students: list[Student] | None = None,
 ) -> LlmSearchService:
     detections = MemoryDetectionEventRepository()
     for event in events or []:
@@ -158,6 +179,10 @@ def _build(
     classroom_repository = InMemoryClassroomRepository()
     for classroom in classrooms or []:
         classroom_repository.create_classroom(classroom)
+
+    student_repository = InMemoryStudentRepository()
+    for student in students or []:
+        student_repository.create(student)
 
     default_plan = {
         "intent": "detection_search",
@@ -173,6 +198,7 @@ def _build(
         stream_repository,
         classroom_repository,
         SnapshotService(FakeStorage(snapshot_keys, fails=snapshot_fails)),
+        student_repository,
         max_span_days=7,
         scan_limit=scan_limit,
         clock=lambda: _NOW,
@@ -572,6 +598,7 @@ def test_같은_강의실을_여러_카메라가_가리켜도_한_번만_조회�
         stream_repository,
         classrooms,
         SnapshotService(FakeStorage()),
+        InMemoryStudentRepository(),
         max_span_days=7,
         scan_limit=500,
         clock=lambda: _NOW,
@@ -579,3 +606,157 @@ def test_같은_강의실을_여러_카메라가_가리켜도_한_번만_조회�
     service.search("오늘 누가 왔어?", limit=20)
 
     assert classrooms.calls == 1
+
+
+def _person_plan(name: str, presence: str) -> dict[str, object]:
+    return {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": None,
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+        "person_name": name,
+        "person_presence": presence,
+    }
+
+
+def test_사람을_말하지_않으면_인물_요약을_만들지_않는다() -> None:
+    outcome = _build(events=[_event("camera-01", 0, 1)]).search("오늘", limit=20)
+
+    assert outcome.person is None
+
+
+def test_신원이_실린_탐지에서는_없는_사람_조건을_실제로_건다() -> None:
+    """얼굴 인식이 붙어 `student_id`가 채워지면 같은 코드가 그대로 조건을 건다."""
+    events = [
+        _event("camera-01", 0, 2, student_ids=("student-1",)),
+        _event("camera-01", 5, 3, student_ids=("student-2",)),
+    ]
+
+    outcome = _build(
+        planner=FakePlanner(_person_plan("박무현", "absent")),
+        events=events,
+        students=[_student("student-1", "박무현"), _student("student-2", "김서아")],
+    ).search("박무현 없는 스냅샷", limit=20)
+
+    assert outcome.person is not None
+    assert outcome.person.applied is True
+    assert [hit.event_id for hit in outcome.hits] == ["camera-01-5"]
+
+
+def test_있는_사람_조건은_반대로_고른다() -> None:
+    """이름만 뽑고 방향을 버리면 두 질문이 서버에서 같아진다."""
+    events = [
+        _event("camera-01", 0, 2, student_ids=("student-1",)),
+        _event("camera-01", 5, 3, student_ids=("student-2",)),
+    ]
+
+    outcome = _build(
+        planner=FakePlanner(_person_plan("박무현", "present")),
+        events=events,
+        students=[_student("student-1", "박무현"), _student("student-2", "김서아")],
+    ).search("박무현 나온 스냅샷", limit=20)
+
+    assert [hit.event_id for hit in outcome.hits] == ["camera-01-0"]
+
+
+def test_신원이_하나도_없으면_조건을_걸지_않고_알린다() -> None:
+    """지금의 기본 상태다. 얼굴 인식이 없어 `Detection.student_id`가 비어 있다.
+
+    `absent`를 그대로 걸면 전부 통과해 "확인했더니 없더라"로 보인다. 근거 없는
+    답이라 걸지 않고, **걸지 못했다는 사실을 남긴다.**
+    """
+    events = [_event("camera-01", 0, 2), _event("camera-01", 5, 3)]
+
+    outcome = _build(
+        planner=FakePlanner(_person_plan("박무현", "absent")),
+        events=events,
+        students=[_student("student-1", "박무현")],
+    ).search("박무현 없는 스냅샷", limit=20)
+
+    assert outcome.person is not None
+    assert outcome.person.applied is False
+    assert outcome.person.identity_available is False
+    assert len(outcome.hits) == 2
+    assert any("얼굴 인식이 아직 연결되지 않아" in note for note in outcome.query.notes)
+    assert "확인하지 못했고" in outcome.briefing
+
+
+def test_명부에_없는_이름은_사유를_남기고_전체를_돌려준다() -> None:
+    events = [_event("camera-01", 0, 2, student_ids=("student-1",))]
+
+    outcome = _build(
+        planner=FakePlanner(_person_plan("없는사람", "absent")),
+        events=events,
+        students=[_student("student-1", "박무현")],
+    ).search("없는사람 없는 스냅샷", limit=20)
+
+    assert outcome.person is not None
+    assert outcome.person.student_id is None
+    assert outcome.person.match_count == 0
+    assert outcome.person.applied is False
+    assert len(outcome.hits) == 1
+    assert any("찾지 못해" in note for note in outcome.query.notes)
+
+
+def test_동명이인이면_누구인지_정하지_않는다() -> None:
+    """임의로 하나를 집는 것보다 "정하지 못했다"고 말하는 쪽이 맞다."""
+    events = [_event("camera-01", 0, 2, student_ids=("student-1",))]
+
+    outcome = _build(
+        planner=FakePlanner(_person_plan("박무현", "present")),
+        events=events,
+        students=[_student("student-1", "박무현"), _student("student-2", "박무현")],
+    ).search("박무현 있는 스냅샷", limit=20)
+
+    assert outcome.person is not None
+    assert outcome.person.student_id is None
+    assert outcome.person.match_count == 2
+    assert outcome.person.applied is False
+    assert any("2명" in note for note in outcome.query.notes)
+    assert "2명이라 누구인지 정하지 못했고" in outcome.briefing
+
+
+def test_인물_조건은_변화_시점을_고른_뒤에_건다() -> None:
+    """먼저 걸러 내면 남은 프레임들 사이에서 인원 변화를 다시 세게 된다.
+
+    아래 이벤트는 1분과 2분이 같은 2명이라 변화 시점은 0·1·3분뿐이다. 인물 조건을
+    먼저 걸었다면 2분(박무현 없음)이 "변화"로 살아나 결과에 끼어든다.
+    """
+    events = [
+        _event("camera-01", 0, 1, student_ids=("student-1",)),
+        _event("camera-01", 1, 2, student_ids=("student-1",)),
+        _event("camera-01", 2, 2, student_ids=("student-2",)),
+        _event("camera-01", 3, 3, student_ids=("student-2",)),
+    ]
+
+    outcome = _build(
+        planner=FakePlanner(_person_plan("박무현", "absent")),
+        events=events,
+        students=[_student("student-1", "박무현"), _student("student-2", "김서아")],
+    ).search("박무현 없는 스냅샷", limit=20)
+
+    assert [hit.event_id for hit in outcome.hits] == ["camera-01-3"]
+
+
+def test_브리핑에_기간과_대상과_건수를_함께_담는다() -> None:
+    """화면이 이 문장들을 다시 조립하면 표기 규칙이 템플릿으로 샌다."""
+    plan = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": "room-a101",
+        "from": _FROM,
+        "to": _TO,
+        "limit": 20,
+    }
+
+    outcome = _build(
+        planner=FakePlanner(plan),
+        events=[_event("camera-01", 0, 2)],
+        streams=[_stream("camera-01", "room-a101")],
+        classrooms=[_classroom("room-a101", "A101", "1강의실")],
+    ).search("오늘 A101", limit=20)
+
+    assert "A101 1강의실에서 찾았어요" in outcome.briefing
+    assert "총 1건의 결과가 있어요" in outcome.briefing

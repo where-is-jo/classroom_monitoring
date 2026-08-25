@@ -14,6 +14,17 @@
 해석과 저장소 장애 처리가 그 안에 있기 때문이다. 포트를 직접 받으면 키 규칙이
 worker·snapshots에 이어 **세 번째로 복사된다.**
 
+## 인물 조건("박무현이 없는")을 어떻게 다루는가
+
+모델이 질문에서 이름과 방향("있는"/"없는")을 뽑아 주고(`prompts.py`), 그 이름을
+**학생 원장과 잇는 일은 여기서** 한다. `planning.py`는 저장소를 모르기 때문이다.
+
+**지금은 이 조건을 실제로 걸 수 없는 것이 기본 상태다.** 얼굴 인식이 미구현이라
+`Detection.student_id`를 채우는 생산자가 없고, 탐지에 신원이 하나도 없는 상태에서
+"없는"을 걸면 전부 통과하고 "있는"을 걸면 전부 탈락한다. 어느 쪽이든 근거 없는
+답이라, 걸지 않고 **걸지 못했다는 사실을 `notes`와 briefing에 남긴다.**
+인식이 붙어 신원이 실리기 시작하면 같은 코드가 그대로 조건을 건다.
+
 ## 결과를 왜 줄이는가
 
 탐지 이벤트는 카메라당 프레임마다 한 건이다. 한 시간 범위면 거의 같은 내용이 수천
@@ -32,6 +43,7 @@ from datetime import datetime
 
 from ..classrooms.models import Classroom
 from ..classrooms.ports import ClassroomRepository
+from ..shared.student_identity import StudentIdentity, StudentLookupPort
 from ..snapshots.errors import SnapshotStorageUnavailableError
 from ..snapshots.models import build_snapshot_key
 from ..snapshots.service import SnapshotService
@@ -39,9 +51,18 @@ from ..student_monitoring.models import DetectionEvent
 from ..student_monitoring.ports import DetectionEventRepository
 from ..video_monitoring.models import VideoStream
 from ..video_monitoring.ports import VideoStreamRepository
+from .briefing import build_briefing
 from .errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
 from .metrics import record_plan_attempt, record_search, record_search_truncated
-from .models import CameraChoice, DetectionHit, IdentifiedStudent, SearchOutcome, SearchQuery
+from .models import (
+    CameraChoice,
+    DetectionHit,
+    IdentifiedStudent,
+    PersonPresence,
+    PersonSummary,
+    SearchOutcome,
+    SearchQuery,
+)
 from .planning import MAX_LIMIT, parse_plan
 from .ports import PlanPrompt, QueryPlanner
 from .prompts import build_system_prompt
@@ -49,6 +70,18 @@ from .prompts import build_system_prompt
 logger = logging.getLogger(__name__)
 
 __all__ = ["LlmSearchService"]
+
+# 이름으로 학생을 찾을 때 훑는 최대 인원. 학생 원장에는 이름 조회가 없어
+# (`StudentLookupPort`는 id 조회와 활성 목록만 제공한다) 목록을 넘겨 가며 본다.
+#
+# **포트에 이름 조회를 새로 뚫지 않는다.** 그 계약은 `classrooms`·`student_monitoring`이
+# 함께 쓰는 중립 계약이고, 이 기능 하나를 위해 넓히면 다른 기능도 이름으로 사람을
+# 찾을 수 있게 된다 — PII 접근면을 넓히는 변경이라 이 작업의 범위를 넘는다.
+#
+# 상한을 두는 이유는 사용자가 오타를 냈을 때다. 없는 이름이면 끝까지 훑게 되므로,
+# 원장이 커진 뒤에도 검색 한 번이 전체 스캔이 되지 않도록 자른다.
+_STUDENT_PAGE_SIZE = 200
+_STUDENT_SCAN_LIMIT = 2000
 
 
 class LlmSearchService:
@@ -59,6 +92,7 @@ class LlmSearchService:
         stream_repository: VideoStreamRepository,
         classroom_repository: ClassroomRepository,
         snapshot_service: SnapshotService,
+        student_lookup: StudentLookupPort,
         *,
         max_span_days: int,
         scan_limit: int,
@@ -69,6 +103,7 @@ class LlmSearchService:
         self._streams = stream_repository
         self._classrooms = classroom_repository
         self._snapshots = snapshot_service
+        self._students = student_lookup
         self._max_span_days = max_span_days
         self._scan_limit = scan_limit
         self._clock = clock
@@ -113,8 +148,15 @@ class LlmSearchService:
         changes = [event for target in targets for event in _keep_changes(events.get(target, []))]
         changes.sort(key=lambda event: (event.captured_at, event.sequence), reverse=True)
 
-        limited = changes[: query.limit]
-        truncated = scan_truncated or len(changes) > len(limited)
+        # 인물 조건은 **변화 시점을 고른 뒤에** 건다. 먼저 걸러 내면 남은 프레임들
+        # 사이에서 인원 변화를 다시 세게 되고, "그 사람이 없는 동안 인원이 몇 번
+        # 바뀌었나"라는 아무도 묻지 않은 질문의 답이 나온다.
+        person, person_notes = self._resolve_person(query, events)
+        notes.extend(person_notes)
+        selected = _apply_person(changes, person)
+
+        limited = selected[: query.limit]
+        truncated = scan_truncated or len(selected) > len(limited)
 
         classroom_by_camera = {stream.camera_id: stream.classroom_id for stream in targets}
         hits, snapshot_lookup_failed = self._to_hits(limited, classroom_by_camera, classrooms)
@@ -122,10 +164,100 @@ class LlmSearchService:
         return SearchOutcome(
             query=replace(query, notes=query.notes + tuple(notes)),
             target_label=target_label,
+            person=person,
+            briefing=build_briefing(
+                from_at=query.from_at,
+                to_at=query.to_at,
+                target_label=target_label,
+                person=person,
+                hit_count=len(hits),
+                truncated=truncated,
+            ),
             hits=tuple(hits),
             truncated=truncated,
             snapshot_lookup_failed=snapshot_lookup_failed,
         )
+
+    def _resolve_person(
+        self,
+        query: SearchQuery,
+        events: dict[VideoStream, list[DetectionEvent]],
+    ) -> tuple[PersonSummary | None, list[str]]:
+        """질문이 지목한 사람을 학생 원장과 잇고, 조건을 걸 수 있는지 판정한다.
+
+        **걸 수 없으면 걸지 않고 그 사실을 알린다.** 조용히 전체 목록을 돌려주면
+        사용자는 "박무현이 없는 기록"을 받았다고 읽는다. 우리가 하지 않은 판정을
+        한 것처럼 보이는 것이 이 기능에서 가장 나쁜 실패다.
+
+        걸 수 없는 경우가 셋이다.
+
+        - 이름을 원장에서 찾지 못했다. 오타이거나 등록되지 않은 사람이다
+        - 같은 이름이 여럿이다. 어느 쪽인지 우리가 고를 수 없다
+        - **조회 구간의 탐지에 신원이 하나도 실려 있지 않다.** 얼굴 인식이 아직
+          연결되지 않아 `Detection.student_id`를 채우는 생산자가 없으므로 지금은
+          이것이 기본 상태다. 이때 `absent`를 그대로 걸면 모든 기록이 통과해
+          "확인했더니 없더라"로 보이고, `present`를 걸면 0건이 되어 "그 시간에
+          없었다"로 보인다. 둘 다 근거 없는 답이다
+        """
+        if query.person_name is None:
+            return None, []
+
+        matches = self._find_students(query.person_name)
+        identity_available = any(
+            detection.student_id
+            for collected in events.values()
+            for event in collected
+            for detection in event.detections
+        )
+        student_id = matches[0].id if len(matches) == 1 else None
+        applied = student_id is not None and identity_available
+
+        notes: list[str] = []
+        if not matches:
+            notes.append(
+                f"학생 명부에서 '{query.person_name}'을(를) 찾지 못해 인물 조건 없이 조회했습니다."
+            )
+        elif len(matches) > 1:
+            notes.append(
+                f"'{query.person_name}'이라는 이름이 {len(matches)}명이라 "
+                "누구인지 정하지 못했습니다. 인물 조건 없이 조회했습니다."
+            )
+        elif not identity_available:
+            notes.append(
+                "얼굴 인식이 아직 연결되지 않아 탐지에 신원이 실리지 않습니다. "
+                f"'{query.person_name}'의 유무는 확인하지 못했고, 아래는 인물 조건을 "
+                "걸지 않은 결과입니다."
+            )
+
+        return (
+            PersonSummary(
+                name=query.person_name,
+                presence=query.person_presence,
+                student_id=student_id,
+                match_count=len(matches),
+                identity_available=identity_available,
+                applied=applied,
+            ),
+            notes,
+        )
+
+    def _find_students(self, name: str) -> list[StudentIdentity]:
+        """활성 학생 중 이름이 정확히 같은 사람을 모은다.
+
+        부분 일치를 하지 않는다. "박"으로 열 명이 걸리면 어느 쪽도 고를 수 없고,
+        고르면 그것은 우리가 지어낸 답이다. 동명이인도 그대로 여럿으로 돌려준다 —
+        임의로 하나를 집는 것보다 "정하지 못했다"고 말하는 쪽이 맞다.
+        """
+        wanted = name.strip()
+        found: list[StudentIdentity] = []
+        offset = 0
+        while offset < _STUDENT_SCAN_LIMIT:
+            page = self._students.list_active(limit=_STUDENT_PAGE_SIZE, offset=offset)
+            found.extend(student for student in page.items if student.name.strip() == wanted)
+            offset += len(page.items)
+            if not page.items or offset >= page.total:
+                break
+        return found
 
     def _plan(
         self,
@@ -375,6 +507,27 @@ def _classroom_label(classroom: Classroom | None, fallback: str) -> str:
         return f"강의실 {fallback}"
     parts = [part for part in (classroom.code, classroom.name) if part]
     return " ".join(parts) if parts else f"강의실 {classroom.id}"
+
+
+def _apply_person(
+    events: Sequence[DetectionEvent], person: PersonSummary | None
+) -> list[DetectionEvent]:
+    """인물 조건을 건다. **걸 수 없다고 판정됐으면 그대로 둔다.**
+
+    `person.applied`가 거짓인 경우를 여기서 다시 판단하지 않는다. 판정은
+    `_resolve_person`이 이미 했고, 같은 규칙이 두 곳에 있으면 안내 문구와 실제
+    결과가 갈라진다 — 사용자는 "확인하지 못했다"는 안내를 읽으면서 걸러진 목록을
+    보게 된다.
+    """
+    if person is None or not person.applied:
+        return list(events)
+    target = person.student_id
+    wanted = person.presence is PersonPresence.PRESENT
+    return [event for event in events if _has_student(event, target) is wanted]
+
+
+def _has_student(event: DetectionEvent, student_id: str | None) -> bool:
+    return any(detection.student_id == student_id for detection in event.detections)
 
 
 def _keep_changes(events: Sequence[DetectionEvent]) -> list[DetectionEvent]:

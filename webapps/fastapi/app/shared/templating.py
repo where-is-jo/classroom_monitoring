@@ -43,6 +43,19 @@ def format_kst(value: datetime | None) -> str:
     return value.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S KST")
 
 
+def format_kst_plain(value: datetime | None) -> str:
+    """같은 변환이지만 "KST" 꼬리표를 붙이지 않는다.
+
+    자연어 검색 화면처럼 **그 화면의 모든 시각이 KST인 곳**에서 쓴다. 줄마다 같은
+    꼬리표가 붙으면 읽는 눈이 그것을 매번 걸러 내야 하고, 정작 확인해야 할 분·초가
+    묻힌다. 시각대를 밝혀야 하는 화면은 `format_kst`를 그대로 쓴다 — 둘을 하나로
+    합치지 않는 이유가 그것이다.
+    """
+    if value is None:
+        return "-"
+    return value.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def format_display_label(value: object) -> str:
     """도메인 enum을 사용자용 한국어 표시명으로 변환한다."""
     raw_value = getattr(value, "value", value)
@@ -53,6 +66,7 @@ def format_display_label(value: object) -> str:
 
 
 templates.env.filters["kst_datetime"] = format_kst
+templates.env.filters["kst_datetime_plain"] = format_kst_plain
 templates.env.filters["display_label"] = format_display_label
 
 

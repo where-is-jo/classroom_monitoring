@@ -214,6 +214,29 @@ def test_어제_날짜를_직접_세지_않게_한다() -> None:
     assert "직접 세지 마라" in prompt
 
 
+def test_사람_이름을_담을_칸을_따로_알려준다() -> None:
+    """칸이 없으면 모델은 이름을 장소 칸에 넣는다 — 위 규칙이 그렇게 시키기 때문이다.
+
+    2026-08-25 실측: "박무현 없는 스냅샷"이 `classroom_id="박무현"`으로 나왔고,
+    서버는 등록되지 않은 강의실로 판정해 0건과 엉뚱한 안내를 냈다.
+    """
+    prompt = _prompt([])
+
+    assert "person_name" in prompt
+    assert "사람 이름을 classroom_id나 camera_id에 넣지 마라" in prompt
+
+
+def test_있는지_없는지의_방향을_함께_받는다() -> None:
+    """이름만 뽑으면 "박무현이 있는 사진"과 "없는 사진"이 서버에서 같은 질의가 된다."""
+    prompt = _prompt([])
+
+    assert "person_presence" in prompt
+    assert '"absent"' in prompt
+    assert '"present"' in prompt
+    # 사람을 말하지 않았을 때의 값도 못 박는다. 비워 두면 모델이 지어낸다.
+    assert '"any"' in prompt
+
+
 def test_강의실만_말했으면_카메라를_고르지_말라고_지시한다() -> None:
     """2026-08-25 GPU 서버(gemma) 실측: "A111에 누가 있었어?"에 모델이 강의실과 함께
     `camera_id="classroom-cctv"`를 냈다.
