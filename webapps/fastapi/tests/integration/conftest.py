@@ -37,6 +37,7 @@ MANAGED_COLLECTIONS = (
     "video_streams",
     "roi_connections",
     "detection_events",
+    "entry_identity_events",
     "student_states",
     "student_state_history",
 )

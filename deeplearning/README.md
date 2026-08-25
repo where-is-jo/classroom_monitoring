@@ -279,11 +279,14 @@ bbox 기반 크기 비율, 검출 신뢰도, 안내 타원 포함 여부, MediaP
 120개 특징 중 유사 자세와 비교하고, 비교 상태는 완료·취소 시 삭제한다. 얼굴 이미지와
 비교 지문은 응답·로그에 포함하지 않으며 저장 여부와 파일명은 FastAPI가 결정한다.
 
-`POST /internal/face-identifications`는 JPEG 바이트, `X-Camera-ID`, JSON 형식의
-`X-Person-Bboxes`를 받는다. 기능이 켜져 있으면 FastAPI의 `face_embeddings` 컬렉션을
+`POST /internal/face-identifications`는 입구 카메라의 JPEG 바이트와 `X-Camera-ID`만
+받는다. 사람 bbox나 사람 track은 입력 계약에 없다. 기능이 켜져 있으면 FastAPI의
+`face_embeddings` 컬렉션을
 주기적으로 읽어 현재 ArcFace 메타데이터와 정확히 맞는 대표 벡터만 갤러리에 넣는다.
-응답에는 사람 인덱스·얼굴 bbox·얼굴 track과 기준을 통과한 `student_id`·유사도만 있고
-embedding은 없다. 갤러리 조회 실패·빈 갤러리·호환되지 않는 문서는 503으로 닫힌다.
+응답의 `observations`에는 얼굴 track ID·bbox·검출 신뢰도, `REGISTERED`/`UNKNOWN`/
+`UNCERTAIN`, 기준을 통과한 `student_id`, ArcFace 유사도·margin, 품질·관측 수·거절 사유가
+있고 사람 탐지 결과·이미지·embedding은 없다. 갤러리 조회 실패·빈 갤러리·호환되지 않는
+문서는 503으로 닫힌다.
 임계값은 `training/face_identification_eval.py`가 만든 산출물을 사용한다.
 
 ## 관련 문서

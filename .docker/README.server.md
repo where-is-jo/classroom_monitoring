@@ -324,7 +324,7 @@ INFERENCE_TARGET_CLASS_IDS={"0":"person"}
 FASTAPI_URL=http://<개인-PC-Tailscale-IP>:8076
 FACE_IDENTITY_URL=http://deeplearning:8100
 FACE_IDENTITY_CAMERA_IDS=camera-01
-PERSON_TRACKING_CAMERA_IDS=camera-01,classroom-cctv
+PERSON_TRACKING_CAMERA_IDS=classroom-cctv
 IDENTITY_HANDOVER_ROUTES=[{"entry_camera_id":"camera-01","classroom_camera_id":"classroom-cctv","classroom_entry_zone":[0.0,0.0,0.25,1.0]}]
 ```
 
@@ -389,8 +389,8 @@ ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deep
    들어갔을 때 학생 상태로 반영되는지 확인한다.
 
 위 3번 실제 동선까지 수행한 뒤 다음 명령을 실행하면 두 camera의 처리 프레임, 성공한
-얼굴 호출, `accepted` 인계가 모두 1건 이상인지 자동 확인한다. URL·MongoDB 자격 증명·
-학생 ID는 출력하지 않는다.
+얼굴 호출, `accepted` 인계, FastAPI에 저장되어 조회되는 입구 얼굴 이벤트가 모두 1건
+이상인지 자동 확인한다. URL·MongoDB 자격 증명·학생 ID는 출력하지 않는다.
 
 ```bash
 python .docker/scripts/verify_face_handover_runtime.py --require-live-handoff

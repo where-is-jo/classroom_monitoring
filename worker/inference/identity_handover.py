@@ -21,7 +21,13 @@ from shared.types import CapturedFrame
 
 from .consumer import ResultHandler
 from .metrics import IDENTITY_HANDOFF_TOTAL
-from .types import Detection, InferenceResult
+from .types import (
+    Detection,
+    EntryFaceObservationBatch,
+    EntryIdentityProcessingStatus,
+    EntryIdentityStatus,
+    InferenceResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +156,8 @@ class RefreshingIdentityHandoverResultHandler:
         track_stale_seconds: float = 30.0,
         minimum_identity_confidence: float = 0.0,
         available_camera_ids: frozenset[str] | None = None,
+        entry_camera_ids: frozenset[str] = frozenset(),
+        classroom_camera_ids: frozenset[str] = frozenset(),
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if refresh_seconds <= 0:
@@ -163,16 +171,33 @@ class RefreshingIdentityHandoverResultHandler:
         self._track_stale_seconds = track_stale_seconds
         self._minimum_identity_confidence = minimum_identity_confidence
         self._available_camera_ids = available_camera_ids
+        self._entry_camera_ids = entry_camera_ids
+        self._classroom_camera_ids = classroom_camera_ids
         self._monotonic = monotonic
         self._last_refresh = float("-inf")
         self._active = self._build(initial_routes)
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
+        self._inner(captured, self.enrich_classroom(captured, result))
+
+    def observe_entry(
+        self,
+        captured: CapturedFrame,
+        batch: EntryFaceObservationBatch,
+    ) -> None:
+        self._refresh_if_due()
+        if self._active is not None:
+            self._active.observe_entry(captured, batch)
+
+    def enrich_classroom(
+        self,
+        captured: CapturedFrame,
+        result: InferenceResult,
+    ) -> InferenceResult:
         self._refresh_if_due()
         if self._active is None:
-            self._inner(captured, result)
-            return
-        self._active(captured, result)
+            return result
+        return self._active.enrich_classroom(captured, result)
 
     def _refresh_if_due(self) -> None:
         now = self._monotonic()
@@ -209,6 +234,22 @@ class RefreshingIdentityHandoverResultHandler:
             raise ValueError(
                 "동적 신원 인계 route의 카메라가 STREAM_SOURCES에 없습니다: "
                 + ", ".join(sorted(missing))
+            )
+        invalid_entries = {
+            route.entry_camera_id for route in routes
+        } - self._entry_camera_ids
+        invalid_classrooms = {
+            route.classroom_camera_id for route in routes
+        } - self._classroom_camera_ids
+        if invalid_entries:
+            raise ValueError(
+                "동적 신원 인계 route의 입구 카메라는 얼굴 전용이어야 합니다: "
+                + ", ".join(sorted(invalid_entries))
+            )
+        if invalid_classrooms:
+            raise ValueError(
+                "동적 신원 인계 route의 교실 카메라는 사람 추적 대상이어야 합니다: "
+                + ", ".join(sorted(invalid_classrooms))
             )
 
     def _build(
@@ -321,14 +362,30 @@ class IdentityHandoverResultHandler:
             self._classroom_routes[route.classroom_camera_id] = route
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
+        self._inner(captured, self.enrich_classroom(captured, result))
+
+    def observe_entry(
+        self,
+        captured: CapturedFrame,
+        batch: EntryFaceObservationBatch,
+    ) -> None:
         observed_at = captured.captured_at.timestamp()
         for route in self._entry_routes.get(captured.camera_id, ()):
-            self._observe_entry(route, result, observed_at)
+            self._observe_entry(route, batch, observed_at)
 
+    def enrich_classroom(
+        self,
+        captured: CapturedFrame,
+        result: InferenceResult,
+    ) -> InferenceResult:
         route = self._classroom_routes.get(captured.camera_id)
-        if route is not None:
-            result = self._observe_classroom(route, result, observed_at)
-        self._inner(captured, result)
+        if route is None:
+            return result
+        return self._observe_classroom(
+            route,
+            result,
+            captured.captured_at.timestamp(),
+        )
 
     def _expire(self, state: _RouteState, observed_at: float) -> bool:
         """오래된 후보를 버리고 인계 입력 집합이 바뀌었는지 돌려준다.
@@ -380,45 +437,44 @@ class IdentityHandoverResultHandler:
     def _observe_entry(
         self,
         route: IdentityHandoverRoute,
-        result: InferenceResult,
+        batch: EntryFaceObservationBatch,
         observed_at: float,
     ) -> None:
         state = self._states[route]
         match_inputs_expired = self._expire(state, observed_at)
         changed = False
-        for _, detection in _person_detections(result):
+        if batch.processing_status is not EntryIdentityProcessingStatus.SUCCEEDED:
+            if match_inputs_expired:
+                self._try_match(state)
+            return
+        for observation in batch.observations:
             if (
-                detection.student_id is None
-                or detection.identity_confidence is None
-                or detection.identity_confidence < self._minimum_identity_confidence
+                observation.identity_status is not EntryIdentityStatus.REGISTERED
+                or observation.student_id is None
+                or observation.similarity is None
+                or observation.similarity < self._minimum_identity_confidence
             ):
                 continue
-            # 사람 detector의 confidence가 ByteTrack 기준을 오가면 같은 실제 사람이
-            # 잠깐 face-* fallback track으로 보였다가 person-* track으로 다시 보일 수
-            # 있다. 이미 CCTV track에 붙은 학생을 새 entry track 후보로 다시 받으면
-            # 한 학생이 교실의 두 사람에게 동시에 붙는다. 활성 CCTV track이 만료될
-            # 때까지는 학생 단위로 한 번만 인계한다.
             if any(
-                active.student_id == detection.student_id
+                active.student_id == observation.student_id
                 for active in state.active_identities.values()
             ):
                 continue
-            track_id = detection.track_id
-            assert track_id is not None
+            track_id = observation.face_track_id
             if track_id in state.consumed_entry_tracks:
                 state.consumed_entry_tracks[track_id] = max(
                     state.consumed_entry_tracks[track_id], observed_at
                 )
                 continue
             existing = state.pending.get(track_id)
-            if existing is not None and existing.student_id != detection.student_id:
+            if existing is not None and existing.student_id != observation.student_id:
                 # 한 entry track의 신원은 첫 확정값에 잠근다. 프레임 하나의 다른 결과로
                 # 바꾸면 CCTV에 잘못된 이름을 자신 있게 넘길 수 있다.
                 continue
             state.pending[track_id] = _PendingIdentity(
                 track_id,
-                detection.student_id,
-                detection.identity_confidence,
+                observation.student_id,
+                observation.similarity,
                 max(existing.observed_at, observed_at) if existing else observed_at,
             )
             changed = True
@@ -494,12 +550,24 @@ class IdentityHandoverResultHandler:
             del state.pending[entry_track_id]
             state.consumed_entry_tracks[entry_track_id] = identity.observed_at
 
-        viable: list[tuple[_PendingIdentity, _UnmatchedClassroomTrack]] = []
+        # 동일 학생이 얼굴 track ID 변경으로 여러 번 대기 중이어도 학생 후보는 하나다.
+        # 학생과 CCTV track의 고유한 조합 수로 모호성을 판단한다.
+        viable_by_pair: dict[
+            tuple[str, str], tuple[_PendingIdentity, _UnmatchedClassroomTrack]
+        ] = {}
         for identity in state.pending.values():
             for classroom_track in state.unmatched_classroom_tracks.values():
                 delay = classroom_track.first_seen_at - identity.observed_at
                 if -self._clock_skew_seconds <= delay <= self._maximum_delay_seconds:
-                    viable.append((identity, classroom_track))
+                    key = (identity.student_id, classroom_track.track_id)
+                    existing = viable_by_pair.get(key)
+                    if (
+                        existing is None
+                        or identity.observed_at > existing[0].observed_at
+                    ):
+                        viable_by_pair[key] = (identity, classroom_track)
+
+        viable = list(viable_by_pair.values())
 
         if not viable:
             if state.unmatched_classroom_tracks:
@@ -515,8 +583,8 @@ class IdentityHandoverResultHandler:
             identity.confidence,
             classroom_track.last_seen_at,
         )
-        # 같은 실제 사람이 face-*와 person-* 두 entry track으로 보였더라도 하나의
-        # CCTV track에 인계한 순간 같은 학생 후보를 모두 소비한다.
+        # 같은 학생이 여러 얼굴 track으로 관측됐더라도 하나의 CCTV track에 인계한
+        # 순간 같은 학생 후보를 모두 소비한다.
         for entry_track_id, pending in list(state.pending.items()):
             if pending.student_id != identity.student_id:
                 continue

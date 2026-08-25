@@ -92,12 +92,14 @@ class FaceIdentityDetection:
 class TrackedIdentity:
     track_id: int
     bbox: tuple[int, int, int, int]
+    detection_confidence: float
     status: IdentityStatus
     student_id: str | None
-    similarity: float
-    margin: float
+    similarity: float | None
+    margin: float | None
     quality: float
     observation_count: int
+    rejected_reason: str | None = None
 
 
 def normalize_embedding(value: Any) -> np.ndarray:
@@ -598,8 +600,11 @@ class MultiFaceIdentityTracker:
             if len(track.embeddings) < self._minimum_observations:
                 status = IdentityStatus.UNCERTAIN
                 student_id = None
-                similarity = detection.similarity
-                margin = detection.margin
+                similarity = None
+                margin = None
+                rejected_reason = (
+                    detection.rejected_reason or "insufficient_observations"
+                )
             else:
                 vectors = np.stack([item[0] for item in track.embeddings])
                 weights = np.asarray(
@@ -610,7 +615,7 @@ class MultiFaceIdentityTracker:
                     np.average(vectors, axis=0, weights=weights)
                 )
                 aggregate_quality = float(np.average(weights, weights=weights))
-                status, student_id, similarity, margin, _ = (
+                status, student_id, similarity, margin, rejected_reason = (
                     self._engine.match_embedding(
                         averaged,
                         quality=aggregate_quality,
@@ -621,12 +626,14 @@ class MultiFaceIdentityTracker:
                 TrackedIdentity(
                     track_id=track_id,
                     bbox=detection.bbox,
+                    detection_confidence=detection.detection_confidence,
                     status=status,
                     student_id=student_id,
                     similarity=similarity,
                     margin=margin,
                     quality=detection.quality,
                     observation_count=len(track.embeddings),
+                    rejected_reason=rejected_reason,
                 )
             )
 

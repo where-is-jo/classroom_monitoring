@@ -35,7 +35,8 @@ def build_deployment(tmp_path: Path) -> Path:
         "INFERENCE_DEVICE=cuda\n"
         "FASTAPI_URL=http://fastapi.example.invalid:8076\n"
         "FACE_IDENTITY_URL=http://deeplearning:8100\n"
-        "FACE_IDENTITY_CAMERA_IDS=entry-camera\n",
+        "FACE_IDENTITY_CAMERA_IDS=entry-camera\n"
+        "PERSON_TRACKING_CAMERA_IDS=classroom-cctv\n",
         encoding="utf-8",
     )
     for relative in (
@@ -100,6 +101,22 @@ def test_잘못된_정적_인계_route는_실패한다(tmp_path: Path) -> None:
     errors = validate(docker_root)
 
     assert any("IDENTITY_HANDOVER_ROUTES" in error for error in errors)
+
+
+def test_입구_카메라에_사람_탐지_역할도_주면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    worker_env = docker_root / "env" / "worker.dev.env"
+    worker_env.write_text(
+        worker_env.read_text(encoding="utf-8").replace(
+            "PERSON_TRACKING_CAMERA_IDS=classroom-cctv",
+            "PERSON_TRACKING_CAMERA_IDS=entry-camera,classroom-cctv",
+        ),
+        encoding="utf-8",
+    )
+
+    errors = validate(docker_root)
+
+    assert any("역할은 겹칠 수 없습니다" in error for error in errors)
 
 
 @pytest.mark.parametrize("threshold", ["0.5", "0.8"])

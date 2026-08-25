@@ -1,12 +1,11 @@
-"""deeplearning 얼굴 식별 결과를 사람 탐지에 보강하는 실패 허용 핸들러."""
+"""입구 카메라 프레임을 얼굴 관측 계약으로 처리하고 저장하는 실행 경계."""
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from datetime import UTC
 from typing import Any
 
 import cv2
@@ -14,24 +13,39 @@ import requests
 
 from shared.types import CapturedFrame
 
-from .consumer import ResultHandler
 from .metrics import (
     FACE_IDENTIFICATION_DURATION_SECONDS,
     FACE_IDENTIFICATION_REQUESTS_TOTAL,
 )
-from .types import InferenceResult
+from .types import (
+    EntryFaceObservation,
+    EntryFaceObservationBatch,
+    EntryIdentityProcessingStatus,
+    EntryIdentityStatus,
+)
 
 logger = logging.getLogger(__name__)
 
 IDENTIFICATION_PATH = "/internal/face-identifications"
+ENTRY_IDENTITY_EVENTS_PATH = "/internal/entry-identity-events"
 
 
 class FaceIdentificationError(RuntimeError):
-    """얼굴 식별 호출이나 응답 검증이 실패했을 때 발생한다."""
+    """얼굴 분석을 완료하지 못했을 때 처리 상태와 함께 발생한다."""
+
+    processing_status: EntryIdentityProcessingStatus
+
+
+class FaceAnalyzerUnavailableError(FaceIdentificationError):
+    processing_status = EntryIdentityProcessingStatus.ANALYZER_UNAVAILABLE
+
+
+class FaceIdentificationResponseError(FaceIdentificationError):
+    processing_status = EntryIdentityProcessingStatus.INVALID_RESPONSE
 
 
 class HttpFaceIdentifier:
-    """모델 세부사항 없이 deeplearning의 학생 식별 API만 호출한다."""
+    """모델 세부사항 없이 deeplearning의 얼굴 관측 API만 호출한다."""
 
     def __init__(
         self,
@@ -39,189 +53,324 @@ class HttpFaceIdentifier:
         *,
         timeout_seconds: float,
         jpeg_quality: int,
-        minimum_person_confidence: float = 0.0,
         post: Callable[..., requests.Response] = requests.post,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("얼굴 식별 timeout은 0보다 커야 합니다.")
         if not 1 <= jpeg_quality <= 100:
             raise ValueError("얼굴 식별 JPEG 품질은 1과 100 사이여야 합니다.")
-        if not 0.0 <= minimum_person_confidence <= 1.0:
-            raise ValueError("얼굴 식별 사람 신뢰도는 0과 1 사이여야 합니다.")
         self._url = base_url.rstrip("/") + IDENTIFICATION_PATH
         self._timeout_seconds = timeout_seconds
         self._jpeg_quality = jpeg_quality
-        self._minimum_person_confidence = minimum_person_confidence
         self._post = post
 
-    def enrich(
-        self, captured: CapturedFrame, result: InferenceResult
-    ) -> InferenceResult:
-        person_positions = [
-            index
-            for index, detection in enumerate(result.detections)
-            if detection.class_name.casefold() == "person"
-            and detection.confidence >= self._minimum_person_confidence
-        ]
-        if not person_positions:
-            return result
-        person_bboxes = [result.detections[index].bbox for index in person_positions]
+    def identify(self, captured: CapturedFrame) -> tuple[EntryFaceObservation, ...]:
         encoded, buffer = cv2.imencode(
             ".jpg",
             captured.frame,
             [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality],
         )
         if not encoded:
-            raise FaceIdentificationError("얼굴 식별용 JPEG를 만들지 못했습니다.")
+            raise FaceIdentificationResponseError(
+                "얼굴 식별용 JPEG를 만들지 못했습니다."
+            )
 
         started_at = time.perf_counter()
         try:
-            response = self._post(
-                self._url,
-                data=bytes(buffer.tobytes()),
-                headers={
-                    "Content-Type": "image/jpeg",
-                    "X-Camera-ID": captured.camera_id,
-                    "X-Person-Bboxes": json.dumps(person_bboxes, separators=(",", ":")),
-                },
-                timeout=self._timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            matches = self._parse_matches(payload, person_count=len(person_positions))
-        except requests.RequestException as error:
-            FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
-            raise FaceIdentificationError(
-                "얼굴 식별 서비스 호출에 실패했습니다."
-            ) from error
-        except FaceIdentificationError:
-            FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
-            raise
-        else:
+            try:
+                response = self._post(
+                    self._url,
+                    data=bytes(buffer.tobytes()),
+                    headers={
+                        "Content-Type": "image/jpeg",
+                        "X-Camera-ID": captured.camera_id,
+                    },
+                    timeout=self._timeout_seconds,
+                )
+                response.raise_for_status()
+            except requests.RequestException as error:
+                FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
+                raise FaceAnalyzerUnavailableError(
+                    "얼굴 식별 서비스 호출에 실패했습니다."
+                ) from error
+            try:
+                payload = response.json()
+            except ValueError as error:
+                FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
+                raise FaceIdentificationResponseError(
+                    "얼굴 식별 서비스 응답 JSON이 올바르지 않습니다."
+                ) from error
+            try:
+                observations = self._parse_observations(
+                    payload, frame_shape=captured.frame.shape
+                )
+            except FaceIdentificationError:
+                FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
+                raise
+            except (TypeError, ValueError) as error:
+                FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="error").inc()
+                raise FaceIdentificationResponseError(
+                    "얼굴 식별 서비스 응답 형식이 올바르지 않습니다."
+                ) from error
             FACE_IDENTIFICATION_REQUESTS_TOTAL.labels(outcome="ok").inc()
+            return observations
         finally:
             FACE_IDENTIFICATION_DURATION_SECONDS.observe(
                 time.perf_counter() - started_at
             )
 
-        enriched = list(result.detections)
-        for person_index, values in matches.items():
-            detection_index = person_positions[person_index]
-            detection = enriched[detection_index]
-            enriched[detection_index] = replace(
-                detection,
-                student_id=values["student_id"],
-                identity_confidence=values["identity_confidence"],
-                face_bbox=(
-                    values["face_bbox"] if values["student_id"] is not None else None
-                ),
-                # 사람 ByteTrack이 먼저 붙인 ID가 있으면 그것이 카메라 안에서의
-                # 이동 수명이다. 얼굴 track ID로 덮어쓰면 입구에서 확인한 신원을
-                # 교실 사람 track으로 인계할 기준이 끊긴다. 단독 얼굴 식별 실행에서만
-                # 얼굴 서비스의 track ID를 폴백으로 쓴다.
-                track_id=detection.track_id or values["track_id"],
-            )
-        return InferenceResult(
-            frame_shape=result.frame_shape,
-            detections=tuple(enriched),
-        )
-
     @staticmethod
-    def _parse_matches(payload: Any, *, person_count: int) -> dict[int, dict[str, Any]]:
+    def _parse_observations(
+        payload: Any,
+        *,
+        frame_shape: tuple[int, ...],
+    ) -> tuple[EntryFaceObservation, ...]:
         try:
-            raw_matches = payload["identities"]
-            if not isinstance(raw_matches, list):
+            if not isinstance(payload, dict) or set(payload) != {"observations"}:
                 raise TypeError
-            parsed: dict[int, dict[str, Any]] = {}
-            for item in raw_matches:
-                if not isinstance(item, dict):
+            raw_observations = payload["observations"]
+            if not isinstance(raw_observations, list) or len(raw_observations) > 100:
+                raise TypeError
+            height, width = frame_shape[:2]
+            parsed: list[EntryFaceObservation] = []
+            seen_track_ids: set[str] = set()
+            expected_keys = {
+                "face_track_id",
+                "face_bbox",
+                "detection_confidence",
+                "identity_status",
+                "student_id",
+                "similarity",
+                "margin",
+                "quality",
+                "observation_count",
+                "rejected_reason",
+            }
+            for item in raw_observations:
+                if not isinstance(item, dict) or set(item) != expected_keys:
                     raise TypeError
-                person_index = item["person_index"]
-                face_bbox = tuple(item["face_bbox"])
-                track_id = item["track_id"]
-                student_id = item.get("student_id")
-                confidence = item.get("identity_confidence")
+                track_id = item["face_track_id"]
+                bbox_value = item["face_bbox"]
+                detection_confidence = item["detection_confidence"]
+                identity_status = EntryIdentityStatus(item["identity_status"])
+                student_id = item["student_id"]
+                similarity = item["similarity"]
+                margin = item["margin"]
+                quality = item["quality"]
+                observation_count = item["observation_count"]
+                rejected_reason = item["rejected_reason"]
+
                 if (
-                    not isinstance(person_index, int)
-                    or isinstance(person_index, bool)
-                    or not 0 <= person_index < person_count
-                    or person_index in parsed
-                    or len(face_bbox) != 4
-                    or any(
-                        not isinstance(value, int) or isinstance(value, bool)
-                        for value in face_bbox
-                    )
-                    or face_bbox[0] >= face_bbox[2]
-                    or face_bbox[1] >= face_bbox[3]
-                    or not isinstance(track_id, str)
+                    not isinstance(track_id, str)
                     or not track_id
                     or len(track_id) > 128
-                    or (student_id is None) != (confidence is None)
-                    or (
-                        student_id is not None
-                        and (not isinstance(student_id, str) or not student_id)
+                    or track_id in seen_track_ids
+                    or not isinstance(bbox_value, list)
+                    or len(bbox_value) != 4
+                    or any(
+                        not isinstance(value, int) or isinstance(value, bool)
+                        for value in bbox_value
                     )
+                    or not (
+                        0 <= bbox_value[0] < bbox_value[2] <= width
+                        and 0 <= bbox_value[1] < bbox_value[3] <= height
+                    )
+                    or not _is_number_between(detection_confidence, 0.0, 1.0)
+                    or not _is_number_between(quality, 0.0, 1.0)
+                    or not isinstance(observation_count, int)
+                    or isinstance(observation_count, bool)
+                    or observation_count < 0
                     or (
-                        confidence is not None
+                        rejected_reason is not None
                         and (
-                            not isinstance(confidence, (int, float))
-                            or isinstance(confidence, bool)
-                            or not 0.0 <= float(confidence) <= 1.0
+                            not isinstance(rejected_reason, str)
+                            or not rejected_reason
+                            or len(rejected_reason) > 128
                         )
                     )
                 ):
                     raise ValueError
-                parsed[person_index] = {
-                    "face_bbox": face_bbox,
-                    "track_id": track_id,
-                    "student_id": student_id,
-                    "identity_confidence": (
-                        None if confidence is None else float(confidence)
-                    ),
-                }
-            return parsed
+
+                if identity_status is EntryIdentityStatus.REGISTERED:
+                    if (
+                        not isinstance(student_id, str)
+                        or not student_id
+                        or len(student_id) > 128
+                        or not _is_number_between(similarity, 0.0, 1.0)
+                        or not _is_number_between(margin, 0.0, 2.0)
+                        or rejected_reason is not None
+                    ):
+                        raise ValueError
+                elif student_id is not None:
+                    raise ValueError
+
+                if (similarity is None) != (margin is None):
+                    raise ValueError
+                if similarity is not None and not _is_number_between(
+                    similarity, -1.0, 1.0
+                ):
+                    raise ValueError
+                if margin is not None and not _is_number_between(margin, 0.0, 2.0):
+                    raise ValueError
+
+                seen_track_ids.add(track_id)
+                parsed.append(
+                    EntryFaceObservation(
+                        face_track_id=track_id,
+                        face_bbox=tuple(bbox_value),  # type: ignore[arg-type]
+                        detection_confidence=float(detection_confidence),
+                        identity_status=identity_status,
+                        student_id=student_id,
+                        similarity=(None if similarity is None else float(similarity)),
+                        margin=None if margin is None else float(margin),
+                        quality=float(quality),
+                        observation_count=observation_count,
+                        rejected_reason=rejected_reason,
+                    )
+                )
+            return tuple(parsed)
         except (KeyError, TypeError, ValueError):
-            raise FaceIdentificationError(
+            raise FaceIdentificationResponseError(
                 "얼굴 식별 서비스 응답 형식이 올바르지 않습니다."
             ) from None
 
 
-class FaceIdentityResultHandler:
-    """식별 실패 시 원래 사람 탐지를 그대로 다음 핸들러로 넘긴다."""
+def _is_number_between(value: object, minimum: float, maximum: float) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and minimum <= float(value) <= maximum
+    )
 
-    def __init__(
-        self,
-        identifier: HttpFaceIdentifier,
-        *,
-        camera_ids: frozenset[str],
-        inner: ResultHandler,
-    ) -> None:
-        if not camera_ids:
-            raise ValueError("얼굴 식별 대상 카메라가 하나 이상 필요합니다.")
+
+class EntryFaceProcessor:
+    """얼굴 서비스 장애도 저장 가능한 프레임 처리 결과로 바꾼다."""
+
+    def __init__(self, identifier: HttpFaceIdentifier) -> None:
         self._identifier = identifier
-        self._camera_ids = camera_ids
-        self._inner = inner
 
-    def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
-        if captured.camera_id not in self._camera_ids:
-            self._inner(captured, result)
-            return
+    def process(self, captured: CapturedFrame) -> EntryFaceObservationBatch:
         try:
-            enriched = self._identifier.enrich(captured, result)
+            observations = self._identifier.identify(captured)
         except FaceIdentificationError as error:
-            # 얼굴 서비스 장애가 사람 탐지·좌석 점유 전송까지 막아서는 안 된다.
             logger.warning(
-                "카메라 %s 프레임 %d 얼굴 식별을 건너뜁니다: %s",
+                "카메라 %s 프레임 %d 얼굴 분석을 완료하지 못했습니다: %s",
                 captured.camera_id,
                 captured.sequence,
                 error,
             )
-            enriched = result
-        self._inner(captured, enriched)
+            return EntryFaceObservationBatch(
+                frame_shape=captured.frame.shape,
+                processing_status=error.processing_status,
+                observations=(),
+            )
+        return EntryFaceObservationBatch(
+            frame_shape=captured.frame.shape,
+            processing_status=EntryIdentityProcessingStatus.SUCCEEDED,
+            observations=observations,
+        )
+
+
+def build_entry_identity_event_payload(
+    captured: CapturedFrame,
+    batch: EntryFaceObservationBatch,
+) -> dict[str, Any]:
+    captured_utc = captured.captured_at.astimezone(UTC)
+    captured_milliseconds = int(captured_utc.timestamp() * 1000)
+    height, width = batch.frame_shape[:2]
+    return {
+        "event_id": (
+            f"{captured.camera_id}-{captured_milliseconds}-"
+            f"{captured.sequence}-entry-face"
+        ),
+        "camera_id": captured.camera_id,
+        "captured_at": captured_utc.isoformat(),
+        "sequence": captured.sequence,
+        "frame": {"width_pixels": width, "height_pixels": height},
+        "processing_status": batch.processing_status.value,
+        "observations": [
+            {
+                "face_track_id": item.face_track_id,
+                "face_bbox": list(item.face_bbox),
+                "detection_confidence": item.detection_confidence,
+                "identity_status": item.identity_status.value,
+                "student_id": item.student_id,
+                "similarity": item.similarity,
+                "margin": item.margin,
+                "quality": item.quality,
+                "observation_count": item.observation_count,
+                "rejected_reason": item.rejected_reason,
+            }
+            for item in batch.observations
+        ],
+    }
+
+
+class FastAPIEntryIdentityEventHandler:
+    """입구 관측을 FastAPI에 보내되 메모리 신원 인계를 먼저 진행한다."""
+
+    def __init__(
+        self,
+        fastapi_url: str,
+        *,
+        inner: Callable[[CapturedFrame, EntryFaceObservationBatch], None],
+        timeout_seconds: float = 5.0,
+        max_retries: int = 2,
+        backoff_seconds: tuple[float, ...] = (0.2, 0.5),
+        post: Callable[..., requests.Response] = requests.post,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if timeout_seconds <= 0 or max_retries < 0 or not backoff_seconds:
+            raise ValueError("입구 관측 전송 재시도 설정이 올바르지 않습니다.")
+        self._url = fastapi_url.rstrip("/") + ENTRY_IDENTITY_EVENTS_PATH
+        self._inner = inner
+        self._timeout_seconds = timeout_seconds
+        self._max_retries = max_retries
+        self._backoff_seconds = backoff_seconds
+        self._post = post
+        self._sleep = sleep
+
+    def __call__(
+        self,
+        captured: CapturedFrame,
+        batch: EntryFaceObservationBatch,
+    ) -> None:
+        # 저장소 장애가 in-memory 인계를 막지 않도록 순서를 고정한다.
+        self._inner(captured, batch)
+        payload = build_entry_identity_event_payload(captured, batch)
+        last_error: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self._post(
+                    self._url,
+                    json=payload,
+                    timeout=self._timeout_seconds,
+                )
+                response.raise_for_status()
+                return
+            except Exception as error:
+                last_error = error
+                if attempt < self._max_retries:
+                    wait_seconds = self._backoff_seconds[
+                        min(attempt, len(self._backoff_seconds) - 1)
+                    ]
+                    self._sleep(wait_seconds)
+        logger.error(
+            "카메라 %s 프레임 %d 입구 관측 저장 실패 (%d회): %s",
+            captured.camera_id,
+            captured.sequence,
+            self._max_retries + 1,
+            last_error,
+        )
 
 
 __all__ = [
+    "ENTRY_IDENTITY_EVENTS_PATH",
+    "EntryFaceProcessor",
+    "FaceAnalyzerUnavailableError",
     "FaceIdentificationError",
-    "FaceIdentityResultHandler",
+    "FaceIdentificationResponseError",
+    "FastAPIEntryIdentityEventHandler",
     "HttpFaceIdentifier",
+    "build_entry_identity_event_payload",
 ]

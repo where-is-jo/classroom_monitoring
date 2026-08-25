@@ -119,6 +119,8 @@ class Settings(BaseSettings):
     # Detection event settings
     detection_event_max_detections_per_event: int = Field(default=100, ge=1)
     detection_event_stale_seconds: int = Field(default=300, ge=1)
+    # 입구 얼굴 관측 메타데이터는 원본 이미지·embedding 없이 이 기간만 보관한다.
+    entry_identity_event_retention_days: int = Field(default=7, ge=1, le=90)
     student_identity_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
     # --- 학생 상태 판정 시간 정책 (결정 0008) ---
     # 마지막으로 학생을 식별한 뒤 이 시간 동안은 직전 판정을 이어받는다. 앉은 사람도

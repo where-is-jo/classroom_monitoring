@@ -77,8 +77,8 @@ IN_CLASSROOM(좌석엔 없지만 교실 안)도 신원 있는 CCTV track의 MVP 
 - webapps/fastapi : FastAPI + Jinja2. 브라우저의 유일한 진입점.
                     좌석 현황 / 실시간 모니터링 / 자연어 검색 / 학생·얼굴 등록.
                     MongoDB 저장, 학생 상태 판정, SSE를 소유한다. 인증·시간표 ABSENT는 없다
-- worker          : RTSP 수신 → 사람 탐지·카메라별 ByteTrack → 입구 얼굴 식별 호출 →
-                    CCTV 신원 인계 → FastAPI 이벤트 전송. recorder는 별도 실행한다
+- worker          : RTSP 수신 → 입구 얼굴 관측 / CCTV 사람 탐지·ByteTrack 역할 분기 →
+                    문 ROI 신원 인계 → FastAPI 역할별 이벤트 전송. recorder는 별도 실행한다
 - deeplearning    : SCRFD·ArcFace 얼굴 검출·갤러리 식별 내부 HTTP 서비스와 학습·평가 도구
 monitoring/internal에는 관측 구성이 있고 RPAs에는 아직 실행 코드가 없다.
 

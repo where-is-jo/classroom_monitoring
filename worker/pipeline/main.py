@@ -17,9 +17,15 @@ from pydantic import ValidationError
 
 from inference.config import DEFAULT_DATA_DIR as INFERENCE_DATA_DIR
 from inference.config import InferenceSettings
-from inference.consumer import InferenceConsumer, ResultHandler, log_result
+from inference.consumer import (
+    EntryResultHandler,
+    InferenceConsumer,
+    ResultHandler,
+    log_result,
+)
 from inference.face_identity import (
-    FaceIdentityResultHandler,
+    EntryFaceProcessor,
+    FastAPIEntryIdentityEventHandler,
     HttpFaceIdentifier,
 )
 from inference.handler import FastAPIResultHandler
@@ -33,12 +39,14 @@ from inference.model import Yolo8nDetector
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
 from inference.tracking import ByteTrackConfig, ByteTrackResultHandler
+from inference.types import EntryFaceObservationBatch
 from shared.config_errors import format_validation_error
 from shared.frame_buffer import FrameBuffer
 from shared.logging_setup import configure_logging, use_utf8_console
 from shared.metrics import register_frame_buffer, start_metrics_server
 from shared.object_storage import ObjectStorageError
 from shared.object_storage.factory import build_object_storage
+from shared.types import CapturedFrame
 from stream.config import StreamSettings
 from stream.errors import StreamWorkerError
 from stream.main import build_publisher
@@ -93,15 +101,18 @@ def build_snapshot_handler(settings: InferenceSettings) -> ResultHandler:
     )
 
 
-def build_result_handler(
+def _discard_entry_result(
+    _captured: CapturedFrame,
+    _batch: EntryFaceObservationBatch,
+) -> None:
+    """인계 route가 없을 때도 얼굴 분석 결과를 일반 탐지로 바꾸지 않는다."""
+
+
+def build_result_handlers(
     settings: InferenceSettings,
     *,
     fastapi_url: str | None = None,
     face_identity_url: str | None = None,
-    face_identity_camera_ids: frozenset[str] = frozenset(),
-    face_identity_timeout_seconds: float = 5.0,
-    face_identity_jpeg_quality: int = 95,
-    face_identity_min_person_confidence: float = 0.5,
     person_tracking_config: ByteTrackConfig | None = None,
     person_tracking_camera_ids: frozenset[str] | None = None,
     identity_handover_routes: tuple[IdentityHandoverRoute, ...] = (),
@@ -113,8 +124,10 @@ def build_result_handler(
     identity_handover_track_stale_seconds: float = 30.0,
     identity_handover_min_confidence: float = 0.0,
     available_camera_ids: frozenset[str] | None = None,
-) -> ResultHandler:
-    """탐지 결과를 무엇으로 받을지 정한다.
+    entry_camera_ids: frozenset[str] = frozenset(),
+    classroom_camera_ids: frozenset[str] = frozenset(),
+) -> tuple[ResultHandler, EntryResultHandler | None]:
+    """CCTV 탐지와 입구 얼굴 관측의 서로 다른 결과 경계를 조립한다.
 
     스냅샷이 꺼져 있으면 저장소를 만들지 않는다. MinIO 접속 정보 없이도 파이프라인이
     돌아야 하고, 저장은 명시적으로 켜는 것이라는 규칙(결정 0011)에 맞춘다.
@@ -133,14 +146,17 @@ def build_result_handler(
         logger.info("탐지 결과를 FastAPI(%s)로 전송한다.", fastapi_url)
         handler = FastAPIResultHandler(fastapi_url, inner=handler)
 
-    # 인계는 얼굴 식별이 끝난 결과를 받아야 하므로 FaceIdentityResultHandler의
-    # 안쪽에 둔다. 여기서 보강한 CCTV student_id가 FastAPI 좌석 ROI 판정까지 간다.
+    coordinator: (
+        IdentityHandoverResultHandler
+        | RefreshingIdentityHandoverResultHandler
+        | None
+    ) = None
     if identity_handover_config_url is not None:
         logger.info(
             "FastAPI 인계 ROI 설정을 %.1f초마다 갱신한다.",
             identity_handover_config_refresh_seconds,
         )
-        handler = RefreshingIdentityHandoverResultHandler(
+        coordinator = RefreshingIdentityHandoverResultHandler(
             identity_handover_routes,
             provider=HttpIdentityHandoverRouteProvider(
                 identity_handover_config_url,
@@ -153,13 +169,15 @@ def build_result_handler(
             track_stale_seconds=identity_handover_track_stale_seconds,
             minimum_identity_confidence=identity_handover_min_confidence,
             available_camera_ids=available_camera_ids,
+            entry_camera_ids=entry_camera_ids,
+            classroom_camera_ids=classroom_camera_ids,
         )
     elif identity_handover_routes:
         logger.info(
             "입구 → 교실 CCTV 신원 인계 route %d개를 켠다.",
             len(identity_handover_routes),
         )
-        handler = IdentityHandoverResultHandler(
+        coordinator = IdentityHandoverResultHandler(
             identity_handover_routes,
             inner=handler,
             maximum_delay_seconds=identity_handover_max_delay_seconds,
@@ -168,23 +186,11 @@ def build_result_handler(
             minimum_identity_confidence=identity_handover_min_confidence,
         )
 
-    if face_identity_url is not None:
-        logger.info(
-            "사람 탐지 결과를 얼굴 식별 서비스(%s)로 보강한다.", face_identity_url
-        )
-        handler = FaceIdentityResultHandler(
-            HttpFaceIdentifier(
-                face_identity_url,
-                timeout_seconds=face_identity_timeout_seconds,
-                jpeg_quality=face_identity_jpeg_quality,
-                minimum_person_confidence=face_identity_min_person_confidence,
-            ),
-            camera_ids=face_identity_camera_ids,
-            inner=handler,
-        )
+    if coordinator is not None:
+        handler = coordinator
 
-    # 호출 순서의 가장 바깥이다: 사람 track_id를 먼저 만든 뒤 얼굴 식별이 그 track에
-    # student_id를 붙이고, 이어서 카메라 간 인계가 CCTV의 같은 track에 신원을 잠근다.
+    # CCTV 호출 순서의 가장 바깥이다. 사람 track_id를 먼저 만든 뒤 coordinator가
+    # 입구 얼굴 후보를 CCTV의 같은 track에 잠근다. 입구 경로는 이 체인을 타지 않는다.
     if person_tracking_config is not None:
         logger.info("카메라별 사람 ByteTrack을 켠다.")
         handler = ByteTrackResultHandler(
@@ -192,7 +198,22 @@ def build_result_handler(
             camera_ids=person_tracking_camera_ids,
             inner=handler,
         )
-    return handler
+    entry_handler: EntryResultHandler | None = None
+    if face_identity_url is not None:
+        observe_entry: EntryResultHandler = (
+            coordinator.observe_entry
+            if coordinator is not None
+            else _discard_entry_result
+        )
+        if fastapi_url is None:
+            entry_handler = observe_entry
+        else:
+            logger.info("입구 얼굴 관측을 FastAPI(%s)에 저장한다.", fastapi_url)
+            entry_handler = FastAPIEntryIdentityEventHandler(
+                fastapi_url,
+                inner=observe_entry,
+            )
+    return handler, entry_handler
 
 
 def build_runner(
@@ -265,26 +286,124 @@ def build_runner(
         )
     face_identity_camera_ids = pipeline_settings.parsed_face_identity_camera_ids
     if face_identity_url is not None:
+        if fastapi_url is None:
+            raise ValueError(
+                "입구 얼굴 관측을 저장하려면 FASTAPI_URL을 명시해야 합니다."
+            )
         missing_face_camera_ids = face_identity_camera_ids - configured_camera_ids
         if missing_face_camera_ids:
             raise ValueError(
                 "FACE_IDENTITY_CAMERA_IDS의 카메라가 STREAM_SOURCES에 없습니다: "
                 + ", ".join(sorted(missing_face_camera_ids))
             )
-    tracking_camera_ids = pipeline_settings.parsed_person_tracking_camera_ids
-    if tracking_camera_ids is not None:
+    configured_tracking_ids = pipeline_settings.parsed_person_tracking_camera_ids
+    tracking_camera_ids = (
+        configured_tracking_ids
+        if configured_tracking_ids is not None
+        else frozenset(configured_camera_ids - face_identity_camera_ids)
+    )
+    if pipeline_settings.person_tracking_enabled:
         missing_tracking_ids = tracking_camera_ids - configured_camera_ids
         if missing_tracking_ids:
             raise ValueError(
                 "PERSON_TRACKING_CAMERA_IDS의 카메라가 STREAM_SOURCES에 없습니다: "
                 + ", ".join(sorted(missing_tracking_ids))
             )
-        untracked_handover_ids = handover_camera_ids - tracking_camera_ids
-        if untracked_handover_ids:
+        overlap = face_identity_camera_ids & tracking_camera_ids
+        if overlap:
             raise ValueError(
-                "신원 인계 route의 모든 카메라에 ByteTrack이 필요합니다: "
-                + ", ".join(sorted(untracked_handover_ids))
+                "얼굴 전용 카메라와 사람 추적 카메라는 겹칠 수 없습니다: "
+                + ", ".join(sorted(overlap))
             )
+        if face_identity_url is not None:
+            unassigned = configured_camera_ids - (
+                face_identity_camera_ids | tracking_camera_ids
+            )
+            if unassigned:
+                raise ValueError(
+                    "모든 STREAM_SOURCES 카메라는 얼굴 전용 또는 사람 추적 역할이 "
+                    "필요합니다: "
+                    + ", ".join(sorted(unassigned))
+                )
+        classroom_route_ids = {
+            route.classroom_camera_id for route in handover_routes
+        }
+        untracked_classroom_ids = classroom_route_ids - tracking_camera_ids
+        if untracked_classroom_ids:
+            raise ValueError(
+                "신원 인계 route의 교실 카메라에는 ByteTrack이 필요합니다: "
+                + ", ".join(sorted(untracked_classroom_ids))
+            )
+
+    person_tracking_config = (
+        ByteTrackConfig(
+            high_confidence_threshold=(
+                pipeline_settings.bytetrack_high_confidence_threshold
+            ),
+            low_confidence_threshold=(
+                pipeline_settings.bytetrack_low_confidence_threshold
+            ),
+            new_track_threshold=pipeline_settings.bytetrack_new_track_threshold,
+            first_match_iou_threshold=(
+                pipeline_settings.bytetrack_first_match_iou_threshold
+            ),
+            second_match_iou_threshold=(
+                pipeline_settings.bytetrack_second_match_iou_threshold
+            ),
+            track_buffer_frames=pipeline_settings.bytetrack_buffer_frames,
+        )
+        if pipeline_settings.person_tracking_enabled
+        else None
+    )
+    result_handler, entry_result_handler = build_result_handlers(
+        inference_settings,
+        fastapi_url=fastapi_url,
+        face_identity_url=face_identity_url,
+        person_tracking_config=person_tracking_config,
+        person_tracking_camera_ids=tracking_camera_ids,
+        identity_handover_routes=handover_routes,
+        identity_handover_config_url=(
+            fastapi_url
+            if fastapi_url is not None
+            and face_identity_url is not None
+            and pipeline_settings.person_tracking_enabled
+            and pipeline_settings.identity_handover_dynamic_config_enabled
+            else None
+        ),
+        identity_handover_config_refresh_seconds=(
+            pipeline_settings.identity_handover_config_refresh_seconds
+        ),
+        identity_handover_config_timeout_seconds=(
+            pipeline_settings.identity_handover_config_timeout_seconds
+        ),
+        identity_handover_max_delay_seconds=(
+            pipeline_settings.identity_handover_max_delay_seconds
+        ),
+        identity_handover_clock_skew_seconds=(
+            pipeline_settings.identity_handover_clock_skew_seconds
+        ),
+        identity_handover_track_stale_seconds=(
+            pipeline_settings.identity_handover_track_stale_seconds
+        ),
+        identity_handover_min_confidence=(
+            pipeline_settings.identity_handover_min_confidence
+        ),
+        available_camera_ids=frozenset(configured_camera_ids),
+        entry_camera_ids=face_identity_camera_ids,
+        classroom_camera_ids=tracking_camera_ids,
+    )
+
+    entry_processor = (
+        EntryFaceProcessor(
+            HttpFaceIdentifier(
+                face_identity_url,
+                timeout_seconds=pipeline_settings.face_identity_timeout_seconds,
+                jpeg_quality=pipeline_settings.face_identity_jpeg_quality,
+            )
+        )
+        if face_identity_url is not None
+        else None
+    )
 
     consumer = InferenceConsumer(
         frame_buffer=frame_buffer,
@@ -292,70 +411,10 @@ def build_runner(
         shutdown_event=shutdown_event,
         poll_timeout_seconds=pipeline_settings.inference_poll_timeout_seconds,
         max_consecutive_failures=pipeline_settings.inference_max_consecutive_failures,
-        result_handler=build_result_handler(
-            inference_settings,
-            fastapi_url=fastapi_url,
-            face_identity_url=face_identity_url,
-            face_identity_camera_ids=(
-                face_identity_camera_ids
-            ),
-            face_identity_timeout_seconds=(
-                pipeline_settings.face_identity_timeout_seconds
-            ),
-            face_identity_jpeg_quality=pipeline_settings.face_identity_jpeg_quality,
-            face_identity_min_person_confidence=(
-                pipeline_settings.face_identity_min_person_confidence
-            ),
-            person_tracking_config=(
-                ByteTrackConfig(
-                    high_confidence_threshold=(
-                        pipeline_settings.bytetrack_high_confidence_threshold
-                    ),
-                    low_confidence_threshold=(
-                        pipeline_settings.bytetrack_low_confidence_threshold
-                    ),
-                    new_track_threshold=pipeline_settings.bytetrack_new_track_threshold,
-                    first_match_iou_threshold=(
-                        pipeline_settings.bytetrack_first_match_iou_threshold
-                    ),
-                    second_match_iou_threshold=(
-                        pipeline_settings.bytetrack_second_match_iou_threshold
-                    ),
-                    track_buffer_frames=pipeline_settings.bytetrack_buffer_frames,
-                )
-                if pipeline_settings.person_tracking_enabled
-                else None
-            ),
-            person_tracking_camera_ids=tracking_camera_ids,
-            identity_handover_routes=handover_routes,
-            identity_handover_config_url=(
-                fastapi_url
-                if fastapi_url is not None
-                and face_identity_url is not None
-                and pipeline_settings.person_tracking_enabled
-                and pipeline_settings.identity_handover_dynamic_config_enabled
-                else None
-            ),
-            identity_handover_config_refresh_seconds=(
-                pipeline_settings.identity_handover_config_refresh_seconds
-            ),
-            identity_handover_config_timeout_seconds=(
-                pipeline_settings.identity_handover_config_timeout_seconds
-            ),
-            identity_handover_max_delay_seconds=(
-                pipeline_settings.identity_handover_max_delay_seconds
-            ),
-            identity_handover_clock_skew_seconds=(
-                pipeline_settings.identity_handover_clock_skew_seconds
-            ),
-            identity_handover_track_stale_seconds=(
-                pipeline_settings.identity_handover_track_stale_seconds
-            ),
-            identity_handover_min_confidence=(
-                pipeline_settings.identity_handover_min_confidence
-            ),
-            available_camera_ids=frozenset(configured_camera_ids),
-        ),
+        result_handler=result_handler,
+        entry_processor=entry_processor,
+        entry_camera_ids=face_identity_camera_ids,
+        entry_result_handler=entry_result_handler,
     )
     stream_worker = StreamWorker(
         stream_settings,

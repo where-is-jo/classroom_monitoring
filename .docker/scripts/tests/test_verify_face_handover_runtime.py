@@ -80,7 +80,11 @@ def install_docker_fake(
             else:
                 output = "deep:test" if command[-1] == "deep-id" else "worker:test"
         elif "exec" in command and "/metrics" in command[-1]:
-            output = metrics + "\n__FACE_CAMERAS__=entry-camera"
+            output = (
+                metrics
+                + "\n__FACE_CAMERAS__=entry-camera"
+                + "\n__ENTRY_EVENTS__=1"
+            )
         elif "exec" in command:
             output = "ok"
         else:  # pragma: no cover - 새 Docker 호출이 추가되면 테스트가 알려준다.
@@ -120,6 +124,29 @@ def test_live_인계가_아직_없으면_실패_이유를_남긴다(
     assert "성공한 CCTV 신원 인계가 아직 없습니다." in verifier.errors
 
 
+def test_저장된_입구_이벤트가_아직_없으면_실패_이유를_남긴다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_docker_fake(monkeypatch)
+    original_run = runtime_module.subprocess.run
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        completed = original_run(command, **kwargs)
+        return subprocess.CompletedProcess(
+            command,
+            completed.returncode,
+            stdout=completed.stdout.replace("__ENTRY_EVENTS__=1", "__ENTRY_EVENTS__=0"),
+            stderr=completed.stderr,
+        )
+
+    monkeypatch.setattr(runtime_module.subprocess, "run", run)
+    verifier = RuntimeVerifier(tmp_path / "compose.yml")
+
+    verifier.verify_metrics(require_live_handoff=True)
+
+    assert "FastAPI에서 저장된 입구 얼굴 이벤트를 조회하지 못했습니다." in verifier.errors
+
+
 def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -131,7 +158,11 @@ def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
         attempts += 1
         if attempts < 3:
             raise subprocess.CalledProcessError(1, command)
-        output = METRICS + "\n__FACE_CAMERAS__=entry-camera"
+        output = (
+            METRICS
+            + "\n__FACE_CAMERAS__=entry-camera"
+            + "\n__ENTRY_EVENTS__=1"
+        )
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 
     monkeypatch.setattr(runtime_module.subprocess, "run", run)
@@ -141,11 +172,12 @@ def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
         worker_readiness_timeout_seconds=30,
     )
 
-    metrics, camera_ids = verifier.worker_metrics()
+    metrics, camera_ids, stored_event_count = verifier.worker_metrics()
 
     assert attempts == 3
     assert metrics.strip() == METRICS.strip()
     assert camera_ids == {"entry-camera"}
+    assert stored_event_count == 1
     assert verifier.errors == []
 
 
@@ -162,10 +194,11 @@ def test_worker_metrics가_제한_시간_안에_열리지_않으면_실패한다
         worker_readiness_timeout_seconds=0,
     )
 
-    metrics, camera_ids = verifier.worker_metrics()
+    metrics, camera_ids, stored_event_count = verifier.worker_metrics()
 
     assert metrics == ""
     assert camera_ids == set()
+    assert stored_event_count == 0
     assert verifier.errors == [
         "worker /metrics가 0초 안에 준비되지 않았습니다. (1회 시도)"
     ]

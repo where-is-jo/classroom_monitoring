@@ -11,17 +11,15 @@ inference_poll_timeout_seconds: 0.5
 # 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다
 inference_max_consecutive_failures: 5
 
-# 얼굴 식별 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의 FACE_IDENTITY_URL이
-# 소유하고, 비워 두면 기능을 끈다. 실패하면 사람 탐지 결과는 그대로 전송한다.
+# 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의
+# FACE_IDENTITY_URL이 소유하고, 비워 두면 기능을 끈다. 실패해도 CCTV 사람 탐지는
+# 독립적으로 계속한다.
 face_identity_timeout_seconds: 5.0
 face_identity_jpeg_quality: 95
 
-# 사람 탐지에는 카메라별 ByteTrack을 항상 붙인다. camera ID 선택과 인계 route는
+# 사람 탐지와 ByteTrack은 CCTV 역할 카메라에만 붙인다. camera ID 선택과 인계 route는
 # 배치마다 달라 .env.*가 소유하고, 아래 값은 모든 환경에서 같은 판정 기준이다.
 person_tracking_enabled: true
-# ByteTrack은 0.5 미만 사람 bbox도 2단계 연결에 쓰지만, 얼굴 서비스에는 확실한 사람
-# bbox만 보낸다. 겹친 오탐 bbox가 들어가면 얼굴-사람 일대일 연결이 미식별로 끝난다.
-face_identity_min_person_confidence: 0.5
 bytetrack_high_confidence_threshold: 0.5
 bytetrack_low_confidence_threshold: 0.1
 bytetrack_new_track_threshold: 0.6
