@@ -61,7 +61,10 @@ import urllib.request
 
 with urllib.request.urlopen("http://deeplearning:8100/health/ready", timeout=8) as response:
     ready = json.load(response)
-assert ready == {"status": "ready", "face_identification": "ready"}
+assert ready.get("status") == "ready"
+assert ready.get("face_identification") == "ready"
+assert int(ready["gallery_entries"]) >= 1
+assert int(ready["excluded_gallery_entries"]) >= 0
 with urllib.request.urlopen("http://deeplearning:8100/openapi.json", timeout=8) as response:
     openapi = json.load(response)
 assert "/internal/face-identifications" in openapi["paths"]

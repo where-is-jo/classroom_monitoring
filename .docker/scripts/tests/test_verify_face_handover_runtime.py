@@ -266,6 +266,17 @@ def test_GPU_배포_workflow가_재기동_후_runtime을_검증한다() -> None:
     assert "--worker-readiness-timeout-seconds 120" in workflow
 
 
+def test_deeplearning_HTTP_계약은_readiness_확장_필드를_검증한다() -> None:
+    probe = runtime_module.DEEPLEARNING_CONTRACT_PROBE_CODE
+
+    compile(probe, "<deeplearning-contract-probe>", "exec")
+    assert 'ready.get("status") == "ready"' in probe
+    assert 'ready.get("face_identification") == "ready"' in probe
+    assert 'int(ready["gallery_entries"]) >= 1' in probe
+    assert 'int(ready["excluded_gallery_entries"]) >= 0' in probe
+    assert "assert ready ==" not in probe
+
+
 def test_GPU_배포_workflow가_현재_소스로_latest_두_개를_함께_갱신한다() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     workflow = (
