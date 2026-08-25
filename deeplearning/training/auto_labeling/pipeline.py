@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import cv2
+
 from .core import (
     SAFE_ID_PATTERN,
     frame_id_from_record,
@@ -28,6 +30,12 @@ from .core import (
     write_json,
 )
 from .errors import AutoLabelingError
+from .evaluation import (
+    freeze_evaluation_set,
+    prelabel_evaluation_set,
+    sample_evaluation_frames,
+    verify_frozen_evaluation_set,
+)
 from .experiments import (
     TrainingConfig,
     select_validation_f1_threshold,
@@ -36,7 +44,13 @@ from .experiments import (
 from .partition import partition_sessions
 from .pilot import PilotSessionPlan, prepare_clean_pilot_run
 from .prelabel import run_prelabel
-from .preprocessing import DEFAULT_PIXELATION_BLOCK_SIZE, uniform_pixelation_contract
+from .preprocessing import (
+    DEFAULT_PIXELATION_BLOCK_SIZE,
+    ORIGINAL_FRAME,
+    UNIFORM_FULL_FRAME_PIXELATION,
+    original_frame_contract,
+    uniform_pixelation_contract,
+)
 from .privacy import export_deidentified_dataset, validate_privacy_export
 from .publish import publish_dataset, validate_dataset
 from .quality import FrameQualityThresholds, inspect_frame_quality
@@ -62,9 +76,21 @@ LOCAL_CONFIG_KEYS = {
     "session_gap_seconds",
     "overlap_tolerance_seconds",
     "allow_approved_student_data",
+    "require_session_approval_metadata",
     "n1_model_path",
     "n1_model_sha256",
+    "prelabel_model_path",
+    "prelabel_model_sha256",
     "prelabel_device",
+    "prelabel_image_size",
+    "prelabel_preprocessing_method",
+    "training_export_preprocessing_method",
+    "target_train_frames",
+    "target_val_frames",
+    "target_test_frames",
+    "evaluation_interval_seconds",
+    "expected_frame_width",
+    "expected_frame_height",
     "force_full_review",
     "manual_excluded_frame_ids",
     "reviewer_id",
@@ -111,9 +137,21 @@ class LocalPipelineConfig:
     session_gap_seconds: float = 60.0
     overlap_tolerance_seconds: float = 2.0
     allow_approved_student_data: bool = True
+    require_session_approval_metadata: bool = True
     n1_model_path: Path = TRAINING_ROOT / N1_MODEL_RELATIVE_PATH
     n1_model_sha256: str = N1_MODEL_SHA256
+    prelabel_model_path: Path | None = None
+    prelabel_model_sha256: str | None = None
     prelabel_device: str = "cpu"
+    prelabel_image_size: int | None = None
+    prelabel_preprocessing_method: str = UNIFORM_FULL_FRAME_PIXELATION
+    training_export_preprocessing_method: str = UNIFORM_FULL_FRAME_PIXELATION
+    target_train_frames: int | None = None
+    target_val_frames: int | None = None
+    target_test_frames: int | None = None
+    evaluation_interval_seconds: float = 5.0
+    expected_frame_width: int | None = None
+    expected_frame_height: int | None = None
     force_full_review: bool = True
     manual_excluded_frame_ids: tuple[str, ...] = ()
     reviewer_id: str | None = None
@@ -183,11 +221,48 @@ def load_local_pipeline_config(path: Path) -> LocalPipelineConfig:
             raw.get("allow_approved_student_data", True),
             "allow_approved_student_data",
         ),
+        require_session_approval_metadata=_bool_value(
+            raw.get("require_session_approval_metadata", True),
+            "require_session_approval_metadata",
+        ),
         n1_model_path=_path_value(
             raw.get("n1_model_path", str(N1_MODEL_RELATIVE_PATH))
         ),
         n1_model_sha256=str(raw.get("n1_model_sha256", N1_MODEL_SHA256)),
+        prelabel_model_path=_optional_path(raw.get("prelabel_model_path")),
+        prelabel_model_sha256=_optional_text(raw.get("prelabel_model_sha256")),
         prelabel_device=str(raw.get("prelabel_device", "cpu")),
+        prelabel_image_size=_optional_positive_int(
+            raw.get("prelabel_image_size"), "prelabel_image_size"
+        ),
+        prelabel_preprocessing_method=str(
+            raw.get("prelabel_preprocessing_method", UNIFORM_FULL_FRAME_PIXELATION)
+        ),
+        training_export_preprocessing_method=str(
+            raw.get(
+                "training_export_preprocessing_method",
+                UNIFORM_FULL_FRAME_PIXELATION,
+            )
+        ),
+        target_train_frames=_optional_positive_int(
+            raw.get("target_train_frames"), "target_train_frames"
+        ),
+        target_val_frames=_optional_positive_int(
+            raw.get("target_val_frames"), "target_val_frames"
+        ),
+        target_test_frames=_optional_positive_int(
+            raw.get("target_test_frames"), "target_test_frames"
+        ),
+        evaluation_interval_seconds=_positive_float(
+            raw.get("evaluation_interval_seconds", 5.0),
+            "evaluation_interval_seconds",
+        ),
+        expected_frame_width=_optional_positive_int(
+            raw.get("expected_frame_width"), "expected_frame_width"
+        ),
+        expected_frame_height=_optional_positive_int(
+            raw.get("expected_frame_height"), "expected_frame_height"
+        ),
         force_full_review=_bool_value(
             raw.get("force_full_review", True), "force_full_review"
         ),
@@ -266,6 +341,7 @@ def advance_local_pipeline(
     source_runs_root = workspace / "03-source-runs"
     quality_runs_root = workspace / "04-quality-runs"
     datasets_root = workspace / "05-datasets"
+    evaluation_dir = workspace / "05-fixed-test"
     export_dir = workspace / "06-colab-export"
     archive_path = workspace / "06-colab-export.zip"
 
@@ -280,8 +356,19 @@ def advance_local_pipeline(
             overlap_tolerance_seconds=config.overlap_tolerance_seconds,
         )
     _verify_scan_contract(scan_dir, config)
+    if config.expected_frame_width is not None:
+        _verify_scan_video_resolution(
+            scan_dir,
+            workspace / "source-resolution-report.json",
+            expected_width=config.expected_frame_width,
+            expected_height=config.expected_frame_height,
+        )
     assignments = scan_dir / "session_assignments.csv"
-    incomplete_sessions = _incomplete_assignment_sessions(assignments)
+    incomplete_sessions = (
+        _incomplete_assignment_sessions(assignments)
+        if config.require_session_approval_metadata
+        else []
+    )
     if incomplete_sessions:
         return _write_local_state(
             config,
@@ -289,6 +376,10 @@ def advance_local_pipeline(
             artifacts={
                 "assignments": str(assignments),
                 "session_timeline": str(scan_dir / "session_timeline.html"),
+                "source_resolution_report": str(
+                    workspace / "source-resolution-report.json"
+                ),
+                "prelabel_model": str(_prelabel_model_path(config)),
             },
             detail={"incomplete_session_ids": incomplete_sessions},
         )
@@ -299,8 +390,40 @@ def advance_local_pipeline(
             assignments,
             partition_dir,
             allow_approved_student_data=config.allow_approved_student_data,
+            require_approval_metadata=config.require_session_approval_metadata,
         )
     _verify_partition_contract(partition_dir, scan_dir, assignments)
+
+    prelabel_model_path = _prelabel_model_path(config)
+    prelabel_model_sha256 = _prelabel_model_sha256(config)
+    prelabel_contract = _local_preprocessing_contract(
+        config.prelabel_preprocessing_method,
+        config.pixelation_block_size,
+    )
+    if config.target_test_frames is not None:
+        if not evaluation_dir.exists():
+            sample_evaluation_frames(
+                partition_dir / "evaluation_manifest.json",
+                evaluation_dir,
+                interval_seconds=config.evaluation_interval_seconds,
+                target_frame_count=config.target_test_frames,
+            )
+        _verify_fixed_evaluation_set(
+            evaluation_dir,
+            partition_dir / "evaluation_manifest.json",
+            config.target_test_frames,
+            expected_width=config.expected_frame_width,
+            expected_height=config.expected_frame_height,
+        )
+        prelabel_evaluation_set(
+            evaluation_dir,
+            prelabel_model_path,
+            settings,
+            device=config.prelabel_device,
+            expected_model_sha256=prelabel_model_sha256,
+            image_size=config.prelabel_image_size,
+            input_preprocessing=prelabel_contract,
+        )
 
     source_run = prepare_clean_source_run(
         partition_dir / "dataset_manifest.json",
@@ -308,17 +431,38 @@ def advance_local_pipeline(
         quality_runs_root,
         pipeline_id=config.pipeline_id,
         allow_approved_student_data=config.allow_approved_student_data,
+        require_approval_metadata=config.require_session_approval_metadata,
         manual_excluded_frame_ids=config.manual_excluded_frame_ids,
+        target_train_frames=config.target_train_frames,
+        target_val_frames=config.target_val_frames,
     )
-    preprocessing_contract = uniform_pixelation_contract(config.pixelation_block_size)
-    run_prelabel(
-        source_run,
-        config.n1_model_path,
-        settings,
-        device=config.prelabel_device,
-        expected_model_sha256=config.n1_model_sha256,
-        input_preprocessing=preprocessing_contract,
-    )
+    if config.target_train_frames is not None:
+        _verify_selected_split_counts(
+            source_run,
+            target_train_frames=config.target_train_frames,
+            target_val_frames=config.target_val_frames,
+            expected_width=config.expected_frame_width,
+            expected_height=config.expected_frame_height,
+        )
+    if config.prelabel_image_size is None:
+        run_prelabel(
+            source_run,
+            prelabel_model_path,
+            settings,
+            device=config.prelabel_device,
+            expected_model_sha256=prelabel_model_sha256,
+            input_preprocessing=prelabel_contract,
+        )
+    else:
+        run_prelabel(
+            source_run,
+            prelabel_model_path,
+            settings,
+            device=config.prelabel_device,
+            expected_model_sha256=prelabel_model_sha256,
+            image_size=config.prelabel_image_size,
+            input_preprocessing=prelabel_contract,
+        )
     review_dir = prepare_review(
         source_run,
         settings,
@@ -333,13 +477,24 @@ def advance_local_pipeline(
                 status="waiting-for-human-review",
                 artifacts={
                     "review_dir": str(review_dir),
+                    "fixed_test_dir": (
+                        str(evaluation_dir)
+                        if config.target_test_frames is not None
+                        else None
+                    ),
                     "quality_report": str(source_run / "quality-report.json"),
                     "prelabel_receipt": str(source_run / "prelabel.json"),
                 },
                 detail={
                     "review_frame_count": _review_frame_count(review_dir),
-                    "review_model": "N1",
-                    "model_sha256": config.n1_model_sha256,
+                    "review_model": prelabel_model_path.name,
+                    "model_sha256": prelabel_model_sha256,
+                    "prelabel_image_size": config.prelabel_image_size,
+                    "split_targets": {
+                        "train": config.target_train_frames,
+                        "val": config.target_val_frames,
+                        "test": config.target_test_frames,
+                    },
                 },
             )
         if config.reviewer_id is None or config.labelimg_executable is None:
@@ -368,6 +523,7 @@ def advance_local_pipeline(
             operator_id=config.operator_id,
             approved_cohort_policy=config.approved_cohort_policy,
             pixelation_block_size=config.pixelation_block_size,
+            preprocessing_method=config.training_export_preprocessing_method,
         )
     privacy_report = validate_privacy_export(export_dir)
     _verify_export_source(export_dir, dataset_dir)
@@ -383,6 +539,20 @@ def advance_local_pipeline(
             "자동 학습 export에는 train과 val 프레임이 각각 한 장 이상 필요합니다."
         )
     archive_receipt = create_dataset_archive(export_dir, archive_path)
+    frozen_evaluation: dict[str, object] | None = None
+    if config.target_test_frames is not None:
+        if config.reviewer_id is None:
+            raise AutoLabelingError("고정 Test 동결에는 reviewer_id가 필요합니다.")
+        frozen_receipt = evaluation_dir / "evaluation_frozen.json"
+        if not frozen_receipt.exists():
+            freeze_evaluation_set(
+                evaluation_dir,
+                reviewer_id=config.reviewer_id,
+                training_dataset_dir=dataset_dir,
+            )
+        frozen_evaluation = verify_frozen_evaluation_set(evaluation_dir)
+        if frozen_evaluation.get("frame_count") != config.target_test_frames:
+            raise AutoLabelingError("동결된 Test 프레임 수가 설정과 다릅니다.")
     return _write_local_state(
         config,
         status="ready-for-training",
@@ -393,11 +563,20 @@ def advance_local_pipeline(
             "colab_export": str(export_dir),
             "dataset_archive": str(archive_path),
             "archive_receipt": str(archive_receipt),
+            "fixed_test_dir": (
+                str(evaluation_dir) if config.target_test_frames is not None else None
+            ),
+            "fixed_test_receipt": (
+                str(evaluation_dir / "evaluation_frozen.json")
+                if config.target_test_frames is not None
+                else None
+            ),
         },
         detail={
             "dataset": dataset_report,
             "privacy": privacy_report,
-            "model_sha256": config.n1_model_sha256,
+            "fixed_test": frozen_evaluation,
+            "model_sha256": prelabel_model_sha256,
         },
     )
 
@@ -409,7 +588,10 @@ def prepare_clean_source_run(
     *,
     pipeline_id: str,
     allow_approved_student_data: bool,
+    require_approval_metadata: bool = True,
     manual_excluded_frame_ids: tuple[str, ...] = (),
+    target_train_frames: int | None = None,
+    target_val_frames: int | None = None,
 ) -> Path:
     """프레임 추출 후 명백한 손상 프레임을 제외한 불변 파생 run을 만든다."""
 
@@ -419,6 +601,7 @@ def prepare_clean_source_run(
         settings,
         source_runs_root,
         allow_approved_student_data=allow_approved_student_data,
+        require_approval_metadata=require_approval_metadata,
     )
     quality_run_id = f"{pipeline_id}-quality"
     quality_run = quality_runs_root.resolve() / quality_run_id
@@ -456,14 +639,20 @@ def prepare_clean_source_run(
         raise AutoLabelingError(
             f"수동 제외 frame_id를 추출 run에서 찾지 못했습니다: {missing_exclusions}"
         )
+    selected_targets = _allocate_session_frame_targets(
+        eligible_counts,
+        target_train_frames=target_train_frames,
+        target_val_frames=target_val_frames,
+    )
     split_by_session: dict[str, str] = {}
     session_plan: dict[str, PilotSessionPlan] = {}
-    for (session_id, split), count in sorted(eligible_counts.items()):
+    for (session_id, split), _count in sorted(eligible_counts.items()):
         previous = split_by_session.setdefault(session_id, split)
         if previous != split:
             raise AutoLabelingError("같은 세션이 train과 val에 동시에 포함됐습니다.")
-        if count:
-            session_plan[session_id] = PilotSessionPlan(split, count)
+        selected_count = selected_targets.get((session_id, split), 0)
+        if selected_count:
+            session_plan[session_id] = PilotSessionPlan(split, selected_count)
     if not session_plan:
         raise AutoLabelingError("품질 검사를 통과한 프레임이 없습니다.")
     missing_sessions = sorted(all_sessions - set(session_plan))
@@ -482,7 +671,7 @@ def prepare_clean_source_run(
 
 
 def create_dataset_archive(dataset_dir: Path, archive_path: Path) -> Path:
-    """검증된 비식별 데이터셋을 결정적인 ZIP과 해시 영수증으로 묶는다."""
+    """검증된 학습 데이터셋을 결정적인 ZIP과 해시 영수증으로 묶는다."""
 
     source = dataset_dir.resolve(strict=True)
     validate_privacy_export(source)
@@ -516,7 +705,7 @@ def create_dataset_archive(dataset_dir: Path, archive_path: Path) -> Path:
         receipt_path,
         {
             "schema_version": 1,
-            "artifact_type": "deidentified-training-dataset-archive",
+            "artifact_type": "training-dataset-archive",
             "dataset_name": source.name,
             "source_manifest_sha256": source_manifest_sha256,
             "source_privacy_receipt_sha256": source_privacy_sha256,
@@ -597,6 +786,14 @@ def run_training_pipeline(config: TrainingPipelineConfig) -> dict[str, object]:
             device=device,
             image_size=config.image_size,
         )
+    model_contract_path = experiment_dir / "model_contract.json"
+    _write_or_verify_model_contract(
+        model_contract_path,
+        best_weight=best_weight,
+        dataset=dataset,
+        training_receipt=full_receipt,
+        privacy_report=privacy_report,
+    )
     bundle_path = experiment_dir.parent / f"{experiment_dir.name}-result.zip"
     bundle_receipt = _create_training_result_bundle(experiment_dir, bundle_path)
     pipeline_receipt = experiment_dir / "pipeline-training-receipt.json"
@@ -616,6 +813,7 @@ def run_training_pipeline(config: TrainingPipelineConfig) -> dict[str, object]:
             "config": asdict(active),
             "training_receipt_sha256": sha256_file(full_receipt),
             "best_weight_sha256": sha256_file(best_weight),
+            "model_contract_sha256": sha256_file(model_contract_path),
             "threshold_receipt_sha256": sha256_file(threshold_path),
             "result_bundle": str(bundle_path),
             "result_bundle_receipt": str(bundle_receipt),
@@ -628,6 +826,7 @@ def run_training_pipeline(config: TrainingPipelineConfig) -> dict[str, object]:
         "experiment_dir": str(experiment_dir),
         "best_weight": str(best_weight),
         "threshold_receipt": str(threshold_path),
+        "model_contract": str(model_contract_path),
         "result_bundle": str(bundle_path),
         "pipeline_receipt": str(pipeline_receipt),
         "receipts": receipts,
@@ -975,6 +1174,7 @@ def _prepare_run(
     output_root: Path,
     *,
     allow_approved_student_data: bool,
+    require_approval_metadata: bool = True,
 ) -> Path:
     # 테스트에서 고비용 프레임 추출 경계를 교체할 수 있도록 얇게 분리한다.
     from .prepare import prepare_run
@@ -984,6 +1184,7 @@ def _prepare_run(
         settings,
         output_root=output_root,
         allow_approved_student_data=allow_approved_student_data,
+        require_approval_metadata=require_approval_metadata,
     )
 
 
@@ -1057,12 +1258,40 @@ def _verify_threshold_receipt(
         raise AutoLabelingError("validation threshold가 현재 모델·데이터와 다릅니다.")
 
 
+def _write_or_verify_model_contract(
+    path: Path,
+    *,
+    best_weight: Path,
+    dataset: Path,
+    training_receipt: Path,
+    privacy_report: dict[str, Any],
+) -> Path:
+    preprocessing_contract = privacy_report.get("preprocessing_contract")
+    if not isinstance(preprocessing_contract, dict):
+        raise AutoLabelingError("학습 데이터셋의 전처리 계약이 없습니다.")
+    expected = {
+        "schema_version": 1,
+        "model_sha256": sha256_file(best_weight),
+        "preprocessing_contract": preprocessing_contract,
+        "target_class_ids": {"0": "person"},
+        "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
+        "training_receipt_sha256": sha256_file(training_receipt),
+    }
+    if path.exists():
+        if read_json(path) != expected:
+            raise AutoLabelingError("기존 모델 계약이 현재 가중치·데이터와 다릅니다.")
+        return path
+    write_json(path, expected)
+    return path
+
+
 def _create_training_result_bundle(experiment_dir: Path, target: Path) -> Path:
     required_relative_paths = (
         Path("weights/best.pt"),
         Path("weights/last.pt"),
         Path("training_receipt.json"),
         Path("validation_f1_threshold.json"),
+        Path("model_contract.json"),
         Path("results.csv"),
         Path("results.png"),
         Path("args.yaml"),
@@ -1142,6 +1371,15 @@ def _verify_scan_contract(scan_dir: Path, config: LocalPipelineConfig) -> None:
 
 
 def _incomplete_assignment_sessions(path: Path) -> list[str]:
+    required_columns = {
+        "session_id",
+        "role",
+        "approval_reference",
+        "consent_scope",
+        "retention_expires_at",
+        "subject_category",
+    }
+    approval_fields = required_columns - {"session_id", "role"}
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -1149,13 +1387,141 @@ def _incomplete_assignment_sessions(path: Path) -> list[str]:
                 reader.fieldnames
             ):
                 raise AutoLabelingError("session_assignments.csv 필수 열이 없습니다.")
-            return sorted(
-                str(row.get("session_id", "")).strip()
-                for row in reader
-                if not str(row.get("role", "")).strip()
-            )
+            missing_approval_columns = approval_fields - set(reader.fieldnames)
+            incomplete: list[str] = []
+            for row in reader:
+                session_id = str(row.get("session_id", "")).strip()
+                role = str(row.get("role", "")).strip()
+                if not role or (
+                    role != "excluded"
+                    and (
+                        bool(missing_approval_columns)
+                        or any(
+                            not str(row.get(field, "")).strip()
+                            for field in approval_fields
+                        )
+                    )
+                ):
+                    incomplete.append(session_id)
+            return sorted(incomplete)
     except OSError as exc:
         raise AutoLabelingError("session_assignments.csv를 읽을 수 없습니다.") from exc
+
+
+def _verify_scan_video_resolution(
+    scan_dir: Path,
+    report_path: Path,
+    *,
+    expected_width: int,
+    expected_height: int | None,
+) -> None:
+    if expected_height is None:
+        raise AutoLabelingError("expected_frame_height가 필요합니다.")
+    inventory_path = scan_dir / "video_inventory.jsonl"
+    inventory_sha256 = sha256_file(inventory_path)
+    inventory = [
+        record
+        for record in read_jsonl(inventory_path)
+        if record.get("status") == "accepted"
+    ]
+    if report_path.exists():
+        report = read_json(report_path)
+        report_items = report.get("items") if isinstance(report, dict) else None
+        item_by_source = (
+            {
+                str(item.get("source_id", "")): item
+                for item in report_items
+                if isinstance(item, dict)
+            }
+            if isinstance(report_items, list)
+            else {}
+        )
+        if (
+            not isinstance(report, dict)
+            or report.get("status") != "passed"
+            or report.get("inventory_sha256") != inventory_sha256
+            or report.get("expected_width") != expected_width
+            or report.get("expected_height") != expected_height
+            or report.get("video_count") != len(inventory)
+            or len(item_by_source) != len(inventory)
+            or any(
+                (
+                    item_by_source.get(str(record.get("source_id", "")), {}).get(
+                        "source_sha256"
+                    )
+                    != record.get("sha256")
+                    or item_by_source.get(str(record.get("source_id", "")), {}).get(
+                        "width"
+                    )
+                    != expected_width
+                    or item_by_source.get(str(record.get("source_id", "")), {}).get(
+                        "height"
+                    )
+                    != expected_height
+                    or item_by_source.get(str(record.get("source_id", "")), {}).get(
+                        "first_frame_decoded"
+                    )
+                    is not True
+                )
+                for record in inventory
+            )
+        ):
+            raise AutoLabelingError(
+                "기존 원본 해상도 보고서가 현재 스캔·설정과 다릅니다."
+            )
+        return
+
+    items: list[dict[str, object]] = []
+    for record in inventory:
+        video_path = Path(str(record.get("absolute_path", ""))).resolve(strict=True)
+        capture = cv2.VideoCapture(str(video_path))
+        try:
+            if not capture.isOpened():
+                raise AutoLabelingError("원본 영상 스트림을 열 수 없습니다.")
+            width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = float(capture.get(cv2.CAP_PROP_FPS))
+            decoded, first_frame = capture.read()
+            if (
+                width != expected_width
+                or height != expected_height
+                or not decoded
+                or first_frame is None
+                or first_frame.shape[:2] != (expected_height, expected_width)
+                or not (fps > 0)
+            ):
+                raise AutoLabelingError(
+                    f"source_id={record.get('source_id')}: "
+                    "원본 영상 해상도·FPS·첫 프레임 디코딩 계약을 통과하지 못했습니다."
+                )
+            items.append(
+                {
+                    "source_id": record.get("source_id"),
+                    "relative_path": record.get("relative_path"),
+                    "source_sha256": record.get("sha256"),
+                    "width": width,
+                    "height": height,
+                    "fps": round(fps, 6),
+                    "first_frame_decoded": True,
+                }
+            )
+        finally:
+            capture.release()
+    if not items:
+        raise AutoLabelingError("해상도를 검사할 원본 영상이 없습니다.")
+    write_json(
+        report_path,
+        {
+            "schema_version": 1,
+            "status": "passed",
+            "inventory_sha256": inventory_sha256,
+            "expected_width": expected_width,
+            "expected_height": expected_height,
+            "video_count": len(items),
+            "items": items,
+            "created_at": utc_now_iso(),
+        },
+    )
 
 
 def _verify_partition_contract(
@@ -1215,6 +1581,153 @@ def _verify_quality_run(
         verified_frame_image_path(quality_run, frame)
 
 
+def _allocate_session_frame_targets(
+    eligible_counts: dict[tuple[str, str], int],
+    *,
+    target_train_frames: int | None,
+    target_val_frames: int | None,
+) -> dict[tuple[str, str], int]:
+    targets = {"train": target_train_frames, "val": target_val_frames}
+    allocations: dict[tuple[str, str], int] = {}
+    for split, requested_target in targets.items():
+        capacities = {
+            session_id: count
+            for (session_id, candidate_split), count in eligible_counts.items()
+            if candidate_split == split and count > 0
+        }
+        if not capacities:
+            raise AutoLabelingError(f"정상 {split} 프레임이 없습니다.")
+        target = (
+            sum(capacities.values()) if requested_target is None else requested_target
+        )
+        if target > sum(capacities.values()):
+            raise AutoLabelingError(
+                f"정상 {split} 프레임 {sum(capacities.values())}장은 "
+                f"목표 {target}장보다 적습니다."
+            )
+        session_ids = sorted(capacities)
+        if target < len(session_ids):
+            raise AutoLabelingError(
+                f"{split} 목표 프레임 수가 세션 수보다 적습니다. "
+                "모든 세션에서 한 장 이상 선택해야 합니다."
+            )
+        split_allocations = {session_id: 1 for session_id in session_ids}
+        remaining = target - len(session_ids)
+        while remaining:
+            progressed = False
+            for session_id in session_ids:
+                if split_allocations[session_id] >= capacities[session_id]:
+                    continue
+                split_allocations[session_id] += 1
+                remaining -= 1
+                progressed = True
+                if remaining == 0:
+                    break
+            if not progressed:
+                raise AutoLabelingError(f"{split} 프레임 목표 수를 배분할 수 없습니다.")
+        allocations.update(
+            {
+                (session_id, split): count
+                for session_id, count in split_allocations.items()
+            }
+        )
+    return allocations
+
+
+def _verify_selected_split_counts(
+    run_dir: Path,
+    *,
+    target_train_frames: int | None,
+    target_val_frames: int | None,
+    expected_width: int | None,
+    expected_height: int | None,
+) -> None:
+    frames = read_jsonl(run_dir / "frames.jsonl")
+    counts = {
+        split: sum(frame.get("requested_split") == split for frame in frames)
+        for split in ("train", "val")
+    }
+    expected = {"train": target_train_frames, "val": target_val_frames}
+    for split, target in expected.items():
+        if counts[split] < 1:
+            raise AutoLabelingError(f"선택 run에 {split} 프레임이 없습니다.")
+        if target is not None and counts[split] != target:
+            raise AutoLabelingError(f"선택 run의 {split} 프레임 수가 목표와 다릅니다.")
+    session_splits: dict[str, str] = {}
+    for frame in frames:
+        session_id = str(frame.get("session_id", ""))
+        split = str(frame.get("requested_split", ""))
+        previous = session_splits.setdefault(session_id, split)
+        if previous != split:
+            raise AutoLabelingError("선택 run의 같은 세션이 여러 split에 있습니다.")
+        if expected_width is not None and expected_height is not None:
+            image = cv2.imread(str(verified_frame_image_path(run_dir, frame)))
+            if image is None or image.shape[:2] != (expected_height, expected_width):
+                raise AutoLabelingError(
+                    "선택 run 이미지의 해상도가 원본 프레임 계약과 다릅니다."
+                )
+
+
+def _verify_fixed_evaluation_set(
+    evaluation_dir: Path,
+    source_manifest_path: Path,
+    target_frame_count: int,
+    *,
+    expected_width: int | None,
+    expected_height: int | None,
+) -> None:
+    metadata = read_json(evaluation_dir / "evaluation_set.json")
+    records = read_jsonl(evaluation_dir / "evaluation_frames.jsonl")
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("source_manifest_sha256") != sha256_file(source_manifest_path)
+        or metadata.get("target_frame_count") != target_frame_count
+        or metadata.get("frame_count") != target_frame_count
+        or len(records) != target_frame_count
+    ):
+        raise AutoLabelingError(
+            "기존 고정 Test가 현재 manifest 또는 목표 장수와 다릅니다."
+        )
+    frame_ids: set[str] = set()
+    for record in records:
+        frame_id = str(record.get("frame_id", ""))
+        if not frame_id or frame_id in frame_ids:
+            raise AutoLabelingError("고정 Test frame_id가 비었거나 중복됐습니다.")
+        frame_ids.add(frame_id)
+        image_path = evaluation_dir / "images" / f"{frame_id}.jpg"
+        if sha256_file(image_path) != record.get("image_sha256"):
+            raise AutoLabelingError("고정 Test 이미지가 선택 후 변경됐습니다.")
+        if expected_width is not None and expected_height is not None:
+            image = cv2.imread(str(image_path))
+            if image is None or image.shape[:2] != (expected_height, expected_width):
+                raise AutoLabelingError(
+                    "고정 Test 이미지의 해상도가 원본 프레임 계약과 다릅니다."
+                )
+
+
+def _prelabel_model_path(config: LocalPipelineConfig) -> Path:
+    return config.prelabel_model_path or config.n1_model_path
+
+
+def _prelabel_model_sha256(config: LocalPipelineConfig) -> str:
+    value = config.prelabel_model_sha256 or config.n1_model_sha256
+    return _normalized_sha256(value, "prelabel_model_sha256")
+
+
+def _local_preprocessing_contract(
+    method: str,
+    pixelation_block_size: int,
+) -> dict[str, object]:
+    if method == ORIGINAL_FRAME:
+        return original_frame_contract()
+    if method == UNIFORM_FULL_FRAME_PIXELATION:
+        return uniform_pixelation_contract(pixelation_block_size)
+    raise AutoLabelingError(
+        "전처리 방법은 original-frame-v1 또는 "
+        "uniform-full-frame-pixelation-v1이어야 합니다."
+    )
+
+
 def _verify_export_source(export_dir: Path, dataset_dir: Path) -> None:
     receipt = read_json(export_dir / "privacy_receipt.json")
     if not isinstance(receipt, dict) or receipt.get(
@@ -1242,8 +1755,20 @@ def _write_local_state(
         "schema_version": 1,
         "pipeline_id": config.pipeline_id,
         "status": status,
-        "n1_model_sha256": config.n1_model_sha256,
-        "pixelation_block_size": config.pixelation_block_size,
+        "prelabel_model_path": str(_prelabel_model_path(config)),
+        "prelabel_model_sha256": _prelabel_model_sha256(config),
+        "prelabel_image_size": config.prelabel_image_size,
+        "preprocessing_method": config.prelabel_preprocessing_method,
+        "pixelation_block_size": (
+            config.pixelation_block_size
+            if config.prelabel_preprocessing_method == UNIFORM_FULL_FRAME_PIXELATION
+            else None
+        ),
+        "split_targets": {
+            "train": config.target_train_frames,
+            "val": config.target_val_frames,
+            "test": config.target_test_frames,
+        },
         "artifacts": artifacts,
         "detail": detail,
         "updated_at": utc_now_iso(),
@@ -1466,6 +1991,46 @@ def _validate_local_config(config: LocalPipelineConfig) -> None:
             "원본 영상 폴더와 파이프라인 출력 폴더는 분리해야 합니다."
         )
     _normalized_sha256(config.n1_model_sha256, "n1_model_sha256")
+    if config.prelabel_model_path is None and config.prelabel_model_sha256 is not None:
+        raise AutoLabelingError(
+            "prelabel_model_sha256를 쓰려면 prelabel_model_path가 필요합니다."
+        )
+    if config.prelabel_model_path is not None and config.prelabel_model_sha256 is None:
+        raise AutoLabelingError(
+            "prelabel_model_path를 쓰려면 prelabel_model_sha256가 필요합니다."
+        )
+    if config.prelabel_model_sha256 is not None:
+        _normalized_sha256(
+            config.prelabel_model_sha256,
+            "prelabel_model_sha256",
+        )
+    if config.prelabel_image_size is not None and (
+        config.prelabel_image_size < 32 or config.prelabel_image_size % 32 != 0
+    ):
+        raise AutoLabelingError("prelabel_image_size는 32 이상의 32 배수여야 합니다.")
+    _local_preprocessing_contract(
+        config.prelabel_preprocessing_method,
+        config.pixelation_block_size,
+    )
+    _local_preprocessing_contract(
+        config.training_export_preprocessing_method,
+        config.pixelation_block_size,
+    )
+    if (
+        config.prelabel_preprocessing_method
+        != config.training_export_preprocessing_method
+    ):
+        raise AutoLabelingError(
+            "자동 라벨링과 학습 export의 전처리 방법은 같아야 합니다."
+        )
+    if (config.target_train_frames is None) != (config.target_val_frames is None):
+        raise AutoLabelingError(
+            "target_train_frames와 target_val_frames는 함께 지정해야 합니다."
+        )
+    if (config.expected_frame_width is None) != (config.expected_frame_height is None):
+        raise AutoLabelingError(
+            "expected_frame_width와 expected_frame_height는 함께 지정해야 합니다."
+        )
     if not config.operator_id.strip() or not config.approved_cohort_policy.strip():
         raise AutoLabelingError("개인정보 반출 작업자와 승인 정책 참조가 필요합니다.")
     uniform_pixelation_contract(config.pixelation_block_size)
@@ -1478,8 +2043,10 @@ def _validate_training_pipeline_config(config: TrainingPipelineConfig) -> None:
         )
     if SAFE_ID_PATTERN.fullmatch(config.experiment_name) is None:
         raise AutoLabelingError("experiment_name 형식이 올바르지 않습니다.")
-    if Path(config.base_model).name != "yolo11n.pt":
-        raise AutoLabelingError("자동 학습 기준 모델은 yolo11n.pt여야 합니다.")
+    if Path(config.base_model).name not in {"yolo11n.pt", "yolo26n.pt"}:
+        raise AutoLabelingError(
+            "자동 학습 기준 모델은 yolo11n.pt 또는 yolo26n.pt여야 합니다."
+        )
     if config.mode not in {"smoke", "full", "smoke-full", "resume"}:
         raise AutoLabelingError(
             "학습 mode는 smoke/full/smoke-full/resume이어야 합니다."
@@ -1589,6 +2156,12 @@ def _optional_path(value: object) -> Path | None:
     return _path_value(value)
 
 
+def _optional_positive_int(value: object, key: str) -> int | None:
+    if value is None:
+        return None
+    return _int_value(value, key, minimum=1)
+
+
 def _path_value(value: object) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise AutoLabelingError("경로 설정은 비어 있지 않은 문자열이어야 합니다.")
@@ -1601,13 +2174,13 @@ def _model_reference_value(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AutoLabelingError("base_model은 비어 있지 않은 문자열이어야 합니다.")
     text = value.strip()
-    if text == "yolo11n.pt":
+    if text in {"yolo11n.pt", "yolo26n.pt"}:
         return text
     return str(_path_value(text))
 
 
 def _local_base_model_path(reference: str) -> Path | None:
-    if reference == "yolo11n.pt":
+    if reference in {"yolo11n.pt", "yolo26n.pt"}:
         return None
     try:
         path = Path(reference).resolve(strict=True)

@@ -49,6 +49,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 .venv/
+.venv-*/
 venv/
 
 # VSCode 설정

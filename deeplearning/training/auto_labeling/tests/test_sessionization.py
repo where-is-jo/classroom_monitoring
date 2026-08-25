@@ -146,6 +146,39 @@ def test_partition_creates_disjoint_dataset_and_evaluation_manifests(
     )
 
 
+def test_partition_allows_blank_approval_metadata_for_local_prelabel(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "videos"
+    _video(root / "camera-01" / "20260819_090000.mp4", "dataset")
+    _video(root / "camera-01" / "20260820_090000.mp4", "benchmark")
+    scan_dir = scan_video_folder(root, tmp_path / "scan", duration_probe=_probe)
+    assignments = scan_dir / "session_assignments.csv"
+    with assignments.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fields = list(rows[0])
+    rows[0]["role"] = "dataset"
+    rows[0]["requested_split"] = "train"
+    rows[1]["role"] = "benchmark"
+    rows[1]["evaluation_scope"] = "benchmark"
+    with assignments.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    output = partition_sessions(
+        scan_dir,
+        assignments,
+        tmp_path / "partition",
+        require_approval_metadata=False,
+    )
+
+    dataset = read_json(output / "dataset_manifest.json")
+    receipt = read_json(output / "split_receipt.json")
+    assert dataset["sources"][0]["approval_reference"] == ""
+    assert receipt["approval_metadata_required"] is False
+
+
 def test_partition_validation_extension_creates_val_only_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

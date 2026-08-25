@@ -53,6 +53,10 @@ def parse_yolo_file(path: Path) -> list[YoloBox]:
             ) from exc
         box = YoloBox(class_id, center_x, center_y, width, height)
         validate_yolo_box(box, path.name, line_number)
+        if box in boxes:
+            raise AutoLabelingError(
+                f"{path.name} {line_number}번째 bbox가 앞선 bbox와 완전히 중복됐습니다."
+            )
         boxes.append(box)
     return boxes
 

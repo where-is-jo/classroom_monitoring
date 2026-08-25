@@ -26,7 +26,7 @@ def create_server_transfer_bundle(
     *,
     bundle_id: str,
 ) -> Path:
-    """개인정보 원본을 제외한 GPU 서버 전송 목록과 코드 ZIP을 만든다."""
+    """승인된 학습 데이터와 실행 코드의 GPU 서버 전송 목록을 만든다."""
 
     if SAFE_ID_PATTERN.fullmatch(bundle_id) is None:
         raise AutoLabelingError("bundle_id 형식이 올바르지 않습니다.")
@@ -53,7 +53,8 @@ def create_server_transfer_bundle(
     )
     if model_source.name != "yolo11n.pt":
         raise AutoLabelingError("기준 모델 로컬 파일명은 yolo11n.pt여야 합니다.")
-    privacy = _inspect_deidentified_archive(dataset_source)
+    privacy = _inspect_training_archive(dataset_source)
+    original_frames_included = bool(privacy["original_frames_included"])
     entries = _runtime_source_entries(config_source, bundle_id=bundle_id)
 
     target_dir = output_dir.resolve()
@@ -70,7 +71,8 @@ def create_server_transfer_bundle(
             "privacy_boundary": {
                 "raw_video_included": False,
                 "review_frames_included": False,
-                "deidentified_dataset_only": True,
+                "deidentified_dataset_only": not original_frames_included,
+                "approved_original_frames_included": original_frames_included,
                 "dataset_training_compatible": privacy["training_compatible"],
                 "preprocessing_contract": privacy["preprocessing_contract"],
             },
@@ -88,7 +90,11 @@ def create_server_transfer_bundle(
                     "sha256": archive_sha256,
                 },
                 {
-                    "role": "deidentified-dataset",
+                    "role": (
+                        "approved-original-frame-dataset"
+                        if original_frames_included
+                        else "deidentified-dataset"
+                    ),
                     "local_file_name": dataset_source.name,
                     "server_path": str(config["dataset_archive"]),
                     "sha256": dataset_sha256,
@@ -182,7 +188,7 @@ def _verified_config_artifact(
     return actual
 
 
-def _inspect_deidentified_archive(path: Path) -> dict[str, object]:
+def _inspect_training_archive(path: Path) -> dict[str, object]:
     try:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
@@ -222,9 +228,18 @@ def _inspect_deidentified_archive(path: Path) -> dict[str, object]:
     contract = privacy.get("preprocessing_contract")
     if not isinstance(contract, dict):
         raise AutoLabelingError("비식별 전처리 계약이 없습니다.")
+    original_frames_included = contract.get("method") == "original-frame-v1"
+    if original_frames_included and (
+        privacy.get("original_frames_included") is not True
+        or privacy.get("approval_mode") != "approved-student-cohort-policy"
+    ):
+        raise AutoLabelingError(
+            "GPU 서버 원본 프레임 반출에는 승인 정책과 명시적 영수증이 필요합니다."
+        )
     return {
         "training_compatible": True,
         "preprocessing_contract": contract,
+        "original_frames_included": original_frames_included,
     }
 
 

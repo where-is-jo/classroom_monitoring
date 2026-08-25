@@ -35,6 +35,7 @@ from inference.identity_handover import (
     RefreshingIdentityHandoverResultHandler,
 )
 from inference.model import Yolo8nDetector
+from inference.model_contract import verify_person_model_contract
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
 from inference.tracking import ByteTrackConfig, ByteTrackResultHandler
@@ -301,6 +302,12 @@ def build_runner(
             "BYTETRACK_HIGH_CONFIDENCE_THRESHOLD보다 낮아야 합니다."
         )
 
+    # 가중치와 전처리 계약이 다르면 모델을 로딩하기 전에 기동을 거부한다.
+    verify_person_model_contract(
+        inference_settings.model_path,
+        inference_settings.model_contract_path,
+        inference_settings.inference_target_class_ids,
+    )
     # 모델 로딩은 프로세스 시작 시 1회다. 프레임마다 불러오면 추론이 멈춘다.
     detector = Yolo8nDetector(
         model_path=inference_settings.model_path,

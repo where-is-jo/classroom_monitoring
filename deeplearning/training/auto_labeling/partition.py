@@ -27,6 +27,7 @@ def partition_sessions(
     output_dir: Path,
     *,
     allow_approved_student_data: bool = False,
+    require_approval_metadata: bool = True,
 ) -> Path:
     """검토 완료된 세션 배정을 불변 dataset/evaluation manifest로 변환한다."""
 
@@ -77,7 +78,8 @@ def partition_sessions(
         role = assignment["role"]
         if role == "excluded":
             continue
-        _validate_approval(assignment, session_id, allow_approved_student_data)
+        if require_approval_metadata:
+            _validate_approval(assignment, session_id, allow_approved_student_data)
         if assignment["subject_category"] == "student":
             student_sessions.append(session_id)
         records = sources_by_session.get(session_id, [])
@@ -152,6 +154,7 @@ def partition_sessions(
         },
         "student_sessions": sorted(student_sessions),
         "approved_student_flag_used": bool(student_sessions),
+        "approval_metadata_required": require_approval_metadata,
     }
     leak_check = {
         "schema_version": 1,
@@ -201,6 +204,7 @@ def partition_sessions(
                 "colab_export_allowed": False,
                 "reason": "로컬 비식별화 export와 privacy_receipt 검증 후에만 허용",
                 "student_data_present": bool(student_sessions),
+                "approval_metadata_required": require_approval_metadata,
                 "raw_video_export_allowed": False,
             },
         )

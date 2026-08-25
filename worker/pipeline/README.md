@@ -69,6 +69,8 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `person_tracking_sample_interval_frames` (`PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES`) | CCTV 사람 추적 프레임 샘플링 간격 | 기본 4. 20 FPS 입력에서 약 5 FPS. 괄호의 환경변수로 재정의 가능 |
 | `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
 | `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
+| `MODEL_PATH` | 사람 탐지 가중치 | 가중치 파일은 저장소에 커밋하지 않는다 |
+| `MODEL_CONTRACT_PATH` | 가중치 해시·클래스·전처리 계약 JSON | dev/prod 필수. 불일치하면 모델 로딩 전에 종료 |
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
 | `PERSON_TRACKING_CAMERA_IDS` | YOLO·ByteTrack 대상 CCTV camera ID | 비우면 `STREAM_SOURCES`에서 얼굴 전용 camera를 뺀 나머지. 얼굴 전용 목록과 겹치면 기동 실패 |
 | `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | FastAPI 설정을 처음 읽기 전과 장애 시 사용할 정적 초기·fallback 값 |
@@ -158,6 +160,7 @@ curl http://127.0.0.1:9101/metrics | grep classroom_monitoring_
 | --- | --- |
 | 필수 환경변수 없음 | 시작 시점에 변수 이름을 알리고 종료 코드 1 |
 | ultralytics 미설치·가중치 없음 | 무엇을 설치할지 알리고 종료 코드 1 |
+| 모델 해시·클래스·전처리 계약 불일치 | 모델을 로딩하지 않고 종료 코드 1 |
 | 카메라 한 대 연결 실패 | 그 카메라만 재연결을 반복한다. 다른 카메라는 계속 돈다 |
 | 추론 1회 실패 | 스택을 로그로 남기고 다음 프레임으로 넘어간다 |
 | 얼굴 식별 HTTP·응답 실패 | 처리 실패 상태와 빈 관측을 저장하고 CCTV 사람 탐지는 계속한다 |

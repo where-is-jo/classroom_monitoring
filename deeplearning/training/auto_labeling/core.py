@@ -155,6 +155,7 @@ def load_input_manifest(
     *,
     now: datetime | None = None,
     allow_approved_student_data: bool = False,
+    require_approval_metadata: bool = True,
 ) -> InputManifest:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -178,6 +179,7 @@ def load_input_manifest(
             path.parent,
             current_time,
             allow_approved_student_data=allow_approved_student_data,
+            require_approval_metadata=require_approval_metadata,
         )
         for item in raw_sources
     )
@@ -193,26 +195,44 @@ def _parse_source(
     now: datetime,
     *,
     allow_approved_student_data: bool,
+    require_approval_metadata: bool,
 ) -> SourceInput:
     if not isinstance(raw, dict):
         raise AutoLabelingError("sources 항목은 JSON 객체여야 합니다.")
     source_id = _require_safe_id(raw.get("source_id"), "source_id")
     camera_id = _require_safe_id(raw.get("camera_id"), "camera_id")
     session_id = _require_safe_id(raw.get("session_id"), "session_id")
-    approval_reference = _require_text(
+    approval_reference = _optional_text(
         raw.get("approval_reference"), "approval_reference"
     )
-    consent_scope = _require_text(raw.get("consent_scope"), "consent_scope")
-    if consent_scope != REQUIRED_CONSENT_SCOPE:
+    consent_scope = _optional_text(raw.get("consent_scope"), "consent_scope")
+    subject_category = _optional_text(raw.get("subject_category"), "subject_category")
+    retention_text = _optional_text(
+        raw.get("retention_expires_at"), "retention_expires_at"
+    )
+    if require_approval_metadata and not approval_reference:
+        raise AutoLabelingError(
+            "approval_reference은 비어 있지 않은 문자열이어야 합니다."
+        )
+    if require_approval_metadata and not consent_scope:
+        raise AutoLabelingError("consent_scope은 비어 있지 않은 문자열이어야 합니다.")
+    if consent_scope and consent_scope != REQUIRED_CONSENT_SCOPE:
         raise AutoLabelingError(
             f"source_id={source_id}: consent_scope는 {REQUIRED_CONSENT_SCOPE}이어야 합니다."
         )
-    subject_category = _require_text(raw.get("subject_category"), "subject_category")
-    if subject_category not in ALLOWED_SUBJECT_CATEGORIES:
+    if require_approval_metadata and not subject_category:
+        raise AutoLabelingError(
+            "subject_category은 비어 있지 않은 문자열이어야 합니다."
+        )
+    if subject_category and subject_category not in ALLOWED_SUBJECT_CATEGORIES:
         raise AutoLabelingError(
             f"source_id={source_id}: 허용되지 않은 subject_category입니다."
         )
-    if subject_category == "student" and not allow_approved_student_data:
+    if (
+        require_approval_metadata
+        and subject_category == "student"
+        and not allow_approved_student_data
+    ):
         raise AutoLabelingError(
             f"source_id={source_id}: 실제 학생 영상은 "
             "--allow-approved-student-data가 필요합니다."
@@ -228,10 +248,16 @@ def _parse_source(
             f"source_id={source_id}: requested_split은 train 또는 val이어야 합니다."
         )
     captured_at = _parse_aware_datetime(raw.get("captured_at"), "captured_at")
-    retention_expires_at = _parse_aware_datetime(
-        raw.get("retention_expires_at"), "retention_expires_at"
+    if require_approval_metadata and not retention_text:
+        raise AutoLabelingError(
+            "retention_expires_at은 비어 있지 않은 문자열이어야 합니다."
+        )
+    retention_expires_at = (
+        _parse_aware_datetime(retention_text, "retention_expires_at")
+        if retention_text
+        else None
     )
-    if retention_expires_at <= now:
+    if retention_expires_at is not None and retention_expires_at <= now:
         raise AutoLabelingError(f"source_id={source_id}: 보존 만료 시각이 지났습니다.")
     raw_path = _require_text(raw.get("file_path"), "file_path")
     file_path = Path(raw_path)
@@ -252,7 +278,9 @@ def _parse_source(
         file_path=file_path,
         approval_reference=approval_reference,
         consent_scope=consent_scope,
-        retention_expires_at=retention_expires_at.isoformat(),
+        retention_expires_at=(
+            retention_expires_at.isoformat() if retention_expires_at is not None else ""
+        ),
         camera_id=camera_id,
         session_id=session_id,
         captured_at=captured_at.isoformat(),
@@ -274,6 +302,14 @@ def _require_safe_id(value: Any, field_name: str) -> str:
 def _require_text(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AutoLabelingError(f"{field_name}은 비어 있지 않은 문자열이어야 합니다.")
+    return value.strip()
+
+
+def _optional_text(value: Any, field_name: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise AutoLabelingError(f"{field_name}은 문자열이어야 합니다.")
     return value.strip()
 
 

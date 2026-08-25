@@ -8,7 +8,10 @@ import cv2
 
 from .config import InferenceSettings
 from .model import Yolo8nDetector
+from .model_contract import verify_person_model_contract
 from .processor import InferenceProcessor
+
+logger = logging.getLogger(__name__)
 
 
 def _configure_logging() -> None:
@@ -30,14 +33,19 @@ def main() -> int:
 
     image_path = Path(args.image)
     if not image_path.exists():
-        logging.error("이미지 파일을 찾을 수 없습니다: %s", image_path)
+        logger.error("이미지 파일을 찾을 수 없습니다: %s", image_path)
         return 1
 
     frame = cv2.imread(str(image_path))
     if frame is None:
-        logging.error("이미지 파일을 읽을 수 없습니다: %s", image_path)
+        logger.error("이미지 파일을 읽을 수 없습니다: %s", image_path)
         return 1
 
+    verify_person_model_contract(
+        settings.model_path,
+        settings.model_contract_path,
+        settings.inference_target_class_ids,
+    )
     detector = Yolo8nDetector(
         model_path=settings.model_path,
         device=settings.inference_device,
@@ -47,7 +55,7 @@ def main() -> int:
     processor = InferenceProcessor(detector)
 
     result = processor.process(frame)
-    logging.info(
+    logger.info(
         "frame_shape=%s detections=%d",
         result.frame_shape,
         len(result.detections),

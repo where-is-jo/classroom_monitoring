@@ -8,7 +8,11 @@ from pathlib import Path
 
 from .core import load_settings, read_json
 from .errors import AutoLabelingError
-from .evaluation import freeze_evaluation_set, sample_evaluation_frames
+from .evaluation import (
+    freeze_evaluation_set,
+    prelabel_evaluation_set,
+    sample_evaluation_frames,
+)
 from .partition import partition_sessions, partition_validation_extension
 from .pipeline import (
     advance_local_pipeline,
@@ -20,7 +24,12 @@ from .pipeline import (
 )
 from .prelabel import run_prelabel
 from .prepare import prepare_run
-from .preprocessing import uniform_pixelation_contract
+from .preprocessing import (
+    ORIGINAL_FRAME,
+    UNIFORM_FULL_FRAME_PIXELATION,
+    original_frame_contract,
+    uniform_pixelation_contract,
+)
 from .privacy import export_deidentified_dataset, validate_privacy_export
 from .publish import publish_dataset, validate_dataset
 from .review import complete_review, create_calibration, prepare_review
@@ -77,6 +86,19 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation_parser.add_argument("--output-dir", type=Path, required=True)
     evaluation_parser.add_argument("--interval-seconds", type=float, default=5.0)
     evaluation_parser.add_argument("--max-frames-per-video", type=int, default=500)
+    evaluation_parser.add_argument("--target-frame-count", type=int)
+
+    evaluation_prelabel_parser = subparsers.add_parser(
+        "prelabel-evaluation", help="고정 Test에 YOLO 후보 bbox 생성"
+    )
+    evaluation_prelabel_parser.add_argument(
+        "--evaluation-dir", type=Path, required=True
+    )
+    evaluation_prelabel_parser.add_argument("--model-path", type=Path, required=True)
+    evaluation_prelabel_parser.add_argument("--model-sha256")
+    evaluation_prelabel_parser.add_argument("--image-size", type=int)
+    evaluation_prelabel_parser.add_argument("--device", default="cpu")
+    evaluation_prelabel_parser.add_argument("--original-frame", action="store_true")
 
     freeze_parser = subparsers.add_parser(
         "freeze-evaluation", help="수동 검수 평가 세트를 해시로 동결"
@@ -96,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--approved-cohort-policy",
         help="수동 확인 대신 적용할 승인된 학생 집단 정책 참조",
     )
+    export_parser.add_argument(
+        "--preprocessing-method",
+        choices=(UNIFORM_FULL_FRAME_PIXELATION, ORIGINAL_FRAME),
+        default=UNIFORM_FULL_FRAME_PIXELATION,
+    )
 
     privacy_parser = subparsers.add_parser(
         "validate-privacy", help="Colab 반출용 privacy receipt와 파일 검증"
@@ -112,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
     prelabel_parser.add_argument("--model-path", type=Path, required=True)
     prelabel_parser.add_argument("--model-sha256")
     prelabel_parser.add_argument("--pixelation-block-size", type=int)
+    prelabel_parser.add_argument("--original-frame", action="store_true")
+    prelabel_parser.add_argument("--image-size", type=int)
     prelabel_parser.add_argument("--device", default="cpu")
 
     review_parser = subparsers.add_parser(
@@ -146,7 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pipeline_local_parser = subparsers.add_parser(
         "pipeline-local",
-        help="원본 스캔부터 N1 자동 라벨링·비식별 ZIP까지 단계 재개",
+        help="원본 스캔부터 YOLO 자동 라벨링·학습 ZIP까지 단계 재개",
     )
     pipeline_local_parser.add_argument("--config", type=Path, required=True)
     pipeline_local_parser.add_argument(
@@ -232,6 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.output_dir,
                 interval_seconds=args.interval_seconds,
                 max_frames_per_video=args.max_frames_per_video,
+                target_frame_count=args.target_frame_count,
             )
             metadata = read_json(path / "evaluation_set.json")
             _print_result(
@@ -241,6 +271,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "status": "evaluation-sampled",
                 }
             )
+        elif args.command == "prelabel-evaluation":
+            path = prelabel_evaluation_set(
+                args.evaluation_dir,
+                args.model_path,
+                settings,
+                device=args.device,
+                expected_model_sha256=args.model_sha256,
+                image_size=args.image_size,
+                input_preprocessing=(
+                    original_frame_contract() if args.original_frame else None
+                ),
+            )
+            _print_result({"receipt": str(path), "status": "evaluation-prelabeled"})
         elif args.command == "freeze-evaluation":
             path = freeze_evaluation_set(
                 args.evaluation_dir,
@@ -255,6 +298,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 operator_id=args.operator_id,
                 manual_privacy_review_confirmed=args.confirm_manual_privacy_review,
                 approved_cohort_policy=args.approved_cohort_policy,
+                preprocessing_method=args.preprocessing_method,
             )
             _print_result({"export_dir": str(path), "status": "colab-exported"})
         elif args.command == "validate-privacy":
@@ -269,10 +313,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _print_result({"run_dir": str(path), "status": "prepared"})
         elif args.command == "prelabel":
+            if args.original_frame and args.pixelation_block_size is not None:
+                raise AutoLabelingError(
+                    "--original-frame과 --pixelation-block-size를 함께 쓸 수 없습니다."
+                )
             input_preprocessing = (
-                uniform_pixelation_contract(args.pixelation_block_size)
-                if args.pixelation_block_size is not None
-                else None
+                original_frame_contract()
+                if args.original_frame
+                else (
+                    uniform_pixelation_contract(args.pixelation_block_size)
+                    if args.pixelation_block_size is not None
+                    else None
+                )
             )
             path = run_prelabel(
                 args.run_dir,
@@ -280,6 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 settings,
                 device=args.device,
                 expected_model_sha256=args.model_sha256,
+                image_size=args.image_size,
                 input_preprocessing=input_preprocessing,
             )
             _print_result({"candidate_labels": str(path), "status": "prelabeled"})

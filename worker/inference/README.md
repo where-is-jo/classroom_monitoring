@@ -21,6 +21,9 @@ HTTP 계약만 호출한다. 사람 탐지는 아직 `model.py`가 ultralytics�
 `MODEL_PATH`로 지정한 YOLO 가중치로 프레임 한 장을 탐지한다. 사용할 클래스 번호와
 이름은 `INFERENCE_TARGET_CLASS_IDS`로 함께 지정한다. 기본 COCO 호환 설정은 `person`과
 `cell phone`이고, 프로젝트의 사람 전용 학습 모델은 `{"0":"person"}`을 사용한다.
+dev/prod에서는 `MODEL_CONTRACT_PATH`도 필수다. 시작할 때 가중치 SHA-256, 클래스와
+전처리 계약을 먼저 확인하고, 하나라도 다르거나 현재 worker가 구현하지 않은 전처리가
+필수이면 모델을 로딩하지 않고 종료한다. 현재 지원 계약은 `original-frame-v1`뿐이다.
 입력은 두 갈래다.
 
 - **프레임 버퍼** — `stream`이 넣은 최신 프레임을 소비자 루프가 꺼내 쓴다.
@@ -126,7 +129,9 @@ track ID로 덮어쓰지 않는다. 미식별 사람도 `track_id`는 남길 수
 | 결과 전달 방식 | HTTP | `FASTAPI_URL` 설정 시 내부 API로 제한 재시도, 미설정 시 로그 출력 |
 
 **모델 가중치 파일은 저장소에 커밋하지 않는다.** 경로는 `MODEL_PATH`로 주입한다.
-파일이 없으면 ultralytics가 이름을 보고 내려받는다.
+로컬 개발에서 계약을 생략한 경우에만 파일이 없으면 ultralytics가 이름을 보고 내려받을
+수 있다. dev/prod는 학습 결과의 `model_contract.json`을 가중치와 함께 배치하고
+`MODEL_CONTRACT_PATH`로 지정해야 한다.
 
 **모델은 프로세스 시작 시 한 번만 로딩한다.** 프레임마다 불러오면 추론이 멈춘다.
 
@@ -172,6 +177,7 @@ python -m pipeline.main
 | 이름 | 용도 | 비고 |
 | --- | --- | --- |
 | `MODEL_PATH` | 모델 가중치 경로 | 기본 `yolo11m.pt`. GPU 서버는 다른 경로를 쓸 수 있다 |
+| `MODEL_CONTRACT_PATH` | 가중치 해시·클래스·전처리 계약 JSON | dev/prod 필수. 학습 결과의 `model_contract.json` |
 | `INFERENCE_TARGET_CLASS_IDS` | 탐지할 모델 클래스 JSON | 기본 `{"0":"person","67":"cell phone"}`. 사람 전용 학습 모델은 `{"0":"person"}` |
 | `INFERENCE_DEVICE` | 실행 장치 | `cpu` / `cuda`. local은 보통 cpu, dev는 cuda |
 | `OBJECT_STORAGE_BACKEND` | 객체 저장소 종류 | `local` / `minio`. local은 보통 `local` |

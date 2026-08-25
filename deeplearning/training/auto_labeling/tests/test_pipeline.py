@@ -55,6 +55,70 @@ def test_load_local_config_uses_n1_contract_and_training_relative_paths(
     assert config.force_full_review is True
 
 
+def test_load_local_config_supports_original_yolo26_fixed_500_profile(
+    tmp_path: Path,
+) -> None:
+    model = tmp_path / "yolo26n.pt"
+    model.write_bytes(b"yolo26n")
+    config_path = tmp_path / "local.yml"
+    config_path.write_text(
+        "\n".join(
+            (
+                "schema_version: 1",
+                "pipeline_id: person-original-500-v001",
+                f"video_dir: {(tmp_path / 'raw').as_posix()}",
+                f"workspace_dir: {(tmp_path / 'workflow').as_posix()}",
+                "camera_id: camera-01",
+                f"prelabel_model_path: {model.as_posix()}",
+                f"prelabel_model_sha256: {sha256_file(model)}",
+                "prelabel_image_size: 1280",
+                "prelabel_preprocessing_method: original-frame-v1",
+                "training_export_preprocessing_method: original-frame-v1",
+                "target_train_frames: 350",
+                "target_val_frames: 75",
+                "target_test_frames: 75",
+                "require_session_approval_metadata: false",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_local_pipeline_config(config_path)
+
+    assert config.prelabel_model_path == model
+    assert config.prelabel_image_size == 1280
+    assert (
+        config.target_train_frames,
+        config.target_val_frames,
+        config.target_test_frames,
+    ) == (350, 75, 75)
+    assert config.training_export_preprocessing_method == "original-frame-v1"
+    assert config.require_session_approval_metadata is False
+
+
+def test_load_training_config_accepts_managed_yolo26n(tmp_path: Path) -> None:
+    config_path = tmp_path / "training.yml"
+    config_path.write_text(
+        "\n".join(
+            (
+                "schema_version: 1",
+                f"dataset_dir: {(tmp_path / 'dataset').as_posix()}",
+                "dataset_archive: null",
+                f"output_root: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: person-yolo26n-v001",
+                "base_model: yolo26n.pt",
+                "image_size: 1280",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_training_pipeline_config(config_path)
+
+    assert config.base_model == "yolo26n.pt"
+    assert config.image_size == 1280
+
+
 def test_local_pipeline_stops_at_explicit_assignment_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -190,6 +254,13 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
             "status": "valid",
             "training_compatible": True,
             "split_counts": {"train": 20, "val": 5},
+            "preprocessing_contract": {
+                "schema_version": 1,
+                "method": "original-frame-v1",
+                "label_derived": False,
+                "training_compatible": True,
+                "inference_preprocessing_required": False,
+            },
         },
     )
     monkeypatch.setattr(pipeline, "_verify_export_source", lambda *_args: None)
@@ -315,6 +386,13 @@ def test_training_pipeline_runs_smoke_then_full_and_bundles_results(
             "status": "valid",
             "training_compatible": True,
             "split_counts": {"train": 20, "val": 5},
+            "preprocessing_contract": {
+                "schema_version": 1,
+                "method": "original-frame-v1",
+                "label_derived": False,
+                "training_compatible": True,
+                "inference_preprocessing_required": False,
+            },
         },
     )
 
@@ -384,6 +462,16 @@ def test_training_pipeline_runs_smoke_then_full_and_bundles_results(
     ]
     assert result["status"] == "training-complete"
     assert Path(str(result["best_weight"])).is_file()
+    model_contract = json.loads(
+        Path(str(result["model_contract"])).read_text(encoding="utf-8")
+    )
+    assert model_contract["model_sha256"] == sha256_file(
+        Path(str(result["best_weight"]))
+    )
+    assert (
+        model_contract["preprocessing_contract"]["inference_preprocessing_required"]
+        is False
+    )
     assert Path(str(result["result_bundle"])).is_file()
 
 

@@ -37,6 +37,12 @@ def _dataset(tmp_path: Path) -> Path:
                         "split": "train",
                         "image_path": "images/train/frame-001.jpg",
                         "label_path": "labels/train/frame-001.txt",
+                        "approved_student_data": True,
+                        "approval_type": "human-reviewed",
+                        "approval_reference": "approved-cohort-v1",
+                        "consent_scope": "person-detection-training",
+                        "subject_category": "student",
+                        "retention_expires_at": "2099-12-31T23:59:59+09:00",
                     }
                 ],
             }
@@ -120,6 +126,39 @@ def test_colab_export_accepts_approved_student_cohort_policy(
     assert report["approval_mode"] == "approved-student-cohort-policy"
     assert receipt["manual_privacy_review_confirmed"] is False
     assert receipt["approval_reference"] == "ai-student-cohort-person-detection-v1"
+
+
+def test_approved_original_export_preserves_image_and_declares_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _dataset(tmp_path)
+    source_image = dataset / "images" / "train" / "frame-001.jpg"
+    monkeypatch.setattr(
+        privacy,
+        "validate_dataset",
+        lambda path: {"dataset_version": "person-v0001", "frame_count": 1},
+    )
+
+    export = privacy.export_deidentified_dataset(
+        dataset,
+        tmp_path / "original-export",
+        operator_id="operator-001",
+        approved_cohort_policy="ai-student-cohort-person-detection-v1",
+        preprocessing_method="original-frame-v1",
+    )
+    report = privacy.validate_privacy_export(export)
+    receipt = json.loads((export / "privacy_receipt.json").read_text(encoding="utf-8"))
+    exported_image = export / "images" / "train" / "frame-001.jpg"
+
+    assert exported_image.read_bytes() == source_image.read_bytes()
+    assert receipt["original_frames_included"] is True
+    assert report["preprocessing_contract"] == {
+        "schema_version": 1,
+        "method": "original-frame-v1",
+        "label_derived": False,
+        "training_compatible": True,
+        "inference_preprocessing_required": False,
+    }
 
 
 def test_extend_colab_export_adds_reviewed_val_and_applies_exclusions(
