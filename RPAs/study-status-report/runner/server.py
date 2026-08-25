@@ -47,6 +47,11 @@ DEFAULT_MESSAGE_COOLDOWN_SECONDS = float(os.environ.get("RUNNER_MESSAGE_COOLDOWN
 _last_message_at: dict[str, datetime] = {}
 _message_lock = Lock()
 
+# **개발용 스위치.** 켜면 Slack 전송만 건너뛴다 — 상태 수집도, 관리 문서 생성도,
+# 실행 이력도 그대로 남는다. 워크플로를 통째로 끄면(toggle_workflow.py --off)
+# 수집까지 멈추므로, 채널만 조용히 하고 싶을 때 이쪽을 쓴다.
+DRY_RUN = os.environ.get("RPA_DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
+
 
 class RunnerError(Exception):
     """요청이 잘못됐을 때. 스크립트 실행 실패와 구분한다."""
@@ -114,6 +119,14 @@ def _state_changes_without_names(events_base64: str) -> list[dict[str, object]]:
         for event in events
         if isinstance(event, dict)
     ]
+
+
+def _skipped_by_dry_run(action: str) -> dict[str, object] | None:
+    """드라이런이면 전송을 건너뛴 결과를 돌려준다. 아니면 None."""
+    if not DRY_RUN:
+        return None
+    logger.info("RPA_DRY_RUN=true — %s 전송을 건너뜁니다.", action)
+    return {"ok": True, "returncode": 0, "stdout": f"DRY RUN: {action} 전송을 건너뜀", "stderr": "", "dry_run": True}
 
 
 def _run(script_name: str, args: list[str]) -> dict[str, object]:
@@ -184,7 +197,7 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
         "--title", _require(payload, "title"),
         "--comment", _require(payload, "comment"),
     ]
-    result = _run("slack_upload_file.py", args)
+    result = _skipped_by_dry_run("slack_upload") or _run("slack_upload_file.py", args)
     # 업로드에 실패해도 만들어 둔 파일은 지우지 않는다. 관리자가 그대로 올릴 수
     # 있어야 하기 때문이다(README 실패 조건: "파일은 보존하고 실패 로그를 남긴다").
     append_run_log(
@@ -224,7 +237,7 @@ def handle_slack_message(payload: dict[str, object]) -> dict[str, object]:
         # 전송 전에 기록한다. 전송이 느릴 때 다음 주기가 겹쳐 두 번 나가지 않게 한다.
         _last_message_at[key] = now
 
-    result = _run("slack_upload_file.py", ["--message-only", "--comment", text])
+    result = _skipped_by_dry_run("slack_message") or _run("slack_upload_file.py", ["--message-only", "--comment", text])
     if not result["ok"]:
         # 실패했으면 쿨다운을 풀어 다음 주기에 다시 시도할 수 있게 한다.
         with _message_lock:
@@ -260,7 +273,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler의 이름 규칙이다.
         if self.path == "/health":
-            self._send(200, {"ok": True, "repo_dir": str(REPO_DIR)})
+            # dry_run을 함께 내보낸다. 켜 둔 것을 잊고 왜 Slack이 안 오는지
+            # 찾는 일이 없도록 상태를 한눈에 보이게 한다.
+            self._send(200, {"ok": True, "repo_dir": str(REPO_DIR), "dry_run": DRY_RUN})
             return
         self._send(404, {"ok": False, "error": "not found"})
 
