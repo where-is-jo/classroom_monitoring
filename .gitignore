@@ -73,6 +73,12 @@ worker/**/data/
 webapps/fastapi/local_face_data/
 deeplearning/.models/
 
+# study-status-report 실행 산출물 — 관리 문서에 학생 실명이 들어간다.
+# RPAs/README.md의 개인정보 규칙에 따라 저장소에 남기지 않는다.
+# 검증용 샘플 하나만 예외다 — 합성 이벤트로 만든 것이라 실제 학생이 없다.
+RPAs/study-status-report/reports/*.xlsx
+!RPAs/study-status-report/reports/study_status_management_sample.xlsx
+
 # 모델 가중치 — 대용량이고 저장소가 아니라 실행 환경에서 관리한다.
 # ultralytics는 MODEL_PATH의 이름을 보고 실행 위치에 자동으로 내려받으므로
 # 확장자 기준으로 막는다. 경로는 MODEL_PATH 환경변수로 주입한다.
