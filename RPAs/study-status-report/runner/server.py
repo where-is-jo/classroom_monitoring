@@ -22,6 +22,7 @@ import sys
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("rpa-runner")
@@ -29,6 +30,9 @@ logger = logging.getLogger("rpa-runner")
 REPO_DIR = Path(os.environ.get("REPO_DIR", "/repo")).resolve()
 SCRIPT_DIR = REPO_DIR / "RPAs" / "study-status-report" / "scripts"
 LOG_DIR = REPO_DIR / "RPAs" / "study-status-report" / "logs"
+# 워크북을 쓰고 Slack에 올리는 대상은 이 디렉터리 안으로 한정한다.
+# 저장소 전체를 허용하면 같은 저장소에 있는 .env를 Slack에 올릴 수 있다.
+REPORT_DIR = REPO_DIR / "RPAs" / "study-status-report" / "reports"
 LISTEN_PORT = int(os.environ.get("RUNNER_PORT", "8099"))
 # 워크북 생성은 이벤트가 많으면 수 초가 걸리고, Slack 업로드는 외부 호출이다.
 # 무한정 매달리지 않도록 상한을 둔다.
@@ -36,21 +40,29 @@ COMMAND_TIMEOUT_SECONDS = float(os.environ.get("RUNNER_TIMEOUT_SECONDS", "120"))
 
 MAX_BODY_BYTES = 8 * 1024 * 1024  # 이벤트 base64가 커질 수 있어 넉넉히 잡는다.
 
+# 같은 사유의 오류 알림을 다시 보내기까지 기다리는 시간. 시간표가 없는 상태는
+# 사람이 고칠 때까지 이어지므로, 5분마다 알리면 채널이 묻힌다. 반나절에 한 번이면
+# 놓치지 않으면서 쌓이지도 않는다.
+DEFAULT_MESSAGE_COOLDOWN_SECONDS = float(os.environ.get("RUNNER_MESSAGE_COOLDOWN_SECONDS", 6 * 60 * 60))
+_last_message_at: dict[str, datetime] = {}
+_message_lock = Lock()
+
 
 class RunnerError(Exception):
     """요청이 잘못됐을 때. 스크립트 실행 실패와 구분한다."""
 
 
-def _resolve_inside_repo(raw_path: str) -> Path:
-    """저장소 밖 경로를 쓰지 못하게 막는다.
+def _resolve_inside(base: Path, raw_path: str) -> Path:
+    """``base`` 밖 경로를 쓰지 못하게 막는다.
 
-    경로가 n8n 워크플로에서 넘어오므로, 실수든 아니든 저장소 밖에 파일을 쓰거나
-    읽는 요청은 거부한다.
+    경로가 n8n 워크플로에서 넘어온다. **저장소 안이라는 조건만으로는 부족하다** —
+    같은 저장소에 Slack 토큰이 든 ``.env``가 있어서, 저장소 전체를 허용하면 그
+    파일을 Slack 채널에 올리라고 시킬 수 있다. 그래서 산출물 디렉터리로 좁힌다.
     """
     candidate = Path(raw_path)
     resolved = (candidate if candidate.is_absolute() else REPO_DIR / candidate).resolve()
-    if resolved != REPO_DIR and REPO_DIR not in resolved.parents:
-        raise RunnerError(f"저장소 밖 경로는 사용할 수 없습니다: {raw_path}")
+    if resolved != base and base not in resolved.parents:
+        raise RunnerError(f"허용되지 않은 경로입니다: {raw_path}")
     return resolved
 
 
@@ -129,7 +141,7 @@ def _run(script_name: str, args: list[str]) -> dict[str, object]:
 
 def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
     """관리 문서(.xlsx)를 만든다."""
-    out_path = _resolve_inside_repo(_require(payload, "out"))
+    out_path = _resolve_inside(REPORT_DIR, _require(payload, "out"))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     events_base64 = _require(payload, "events_base64")
 
@@ -159,10 +171,11 @@ def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
 def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
     """관리 문서를 Slack 채널에 올린다.
 
-    토큰과 채널 ID는 이 컨테이너의 환경변수로 주입된다 — 요청 본문으로 받지 않는다.
+    토큰과 채널 ID는 요청 본문으로 받지 않는다 — 마운트된
+    ``RPAs/study-status-report/.env``를 ``slack_upload_file.py``가 직접 읽는다.
     n8n 워크플로나 실행 이력에 비밀값이 남지 않게 하려는 것이다.
     """
-    file_path = _resolve_inside_repo(_require(payload, "file"))
+    file_path = _resolve_inside(REPORT_DIR, _require(payload, "file"))
     if not file_path.exists():
         raise RunnerError(f"업로드할 파일이 없습니다: {file_path}")
 
@@ -186,14 +199,41 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
 
 
 def handle_slack_message(payload: dict[str, object]) -> dict[str, object]:
-    """첨부 없이 텍스트만 보낸다. 시간표를 읽지 못한 경우의 오류 알림에 쓴다."""
+    """첨부 없이 텍스트만 보낸다. 시간표를 읽지 못한 경우의 오류 알림에 쓴다.
+
+    **같은 사유는 쿨다운 동안 한 번만 보낸다.** 시간표가 없는 상태는 사람이 파일을
+    둘 때까지 이어지는데, 워크플로는 5분마다 도는 탓에 그대로 두면 하루 수백 건이
+    채널에 쌓인다. 알림이 묻히면 정작 봐야 할 때 못 본다.
+
+    쿨다운은 메모리에만 둔다. 컨테이너를 다시 띄우면 한 번 더 나가는데, 재기동은
+    사람이 손댄 시점이라 상태를 다시 알리는 편이 낫다.
+    """
     text = _require(payload, "text")
+    reason = payload.get("reason")
+    cooldown = payload.get("cooldown_seconds", DEFAULT_MESSAGE_COOLDOWN_SECONDS)
+    cooldown = float(cooldown) if isinstance(cooldown, int | float) else DEFAULT_MESSAGE_COOLDOWN_SECONDS
+
+    key = str(reason) if reason else text
+    now = datetime.now(UTC)
+    with _message_lock:
+        last_sent = _last_message_at.get(key)
+        if last_sent is not None and (now - last_sent).total_seconds() < cooldown:
+            remaining = int(cooldown - (now - last_sent).total_seconds())
+            logger.info("reason=%s 쿨다운 중이라 알림을 건너뜁니다(%s초 남음).", key, remaining)
+            return {"ok": True, "skipped": True, "reason": "cooldown", "retry_after_seconds": remaining}
+        # 전송 전에 기록한다. 전송이 느릴 때 다음 주기가 겹쳐 두 번 나가지 않게 한다.
+        _last_message_at[key] = now
+
     result = _run("slack_upload_file.py", ["--message-only", "--comment", text])
+    if not result["ok"]:
+        # 실패했으면 쿨다운을 풀어 다음 주기에 다시 시도할 수 있게 한다.
+        with _message_lock:
+            _last_message_at.pop(key, None)
     append_run_log(
         {
             "action": "slack_message",
             "ok": result["ok"],
-            "reason": payload.get("reason"),
+            "reason": reason,
             "error": result["stderr"] or None if not result["ok"] else None,
         }
     )
