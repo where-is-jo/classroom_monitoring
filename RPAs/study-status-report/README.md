@@ -227,6 +227,7 @@ n8n → 시간표 읽기 → 구간 판정 → fastapi student-states → 상태
 | 확인한 것 | 증상 | 반영한 설정 |
 | --- | --- | --- |
 | 컨테이너 시계가 UTC | 시간표가 9시간 어긋나 공부 시간에 안 걸린다 | `TZ`, `GENERIC_TIMEZONE`을 `Asia/Seoul`로 |
+| **Code 노드가 `TZ`를 따르지 않는다** | 위 설정을 줘도 `new Date()`가 `GMT+0000`을 낸다. n8n 2.x가 Code 노드를 별도 러너 프로세스에서 돌리는데 그쪽이 `TZ`를 물려받지 않는다 | 컨테이너 설정이 아니라 **코드에서 KST로 고정**했다(`Parse Schedule`, `Build Daily Report`). 실행 환경이 무엇이든 같은 결과가 나온다 |
 | Code 노드의 `$env` 접근이 기본 차단 | `access to env vars denied`로 워크플로가 멈춘다 | `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` |
 | 파일 노드의 경로 접근이 기본 차단 | 시간표 읽기가 `Access to the file is not allowed.`로 실패 | `N8N_RESTRICT_FILE_ACCESS_TO=/repo/individual_tasks` |
 | 바이너리가 파일시스템에 저장됨 | 항목에 13바이트 참조만 실려 와 시간표 내용을 파싱할 수 없다 | `N8N_DEFAULT_BINARY_DATA_MODE=default` |
