@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import verify_face_handover_runtime as runtime_module
 from verify_face_handover_runtime import (
+    FASTAPI_CONTRACT_PROBE_CODE,
+    FASTAPI_ENTRY_EVENT_PROBE_CODE,
     WORKER_METRICS_PROBE_CODE,
     RuntimeVerifier,
     metric_sum,
@@ -60,6 +62,13 @@ def test_worker_metrics_probe는_python_c에서_다시_파싱할_수_있다() ->
     """바깥 문자열 escape가 내부 `python -c` 문법을 깨뜨리지 않아야 한다."""
     compile(WORKER_METRICS_PROBE_CODE, "<worker-metrics-probe>", "exec")
     assert 'print("__FACE_CAMERAS__="' in WORKER_METRICS_PROBE_CODE
+    assert "FASTAPI_URL" not in WORKER_METRICS_PROBE_CODE
+    assert "/entry-identity-events" not in WORKER_METRICS_PROBE_CODE
+
+
+def test_FastAPI_probe는_python_c에서_다시_파싱할_수_있다() -> None:
+    compile(FASTAPI_CONTRACT_PROBE_CODE, "<fastapi-contract-probe>", "exec")
+    compile(FASTAPI_ENTRY_EVENT_PROBE_CODE, "<entry-event-probe>", "exec")
 
 
 def install_docker_fake(
@@ -80,11 +89,9 @@ def install_docker_fake(
             else:
                 output = "deep:test" if command[-1] == "deep-id" else "worker:test"
         elif "exec" in command and "/metrics" in command[-1]:
-            output = (
-                metrics
-                + "\n__FACE_CAMERAS__=entry-camera"
-                + "\n__ENTRY_EVENTS__=1"
-            )
+            output = metrics + "\n__FACE_CAMERAS__=entry-camera"
+        elif "exec" in command and "/entry-identity-events" in command[-1]:
+            output = "1"
         elif "exec" in command:
             output = "ok"
         else:  # pragma: no cover - 새 Docker 호출이 추가되면 테스트가 알려준다.
@@ -102,6 +109,7 @@ def test_실행_이미지_HTTP_CUDA_live_인계가_모두_있으면_통과한다
 
     verifier.verify_containers()
     verifier.verify_network_and_gpu()
+    verifier.verify_fastapi_contract(required=True)
     verifier.verify_metrics(require_live_handoff=True)
 
     assert verifier.errors == []
@@ -132,10 +140,17 @@ def test_저장된_입구_이벤트가_아직_없으면_실패_이유를_남긴�
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         completed = original_run(command, **kwargs)
+        if "exec" in command and "/entry-identity-events" in command[-1]:
+            return subprocess.CompletedProcess(
+                command,
+                completed.returncode,
+                stdout="0",
+                stderr=completed.stderr,
+            )
         return subprocess.CompletedProcess(
             command,
             completed.returncode,
-            stdout=completed.stdout.replace("__ENTRY_EVENTS__=1", "__ENTRY_EVENTS__=0"),
+            stdout=completed.stdout,
             stderr=completed.stderr,
         )
 
@@ -144,7 +159,9 @@ def test_저장된_입구_이벤트가_아직_없으면_실패_이유를_남긴�
 
     verifier.verify_metrics(require_live_handoff=True)
 
-    assert "FastAPI에서 저장된 입구 얼굴 이벤트를 조회하지 못했습니다." in verifier.errors
+    assert (
+        "FastAPI에서 저장된 입구 얼굴 이벤트를 조회하지 못했습니다." in verifier.errors
+    )
 
 
 def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
@@ -158,11 +175,7 @@ def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
         attempts += 1
         if attempts < 3:
             raise subprocess.CalledProcessError(1, command)
-        output = (
-            METRICS
-            + "\n__FACE_CAMERAS__=entry-camera"
-            + "\n__ENTRY_EVENTS__=1"
-        )
+        output = METRICS + "\n__FACE_CAMERAS__=entry-camera"
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 
     monkeypatch.setattr(runtime_module.subprocess, "run", run)
@@ -172,12 +185,11 @@ def test_worker_metrics가_늦게_열리면_준비될_때까지_재시도한다(
         worker_readiness_timeout_seconds=30,
     )
 
-    metrics, camera_ids, stored_event_count = verifier.worker_metrics()
+    metrics, camera_ids = verifier.worker_metrics()
 
     assert attempts == 3
     assert metrics.strip() == METRICS.strip()
     assert camera_ids == {"entry-camera"}
-    assert stored_event_count == 1
     assert verifier.errors == []
 
 
@@ -194,14 +206,49 @@ def test_worker_metrics가_제한_시간_안에_열리지_않으면_실패한다
         worker_readiness_timeout_seconds=0,
     )
 
-    metrics, camera_ids, stored_event_count = verifier.worker_metrics()
+    metrics, camera_ids = verifier.worker_metrics()
 
     assert metrics == ""
     assert camera_ids == set()
-    assert stored_event_count == 0
     assert verifier.errors == [
         "worker /metrics가 0초 안에 준비되지 않았습니다. (1회 시도)"
     ]
+
+
+def test_원격_FastAPI_계약_실패는_기본_GPU_배포를_막지_않는다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        if "exec" in command and command[-1] == FASTAPI_CONTRACT_PROBE_CODE:
+            raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(runtime_module.subprocess, "run", run)
+    verifier = RuntimeVerifier(tmp_path / "compose.yml")
+
+    verifier.verify_fastapi_contract(required=False)
+
+    assert verifier.errors == []
+    assert verifier.warnings == [
+        "원격 FastAPI HTTP 계약을 확인하지 못했습니다. GPU 서비스 배포는 계속합니다."
+    ]
+
+
+def test_live_인계_검증에서는_원격_FastAPI_계약이_필수다(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(runtime_module.subprocess, "run", run)
+    verifier = RuntimeVerifier(tmp_path / "compose.yml")
+
+    verifier.verify_fastapi_contract(required=True)
+
+    assert verifier.errors == ["원격 FastAPI HTTP 계약을 확인하지 못했습니다."]
+    assert verifier.warnings == []
 
 
 def test_GPU_배포_workflow가_재기동_후_runtime을_검증한다() -> None:

@@ -375,6 +375,12 @@ ArcFace metadata가 일치하는지까지 확인한다. 그래서 worker는 deep
 런타임 검증도 자동 실행한다. 실패하면 설정과 두 `:latest` 태그를 모두 이전 상태로
 되돌린다.
 
+기본 배포 검증의 필수 범위는 GPU 서버 안의 deeplearning 계약·CUDA·worker `/metrics`다.
+개인 PC의 FastAPI는 노트북이 꺼져 있거나 새 `:develop` 이미지를 아직 재적용하지 않았을
+수 있으므로 계약 불일치는 경고만 남기고 GPU 스택을 롤백하지 않는다. 두 호스트를 모두
+올린 뒤 `--require-live-handoff`를 주면 FastAPI의 신원 이벤트 API 계약과 실제 저장 이벤트
+조회도 필수로 검증한다.
+
 ### 4. 실제 인계 확인
 
 1. FastAPI `/identity-handover`에서 `camera-01 → classroom-cctv` route와 실제 문 바닥
