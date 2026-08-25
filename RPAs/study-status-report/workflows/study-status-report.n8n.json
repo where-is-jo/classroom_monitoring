@@ -38,7 +38,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "5 22 * * *"
+              "expression": "5 18 * * *"
             }
           ]
         }
@@ -501,7 +501,8 @@
   },
   "pinData": {},
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
   },
   "staticData": null,
   "tags": [
