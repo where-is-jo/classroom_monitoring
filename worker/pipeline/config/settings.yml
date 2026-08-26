@@ -21,8 +21,10 @@ person_tracking_sample_interval_frames: 4
 # Atlas 왕복 5~6회), 그 대기 때문에 들어온 프레임의 73%를 버렸다. 근거는
 # worker/inference/dispatch.py의 모듈 주석에 있다.
 result_dispatch_enabled: true
-# 전송이 밀렸을 때 들고 있을 최대 건수. 넘치면 오래된 것부터 버린다.
+# 전송이 밀렸을 때 들고 있을 최대 건수. 카메라마다 최신 하나만 들고 있는다.
 result_dispatch_queue_maxsize: 32
+# 카메라 하나를 이 간격보다 자주 보내지 않는다. 추론 주기(5FPS)와 전송 주기를 나눈다.
+result_dispatch_min_interval_seconds: 1.0
 result_dispatch_close_timeout_seconds: 5.0
 
 # 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의

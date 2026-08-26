@@ -45,6 +45,7 @@ __all__ = [
     "PERSON_TRACKS_CREATED_TOTAL",
     "PERSON_TRACKS_EXPIRED_TOTAL",
     "PERSON_TRACK_LIFETIME_FRAMES",
+    "RESULT_DISPATCH_COALESCED_TOTAL",
     "RESULT_DISPATCH_DROPPED_TOTAL",
     "RESULT_DISPATCH_DURATION_SECONDS",
     "RESULT_DISPATCH_FAILED_TOTAL",
@@ -173,11 +174,19 @@ RESULT_DISPATCH_QUEUE_DEPTH = Gauge(
     labelnames=("channel",),
 )
 
-# 큐가 가득 차 버린 결과 수. **프레임 버퍼의 dropped와 뜻이 같다** — 밀린 것을
-# 붙들고 있는 것보다 최신을 보내는 편이 실시간 파이프라인에 맞다.
+# 큐가 가득 차 버린 결과 수. 카메라 수가 큐 크기를 넘는 구성에서만 오른다.
 RESULT_DISPATCH_DROPPED_TOTAL = Counter(
     f"{METRIC_PREFIX}result_dispatch_dropped_total",
     "전송 큐가 가득 차 버린 결과 수",
+    labelnames=("channel",),
+)
+
+# 같은 카메라의 더 새로운 결과로 덮인 수. **버린 것과 구분해서 센다** — 이쪽은
+# 정상 동작이다. 전송이 생산보다 느릴 때 지난 상태를 뒤늦게 보내는 대신 최신으로
+# 갈아끼운 횟수이며, 값이 높다는 것은 전송 주기가 생산 주기보다 길다는 뜻이다.
+RESULT_DISPATCH_COALESCED_TOTAL = Counter(
+    f"{METRIC_PREFIX}result_dispatch_coalesced_total",
+    "더 새로운 결과로 덮여 전송하지 않은 결과 수",
     labelnames=("channel",),
 )
 

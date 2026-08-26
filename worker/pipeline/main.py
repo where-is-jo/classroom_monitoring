@@ -146,6 +146,7 @@ def build_result_handlers(
     classroom_camera_ids: frozenset[str] = frozenset(),
     result_dispatch_enabled: bool = False,
     result_dispatch_queue_maxsize: int = 32,
+    result_dispatch_min_interval_seconds: float = 0.0,
     result_dispatch_close_timeout_seconds: float = 5.0,
 ) -> tuple[ResultHandler, EntryResultHandler | None, tuple[ResultDispatcher, ...]]:
     """CCTV 탐지와 입구 얼굴 관측의 서로 다른 결과 경계를 조립한다.
@@ -171,14 +172,16 @@ def build_result_handlers(
             # **여기가 소비자 스레드와 네트워크의 경계다.** 아래(전송·스냅샷)는 전용
             # 스레드가, 위(ByteTrack·신원 인계)는 소비자 스레드가 맡는다.
             logger.info(
-                "탐지 결과 전송을 별도 스레드로 분리한다. 큐 %d건, 넘치면 오래된 것을 버린다.",
+                "탐지 결과 전송을 별도 스레드로 분리한다. 큐 %d건, 카메라당 최소 간격 %.2f초.",
                 result_dispatch_queue_maxsize,
+                result_dispatch_min_interval_seconds,
             )
             detection_dispatcher: AsyncResultDispatcher[InferenceResult] = (
                 AsyncResultDispatcher(
                     handler,
                     channel="detection",
                     maxsize=result_dispatch_queue_maxsize,
+                    min_interval_seconds=result_dispatch_min_interval_seconds,
                     close_timeout_seconds=result_dispatch_close_timeout_seconds,
                 )
             )
@@ -260,6 +263,7 @@ def build_result_handlers(
                     ),
                     channel="entry",
                     maxsize=result_dispatch_queue_maxsize,
+                    min_interval_seconds=result_dispatch_min_interval_seconds,
                     close_timeout_seconds=result_dispatch_close_timeout_seconds,
                 )
             )
@@ -477,6 +481,9 @@ def build_runner(
         classroom_camera_ids=tracking_camera_ids,
         result_dispatch_enabled=pipeline_settings.result_dispatch_enabled,
         result_dispatch_queue_maxsize=pipeline_settings.result_dispatch_queue_maxsize,
+        result_dispatch_min_interval_seconds=(
+            pipeline_settings.result_dispatch_min_interval_seconds
+        ),
         result_dispatch_close_timeout_seconds=(
             pipeline_settings.result_dispatch_close_timeout_seconds
         ),
