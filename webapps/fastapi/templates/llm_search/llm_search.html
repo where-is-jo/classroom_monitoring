@@ -34,23 +34,29 @@
 {# **POST로 보낸다.** GET이면 질문이 주소창에 남아 방문 기록·북마크·접근 로그에
    그대로 쌓인다. 이 기능의 질문에는 사람 이름과 찾는 시각이 담긴다(router.py). #}
 <form class="filter-bar filter-bar--query" method="post" action="/llm-search">
-  <label for="question">질문</label>
-  <input
-    id="question"
-    name="question"
-    type="text"
-    maxlength="200"
-    value="{{ question }}"
-    placeholder="예) 어제 16시 30분부터 17시 사이에 A101에 누가 있었어?">
+  {# 질문과 정렬을 **줄로 나눈다.** 한 줄에 두면 질문 입력이 좁아지는 데다,
+     정렬이 질문의 일부처럼 붙어 읽힌다. #}
+  <div class="filter-bar__row">
+    <label for="question">질문</label>
+    <input
+      id="question"
+      name="question"
+      type="text"
+      maxlength="200"
+      value="{{ question }}"
+      placeholder="예) 어제 16시 30분부터 17시 사이에 A101에 누가 있었어?">
+    <button type="submit">검색</button>
+  </div>
   {# 정렬은 화면에서 뒤집는 것이 아니라 **조회에 함께 들어간다.** 상한이 있어서
      최신순은 가장 최근 건을, 오래된순은 가장 오래된 건을 골라 온다. 받아 온 뒤에
      뒤집기만 하면 "오래된 순"을 골라도 최근 것들만 뒤집힌 목록이 나온다. #}
-  <label for="sort">정렬</label>
-  <select id="sort" name="sort">
-    <option value="time_desc"{% if sort == 'time_desc' %} selected{% endif %}>최신순</option>
-    <option value="time_asc"{% if sort == 'time_asc' %} selected{% endif %}>오래된순</option>
-  </select>
-  <button type="submit">검색</button>
+  <div class="filter-bar__row">
+    <label for="sort">정렬</label>
+    <select id="sort" name="sort">
+      <option value="time_desc"{% if sort == 'time_desc' %} selected{% endif %}>최신순</option>
+      <option value="time_asc"{% if sort == 'time_asc' %} selected{% endif %}>오래된순</option>
+    </select>
+  </div>
 </form>
 
 {% if planner_error %}
@@ -146,15 +152,15 @@
     <div class="results__heading">
       <h2 id="results-heading">탐지 결과</h2>
       {% if outcome.hits %}
-        <p class="result-count{% if outcome.truncated %} result-count--warning{% endif %}">
-          {# 정렬 방향을 함께 적는다. 칸에 시:분:초만 있어 격자만 보고는 위가
-             최신인지 오래된 쪽인지 한눈에 갈리지 않는다. #}
-          {% if outcome.sort == 'time_asc' %}오래된순{% else %}최신순{% endif %} ·
-          {% if outcome.truncated %}
-            <strong>상한에 걸려 {{ outcome.hits|length }}건까지만 보여드립니다. 이것이 전부가 아닙니다.</strong>
-          {% else %}
-            총 {{ outcome.hits|length }}건
-          {% endif %}
+        {# 정렬 방향을 적는다. 칸에 시:분:초만 있어 격자만 보고는 위가 최신인지
+           오래된 쪽인지 한눈에 갈리지 않는다.
+
+           **잘렸다는 경고를 여기 두지 않는다.** 바로 위 브리핑 문장이 이미
+           "상한에 걸려 N건까지만 보여드려요. 이게 전부는 아니에요."라고 말한다.
+           같은 말을 제목 옆에 한 번 더 두면 긴 붉은 문장이 정렬 표시를 덮는다. #}
+        <p class="result-count">
+          {% if outcome.sort == 'time_asc' %}오래된순{% else %}최신순{% endif %}
+          {% if not outcome.truncated %}· 총 {{ outcome.hits|length }}건{% endif %}
         </p>
       {% endif %}
     </div>
