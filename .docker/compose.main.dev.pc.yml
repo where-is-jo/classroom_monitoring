@@ -210,6 +210,18 @@ services:
     # HTTP Request 노드로 부른다(RPA_RUNNER_URL).
     build:
       context: ../RPAs/study-status-report/runner
+      args:
+        # **리눅스 호스트로 옮기면 여기를 채워야 한다.** 컨테이너는 root로 돌지
+        # 않으면서 마운트된 저장소의 logs/·reports/에 쓴다. 컨테이너 UID가 그
+        # 디렉터리 소유자와 다르면 쓰기가 막히고 보고서가 조용히 빠진다.
+        #
+        # 기본값 65534는 지금 이 PC에서 도는 값이다(nobody가 logs/·reports/를 만들어
+        # 소유하고 있다). **바꾸면 기존 디렉터리 소유자도 함께 맞춰야 한다.** 리눅스
+        # 호스트에서는 `id -u`/`id -g` 값을 셸 환경이나 .docker/.env에 두고,
+        # `chown -R $(id -u):$(id -g) RPAs/study-status-report/{logs,reports}`를 한 번
+        # 돌린다. 쓰기 가능 여부는 실행기의 `GET /health`가 알려 준다 — 못 쓰면 503이다.
+        RUNNER_UID: "${RPA_RUNNER_UID:-65534}"
+        RUNNER_GID: "${RPA_RUNNER_GID:-65534}"
     environment:
       REPO_DIR: /repo
     volumes:

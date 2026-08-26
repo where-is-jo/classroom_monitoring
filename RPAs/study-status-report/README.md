@@ -182,7 +182,7 @@ n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -
 
 | 경로 | 하는 일 |
 | --- | --- |
-| `GET /health` | 살아 있는지와 저장소 마운트 경로 확인 |
+| `GET /health` | 살아 있는지, 저장소 마운트 경로, 드라이런 여부, **`logs/`·`reports/`에 실제로 쓸 수 있는지** 확인. 쓰지 못하면 `503`과 원인을 돌려준다 |
 | `POST /workbook` | `create_management_workbook.py` 실행 |
 | `POST /slack-upload` | `slack_upload_file.py`로 관리 문서 전송 |
 | `POST /slack-message` | 첨부 없이 텍스트만 전송. 시간표를 읽지 못했을 때의 오류 알림용 |
@@ -248,6 +248,29 @@ docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner n8n
 ```
 
 대상 강의실을 바꾸려면 compose의 `CLASSROOM_ID`·`CLASSROOM_NAME`을 고친다.
+
+### 실행기 UID (다른 호스트로 옮길 때)
+
+실행기는 root로 돌지 않으면서 마운트된 `logs/`·`reports/`에 쓴다. 기본 UID/GID는
+**65534(`nobody`)** 로, 지금 이 PC에서 도는 값이다.
+
+"Docker Desktop은 바인드 마운트 권한을 무시하니 UID는 아무래도 된다"는 말이 돌았는데
+**사실이 아니다.** 실측하면 WSL2의 9p 마운트에 `metadata` 옵션이 붙어 리눅스 권한이
+그대로 적용되고, `logs/`는 `drwxr-xr-x 65534:65534`다 — 지금 써지는 이유는 `nobody`가
+그 디렉터리를 만들어 소유하고 있어서다.
+
+그래서 **다른 호스트(특히 리눅스 서버)로 옮길 때는 둘 중 하나를 해야 한다.**
+
+```bash
+# (a) 컨테이너 UID를 호스트 소유자에 맞춘다
+RPA_RUNNER_UID=$(id -u) RPA_RUNNER_GID=$(id -g)   docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner
+
+# (b) 또는 기존 디렉터리 소유자를 컨테이너 UID에 맞춘다
+sudo chown -R 65534:65534 RPAs/study-status-report/logs RPAs/study-status-report/reports
+```
+
+맞지 않으면 실행기가 기동 로그에 오류를 남기고 `GET /health`가 `503`으로 답한다.
+예전에는 첫 보고 시점까지 아무 표시 없이 조용히 실패했다.
 
 ## 검증
 
