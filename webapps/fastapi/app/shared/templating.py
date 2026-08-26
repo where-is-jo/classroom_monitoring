@@ -56,6 +56,19 @@ def format_kst_plain(value: datetime | None) -> str:
     return value.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def format_kst_time(value: datetime | None) -> str:
+    """날짜를 뗀 시:분:초.
+
+    검색 결과 격자처럼 **칸이 좁고 날짜가 이미 위에서 한 번 말해진 곳**에서 쓴다.
+    칸마다 "2026-08-24"를 반복하면 20칸에 같은 글자가 스무 번 들어가 정작 칸을
+    구분하는 값인 시각이 묻힌다. 날짜가 다른 결과가 섞일 수 있으므로 이것만으로
+    한 건을 특정하지는 못한다 — 전체 시각은 칸을 열면 모달이 보여준다.
+    """
+    if value is None:
+        return "-"
+    return value.astimezone(KST).strftime("%H:%M:%S")
+
+
 def format_display_label(value: object) -> str:
     """도메인 enum을 사용자용 한국어 표시명으로 변환한다."""
     raw_value = getattr(value, "value", value)
@@ -67,6 +80,7 @@ def format_display_label(value: object) -> str:
 
 templates.env.filters["kst_datetime"] = format_kst
 templates.env.filters["kst_datetime_plain"] = format_kst_plain
+templates.env.filters["kst_time_plain"] = format_kst_time
 templates.env.filters["display_label"] = format_display_label
 
 

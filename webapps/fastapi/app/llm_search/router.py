@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import Response
 
@@ -34,11 +36,17 @@ from .errors import (
     LlmSearchPlanInvalidError,
     LlmSearchPlannerUnavailableError,
 )
+from .planning import MAX_LIMIT
 from .schemas import LlmSearchRequest, LlmSearchResponse
 from .service import LlmSearchService
 
 api_router = APIRouter(prefix="/api/v1", tags=["llm-search"])
 page_router = APIRouter(tags=["llm-search-pages"])
+
+# 화면은 결과를 쪽으로 나눠 보여주므로 상한만큼 받아 온다. 예전에는 20이었는데,
+# 그 20이 곧 한 화면이라 "더 있는지"를 알 방법이 없었다. 지금은 20건이 한 쪽이고
+# 상한(100)까지 받아 쪽 번호로 넘긴다.
+_SCREEN_LIMIT: Final = MAX_LIMIT
 
 
 @api_router.post("/llm-searches", response_model=LlmSearchResponse)
@@ -100,7 +108,7 @@ def _render(request: Request, *, service: LlmSearchService | None, question: str
 
     if service is not None and question:
         try:
-            outcome = service.search(question, limit=20)
+            outcome = service.search(question, limit=_SCREEN_LIMIT)
         except LlmSearchPlannerUnavailableError:
             planner_error = True
         except LlmSearchPlanInvalidError:
