@@ -262,7 +262,7 @@ def test_화면이_해석한_계획과_조정_사유를_보여준다(client: Tes
 
     response = client.post("/llm-search", data={"question": "이번 달 A101"})
 
-    assert "이렇게 이해했어요" in response.text
+    assert "질문 해석" in response.text
     assert "마지막 7일만 찾았습니다" in response.text
     assert "이것이 전부가 아닙니다" in response.text
 
@@ -415,7 +415,7 @@ def test_화면이_걸지_못한_인물_조건을_표시한다(client: TestClien
     assert "조건 적용 안 됨" in response.text
 
 
-def test_화면이_탐지_한_건을_카드_하나로_묶는다(client: TestClient) -> None:
+def test_화면이_탐지_한_건을_격자_칸_하나로_묶는다(client: TestClient) -> None:
     """예전에는 이미지·카메라·시각·인원이 한 줄씩 이어져 한 건의 경계가 보이지 않았다."""
     second = DetectionHit(
         event_id="event-2",
@@ -432,7 +432,33 @@ def test_화면이_탐지_한_건을_카드_하나로_묶는다(client: TestClie
 
     response = client.post("/llm-search", data={"question": "오늘 A101"})
 
-    assert response.text.count('class="detection-card"') == 2
+    assert response.text.count('class="shot-grid__item"') == 2
+    # 상세는 칸마다 template로 미리 그려 둔다. JS가 문장을 만들지 않는다.
+    assert response.text.count("data-shot-detail") == 2
+    # 칸의 시각은 날짜를 떼고 KST 시:분:초만 적는다(06:30 UTC = 15:30 KST).
+    assert ">15:30:00<" in response.text
+
+
+def test_화면이_결과를_스무_건씩_쪽으로_나눈다(client: TestClient) -> None:
+    """한 화면에 다섯 칸씩 네 줄로 놓는다. 쪽 크기를 JS에 적어 두면 격자 열 수와 따로 논다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert 'data-page-size="20"' in response.text
+    # 쪽 문구는 서버가 그려 둔다. 스크립트가 만들면 한국어가 JS로 샌다.
+    assert 'id="shot-pager"' in response.text
+
+
+def test_화면이_상세_정보를_모달로_미룬다(client: TestClient) -> None:
+    """칸마다 설명을 붙이면 100건짜리 화면이 다시 줄글이 된다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert 'id="shot-modal"' in response.text
+    assert "상세 정보" in response.text
+    assert "식별 대상" in response.text
 
 
 def test_화면은_질문을_주소가_아니라_본문으로_받는다(client: TestClient) -> None:
