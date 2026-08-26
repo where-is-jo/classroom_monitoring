@@ -82,6 +82,9 @@ RPAs/study-status-report/reports/*.xlsx
 # 실행 이력 — 개인정보는 빼고 남기지만, 실행 로그는 저장소에 커밋하지 않는다
 # (docs/agents/rpa-agent.md "실행 로그를 저장소에 커밋하지 않는다").
 RPAs/study-status-report/logs/
+# 주간 집계가 읽는 일일 이벤트 원본. **학생 실명이 들어 있다** — reports/의 .xlsx와
+# 같은 등급이라 저장소에 올리지 않는다. 이름이 없는 실행 이력(logs/)과 구분해 둔다.
+RPAs/study-status-report/data/
 
 # 모델 가중치 — 대용량이고 저장소가 아니라 실행 환경에서 관리한다.
 # ultralytics는 MODEL_PATH의 이름을 보고 실행 위치에 자동으로 내려받으므로
