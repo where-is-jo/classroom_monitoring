@@ -157,6 +157,7 @@ HTTP Request 노드의 응답은 항목의 `json`을 통째로 덮어써서, 원
 - `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
 - `scripts/run_workflow_tests.py`: `tests/`의 Code 노드 테스트를 n8n 컨테이너의 Node로 실행
 - `tests/period_report.test.js`: 교시 종료 판정(원장·따라잡기 창) 검증
+- `tests/daily_report.test.js`: 일일 리포트가 담을 이벤트와 context 검증
 - `runner/server.py`: 위 두 스크립트를 HTTP로 감싸는 실행기 (아래 참고)
 - `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
