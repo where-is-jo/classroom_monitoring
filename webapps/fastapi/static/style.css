@@ -185,6 +185,29 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 }
 .seat-map__empty:hover { background: #e4efec; border-color: var(--primary); }
 
+/* 출입문 표시: 격자 오른쪽 벽의 아래쪽에 문 개구부를 그린다.
+   실제 강의실이 우측 하단에 문을 두고 있어 배치도와 CCTV 화면을 같은 방향으로 읽게 한다.
+   stage는 격자가 스크롤 영역보다 넓어져도 문이 좌석 위로 겹치지 않도록 내용 폭을 따라간다. */
+.seat-map-stage { position: relative; width: max-content; min-width: 100%; padding-right: 46px; }
+.seat-map__door {
+  position: absolute;
+  right: 0;
+  bottom: 16px;
+  display: grid;
+  place-content: center;
+  width: 38px;
+  height: 86px;
+  margin: 0;
+  color: var(--primary-dark);
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  background: var(--primary-soft);
+  border: 2px solid var(--primary);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+}
+
 /* 좌석 편집 패널: 지도 옆 고정 폭(280px)으로 표시하고 320px에서 축소한다. */
 .seat-edit-panel { flex: 0 1 340px; min-width: 280px; }
 .seat-map-hint { margin-bottom: 8px; }

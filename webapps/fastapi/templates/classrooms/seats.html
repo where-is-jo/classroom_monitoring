@@ -24,22 +24,27 @@
     <div class="seat-workbench" style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
       <div class="seat-workbench__map" style="flex: 1 1 480px; min-width: 0;">
         <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
-          <div id="seat-grid" class="seat-map seat-map--grid" data-classroom-id="{{ classroom.id }}" data-max-row="{{ max_row }}" data-max-column="{{ max_column }}" style="grid-template-columns: repeat({{ max_column }}, minmax(100px, 1fr)); grid-template-rows: repeat({{ max_row }}, minmax(76px, 1fr));" aria-label="좌석 배치">
-            {% for r in range(1, max_row + 1) %}
-              {% for c in range(1, max_column + 1) %}
-                {% set seat = seat_map.get((r, c)) %}
-                {% if seat %}
-                  {% set assignment = assignments.get(seat.id) %}
-                  <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}"{% if assignment %} data-assignment-student-id="{{ assignment.student_id }}" data-assignment-student-name="{{ assignment.student_name }}"{% endif %} style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
-                    <strong>{{ seat.label }}</strong>
-                    <small>{{ seat.code }}</small>
-                    {% if assignment %}<small class="assigned-student">{{ assignment.student_name }}</small>{% endif %}
-                  </button>
-                {% else %}
-                  <button type="button" id="seat-cell-{{ r }}-{{ c }}" class="seat-map__empty" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · 빈 칸"></button>
-                {% endif %}
+          <div class="seat-map-stage">
+            <div id="seat-grid" class="seat-map seat-map--grid" data-classroom-id="{{ classroom.id }}" data-max-row="{{ max_row }}" data-max-column="{{ max_column }}" style="grid-template-columns: repeat({{ max_column }}, minmax(100px, 1fr)); grid-template-rows: repeat({{ max_row }}, minmax(76px, 1fr));" aria-label="좌석 배치">
+              {% for r in range(1, max_row + 1) %}
+                {% for c in range(1, max_column + 1) %}
+                  {% set seat = seat_map.get((r, c)) %}
+                  {% if seat %}
+                    {% set assignment = assignments.get(seat.id) %}
+                    <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}"{% if assignment %} data-assignment-student-id="{{ assignment.student_id }}" data-assignment-student-name="{{ assignment.student_name }}"{% endif %} style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
+                      <strong>{{ seat.label }}</strong>
+                      <small>{{ seat.code }}</small>
+                      {% if assignment %}<small class="assigned-student">{{ assignment.student_name }}</small>{% endif %}
+                    </button>
+                  {% else %}
+                    <button type="button" id="seat-cell-{{ r }}-{{ c }}" class="seat-map__empty" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · 빈 칸"></button>
+                  {% endif %}
+                {% endfor %}
               {% endfor %}
-            {% endfor %}
+            </div>
+            {# 실제 강의실 구조대로 우측 하단 벽에 출입문을 표시한다. 강의실별 문 위치를
+               아직 모델이 갖고 있지 않아 A111 기준 위치를 그대로 그린다. #}
+            <p class="seat-map__door" role="img" aria-label="출입문. 강의실 우측 하단에 있다."><span aria-hidden="true">문</span></p>
           </div>
         </div>
       </div>
