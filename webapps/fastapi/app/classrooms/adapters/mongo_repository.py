@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from math import isfinite
 from typing import cast
 
-from pymongo import ASCENDING, DESCENDING, ReturnDocument
+from pymongo import ASCENDING, DESCENDING, ReturnDocument, UpdateOne
 from pymongo.client_session import ClientSession
 from pymongo.errors import (
     AutoReconnect,
@@ -45,6 +45,7 @@ from ..models import (
     SeatObservation,
     SeatObservationBatchRecord,
     SeatOccupancy,
+    SeatOccupancyApplication,
     SeatOccupancyHistory,
     SeatPage,
 )
@@ -826,6 +827,101 @@ class MongoSeatMutationUnitOfWork:
 
         result = self._commit_with_retry(perform, verify_committed)
         return cast(SeatOccupancyHistory | None, result)
+
+    def append_histories_and_apply_occupancies(
+        self,
+        applications: Sequence[SeatOccupancyApplication],
+        *,
+        updated_at: datetime,
+    ) -> tuple[SeatOccupancyHistory, ...] | None:
+        """좌석 여러 개의 관측을 한 transaction에서 함께 적용한다.
+
+        **왕복 수가 좌석 수와 무관해진다.** 좌석 조회 1회, 이력 조회 1회,
+        이력 삽입 1회, 좌석 갱신 1회로 끝난다. 좌석마다 transaction을 열던
+        예전 경로는 좌석당 네 번을 곱했다.
+
+        원자성 단위가 좌석에서 batch로 넓어진다. 한 좌석의 version이 어긋나면
+        전체가 아무것도 쓰지 않고 되돌아가며, 호출자가 전체를 다시 만들어
+        재시도한다. 같은 이벤트의 좌석들은 어차피 한 프레임에서 나온 관측이라
+        일부만 반영되는 것보다 함께 성립하는 편이 뜻에 맞는다.
+        """
+        if not applications:
+            return ()
+
+        seat_ids = [item.history.seat_id for item in applications]
+        event_ids = {item.history.event_id for item in applications}
+
+        def perform(session: ClientSession) -> tuple[SeatOccupancyHistory, ...] | None:
+            seats = {
+                document["_id"]: document
+                for document in self._seats.find({"_id": {"$in": seat_ids}}, session=session)
+            }
+            for item in applications:
+                seat = seats.get(item.history.seat_id)
+                if seat is None or seat.get("is_active") is not True:
+                    raise SeatNotFoundError()
+            # version 검사는 전부 모아서 한다. 하나라도 어긋나면 아무것도 쓰지 않는다.
+            for item in applications:
+                if seats[item.history.seat_id].get("version") != item.expected_version:
+                    return None
+
+            existing_histories = {
+                (document["event_id"], document["seat_id"]): document
+                for document in self._history.find(
+                    {"event_id": {"$in": list(event_ids)}}, session=session
+                )
+            }
+            stored: list[SeatOccupancyHistory] = []
+            to_insert: list[MongoDocument] = []
+            for item in applications:
+                key = (item.history.event_id, item.history.seat_id)
+                found = existing_histories.get(key)
+                if found is not None:
+                    known = MongoClassroomRepository._history_to_domain(found)
+                    if known != item.history:
+                        raise SeatBatchConflictError()
+                    stored.append(known)
+                    continue
+                to_insert.append(MongoClassroomRepository._history_to_document(item.history))
+                stored.append(item.history)
+            if to_insert:
+                self._history.insert_many(to_insert, session=session)
+
+            updates = [
+                UpdateOne(
+                    {
+                        "_id": item.history.seat_id,
+                        "version": item.expected_version,
+                    },
+                    {
+                        "$set": {
+                            "current_occupancy": _occupancy_to_document(item.occupancy),
+                            "updated_at": updated_at,
+                            "version": item.expected_version + 1,
+                        }
+                    },
+                )
+                for item in applications
+                if item.occupancy is not None
+            ]
+            if updates:
+                self._seats.bulk_write(updates, session=session, ordered=False)
+            return tuple(stored)
+
+        def verify_committed() -> bool:
+            found = {
+                (document["event_id"], document["seat_id"])
+                for document in self._history.find(
+                    {"event_id": {"$in": list(event_ids)}},
+                    {"event_id": 1, "seat_id": 1},
+                )
+            }
+            return all(
+                (item.history.event_id, item.history.seat_id) in found for item in applications
+            )
+
+        result = self._commit_with_retry(perform, verify_committed)
+        return cast("tuple[SeatOccupancyHistory, ...] | None", result)
 
     def _commit_with_retry(
         self,
