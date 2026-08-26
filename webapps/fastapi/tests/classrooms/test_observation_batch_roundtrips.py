@@ -16,7 +16,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
+from app.classrooms.adapters.memory_repository import (
+    InMemoryClassroomRepository,
+    InMemorySeatMutationUnitOfWork,
+)
 from app.classrooms.models import (
     OccupancySource,
     RecordSeatObservationBatchCommand,
@@ -61,6 +64,23 @@ class CountingRepository(InMemoryClassroomRepository):
             return super().append_occupancy_history(history)
         finally:
             self._inside_adapter = False
+
+
+class CountingUnitOfWork(InMemorySeatMutationUnitOfWork):
+    """UoW 호출 횟수를 세는 대역. 좌석당 transaction이 남아 있는지 보려는 것이다."""
+
+    def __init__(self, store: InMemoryClassroomRepository) -> None:
+        super().__init__(store)
+        self.calls: collections.Counter[str] = collections.Counter()
+
+    def append_history_and_apply_occupancy(self, history, **kwargs):  # type: ignore[no-untyped-def]
+        self.calls["single"] += 1
+        return super().append_history_and_apply_occupancy(history, **kwargs)
+
+    def append_histories_and_apply_occupancies(self, applications, **kwargs):  # type: ignore[no-untyped-def]
+        self.calls["batch"] += 1
+        self.calls["batch_seats"] += len(applications)
+        return super().append_histories_and_apply_occupancies(applications, **kwargs)
 
 
 def _service_with_seats(
@@ -139,3 +159,55 @@ def test_같은_event_id를_다시_받아도_이력을_새로_쓰지_않는다()
 
     # 배치로 미리 읽은 이력으로 재수신을 판정하므로 멱등성이 그대로 지켜진다.
     assert repository.calls["append_occupancy_history"] == writes_after_first
+
+
+def _service_with_uow(
+    seat_count: int,
+) -> tuple[ClassroomService, CountingUnitOfWork, str, list[str]]:
+    """UoW를 주입한 서비스. 운영(MongoDB) 조립과 같은 경로를 탄다."""
+    repository = InMemoryClassroomRepository()
+    uow = CountingUnitOfWork(repository)
+    service = ClassroomService(
+        repository, uow=uow, occupancy_confidence_threshold=0.6, clock=lambda: NOW
+    )
+    classroom = service.create_classroom(
+        code=f"U{seat_count:03d}", name="UoW 왕복 시험실", location="4A"
+    )
+    seat_ids = [
+        service.create_seat(
+            classroom_id=classroom.id,
+            code=f"S{index:02d}",
+            label=f"S{index:02d}",
+            row=1,
+            column=index,
+        ).id
+        for index in range(1, seat_count + 1)
+    ]
+    uow.calls.clear()
+    return service, uow, classroom.id, seat_ids
+
+
+@pytest.mark.parametrize("seat_count", [3, 12])
+def test_좌석_관측을_transaction_한_번으로_적용한다(seat_count: int) -> None:
+    service, uow, classroom_id, seat_ids = _service_with_uow(seat_count)
+
+    _record(service, classroom_id, seat_ids, "event-1")
+
+    # **좌석 수와 무관하게 transaction은 한 번이다.** 원격 저장소에서는 transaction
+    # 하나가 여러 번 왕복하므로, 좌석 수만큼 곱하면 그것만으로 처리 시간을 지배한다.
+    assert uow.calls["batch"] == 1
+    assert uow.calls["batch_seats"] == seat_count
+    # 좌석마다 따로 여는 예전 경로는 쓰이지 않아야 한다.
+    assert uow.calls["single"] == 0
+
+
+def test_재수신은_이미_있는_이력을_transaction에_담지_않는다() -> None:
+    service, uow, classroom_id, seat_ids = _service_with_uow(4)
+
+    _record(service, classroom_id, seat_ids, "event-1")
+    uow.calls.clear()
+    _record(service, classroom_id, seat_ids, "event-1")
+
+    # 이력이 이미 있으면 쓸 것이 없다. 같은 값을 다시 쓰려고 transaction을 열지 않는다.
+    assert uow.calls["batch"] == 0
+    assert uow.calls["single"] == 0

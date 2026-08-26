@@ -17,6 +17,7 @@ from .models import (
     SeatMigrationSnapshot,
     SeatMigrationSnapshotPayload,
     SeatObservationBatchRecord,
+    SeatOccupancyApplication,
     SeatOccupancyHistory,
     SeatPage,
 )
@@ -158,6 +159,30 @@ class SeatMutationUnitOfWork(Protocol):
         - ``occupancy``가 ``None``이면 history만 기록한다 (과거 관측 재생).
         - 같은 (event_id, seat_id) history가 이미 있으면 기존 값을 돌려주고,
           내용이 다르면 ``SeatBatchConflictError``를 던진다.
+        """
+        ...
+
+    def append_histories_and_apply_occupancies(
+        self,
+        applications: Sequence[SeatOccupancyApplication],
+        *,
+        updated_at: datetime,
+    ) -> tuple[SeatOccupancyHistory, ...] | None:
+        """여러 좌석의 관측을 **한 transaction/lock에서** 함께 적용한다.
+
+        좌석마다 따로 열면 원격 저장소 왕복이 좌석 수만큼 곱해진다. 실측에서
+        이벤트 하나가 좌석 7개를 관측할 때 이 구간이 전체 처리 시간의 대부분이었다
+        (결정 0045의 남은 일).
+
+        단건 계약과 다른 점은 **실패 단위가 batch 전체**라는 것이다.
+
+        - 좌석이 하나라도 없거나 비활성이면 아무것도 쓰지 않고
+          ``SeatNotFoundError``를 던진다.
+        - 좌석 version이 하나라도 어긋나면 아무것도 쓰지 않고 ``None``을 돌려준다.
+          호출자는 **전체를** 최신 상태로 다시 만들어 재시도한다.
+        - 이미 있는 (event_id, seat_id) history는 기존 값을 그대로 돌려주고,
+          내용이 다르면 ``SeatBatchConflictError``를 던진다.
+        - 돌려주는 순서는 ``applications``와 같다.
         """
         ...
 
