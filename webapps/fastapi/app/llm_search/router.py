@@ -36,6 +36,7 @@ from .errors import (
     LlmSearchPlanInvalidError,
     LlmSearchPlannerUnavailableError,
 )
+from .models import SortOrder
 from .planning import MAX_LIMIT
 from .schemas import LlmSearchRequest, LlmSearchResponse
 from .service import LlmSearchService
@@ -56,7 +57,7 @@ def search_detections(
 ) -> LlmSearchResponse:
     if service is None:
         raise LlmSearchDisabledError()
-    outcome = service.search(payload.question, limit=payload.limit)
+    outcome = service.search(payload.question, limit=payload.limit, sort=payload.sort)
     return LlmSearchResponse.from_domain(payload.question, outcome)
 
 
@@ -70,13 +71,14 @@ def llm_search_page(
     질문은 아래 `POST`가 본문으로 받는다. 주소로 질문을 받는 경로를 남기지 않는 것이
     이 화면을 둘로 나눈 이유다.
     """
-    return _render(request, service=service, question="")
+    return _render(request, service=service, question="", sort=SortOrder.TIME_DESC)
 
 
 @page_router.post("/llm-search")
 def llm_search_submit(
     request: Request,
     question: str = Form(default="", max_length=200),
+    sort: str = Form(default=SortOrder.TIME_DESC.value, max_length=32),
     service: LlmSearchService | None = Depends(get_llm_search_service),
 ) -> Response:
     """질문을 본문으로 받아 결과까지 그린다.
@@ -84,10 +86,26 @@ def llm_search_submit(
     폼 값이 비어 있으면 검색하지 않고 안내 화면으로 되돌린다. 빈 질문을 LLM에게
     보내면 모델이 아무 계획이나 지어내고, 사용자는 자기가 묻지 않은 결과를 받는다.
     """
-    return _render(request, service=service, question=question.strip())
+    return _render(request, service=service, question=question.strip(), sort=_sort_order(sort))
 
 
-def _render(request: Request, *, service: LlmSearchService | None, question: str) -> Response:
+def _sort_order(value: str) -> SortOrder:
+    """폼이 보낸 정렬 값을 도메인 값으로 바꾼다. **모르는 값이면 기본값으로 돌린다.**
+
+    API는 규격에 없는 값을 422로 거절하지만 화면은 그러지 않는다. 여기서 오류를
+    내면 사용자가 고칠 수 있는 것이 없다 — 정렬은 사용자가 타이핑하는 값이 아니라
+    고르는 값이라, 이상한 값이 왔다면 그건 사용자의 잘못이 아니다. 질문까지 함께
+    버리는 대신 최신순으로 보여주고 검색은 진행한다.
+    """
+    try:
+        return SortOrder(value)
+    except ValueError:
+        return SortOrder.TIME_DESC
+
+
+def _render(
+    request: Request, *, service: LlmSearchService | None, question: str, sort: SortOrder
+) -> Response:
     """질문·해석·결과를 한 화면에 보여준다.
 
     화면이 구분해야 하는 상태가 여섯이다. 기능 비활성 / 질문 전 / 결과 없음 /
@@ -108,7 +126,7 @@ def _render(request: Request, *, service: LlmSearchService | None, question: str
 
     if service is not None and question:
         try:
-            outcome = service.search(question, limit=_SCREEN_LIMIT)
+            outcome = service.search(question, limit=_SCREEN_LIMIT, sort=sort)
         except LlmSearchPlannerUnavailableError:
             planner_error = True
         except LlmSearchPlanInvalidError:
@@ -120,6 +138,7 @@ def _render(request: Request, *, service: LlmSearchService | None, question: str
         context={
             "search_enabled": enabled,
             "question": question,
+            "sort": sort.value,
             "asked": enabled and bool(question),
             "outcome": outcome,
             "planner_error": planner_error,

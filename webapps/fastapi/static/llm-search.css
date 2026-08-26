@@ -3,6 +3,15 @@
    화면과 함께 쓰는 것(.page-lead, .filter-bar, .state-panel, .result-count)은
    style.css에 그대로 둔다 — 탐지 스냅샷 화면이 같은 것을 쓴다. */
 
+/* ── 질문 줄 ───────────────────────────────────────────
+   공용 .filter-bar는 label이 늘어나게 되어 있어 입력이 눌린다. 이 화면은 질문
+   입력이 길어야 하고 정렬 선택은 짧아야 해서 여기서 다시 잡는다. */
+.filter-bar.filter-bar--query { align-items: center; }
+.filter-bar.filter-bar--query > label { flex: 0 0 auto; font-weight: 700; }
+.filter-bar.filter-bar--query > input { flex: 1 1 320px; min-width: 0; }
+.filter-bar.filter-bar--query > select,
+.filter-bar.filter-bar--query > button { flex: 0 0 auto; }
+
 /* ── 질문 해석 ─────────────────────────────────────────────
    문장 한 줄이 먼저, 대조용 값이 그 아래다. */
 .briefing {
