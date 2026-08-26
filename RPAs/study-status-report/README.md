@@ -93,12 +93,61 @@ Slack 채널 URL이 `https://app.slack.com/client/<workspace_id>/<channel_id>` �
 | 시간표 문서가 없거나 파싱 실패 | 자동화를 중단하고 Slack에 오류 메시지만 전송한다. |
 | FastAPI 조회 실패 | 해당 주기만 실패로 기록하고 다음 주기에서 재시도한다. |
 | 학생 상태가 `UNKNOWN`으로만 반복됨 | 오탐 가능성이 있어 기록은 남기되 관리자 판단 대상으로 표시한다. |
-| Slack 파일 업로드 실패 | 파일은 보존하고 실패 로그를 남긴다. 전송 노드는 자동 재시도하지 않는다. |
+| Slack 파일 업로드 실패 | 파일은 보존하고 실패 로그를 남긴다. 전송 노드 자체는 재시도하지 않지만, **교시 보고는 원장에 적히지 않아 다음 5분 주기가 다시 시도한다**(아래 "교시 종료 보고를 놓치지 않는 법"). |
 | 권한 또는 토큰 오류 | 자동 재시도하지 않고 관리자 확인 대상으로 중단한다. |
 
 ## 중복 실행 방지
 
 n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|state|observed_at` 키를 저장한다. 동일 키는 다시 기록하지 않는다.
+
+## 교시 종료 보고를 놓치지 않는 법
+
+교시가 끝나면 그 시점의 관리 문서를 Slack에 올린다. **어느 교시를 올릴지는 시간 창이
+아니라 원장(ledger)으로 정한다.**
+
+예전에는 "종료 후 5분 안"에 든 교시만 보고했다. 그런데 스케줄 트리거 주기가 똑같이
+5분이라, n8n 재시작 등으로 틱이 한 번만 밀리면 그 교시가 창을 통째로 지나쳐 **보고서가
+조용히 사라졌다.** 사라진 것을 알 방법도 없었다.
+
+지금은 이렇게 돈다.
+
+1. `Parse Schedule`이 "이미 끝났는데 아직 보고하지 않은 교시"를 찾는다. 판단 근거는
+   워크플로 정적 데이터의 `reportedPeriods`(원장)다.
+2. 그 교시의 관리 문서를 만들어 Slack에 올린다.
+3. **전송이 끝난 뒤에야** `Mark Period Reported`가 원장에 적는다.
+
+그래서 틱이 밀려도, FastAPI 조회나 Slack 전송이 실패해도, 원장에 남지 않았으니 다음
+주기가 같은 교시를 다시 집는다. 반대로 한 번 올린 교시는 원장에 있어 다시 올라가지
+않는다.
+
+**따라잡기 창(`PERIOD_REPORT_CATCH_UP_MINUTES`, 기본 60분).** 종료 후 이 시간을 넘기면
+포기한다. 여기까지 밀렸다면 다음 교시가 이미 한참 지났고, 늦은 보고서는 어느 교시 것인지
+오히려 헷갈리기 때문이다. **포기할 때는 조용히 넘어가지 않고 Slack으로 알린다**
+(`Notify Missed Period`). 알림은 교시당 한 번만 나간다.
+
+낮에 워크플로를 처음 켜는 경우는 놓친 것이 아니다. 그날 처음 돈 시각(`watchingSince`)
+보다 먼저 끝난 교시는 애초에 관측 대상이 아니었으므로 알리지 않는다. 시간표를 읽지
+못한 주기에는 원장을 건드리지 않는다 — 그때 쓰이는 것은 기본 시간표라, 기록하면 실제와
+다른 교시 이름이 원장에 남기 때문이다.
+
+이 판정은 [`tests/period_report.test.js`](./tests/period_report.test.js)가 실제 Node
+런타임에서 검증한다(아래 "검증").
+
+## 노드 이름 참조를 늘리지 않는다
+
+n8n 표현식은 다른 노드를 **이름 문자열로만** 부를 수 있다(`$('Parse Schedule')`).
+편집기에서 노드 이름을 바꾸면 이 참조는 경고 없이 끊기고, `undefined`가 아래로 흘러
+빈 보고서가 올라가거나 조건이 늘 거짓이 된다.
+
+HTTP Request 노드의 응답은 항목의 `json`을 통째로 덮어써서, 원래는 뒤 노드마다 앞
+노드를 이름으로 거슬러 올라가야 했다. 지금은 **필요한 값을 `context`에 담아 실행기에
+같이 보내고, 실행기가 그대로 돌려준다**(`runner/server.py`의 `_echo_context`). 뒤 노드는
+자기 입력만 보고 일을 마친다.
+
+그 결과 이름 참조는 `Build Change Events` 한 곳만 남았고, 이 노드는 실행기를 거치지
+않아 다른 방법이 없다. 대신 참조가 끊기면 즉시 예외를 던지고,
+`scripts/validate_workflow_artifacts.py`가 **참조가 실제 노드를 가리키는지, 새 참조가
+늘지 않았는지** 검사한다.
 
 ## 파일
 
@@ -106,6 +155,9 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 - `scripts/create_management_workbook.py`: `.xlsx` 생성 스크립트
 - `scripts/slack_upload_file.py`: Slack 외부 업로드 API 기반 `.xlsx` 전송 스크립트
 - `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
+- `scripts/run_workflow_tests.py`: `tests/`의 Code 노드 테스트를 n8n 컨테이너의 Node로 실행
+- `tests/period_report.test.js`: 교시 종료 판정(원장·따라잡기 창) 검증
+- `tests/daily_report.test.js`: 일일 리포트가 담을 이벤트와 context 검증
 - `runner/server.py`: 위 두 스크립트를 HTTP로 감싸는 실행기 (아래 참고)
 - `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
@@ -131,7 +183,7 @@ n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -
 
 | 경로 | 하는 일 |
 | --- | --- |
-| `GET /health` | 살아 있는지와 저장소 마운트 경로 확인 |
+| `GET /health` | 살아 있는지, 저장소 마운트 경로, 드라이런 여부, **`logs/`·`reports/`에 실제로 쓸 수 있는지** 확인. 쓰지 못하면 `503`과 원인을 돌려준다 |
 | `POST /workbook` | `create_management_workbook.py` 실행 |
 | `POST /slack-upload` | `slack_upload_file.py`로 관리 문서 전송 |
 | `POST /slack-message` | 첨부 없이 텍스트만 전송. 시간표를 읽지 못했을 때의 오류 알림용 |
@@ -198,6 +250,51 @@ docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner n8n
 
 대상 강의실을 바꾸려면 compose의 `CLASSROOM_ID`·`CLASSROOM_NAME`을 고친다.
 
+### 지금 도는 것은 이 compose가 아니다 (2026-08-26 확인)
+
+**위 명령은 현재 PM PC에서 그대로 실패한다.** `.docker/env/`가 비어 있어 compose가
+`fastapi.dev.env`를 찾다가 멈춘다(`n8n.dev.env`도 없다). 그리고 돌고 있는 `n8n`·
+`rpa-runner` 컨테이너에는 **compose 라벨이 아예 없다** — `docker run`으로 손수 만든
+것들이고, 네트워크도 compose의 `backend`가 아니라 `classroom-rpa`다.
+
+즉 이 절의 compose 정의는 **가야 할 곳이지 지금 있는 곳이 아니다.** 실행기를 다시
+띄워야 하면 지금 구성에서는 이렇게 한다.
+
+```bash
+docker build -t rpa-runner:local RPAs/study-status-report/runner
+docker rm -f rpa-runner
+docker run -d --name rpa-runner --network classroom-rpa --restart unless-stopped   -e REPO_DIR=/repo -v "<저장소 절대경로>/RPAs:/repo/RPAs" rpa-runner:local
+```
+
+컨테이너 이름은 `rpa-runner`여야 한다 — n8n이 `http://rpa-runner:8099`로 부르고,
+사용자 정의 네트워크에서는 컨테이너 이름이 곧 DNS 이름이다.
+
+**compose로 정리하려면 없어진 두 env 파일이 필요하다.** 그 값은 이 저장소에 없고
+처음 띄운 사람만 갖고 있다. CTO 노트북으로 옮기기 전에 해결해야 할 항목이다.
+
+### 실행기 UID (다른 호스트로 옮길 때)
+
+실행기는 root로 돌지 않으면서 마운트된 `logs/`·`reports/`에 쓴다. 기본 UID/GID는
+**65534(`nobody`)** 로, 지금 이 PC에서 도는 값이다.
+
+"Docker Desktop은 바인드 마운트 권한을 무시하니 UID는 아무래도 된다"는 말이 돌았는데
+**사실이 아니다.** 실측하면 WSL2의 9p 마운트에 `metadata` 옵션이 붙어 리눅스 권한이
+그대로 적용되고, `logs/`는 `drwxr-xr-x 65534:65534`다 — 지금 써지는 이유는 `nobody`가
+그 디렉터리를 만들어 소유하고 있어서다.
+
+그래서 **다른 호스트(특히 리눅스 서버)로 옮길 때는 둘 중 하나를 해야 한다.**
+
+```bash
+# (a) 컨테이너 UID를 호스트 소유자에 맞춘다
+RPA_RUNNER_UID=$(id -u) RPA_RUNNER_GID=$(id -g)   docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner
+
+# (b) 또는 기존 디렉터리 소유자를 컨테이너 UID에 맞춘다
+sudo chown -R 65534:65534 RPAs/study-status-report/logs RPAs/study-status-report/reports
+```
+
+맞지 않으면 실행기가 기동 로그에 오류를 남기고 `GET /health`가 `503`으로 답한다.
+예전에는 첫 보고 시점까지 아무 표시 없이 조용히 실패했다.
+
 ## 검증
 
 검증은 샘플 데이터 기준으로 수행한다. 운영 Slack 전송과 운영 FastAPI 조회는 실제 credential과 실행 환경이 필요하므로 이 저장소에서 강제 실행하지 않는다.
@@ -210,6 +307,15 @@ python RPAs/study-status-report/scripts/create_management_workbook.py `
   --out RPAs/study-status-report/reports/study_status_management_sample.xlsx
 
 python RPAs/study-status-report/scripts/validate_workflow_artifacts.py
+```
+
+워크플로 Code 노드의 판정 로직은 **n8n 컨테이너의 Node로 직접 돌려서** 확인한다.
+그 코드는 워크플로 JSON 안의 문자열이라 평소에는 n8n이 실행할 때만 돌고, 틀려도 그날
+보고서가 빠질 뿐 아무 표시가 나지 않는다. 돌고 있는 워크플로에는 손대지 않는다 —
+컨테이너 `/tmp`에 파일을 넣고 부를 뿐이다.
+
+```bash
+python RPAs/study-status-report/scripts/run_workflow_tests.py
 ```
 
 Slack 파일 업로드는 Slack의 현재 파일 업로드 방식인 `files.getUploadURLExternal`와 `files.completeUploadExternal`를 사용한다. Bot token만으로 인증 확인은 가능하지만, 파일을 관리자 채널에 공유하려면 `files:write` 권한과 `SLACK_CHANNEL_ID`가 반드시 필요하다. Incoming Webhook은 텍스트 메시지 전송만 지원하므로 `.xlsx` 첨부 전송의 대체 수단으로 쓰지 않는다.
