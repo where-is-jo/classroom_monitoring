@@ -249,6 +249,28 @@ docker compose -f .docker/compose.main.dev.pc.yml up -d --build rpa-runner n8n
 
 대상 강의실을 바꾸려면 compose의 `CLASSROOM_ID`·`CLASSROOM_NAME`을 고친다.
 
+### 지금 도는 것은 이 compose가 아니다 (2026-08-26 확인)
+
+**위 명령은 현재 PM PC에서 그대로 실패한다.** `.docker/env/`가 비어 있어 compose가
+`fastapi.dev.env`를 찾다가 멈춘다(`n8n.dev.env`도 없다). 그리고 돌고 있는 `n8n`·
+`rpa-runner` 컨테이너에는 **compose 라벨이 아예 없다** — `docker run`으로 손수 만든
+것들이고, 네트워크도 compose의 `backend`가 아니라 `classroom-rpa`다.
+
+즉 이 절의 compose 정의는 **가야 할 곳이지 지금 있는 곳이 아니다.** 실행기를 다시
+띄워야 하면 지금 구성에서는 이렇게 한다.
+
+```bash
+docker build -t rpa-runner:local RPAs/study-status-report/runner
+docker rm -f rpa-runner
+docker run -d --name rpa-runner --network classroom-rpa --restart unless-stopped   -e REPO_DIR=/repo -v "<저장소 절대경로>/RPAs:/repo/RPAs" rpa-runner:local
+```
+
+컨테이너 이름은 `rpa-runner`여야 한다 — n8n이 `http://rpa-runner:8099`로 부르고,
+사용자 정의 네트워크에서는 컨테이너 이름이 곧 DNS 이름이다.
+
+**compose로 정리하려면 없어진 두 env 파일이 필요하다.** 그 값은 이 저장소에 없고
+처음 띄운 사람만 갖고 있다. CTO 노트북으로 옮기기 전에 해결해야 할 항목이다.
+
 ### 실행기 UID (다른 호스트로 옮길 때)
 
 실행기는 root로 돌지 않으면서 마운트된 `logs/`·`reports/`에 쓴다. 기본 UID/GID는
