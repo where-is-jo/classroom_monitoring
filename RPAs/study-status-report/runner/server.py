@@ -57,6 +57,24 @@ class RunnerError(Exception):
     """요청이 잘못됐을 때. 스크립트 실행 실패와 구분한다."""
 
 
+def _echo_context(payload: dict[str, object], result: dict[str, object]) -> dict[str, object]:
+    """요청에 실려 온 ``context``를 응답에 그대로 얹어 준다.
+
+    **n8n에서 노드 이름 참조를 걷어내려고 둔 통로다.** HTTP Request 노드의 응답은
+    항목의 json을 통째로 덮어써서, 뒤 노드가 앞 노드의 값을 쓰려면
+    ``$('노드 이름')``으로 거슬러 올라가야 한다. 그 참조는 편집기에서 이름을 바꾸는
+    순간 조용히 깨진다. 요청에 담아 보낸 값을 되돌려 주면 뒤 노드가 자기 입력만
+    보고도 일을 마칠 수 있다.
+
+    내용은 해석하지 않고 그대로 돌려준다. 다만 **학생 이름은 담기지 않는다** —
+    보내는 쪽(워크플로)이 교시 이름·강의실·제목 문구만 싣는다.
+    """
+    context = payload.get("context")
+    if isinstance(context, dict):
+        result["context"] = context
+    return result
+
+
 def _resolve_inside(base: Path, raw_path: str) -> Path:
     """``base`` 밖 경로를 쓰지 못하게 막는다.
 
@@ -167,6 +185,8 @@ def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
     result = _run("create_management_workbook.py", args)
     result["workbook_path"] = str(out_path)
 
+    _echo_context(payload, result)
+
     changes = _state_changes_without_names(events_base64)
     append_run_log(
         {
@@ -198,6 +218,7 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
         "--comment", _require(payload, "comment"),
     ]
     result = _skipped_by_dry_run("slack_upload") or _run("slack_upload_file.py", args)
+    context = _echo_context(payload, result).get("context") or {}
     # 업로드에 실패해도 만들어 둔 파일은 지우지 않는다. 관리자가 그대로 올릴 수
     # 있어야 하기 때문이다(README 실패 조건: "파일은 보존하고 실패 로그를 남긴다").
     append_run_log(
@@ -205,6 +226,9 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
             "action": "slack_upload",
             "ok": result["ok"],
             "workbook": file_path.name,
+            # 어느 교시를 올렸는지 남긴다. 교시 보고가 빠졌을 때 원장(reportedPeriods)과
+            # 대조할 근거가 이력에 있어야 한다. 교시 이름은 개인정보가 아니다.
+            "period": context.get("periodName"),
             "error": result["stderr"] or None if not result["ok"] else None,
         }
     )

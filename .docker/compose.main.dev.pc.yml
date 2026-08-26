@@ -178,6 +178,11 @@ services:
       SCHEDULE_FILE_PATH: /repo/individual_tasks/시간표.md
       # 파이썬 스크립트를 대신 실행하는 사이드카. 아래 rpa-runner 서비스다.
       RPA_RUNNER_URL: http://rpa-runner:8099
+      # **교시 종료 보고를 늦게라도 따라잡는 창.** 교시가 끝난 뒤 이 시간 안이면
+      # 밀린 보고서도 올린다. 예전에는 창이 트리거 주기와 같은 5분이라 n8n 재시작
+      # 등으로 틱이 한 번만 밀려도 그 교시 보고가 조용히 사라졌다. 이 창마저 넘긴
+      # 교시는 포기하고 Slack으로 놓쳤다고 알린다.
+      PERIOD_REPORT_CATCH_UP_MINUTES: "60"
     volumes:
       # **GPU 서버에 있던 워크플로는 따라오지 않는다.** 볼륨은 기계에 묶여 있고
       # project name도 달라졌다(classroom-monitoring-dev_n8n-data ->
