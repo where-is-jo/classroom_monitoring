@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from math import isfinite
 from typing import cast
@@ -242,6 +242,22 @@ class MongoClassroomRepository:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._seat_to_domain(document)
 
+    def get_seats(self, seat_ids: Sequence[str]) -> dict[str, Seat]:
+        """`$in` 한 번으로 좌석 여러 개를 읽는다.
+
+        **왕복 한 번이 곧 지연이다.** 이 저장소는 원격 Atlas라 왕복 1회가 약 42ms고,
+        관측 batch가 좌석마다 `get_seat`을 부르면 그만큼 곱해진다. `_id` 인덱스를
+        그대로 타므로 조회 비용 자체는 늘지 않는다.
+        """
+        if not seat_ids:
+            return {}
+        try:
+            documents = list(self._seats.find({"_id": {"$in": list(seat_ids)}}))
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        seats = [self._seat_to_domain(document) for document in documents]
+        return {seat.id: seat for seat in seats}
+
     def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage:
         query: MongoDocument = {"classroom_id": classroom_id, "is_active": True}
         try:
@@ -373,6 +389,20 @@ class MongoClassroomRepository:
         except PyMongoError:
             raise RepositoryUnavailableError() from None
         return None if document is None else self._history_to_domain(document)
+
+    def get_histories_by_event(self, event_id: str) -> dict[str, SeatOccupancyHistory]:
+        """한 이벤트의 좌석 이력을 한 번에 읽어 좌석 id로 묶는다.
+
+        결과 크기는 그 이벤트가 관측한 좌석 수를 넘지 않는다. 조회는 이미 있는
+        `seat_occupancy_history_event_seat_unique`(event_id, seat_id)의 앞 키를
+        그대로 타므로 인덱스를 새로 만들지 않는다.
+        """
+        try:
+            documents = list(self._history.find({"event_id": event_id}))
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        histories = [self._history_to_domain(document) for document in documents]
+        return {history.seat_id: history for history in histories}
 
     def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory:
         try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -31,6 +32,14 @@ class ClassroomRepository(Protocol):
 
     def create_seat(self, seat: Seat) -> Seat: ...
     def get_seat(self, seat_id: str) -> Seat | None: ...
+    def get_seats(self, seat_ids: Sequence[str]) -> dict[str, Seat]:
+        """좌석 여러 개를 한 번에 읽는다. 없는 좌석은 결과에서 빠진다.
+
+        **좌석마다 `get_seat`을 부르면 저장소 왕복이 좌석 수만큼 늘어난다.** 관측
+        batch는 한 이벤트에서 좌석 여러 개를 함께 검증하므로 그 자리에서만 쓴다.
+        """
+        ...
+
     def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage: ...
     def list_all_seats_for_allocation(self, classroom_id: str) -> list[Seat]:
         """allocator용: 비활성 포함 강의실의 모든 좌석을 돌려준다."""
@@ -57,6 +66,14 @@ class ClassroomRepository(Protocol):
     def get_history_by_event_and_seat(
         self, event_id: str, seat_id: str
     ) -> SeatOccupancyHistory | None: ...
+    def get_histories_by_event(self, event_id: str) -> dict[str, SeatOccupancyHistory]:
+        """한 이벤트의 좌석별 이력을 좌석 id로 묶어 한 번에 읽는다.
+
+        재수신 판정을 좌석마다 따로 물으면 왕복이 좌석 수만큼 늘어난다. 같은
+        event_id의 이력은 한 번에 다 가져와도 양이 좌석 수를 넘지 않는다.
+        """
+        ...
+
     def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory: ...
 
 

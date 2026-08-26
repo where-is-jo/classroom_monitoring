@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from threading import RLock
@@ -112,6 +112,11 @@ class InMemoryClassroomRepository:
         with self._lock:
             return self._seats.get(seat_id)
 
+    def get_seats(self, seat_ids: Sequence[str]) -> dict[str, Seat]:
+        """없는 좌석은 결과에서 빠진다. MongoDB의 `$in` 조회와 같은 계약이다."""
+        with self._lock:
+            return {seat_id: self._seats[seat_id] for seat_id in seat_ids if seat_id in self._seats}
+
     def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage:
         with self._lock:
             items = [
@@ -205,6 +210,12 @@ class InMemoryClassroomRepository:
                 ),
                 None,
             )
+
+    def get_histories_by_event(self, event_id: str) -> dict[str, SeatOccupancyHistory]:
+        with self._lock:
+            return {
+                item.seat_id: item for item in self._history.values() if item.event_id == event_id
+            }
 
     def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory:
         with self._lock:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from math import isfinite
@@ -583,9 +583,13 @@ class ClassroomService:
             if existing.status == ObservationBatchStatus.COMPLETED:
                 return self._batch_result(existing)
 
+        # **좌석마다 따로 묻지 않는다.** 이 저장소는 원격 Atlas라 왕복 1회가 약 42ms고,
+        # 한 이벤트가 좌석 7개를 관측하면 그것만으로 0.3초가 든다. 조회 한 번으로 모아
+        # 읽고 검증은 그대로 좌석마다 한다.
+        found = self._repository.get_seats([item.seat_id for item in observations])
         seats: dict[str, Seat] = {}
         for observation in observations:
-            seat = self._repository.get_seat(observation.seat_id)
+            seat = found.get(observation.seat_id)
             if seat is None or not seat.is_active or seat.classroom_id != classroom.id:
                 raise ClassroomInputError(_OBSERVATION_SEAT_REQUIREMENT)
             seats[seat.id] = seat
@@ -610,6 +614,9 @@ class ClassroomService:
         if claimed.status == ObservationBatchStatus.COMPLETED:
             return self._batch_result(claimed)
 
+        # 재수신 판정도 좌석마다 묻지 않는다. 같은 event_id의 이력은 관측 좌석 수를
+        # 넘지 않으므로 한 번에 읽어 두고 메모리에서 찾는다.
+        known_histories = self._repository.get_histories_by_event(event_id)
         try:
             histories = [
                 self._apply_observation(
@@ -619,6 +626,8 @@ class ClassroomService:
                     source=command.source,
                     observed_at=observed_at,
                     received_at=claimed.received_at,
+                    known_histories=known_histories,
+                    known_seat=seats.get(observation.seat_id),
                 )
                 for observation in observations
             ]
@@ -647,14 +656,21 @@ class ClassroomService:
         source: OccupancySource,
         observed_at: datetime,
         received_at: datetime,
+        known_histories: Mapping[str, SeatOccupancyHistory] | None = None,
+        known_seat: Seat | None = None,
     ) -> SeatOccupancyHistory:
-        existing = self._repository.get_history_by_event_and_seat(event_id, observation.seat_id)
+        # **매핑 자체를 받는다.** 값 하나만 받으면 `None`이 "이력 없음"인지 "미제공"인지
+        # 구분되지 않아, 이미 batch로 확인한 좌석까지 다시 묻게 된다.
+        if known_histories is not None:
+            existing = known_histories.get(observation.seat_id)
+        else:
+            existing = self._repository.get_history_by_event_and_seat(event_id, observation.seat_id)
         if existing is not None:
             self._repair_current_from_history(existing)
             return existing
         if self._uow is None:
             # UoW 미주입(레거시 경로): history append와 current 반영이 분리된다.
-            seat = self._required_seat(observation.seat_id)
+            seat = known_seat or self._required_seat(observation.seat_id)
             history = self._build_history(
                 seat,
                 observation,
@@ -671,8 +687,15 @@ class ClassroomService:
         # session/lock에서 원자적으로 수행한다. 좌석이 사라졌으면 아무것도 쓰지
         # 않고 SeatNotFoundError가 올라오고, version이 어긋나면 최신 좌석으로
         # history를 다시 만들어 재시도한다.
-        for _ in range(_OCCUPANCY_RETRY_LIMIT):
-            seat = self._required_seat(observation.seat_id)
+        for attempt in range(_OCCUPANCY_RETRY_LIMIT):
+            # **첫 시도만 미리 읽어 둔 좌석을 쓴다.** 재시도는 version이 어긋났다는
+            # 뜻이므로 반드시 최신 좌석을 다시 읽어야 한다 — 그러지 않으면 같은
+            # version으로 무한히 실패한다.
+            seat = (
+                known_seat
+                if attempt == 0 and known_seat is not None
+                else self._required_seat(observation.seat_id)
+            )
             history = self._build_history(
                 seat,
                 observation,
