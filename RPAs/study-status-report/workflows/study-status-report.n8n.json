@@ -279,7 +279,9 @@
         100,
         340
       ],
-      "retryOnFail": false
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "id": "schedule-ok-if",

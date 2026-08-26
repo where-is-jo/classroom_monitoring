@@ -272,6 +272,22 @@ docker run -d --name rpa-runner --network classroom-rpa --restart unless-stopped
 **compose로 정리하려면 없어진 두 env 파일이 필요하다.** 그 값은 이 저장소에 없고
 처음 띄운 사람만 갖고 있다. CTO 노트북으로 옮기기 전에 해결해야 할 항목이다.
 
+### 워크플로를 반영할 때는 비활성화 → 갱신 → 활성화
+
+```bash
+python RPAs/study-status-report/scripts/deploy_workflow.py --dry-run   # 차이만 본다
+python RPAs/study-status-report/scripts/deploy_workflow.py
+```
+
+**단순 PUT만 하면 cron 트리거가 그날 몫을 놓친다.** 2026-08-26에 실측했다 — 8/25에는
+18:05 일일 리포트가 정상 발화했는데, 8/26에 API로 PUT을 두 번 하고 나니 **5분 간격
+트리거는 계속 도는데 일일 리포트만 발화하지 않았다.** 비활성화 후 다시 활성화하니
+곧바로 발화했다. 간격 트리거는 재등록되는데 cron은 그렇지 않은 것으로 보인다.
+
+`deploy_workflow.py`가 그 순서를 지키고, **정적 데이터를 그대로 넘긴다** — 거기에
+그날 이벤트와 이미 보고한 교시 원장이 들어 있어서, 빠뜨리면 그날 기록이 사라지고
+이미 올린 교시가 다시 올라간다.
+
 ### 실행기 UID (다른 호스트로 옮길 때)
 
 실행기는 root로 돌지 않으면서 마운트된 `logs/`·`reports/`에 쓴다. 기본 UID/GID는
