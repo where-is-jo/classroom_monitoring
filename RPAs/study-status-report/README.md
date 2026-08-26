@@ -275,10 +275,14 @@ curl -s localhost:8099/health   # {"ok": true, "repo_dir": "/repo", "dry_run": t
 
 | 파일 | 내용 | 없으면 |
 | --- | --- | --- |
-| `RPAs/study-status-report/.env` | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Slack 전송 단계에서 실패한다 |
-| `individual_tasks/시간표.md` | 시간표 문서 | Slack에 알린 뒤 기록을 중단한다 |
+| `RPAs/study-status-report/.env` | Slack 토큰·채널, SMTP 자격 증명 | 전송 단계에서 실패한다 |
 
-둘 다 `.gitignore` 대상이라 `git pull`로는 생기지 않는다. 시간표 형식과 예시는
+**`.env`만 직접 만들면 된다.** `.gitignore` 대상이라 `git pull`로는 생기지 않는다.
+
+**시간표는 저장소가 관리한다**(`individual_tasks/시간표.md`). 예전에는 이 파일도
+gitignore 대상이라 호스트마다 직접 두어야 했는데, **없으면 RPA가 기록을 중단하므로
+다른 호스트에 배포하는 순간 그대로 실패한다.** 개인 노트가 아니라 운영 설정이라
+저장소로 옮겼다. 형식과 예시는
 [`templates/schedule-sample.md`](./templates/schedule-sample.md)에 있다.
 
 **시간표를 못 읽었을 때 기본 시간표로 넘어가지 않는다.** 실제와 다른 시간표로 출결을
