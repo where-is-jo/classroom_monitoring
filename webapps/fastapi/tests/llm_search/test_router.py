@@ -22,6 +22,7 @@ from app.llm_search.models import (
     SearchOutcome,
     SearchQuery,
 )
+from app.llm_search.planning import MAX_LIMIT
 from app.main import app
 from app.shared.config import Settings
 from app.shared.dependencies import get_llm_search_service, get_settings
@@ -55,8 +56,10 @@ class FakeService:
     ) -> None:
         self._outcome = outcome
         self._error = error
+        self.limits: list[int] = []
 
     def search(self, question: str, *, limit: int) -> SearchOutcome:
+        self.limits.append(limit)
         if self._error is not None:
             raise self._error
         assert self._outcome is not None
@@ -459,6 +462,16 @@ def test_화면이_상세_정보를_모달로_미룬다(client: TestClient) -> N
     assert 'id="shot-modal"' in response.text
     assert "상세 정보" in response.text
     assert "식별 대상" in response.text
+
+
+def test_화면이_상한만큼_결과를_요청한다(client: TestClient) -> None:
+    """20건만 받아 오면 쪽을 나눌 것이 없다. 상한까지 받아 화면이 쪽으로 나눈다."""
+    service = FakeService(_outcome(hits=(_HIT,)))
+    _override(service)
+
+    client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert service.limits == [MAX_LIMIT]
 
 
 def test_화면은_질문을_주소가_아니라_본문으로_받는다(client: TestClient) -> None:
