@@ -62,9 +62,17 @@ class PipelineSettings(BaseSettings):
     # FastAPI 전송을 추론 소비자 스레드에서 떼어낸다. 끄면 예전처럼 소비자가 직접
     # 전송하며, 전송 왕복만큼 다음 프레임을 못 가져간다(inference/dispatch.py).
     result_dispatch_enabled: bool = True
-    # 전송이 밀렸을 때 들고 있을 최대 건수. 넘치면 오래된 것부터 버린다 —
-    # 프레임 버퍼와 같은 판단이다. 키울수록 지난 상태를 오래 붙들게 된다.
+    # 전송이 밀렸을 때 들고 있을 최대 건수. 카메라마다 최신 하나만 들고 있으므로
+    # 카메라 수보다 크면 넉넉하다. 넘치면 가장 오래 기다린 카메라를 버린다.
     result_dispatch_queue_maxsize: int = Field(default=32, ge=1, le=1024)
+
+    # **추론 주기와 전송 주기를 나눈다.** ByteTrack은 track을 유지하려고 초당 5장을
+    # 봐야 하지만 좌석 점유는 그만큼 자주 바뀌지 않는다(실측 changed_count 중앙값 0).
+    # 같은 상태를 초당 다섯 번 보내면 받는 쪽만 그만큼 일한다. 0이면 제한하지 않는다.
+    #
+    # 이 값은 도달량을 늘리지 않는다 — 전송 스레드가 한 번에 한 건을 보내므로 상한은
+    # 건당 처리 시간이 정한다. 줄이는 것은 만들어 놓고 버리는 낭비와 받는 쪽 부하다.
+    result_dispatch_min_interval_seconds: float = Field(default=1.0, ge=0, le=60)
     # 종료할 때 남은 전송을 기다리는 상한. FastAPI가 죽어 있으면 끝나지 않으므로 둔다.
     result_dispatch_close_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
