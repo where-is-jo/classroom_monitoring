@@ -15,6 +15,7 @@ import pytest
 from app.classrooms.adapters.memory_repository import InMemoryClassroomRepository
 from app.classrooms.models import Classroom
 from app.llm_search.errors import LlmSearchPlanInvalidError, LlmSearchPlannerUnavailableError
+from app.llm_search.models import SortOrder
 from app.llm_search.ports import PlanPrompt, QueryPlanner
 from app.llm_search.service import LlmSearchService
 from app.snapshots.errors import SnapshotStorageUnavailableError
@@ -760,3 +761,78 @@ def test_브리핑에_기간과_대상과_건수를_함께_담는다() -> None:
 
     assert "A101 1강의실에서 찾았어요" in outcome.briefing
     assert "총 1건의 결과가 있어요" in outcome.briefing
+
+
+def test_정렬을_말하지_않으면_최신순이다() -> None:
+    """운영자가 가장 먼저 보고 싶은 것은 방금 무슨 일이 있었는지다."""
+    events = [_event("camera-01", 0, 1), _event("camera-01", 1, 2), _event("camera-01", 2, 3)]
+
+    outcome = _build(events=events).search("오늘", limit=20)
+
+    assert outcome.sort is SortOrder.TIME_DESC
+    assert [hit.event_id for hit in outcome.hits] == [
+        "camera-01-2",
+        "camera-01-1",
+        "camera-01-0",
+    ]
+
+
+def test_오름차순은_오래된_것부터_보여준다() -> None:
+    events = [_event("camera-01", 0, 1), _event("camera-01", 1, 2), _event("camera-01", 2, 3)]
+
+    outcome = _build(events=events).search("오늘", limit=20, sort=SortOrder.TIME_ASC)
+
+    assert outcome.sort is SortOrder.TIME_ASC
+    assert [hit.event_id for hit in outcome.hits] == [
+        "camera-01-0",
+        "camera-01-1",
+        "camera-01-2",
+    ]
+
+
+def test_정렬은_상한에_걸릴_때_어느_쪽을_남길지도_바꾼다() -> None:
+    """화면에서 뒤집기만 하면 '오래된 순'을 골라도 최근 것들만 뒤집혀 나온다.
+
+    상한이 2인데 변화 시점이 셋이면, 내림차순은 최근 둘을 오름차순은 오래된 둘을
+    남겨야 한다. 같은 두 건이 순서만 달리 나오면 정렬이 조회에 들어가지 않은 것이다.
+    """
+    plan = {
+        "intent": "detection_search",
+        "camera_id": None,
+        "classroom_id": None,
+        "from": _FROM,
+        "to": _TO,
+        "limit": 2,
+    }
+    events = [_event("camera-01", 0, 1), _event("camera-01", 1, 2), _event("camera-01", 2, 3)]
+
+    newest = _build(planner=FakePlanner(plan), events=events).search("오늘", limit=2)
+    oldest = _build(planner=FakePlanner(plan), events=events).search(
+        "오늘", limit=2, sort=SortOrder.TIME_ASC
+    )
+
+    assert [hit.event_id for hit in newest.hits] == ["camera-01-2", "camera-01-1"]
+    assert [hit.event_id for hit in oldest.hits] == ["camera-01-0", "camera-01-1"]
+    assert newest.truncated is True
+    assert oldest.truncated is True
+
+
+def test_스캔이_잘린_채_오름차순이면_앞쪽이_빠졌다고_알린다() -> None:
+    """저장소는 최신순으로 잘라 준다. 오름차순에서는 목록의 첫 건이 기간의 첫 건처럼
+    읽히는데, 잘려 나간 쪽이 바로 그 앞이다. 말하지 않으면 없는 사실을 만든다."""
+    events = [_event("camera-01", minute, minute % 3) for minute in range(6)]
+
+    outcome = _build(events=events, scan_limit=3).search("오늘", limit=20, sort=SortOrder.TIME_ASC)
+
+    assert outcome.truncated is True
+    assert any("기간 앞쪽이 빠졌습니다" in note for note in outcome.query.notes)
+
+
+def test_내림차순에서는_앞쪽이_빠졌다는_말을_하지_않는다() -> None:
+    """최신순으로 보면 잘린 쪽은 목록의 끝이라, 이미 truncated가 말하고 있다."""
+    events = [_event("camera-01", minute, minute % 3) for minute in range(6)]
+
+    outcome = _build(events=events, scan_limit=3).search("오늘", limit=20)
+
+    assert outcome.truncated is True
+    assert not any("기간 앞쪽이 빠졌습니다" in note for note in outcome.query.notes)

@@ -3,6 +3,15 @@
    화면과 함께 쓰는 것(.page-lead, .filter-bar, .state-panel, .result-count)은
    style.css에 그대로 둔다 — 탐지 스냅샷 화면이 같은 것을 쓴다. */
 
+/* ── 질문 줄 ───────────────────────────────────────────
+   공용 .filter-bar는 label이 늘어나게 되어 있어 입력이 눌린다. 이 화면은 질문
+   입력이 길어야 하고 정렬 선택은 짧아야 해서 여기서 다시 잡는다. */
+.filter-bar.filter-bar--query { align-items: center; }
+.filter-bar.filter-bar--query > label { flex: 0 0 auto; font-weight: 700; }
+.filter-bar.filter-bar--query > input { flex: 1 1 320px; min-width: 0; }
+.filter-bar.filter-bar--query > select,
+.filter-bar.filter-bar--query > button { flex: 0 0 auto; }
+
 /* ── 질문 해석 ─────────────────────────────────────────────
    문장 한 줄이 먼저, 대조용 값이 그 아래다. */
 .briefing {
@@ -41,6 +50,9 @@
 .shot-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* 한 줄의 높이를 그 줄에서 가장 높은 칸에 맞춘다. 칸 안의 내용이 조금 달라도
+     줄이 들쭉날쭉해지지 않는다. */
+  grid-auto-rows: 1fr;
   gap: 14px;
   margin: 0;
   padding: 0;
@@ -51,9 +63,13 @@
 .shot-grid__item[hidden] { display: none; }
 
 .shot {
-  display: grid;
-  gap: 0;
+  /* 버튼을 격자 컨테이너로 쓰지 않는다. 브라우저가 버튼 안쪽을 익명 상자 하나로
+     감싸는 경우가 있어 display: grid가 조용히 무시된다. 여기서는 위아래로 쌓기만
+     하면 되므로 block이면 충분하다. */
+  display: block;
   width: 100%;
+  /* 같은 줄의 칸들이 모두 같은 높이가 되게 한다(.shot-grid의 grid-auto-rows: 1fr). */
+  height: 100%;
   padding: 0;
   overflow: hidden;
   color: inherit;
@@ -70,11 +86,22 @@
 
 /* 비율을 고정해 이미지가 있든 없든 칸 높이가 흔들리지 않게 한다. 어안 CCTV는
    세로로 길어 cover로 자르면 뒷줄이 사라지므로 contain으로 전체를 남긴다. */
-.shot__figure { position: relative; display: block; aspect-ratio: 4 / 3; background: #142220; }
-.shot__image { width: 100%; height: 100%; object-fit: contain; }
+.shot__figure {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #142220;
+}
+/* **그림과 "스냅샷 없음" 문구를 똑같이 띄워 둔다.** 예전에는 이미지만 흐름 안에
+   있었는데, height: 100%가 비율로 정해진 부모 높이를 못 읽는 경우가 있어 이미지가
+   제 크기대로 펴지면서 사진 있는 칸만 커졌다. 둘 다 흐름에서 빼면 칸 높이는
+   aspect-ratio 하나로만 정해진다. */
+.shot__image,
+.shot__blank { position: absolute; inset: 0; width: 100%; height: 100%; }
+.shot__image { object-fit: contain; }
 .shot__blank {
-  position: absolute;
-  inset: 0;
   display: grid;
   place-items: center;
   padding: 8px;
@@ -91,7 +118,7 @@
   gap: 8px;
   padding: 9px 11px;
 }
-.shot__time { font-size: .92rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.shot__time { font-size: .92rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .shot__count { color: var(--muted); font-size: .78rem; font-weight: 700; white-space: nowrap; }
 
 /* ── 쪽 이동 ───────────────────────────────────────────── */

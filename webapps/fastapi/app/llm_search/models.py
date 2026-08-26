@@ -151,6 +151,23 @@ class PersonSummary:
     applied: bool
 
 
+class SortOrder(StrEnum):
+    """결과를 시간 어느 쪽부터 보여줄지.
+
+    **`SearchQuery`가 아니라 여기에 두는 이유가 있다.** `SearchQuery`는 LLM이 만든
+    계획을 검증한 결과이고, 정렬은 모델이 관여하지 않는 값이다 — 사용자가 화면에서
+    고른다. 섞어 두면 "모델이 뭐라고 했든 저장소에 넣어도 되는 조건"이라는
+    `SearchQuery`의 뜻이 흐려지고, 모델이 정렬을 지어내는지 검증해야 할 것처럼 읽힌다.
+
+    상한(`limit`)이 있으므로 이 값은 **보이는 순서만 바꾸는 것이 아니다.** 내림차순은
+    가장 최근 100건을, 오름차순은 가장 오래된 100건을 고른다. 정렬을 화면에서
+    뒤집기만 하지 않고 조회에 함께 넣는 이유가 그것이다.
+    """
+
+    TIME_DESC = "time_desc"
+    TIME_ASC = "time_asc"
+
+
 @dataclass(frozen=True)
 class SearchOutcome:
     """검색 한 번의 결과 전부.
@@ -175,6 +192,7 @@ class SearchOutcome:
     target_label: str
     person: PersonSummary | None
     briefing: str
+    sort: SortOrder
     hits: tuple[DetectionHit, ...]
     truncated: bool
     snapshot_lookup_failed: bool
