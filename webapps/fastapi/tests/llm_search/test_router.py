@@ -274,7 +274,21 @@ def test_화면이_해석한_계획과_조정_사유를_보여준다(client: Tes
 
     assert "질문 해석" in response.text
     assert "마지막 7일만 찾았습니다" in response.text
-    assert "이것이 전부가 아닙니다" in response.text
+
+
+def test_잘렸다는_말을_결과_제목_옆에_또_적지_않는다(client: TestClient) -> None:
+    """그 말은 브리핑 문장이 이미 한다(briefing.py의 _count_clause). 제목 옆에 한 번
+    더 두면 긴 붉은 문장이 정렬 표시를 덮는다."""
+    briefing = "2026년 8월 14일 09:00~09:30 동안 A101 1강의실에서 찾았어요. 상한에 걸려 1건까지만 보여드려요. 이게 전부는 아니에요."
+    _override(FakeService(_outcome(hits=(_HIT,), truncated=True, briefing=briefing)))
+
+    response = client.post("/llm-search", data={"question": "이번 달 A101"})
+
+    # 사실 자체는 브리핑 문장으로 그대로 나간다.
+    assert "이게 전부는 아니에요" in response.text
+    # 제목 옆 줄은 정렬만 말한다.
+    assert "이것이 전부가 아닙니다" not in response.text
+    assert "최신순" in response.text
 
 
 def test_화면은_해석한_기간을_한국_시각으로_보여준다(client: TestClient) -> None:

@@ -360,7 +360,6 @@ main:fullscreen {
 .state-error h2 { color: var(--danger); }
 
 .result-count { margin-bottom: 12px; color: var(--muted); font-weight: 700; }
-.result-count--warning { color: var(--danger); }
 
 /* 탐지 스냅샷 화면의 격자. 검색 결과와 달리 이미지 자체가 주인공이다. */
 .snapshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
