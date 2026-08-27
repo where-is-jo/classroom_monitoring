@@ -9,11 +9,13 @@ YOLO 데이터셋을 발행한다.
 ## 안전 범위
 
 - 입력은 승인된 MP4 파일만 허용한다.
-- `subject_category`는 `synthetic` 또는 `consenting-adult`만 허용한다.
+- `subject_category`는 `synthetic`, `consenting-adult`, 승인된 `student`만 허용한다.
 - 라벨은 class `0`, `person` bbox 하나다.
 - 원본 영상은 읽기만 하고 이동·삭제하지 않는다.
 - 프레임·라벨·검수 묶음·데이터셋은 Git 제외 대상인 `training/data/` 아래에 둔다.
-- 실제 학생 영상, 얼굴·신원·행동·출결 라벨, 실시간 RTSP, 자동 재학습·배포는 지원하지 않는다.
+- 학생 영상은 `person-detection-training` 승인 범위·승인 참조·유효 보존기한과
+  `--allow-approved-student-data`가 모두 있을 때만 처리한다. 얼굴·신원·행동·출결 라벨,
+  실시간 RTSP, 자동 재학습·배포는 지원하지 않는다.
 
 labelImg는 저장소에 포함하거나 이 도구에서 설치·업데이트하지 않는다. 검수자는 이미 동작을
 확인한 로컬 버전을 고정해 사용하며, 완료 영수증에는 실행 파일 SHA-256과 smoke test 확인이
@@ -204,7 +206,7 @@ python -m pytest -q
 ```
 
 자동 테스트는 합성 MP4, 고정 bbox와 Ultralytics API 대역만 사용하므로 모델 가중치와
-torch를 내려받지 않는다. 실제 yolov8n 가중치 추론과 labelImg GUI smoke test는 로컬
+torch를 내려받지 않는다. 실제 YOLO 가중치 추론과 labelImg GUI smoke test는 로컬
 파일럿에서 별도로 수행한다. 확인한 버전·해시·결과는 [V1 검증 기록](./VALIDATION.md)에
 개인정보와 로컬 경로 없이 남긴다.
 

@@ -126,6 +126,22 @@ def test_ultralytics_predictor_supports_empty_boxes(
     assert predictor.predict(tmp_path / "empty.jpg") == []
 
 
+def test_ultralytics_predictor_passes_explicit_image_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    model = FakeModel([FakeResult(None, shape=(1944, 1280))], names=["person"])
+    _install_fake_ultralytics(monkeypatch, model)
+    predictor = UltralyticsPredictor(
+        tmp_path / "yolo26n.pt",
+        confidence_threshold=0.25,
+        device="cpu",
+        image_size=1280,
+    )
+
+    assert predictor.predict(tmp_path / "frame.jpg") == []
+    assert model.calls[0]["imgsz"] == 1280
+
+
 def test_ultralytics_predictor_converts_runtime_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

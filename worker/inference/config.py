@@ -2,8 +2,9 @@
 
 값은 두 곳에서 온다.
 
-- `.env.{APP_ENV}` — 환경마다 달라야 하는 값과 비밀값(`MODEL_PATH`, `INFERENCE_DEVICE`,
-  `OBJECT_STORAGE_BACKEND`와 MinIO 접속 정보). 커밋하지 않는다.
+- `.env.{APP_ENV}` — 환경마다 달라야 하는 값과 비밀값(`MODEL_PATH`,
+  `MODEL_CONTRACT_PATH`, `INFERENCE_DEVICE`, `OBJECT_STORAGE_BACKEND`와 MinIO 접속
+  정보). 커밋하지 않는다.
 - `config/settings.yml` — 환경과 무관하게 같은 값. 커밋한다.
 
 우선순위는 실제 OS 환경변수 > `.env.{APP_ENV}` > `config/settings.yml`이다
@@ -55,6 +56,7 @@ class InferenceSettings(ObjectStorageSettings):
     app_env: Literal["local", "dev", "prod"] = "local"
 
     model_path: str = Field(default="yolo11m.pt")
+    model_contract_path: str | None = Field(default=None)
     inference_device: Literal["cpu", "cuda"] = Field(default="cpu")
     inference_confidence_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
     # 모델에 넣기 전에 프레임의 긴 변을 이 크기로 맞춘다.
@@ -100,13 +102,23 @@ class InferenceSettings(ObjectStorageSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return customise_sources_with_yaml(
-            settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+            settings_cls,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
         )
 
     @model_validator(mode="after")
     def _validate_environment_contract(self) -> Self:
+        if self.app_env in {"dev", "prod"} and not (
+            self.model_contract_path and self.model_contract_path.strip()
+        ):
+            raise ValueError("dev/prod에서는 MODEL_CONTRACT_PATH가 필요합니다.")
         if not self.inference_target_class_ids:
-            raise ValueError("INFERENCE_TARGET_CLASS_IDS는 한 클래스 이상이어야 합니다.")
+            raise ValueError(
+                "INFERENCE_TARGET_CLASS_IDS는 한 클래스 이상이어야 합니다."
+            )
         if any(
             class_id < 0 or not class_name.strip()
             for class_id, class_name in self.inference_target_class_ids.items()

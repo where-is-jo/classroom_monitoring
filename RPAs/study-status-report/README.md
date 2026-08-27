@@ -133,6 +133,45 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 이 판정은 [`tests/period_report.test.js`](./tests/period_report.test.js)가 실제 Node
 런타임에서 검증한다(아래 "검증").
 
+## 주간 보고서와 메일
+
+금요일 18:10에 그 주 월요일부터 당일까지를 집계해 **Slack에 올리고 메일로도 보낸다.**
+첨부는 관리 문서와 같은 `.xlsx`이고 시트는 다섯이다 — 주간 요약, 일자별, 학생별,
+교시별, 상태 변화 기록.
+
+**Slack이 먼저고 메일이 나중이다.** 메일은 SMTP 자격 증명이 있어야 나가는데, 그것이
+없거나 틀렸다고 해서 그 주 보고서가 통째로 사라지면 안 된다. Slack은 이미 검증된
+경로라 먼저 태우고, 메일은 더해지는 통로로 뒀다. 메일 단계가 실패해도 워크플로를
+멈추지 않는다(`onError: continueRegularOutput`) — 실패는 실행 이력에 남는다.
+
+**원천은 FastAPI가 아니라 일일 산출물이다.** 보고서가 말하는 "상태 변화"는 이 RPA가
+5분마다 폴링해 직접 diff한 파생 계열이다. FastAPI에는 원시 탐지 이벤트만 있어서
+거기서 주간을 다시 만들면 의미가 다른 두 번째 계열이 생기고, **주간 숫자가 이미 보낸
+일일 보고서와 어긋난다.** 게다가 `detection_event_retention_days` 기본값이 7일이라
+월요일에 지난주를 조회하면 가장 오래된 날이 막 만료되는 시점이다.
+
+그래서 `/workbook`이 관리 문서를 만들 때 **그 이벤트를 그대로** `data/`에 남기고
+(`events_<날짜>_<강의실>.json`), 주간은 그 파일들만 읽는다. 이탈률 식도
+`create_management_workbook.py`에서 그대로 가져와 일일과 어긋나지 않게 했다.
+
+| 디렉터리 | 담는 것 | 학생 이름 |
+| --- | --- | --- |
+| `reports/` | 사람이 받는 `.xlsx` | **있다** |
+| `data/` | 주간이 읽는 이벤트 원본 | **있다** |
+| `logs/` | 실행 이력 | 없다 |
+
+셋 다 `.gitignore` 대상이다. `logs/`만 이름이 없는 것은 의도된 구분이다 — 실행 이력은
+문제를 쫓을 때 자주 열어 보게 되므로 개인정보를 담지 않는다.
+
+**기록이 없는 날을 0으로 세지 않는다.** RPA가 멈춰 있던 날과 이탈이 없던 날은 다른
+이야기인데 둘 다 0으로 적으면 구분이 사라진다. 없는 날은 "기록 없음"으로 적고,
+한 날도 없으면 아예 만들지 않는다(받는 사람이 "이탈이 없었다"로 읽을 수 있다).
+
+**메일은 Slack 비공개 채널과 다르다.** 전달되고, 개인 사서함에 남고, 보존 기간을
+통제할 수 없다. 첨부에 실명과 좌석이 들어 있으므로 `REPORT_EMAIL_TO`를 늘릴 때
+그 점을 함께 판단한다. SMTP 자격 증명은 Slack 토큰과 같이 `.env`에서 스크립트가
+직접 읽는다.
+
 ## 노드 이름 참조를 늘리지 않는다
 
 n8n 표현식은 다른 노드를 **이름 문자열로만** 부를 수 있다(`$('Parse Schedule')`).
@@ -155,9 +194,13 @@ HTTP Request 노드의 응답은 항목의 `json`을 통째로 덮어써서, 원
 - `scripts/create_management_workbook.py`: `.xlsx` 생성 스크립트
 - `scripts/slack_upload_file.py`: Slack 외부 업로드 API 기반 `.xlsx` 전송 스크립트
 - `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
+- `scripts/create_weekly_workbook.py`: 주간 보고서 `.xlsx` 생성 스크립트
+- `scripts/send_email.py`: 보고서 메일 전송 스크립트(표준 라이브러리 `smtplib`)
+- `scripts/deploy_workflow.py`: 워크플로를 n8n에 반영 (**비활성화 → 갱신 → 활성화**)
 - `scripts/run_workflow_tests.py`: `tests/`의 Code 노드 테스트를 n8n 컨테이너의 Node로 실행
 - `tests/period_report.test.js`: 교시 종료 판정(원장·따라잡기 창) 검증
 - `tests/daily_report.test.js`: 일일 리포트가 담을 이벤트와 context 검증
+- `tests/weekly_report.test.js`: 주간 보고서 기간 계산 검증
 - `runner/server.py`: 위 두 스크립트를 HTTP로 감싸는 실행기 (아래 참고)
 - `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
@@ -185,7 +228,9 @@ n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -
 | --- | --- |
 | `GET /health` | 살아 있는지, 저장소 마운트 경로, 드라이런 여부, **`logs/`·`reports/`에 실제로 쓸 수 있는지** 확인. 쓰지 못하면 `503`과 원인을 돌려준다 |
 | `POST /workbook` | `create_management_workbook.py` 실행 |
+| `POST /weekly-workbook` | `create_weekly_workbook.py` 실행. 이벤트를 본문으로 받지 않고 `data/`를 읽는다 |
 | `POST /slack-upload` | `slack_upload_file.py`로 관리 문서 전송 |
+| `POST /email` | `send_email.py`로 보고서 메일 전송. 첨부는 `reports/` 안으로 제한한다 |
 | `POST /slack-message` | 첨부 없이 텍스트만 전송. 시간표를 읽지 못했을 때의 오류 알림용 |
 
 오류 알림은 Incoming Webhook 대신 Bot token의 `chat:write`로 보낸다. 파일 업로드에
@@ -235,10 +280,14 @@ curl -s localhost:8099/health   # {"ok": true, "repo_dir": "/repo", "dry_run": t
 
 | 파일 | 내용 | 없으면 |
 | --- | --- | --- |
-| `RPAs/study-status-report/.env` | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Slack 전송 단계에서 실패한다 |
-| `individual_tasks/시간표.md` | 시간표 문서 | Slack에 알린 뒤 기록을 중단한다 |
+| `RPAs/study-status-report/.env` | Slack 토큰·채널, SMTP 자격 증명 | 전송 단계에서 실패한다 |
 
-둘 다 `.gitignore` 대상이라 `git pull`로는 생기지 않는다. 시간표 형식과 예시는
+**`.env`만 직접 만들면 된다.** `.gitignore` 대상이라 `git pull`로는 생기지 않는다.
+
+**시간표는 저장소가 관리한다**(`individual_tasks/시간표.md`). 예전에는 이 파일도
+gitignore 대상이라 호스트마다 직접 두어야 했는데, **없으면 RPA가 기록을 중단하므로
+다른 호스트에 배포하는 순간 그대로 실패한다.** 개인 노트가 아니라 운영 설정이라
+저장소로 옮겼다. 형식과 예시는
 [`templates/schedule-sample.md`](./templates/schedule-sample.md)에 있다.
 
 **시간표를 못 읽었을 때 기본 시간표로 넘어가지 않는다.** 실제와 다른 시간표로 출결을
@@ -271,6 +320,22 @@ docker run -d --name rpa-runner --network classroom-rpa --restart unless-stopped
 
 **compose로 정리하려면 없어진 두 env 파일이 필요하다.** 그 값은 이 저장소에 없고
 처음 띄운 사람만 갖고 있다. CTO 노트북으로 옮기기 전에 해결해야 할 항목이다.
+
+### 워크플로를 반영할 때는 비활성화 → 갱신 → 활성화
+
+```bash
+python RPAs/study-status-report/scripts/deploy_workflow.py --dry-run   # 차이만 본다
+python RPAs/study-status-report/scripts/deploy_workflow.py
+```
+
+**단순 PUT만 하면 cron 트리거가 그날 몫을 놓친다.** 2026-08-26에 실측했다 — 8/25에는
+18:05 일일 리포트가 정상 발화했는데, 8/26에 API로 PUT을 두 번 하고 나니 **5분 간격
+트리거는 계속 도는데 일일 리포트만 발화하지 않았다.** 비활성화 후 다시 활성화하니
+곧바로 발화했다. 간격 트리거는 재등록되는데 cron은 그렇지 않은 것으로 보인다.
+
+`deploy_workflow.py`가 그 순서를 지키고, **정적 데이터를 그대로 넘긴다** — 거기에
+그날 이벤트와 이미 보고한 교시 원장이 들어 있어서, 빠뜨리면 그날 기록이 사라지고
+이미 올린 교시가 다시 올라간다.
 
 ### 실행기 UID (다른 호스트로 옮길 때)
 

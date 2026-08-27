@@ -1,0 +1,23 @@
+# 검수·동결이 끝난 원본 프레임 데이터셋의 YOLO26n 학습 예시.
+schema_version: 1
+dataset_dir: null
+dataset_archive: /absolute/path/to/06-colab-export.zip
+archive_sha256: REPLACE_WITH_64_HEX_SHA256
+extract_root: /absolute/path/to/datasets
+output_root: /absolute/path/to/runs/person-detection
+experiment_name: person-yolo26n-original-500-v001-seed42
+base_model: yolo26n.pt
+base_model_sha256: null
+
+mode: smoke-full
+epochs: 100
+patience: 20
+image_size: 1280
+batch: 8
+device: auto
+seed: 42
+workers: 2
+confidence: 0.25
+require_cuda: true
+minimum_cuda_free_gib: 8
+allowed_cuda_devices: null

@@ -27,6 +27,7 @@ def partition_sessions(
     output_dir: Path,
     *,
     allow_approved_student_data: bool = False,
+    require_approval_metadata: bool = True,
 ) -> Path:
     """검토 완료된 세션 배정을 불변 dataset/evaluation manifest로 변환한다."""
 
@@ -77,7 +78,16 @@ def partition_sessions(
         role = assignment["role"]
         if role == "excluded":
             continue
-        _validate_approval(assignment, session_id, allow_approved_student_data)
+        # **호출 자체를 건너뛰지 않는다.** `_validate_approval`은 동의 범위·승인 참조
+        # 말고도 subject_category 화이트리스트와 보존 기한 만료를 함께 본다. 통째로
+        # 건너뛰면 "메타데이터 필수 여부"만 완화하려던 것이 **이미 만료된 보존 기한도
+        # 통과시키는** 결과가 된다. 완화가 필요한 항목은 함수 안에서 가른다.
+        _validate_approval(
+            assignment,
+            session_id,
+            allow_approved_student_data,
+            require_metadata=require_approval_metadata,
+        )
         if assignment["subject_category"] == "student":
             student_sessions.append(session_id)
         records = sources_by_session.get(session_id, [])
@@ -152,6 +162,7 @@ def partition_sessions(
         },
         "student_sessions": sorted(student_sessions),
         "approved_student_flag_used": bool(student_sessions),
+        "approval_metadata_required": require_approval_metadata,
     }
     leak_check = {
         "schema_version": 1,
@@ -201,6 +212,7 @@ def partition_sessions(
                 "colab_export_allowed": False,
                 "reason": "로컬 비식별화 export와 privacy_receipt 검증 후에만 허용",
                 "student_data_present": bool(student_sessions),
+                "approval_metadata_required": require_approval_metadata,
                 "raw_video_export_allowed": False,
             },
         )
@@ -483,28 +495,52 @@ def _validate_approval(
     assignment: dict[str, str],
     session_id: str,
     allow_approved_student_data: bool,
+    *,
+    require_metadata: bool = True,
 ) -> None:
-    if assignment["consent_scope"] != "person-detection-training":
+    """세션의 승인 메타데이터를 검사한다.
+
+    ``require_metadata=False``는 **비어 있어도 넘어간다**는 뜻이다. 적혀 있는 값까지
+    믿지 않겠다는 뜻이 아니다. 그래서 값이 있으면 언제나 검사하고, 플래그는 "없을 때
+    통과시킬지"에만 쓴다. 학생 데이터 승인은 이 플래그와 무관하게 늘 요구한다 —
+    그것만은 완화할 대상이 아니다.
+    """
+    consent_scope = assignment["consent_scope"]
+    if require_metadata and not consent_scope:
+        raise AutoLabelingError(
+            f"session_id={session_id}: consent_scope가 필요합니다."
+        )
+    if consent_scope and consent_scope != "person-detection-training":
         raise AutoLabelingError(
             f"session_id={session_id}: consent_scope가 올바르지 않습니다."
         )
-    if not assignment["approval_reference"]:
+    if require_metadata and not assignment["approval_reference"]:
         raise AutoLabelingError(
             f"session_id={session_id}: approval_reference가 필요합니다."
         )
     category = assignment["subject_category"]
-    if category not in SUBJECT_CATEGORIES:
+    if require_metadata and not category:
+        raise AutoLabelingError(
+            f"session_id={session_id}: subject_category가 필요합니다."
+        )
+    if category and category not in SUBJECT_CATEGORIES:
         raise AutoLabelingError(
             f"session_id={session_id}: subject_category가 올바르지 않습니다."
         )
+    # 학생 데이터 승인은 완화하지 않는다.
     if category == "student" and not allow_approved_student_data:
         raise AutoLabelingError(
             "실제 학생 데이터는 --allow-approved-student-data를 명시해야 합니다."
         )
+    raw_expires_at = assignment["retention_expires_at"]
+    if not raw_expires_at:
+        if require_metadata:
+            raise AutoLabelingError(
+                f"session_id={session_id}: retention_expires_at이 필요합니다."
+            )
+        return
     try:
-        expires_at = datetime.fromisoformat(
-            assignment["retention_expires_at"].replace("Z", "+00:00")
-        )
+        expires_at = datetime.fromisoformat(raw_expires_at.replace("Z", "+00:00"))
     except ValueError as exc:
         raise AutoLabelingError(
             f"session_id={session_id}: retention_expires_at이 올바르지 않습니다."
@@ -513,6 +549,7 @@ def _validate_approval(
         raise AutoLabelingError(
             f"session_id={session_id}: retention_expires_at에 timezone이 필요합니다."
         )
+    # 적혀 있는 만료일은 플래그와 무관하게 지킨다.
     if expires_at <= datetime.now(UTC):
         raise AutoLabelingError(
             f"session_id={session_id}: retention_expires_at이 이미 지났습니다."

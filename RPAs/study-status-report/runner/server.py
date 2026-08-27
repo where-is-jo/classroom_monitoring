@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,16 @@ LOG_DIR = REPO_DIR / "RPAs" / "study-status-report" / "logs"
 # 워크북을 쓰고 Slack에 올리는 대상은 이 디렉터리 안으로 한정한다.
 # 저장소 전체를 허용하면 같은 저장소에 있는 .env를 Slack에 올릴 수 있다.
 REPORT_DIR = REPO_DIR / "RPAs" / "study-status-report" / "reports"
+# 주간 집계가 읽는 일일 이벤트 원본을 두는 곳.
+#
+# **주간 보고서의 원천을 FastAPI가 아니라 여기로 잡았다.** 보고서가 말하는 "상태 변화"는
+# 이 RPA가 5분마다 폴링해 직접 diff한 파생 계열이라, FastAPI의 원시 탐지 이벤트에서
+# 다시 만들면 의미가 다른 두 번째 계열이 생기고 주간 숫자가 이미 보낸 일일 보고서와
+# 어긋난다. 그래서 일일 보고서를 만든 그 데이터를 그대로 남겨 주간이 읽게 한다.
+#
+# reports/의 .xlsx와 같은 등급이다 — **학생 실명이 들어 있다.** 이름을 남기지 않는
+# 실행 이력(logs/)과 섞지 않으려고 디렉터리를 나눴다. 둘 다 .gitignore 대상이다.
+DATA_DIR = REPO_DIR / "RPAs" / "study-status-report" / "data"
 LISTEN_PORT = int(os.environ.get("RUNNER_PORT", "8099"))
 # 워크북 생성은 이벤트가 많으면 수 초가 걸리고, Slack 업로드는 외부 호출이다.
 # 무한정 매달리지 않도록 상한을 둔다.
@@ -81,7 +92,7 @@ def writable_problems() -> list[str]:
     그래서 기동할 때와 ``/health``에서 미리 확인해 눈에 보이게 만든다.
     """
     problems: list[str] = []
-    for label, path in (("logs", LOG_DIR), ("reports", REPORT_DIR)):
+    for label, path in (("logs", LOG_DIR), ("reports", REPORT_DIR), ("data", DATA_DIR)):
         try:
             path.mkdir(parents=True, exist_ok=True)
             # 고정 이름으로 만들면 /health가 겹쳐 불릴 때 서로 지운다. 매번 다른
@@ -182,6 +193,37 @@ def _state_changes_without_names(events_base64: str) -> list[dict[str, object]]:
     ]
 
 
+def _store_daily_events(date: str, classroom: str, events_base64: str) -> None:
+    """관리 문서를 만든 그 이벤트를 주간 집계가 읽을 수 있게 그대로 남긴다.
+
+    **매 주기 덮어쓴다.** 워크플로가 그날 누적분 전체를 매번 보내므로 마지막에 쓴 것이
+    그날의 완성본이다. 중간에 RPA가 멈추면 거기까지가 남는데, 그것이 실제로 관측한
+    전부이므로 맞는 동작이다.
+
+    남기지 못해도 본 작업을 실패로 만들지 않는다. 관리 문서는 이미 만들어졌고, 여기서
+    예외를 올리면 되돌릴 수 없는 것을 실패로 보고하게 된다 — 실행 이력과 같은 판단이다.
+    """
+    try:
+        events = json.loads(base64.b64decode(events_base64.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        logger.warning("이벤트를 해석하지 못해 주간용 원본을 남기지 못했습니다.")
+        return
+    if not isinstance(events, list):
+        return
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        path = DATA_DIR / f"events_{date}_{classroom_slug(classroom)}.json"
+        payload = {"date": date, "classroom": classroom, "events": events}
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        logger.exception("주간용 이벤트 원본을 남기지 못했습니다. 본 작업은 계속합니다.")
+
+
+def classroom_slug(value: str) -> str:
+    """파일 이름에 쓸 수 있는 형태로 줄인다. 공백과 특수문자가 경로를 흔들지 않게 한다."""
+    return re.sub(r"[^0-9A-Za-z가-힣_.-]+", "_", value).strip("_") or "classroom"
+
+
 def _skipped_by_dry_run(action: str) -> dict[str, object] | None:
     """드라이런이면 전송을 건너뛴 결과를 돌려준다. 아니면 None."""
     if not DRY_RUN:
@@ -229,6 +271,8 @@ def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
     result["workbook_path"] = str(out_path)
 
     _echo_context(payload, result)
+    if result["ok"]:
+        _store_daily_events(_require(payload, "date"), _require(payload, "classroom"), events_base64)
 
     changes = _state_changes_without_names(events_base64)
     append_run_log(
@@ -238,6 +282,72 @@ def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
             "workbook": out_path.name,
             "state_change_count": len(changes),
             "state_changes": changes,
+            "error": result["stderr"] or None if not result["ok"] else None,
+        }
+    )
+    return result
+
+
+def handle_weekly_workbook(payload: dict[str, object]) -> dict[str, object]:
+    """주간 보고서(.xlsx)를 만든다.
+
+    입력은 기간과 강의실뿐이다. 이벤트를 요청 본문으로 받지 않는 것이 일일 경로와
+    다른 점인데, 주간은 ``data/``에 남아 있는 **일일 산출물을 그대로 읽기** 때문이다.
+    한 주치 이벤트를 base64로 실어 나르면 본문이 커지고, 무엇보다 원천이 두 곳으로
+    갈린다.
+    """
+    out_path = _resolve_inside(REPORT_DIR, _require(payload, "out"))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    args = [
+        "--from", _require(payload, "from"),
+        "--to", _require(payload, "to"),
+        "--classroom", _require(payload, "classroom"),
+        "--data-dir", str(DATA_DIR),
+        "--out", str(out_path),
+    ]
+    result = _run("create_weekly_workbook.py", args)
+    result["workbook_path"] = str(out_path)
+    _echo_context(payload, result)
+    append_run_log(
+        {
+            "action": "weekly_workbook",
+            "ok": result["ok"],
+            "workbook": out_path.name,
+            "range": f"{payload.get('from')}~{payload.get('to')}",
+            "error": result["stderr"] or None if not result["ok"] else None,
+        }
+    )
+    return result
+
+
+def handle_email(payload: dict[str, object]) -> dict[str, object]:
+    """보고서를 메일로 보낸다.
+
+    **첨부는 reports/ 안으로 제한한다.** Slack 업로드와 같은 이유다 — 경로가 워크플로
+    에서 넘어오므로, 저장소 전체를 허용하면 같은 저장소의 ``.env``를 메일로 보내라고
+    시킬 수 있다.
+
+    수신자와 SMTP 자격 증명은 요청 본문으로 받지 않는다. 스크립트가 마운트된
+    ``.env``에서 직접 읽는다. 실행 이력에도 수신자 주소를 남기지 않는다.
+    """
+    args = ["--subject", _require(payload, "subject"), "--body", _require(payload, "body")]
+    attachment = payload.get("file")
+    attached_name = None
+    if isinstance(attachment, str) and attachment:
+        file_path = _resolve_inside(REPORT_DIR, attachment)
+        if not file_path.exists():
+            raise RunnerError(f"첨부할 파일이 없습니다: {file_path}")
+        attached_name = file_path.name
+        args += ["--file", str(file_path)]
+
+    result = _skipped_by_dry_run("email") or _run("send_email.py", args)
+    _echo_context(payload, result)
+    append_run_log(
+        {
+            "action": "email",
+            "ok": result["ok"],
+            "workbook": attached_name,
             "error": result["stderr"] or None if not result["ok"] else None,
         }
     )
@@ -322,8 +432,10 @@ def handle_slack_message(payload: dict[str, object]) -> dict[str, object]:
 
 ROUTES = {
     "/workbook": handle_workbook,
+    "/weekly-workbook": handle_weekly_workbook,
     "/slack-upload": handle_slack_upload,
     "/slack-message": handle_slack_message,
+    "/email": handle_email,
 }
 
 

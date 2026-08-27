@@ -22,6 +22,7 @@ from inference.consumer import (
     log_result,
 )
 from inference.dispatch import AsyncResultDispatcher
+from inference.entry_overlay import FastAPIEntryOverlayHandler
 from inference.face_identity import (
     EntryFaceProcessor,
     FastAPIEntryIdentityEventHandler,
@@ -35,6 +36,7 @@ from inference.identity_handover import (
     RefreshingIdentityHandoverResultHandler,
 )
 from inference.model import Yolo8nDetector
+from inference.model_contract import verify_person_model_contract
 from inference.overlay import FastAPIOverlayHandler
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
@@ -311,6 +313,26 @@ def build_result_handlers(
             )
             dispatchers.append(entry_dispatcher)
             entry_handler = _sequence_entry_handlers(observe_entry, entry_dispatcher)
+            if overlay_dispatch_enabled:
+                # CCTV와 같은 이유로 화면용 상자를 저장과 갈라 보낸다(결정 0047).
+                # 저장 채널은 전송 간격에 묶여 있어 화면 갱신이 그만큼 성겨진다.
+                logger.info("입구 얼굴 상자도 저장과 분리해 보낸다.")
+                entry_overlay_dispatcher: AsyncResultDispatcher[
+                    EntryFaceObservationBatch
+                ] = AsyncResultDispatcher(
+                    FastAPIEntryOverlayHandler(
+                        fastapi_url, timeout_seconds=overlay_timeout_seconds
+                    ),
+                    channel="entry-overlay",
+                    maxsize=result_dispatch_queue_maxsize,
+                    min_interval_seconds=overlay_dispatch_min_interval_seconds,
+                    close_timeout_seconds=result_dispatch_close_timeout_seconds,
+                )
+                dispatchers.append(entry_overlay_dispatcher)
+                # 오버레이를 먼저 넣는다. 지연에 민감한 쪽을 앞에 둔다.
+                entry_handler = _sequence_entry_handlers(
+                    entry_overlay_dispatcher, entry_handler
+                )
         else:
             logger.info("입구 얼굴 관측을 FastAPI(%s)에 저장한다.", fastapi_url)
             entry_handler = FastAPIEntryIdentityEventHandler(
@@ -347,6 +369,13 @@ def build_runner(
             "BYTETRACK_HIGH_CONFIDENCE_THRESHOLD보다 낮아야 합니다."
         )
 
+    # 가중치와 전처리 계약이 다르면 모델을 로딩하기 전에 기동을 거부한다.
+    verify_person_model_contract(
+        inference_settings.model_path,
+        inference_settings.model_contract_path,
+        inference_settings.inference_target_class_ids,
+        inference_settings.inference_image_size,
+    )
     # 모델 로딩은 프로세스 시작 시 1회다. 프레임마다 불러오면 추론이 멈춘다.
     detector = Yolo8nDetector(
         model_path=inference_settings.model_path,
