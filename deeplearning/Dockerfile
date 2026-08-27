@@ -20,8 +20,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
+# **CPU판 onnxruntime을 반드시 걷어낸다.** insightface가 그것을 의존성으로 끌어오는데,
+# 두 패키지가 같은 `onnxruntime` 모듈을 제공해서 나중에 설치된 쪽이 이긴다. 실제로
+# 그대로 두었더니 GPU판을 함께 넣었는데도 provider 목록이
+# ['AzureExecutionProvider', 'CPUExecutionProvider']가 되어 CUDA가 사라졌고, 배포가
+# 기동 단계에서 멈췄다(FACE_EXECUTION_PROVIDER=cuda가 막았다).
+#
+# uninstall을 install 뒤에 두는 이유는 순서 때문이다. requirements.txt가 GPU판을 먼저
+# 적어도 pip가 insightface를 처리하며 CPU판을 나중에 넣을 수 있다. 다 끝난 뒤에
+# 지우고 GPU판만 다시 확정하는 편이 순서에 기대지 않는다.
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /opt/venv/bin/pip uninstall -y onnxruntime \
+    && /opt/venv/bin/pip install --no-cache-dir --force-reinstall --no-deps \
+        onnxruntime-gpu==1.28.0 \
+    && /opt/venv/bin/python -c "import onnxruntime; assert 'CUDAExecutionProvider' in onnxruntime.get_available_providers(), onnxruntime.get_available_providers()" \
     && find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
     && find /opt/venv -name '*.pyc' -delete
 
