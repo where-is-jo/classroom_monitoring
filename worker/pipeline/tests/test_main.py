@@ -389,7 +389,7 @@ def test_입구와_CCTV를_서로_다른_버퍼와_소비자로_조립한다(
     buffers = stream_worker.frame_buffers_by_camera_id
     assert buffers["entry-camera"] is not buffers["classroom-cctv"]
     assert stream_worker.sample_intervals_by_camera_id == {
-        "entry-camera": 20,
+        "entry-camera": 4,
         "classroom-cctv": 4,
     }
 

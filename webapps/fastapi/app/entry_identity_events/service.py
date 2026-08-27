@@ -89,6 +89,46 @@ class EntryIdentityEventService:
             self._broadcaster.publish(self._to_realtime_event(saved))
         return EntryIdentityEventSaveResult(saved, created)
 
+    def publish_overlay(
+        self,
+        *,
+        event_id: str,
+        camera_id: str,
+        captured_at: datetime,
+        sequence: int,
+        frame: EntryFrameInfo,
+        processing_status: EntryIdentityProcessingStatus,
+        observations: tuple[EntryFaceObservation, ...],
+    ) -> None:
+        """얼굴 상자만 구독자에게 내보낸다. **저장하지 않는다.**
+
+        화면에 상자를 그리는 일과 관측을 남기는 일은 요구가 반대다. 오버레이는 자주
+        와야 하고 놓쳐도 다음 프레임이 덮어 그리지만, 저장은 그 이벤트가 유일한
+        기회이고 만료 정책까지 걸려 있다. 같은 경로에 두면 저장 주기가 곧 화면 갱신
+        주기가 된다 — CCTV에서 같은 문제를 겪고 갈랐다(결정 0047).
+
+        `save_event`와 달리 강의실·stream 확인도 하지 않는다. 구독자는 `camera_id`로만
+        걸러 받으므로(`stream_entry_identity_events`) 등록되지 않은 카메라의 payload는
+        아무에게도 닿지 않으며, 확인하려면 저장소 왕복이 생겨 이 경로를 만든 이유가
+        없어진다.
+        """
+        received_at = self._aware_utc(self._clock())
+        event = EntryIdentityEvent(
+            event_id=event_id,
+            camera_id=camera_id,
+            # 저장하지 않으므로 stream_id·expires_at은 화면에 쓰이지 않는다.
+            # `_to_realtime_event`가 두 값을 쓰지 않는 것을 테스트가 고정한다.
+            stream_id="",
+            captured_at=self._aware_utc(captured_at),
+            sequence=sequence,
+            frame=frame,
+            processing_status=processing_status,
+            observations=observations,
+            received_at=received_at,
+            expires_at=received_at,
+        )
+        self._broadcaster.publish(self._to_realtime_event(event))
+
     def resolve_realtime_camera_id(self, stream_id: str) -> str:
         """얼굴 SSE를 열 수 있는 활성 입구 stream인지 확인하고 camera ID를 반환한다."""
         stream = self._stream_repository.find_by_id(
