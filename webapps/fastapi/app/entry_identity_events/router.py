@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import StreamingResponse
 
 from ..shared.broadcaster import InMemoryBroadcaster
@@ -52,6 +52,34 @@ def create_entry_identity_event(
     if not result.created:
         response.status_code = 200
     return EntryIdentityEventResponse.from_domain(result.event)
+
+
+@internal_router.post(
+    "/entry-identity-overlays",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def publish_entry_identity_overlay(
+    request: EntryIdentityEventCreateRequest,
+    service: EntryIdentityEventService = Depends(get_entry_identity_event_service),
+) -> Response:
+    """얼굴 상자만 실시간으로 내보낸다. **저장하지 않는다.**
+
+    저장 경로(`/internal/entry-identity-events`)와 본문 계약이 같다. 두 경로가 다른
+    모양을 보내면 화면의 상자와 저장된 관측이 어긋날 수 있다.
+
+    저장소를 건드리지 않으므로 응답이 빠르다. 만들어진 자원이 없어 201도 200도
+    맞지 않아 202로 답한다.
+    """
+    service.publish_overlay(
+        event_id=request.event_id,
+        camera_id=request.camera_id,
+        captured_at=request.captured_at,
+        sequence=request.sequence,
+        frame=request.frame.to_domain(),
+        processing_status=request.processing_status,
+        observations=tuple(item.to_domain() for item in request.observations),
+    )
+    return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
 @api_router.get("/video-streams/{stream_id}/entry-identity-events/stream")
