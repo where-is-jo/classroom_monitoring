@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -15,7 +16,13 @@ from typing import Any, Literal
 import cv2
 import mediapipe as mp
 import numpy as np
+import onnxruntime
 from dotenv import load_dotenv
+from execution_provider import (
+    active_provider,
+    requested_providers,
+    verify_execution_provider,
+)
 from face_identification import (
     FaceGalleryUnavailable,
     FaceIdentificationConfig,
@@ -123,6 +130,9 @@ def _active_session_count() -> int:
 # DELETE가 오지 않아 위 두 딕셔너리에 항목이 남는다. 스크랩 시점에만 세므로 요청
 # 경로에는 아무것도 추가되지 않는다.
 install_session_gauge(_active_session_count)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _model_path() -> Path:
@@ -270,17 +280,20 @@ def _build_face_identification_runtime(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    detector = get_model(str(_model_path()), providers=["CPUExecutionProvider"])
+    # **세션을 먼저 만들고 실제 provider를 확인한 뒤 ctx_id를 정한다.** 요청한 provider가
+    # 실제로 쓰이는지는 세션에 물어야만 알 수 있다(_active_provider 참고).
+    choice, providers = requested_providers()
+    detector = get_model(str(_model_path()), providers=providers)
+    ctx_id = verify_execution_provider(detector, choice)
+    app.state.execution_provider = active_provider(detector)
     detector.prepare(
-        ctx_id=-1,
+        ctx_id=ctx_id,
         input_size=(640, 640),
         det_thresh=_face_detection_threshold(),
     )
     app.state.detector = detector
-    recognizer = get_model(
-        str(_recognition_model_path()), providers=["CPUExecutionProvider"]
-    )
-    recognizer.prepare(ctx_id=-1)
+    recognizer = get_model(str(_recognition_model_path()), providers=providers)
+    recognizer.prepare(ctx_id=ctx_id)
     app.state.recognizer = recognizer
     app.state.face_identification_runtime = _build_face_identification_runtime(
         detector=detector,
