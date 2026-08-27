@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -135,7 +135,6 @@ def monitoring_page(
         context={
             "real_streams": real_streams,
             "stream_service": stream_service,
-            "current_time": datetime.now(UTC),
         },
     )
 
