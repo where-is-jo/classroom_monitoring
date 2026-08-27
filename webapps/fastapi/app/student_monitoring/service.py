@@ -289,6 +289,15 @@ class StudentMonitoringService:
 
         return InferenceEventResult(event=saved_event, is_new=is_new)
 
+    def publish_overlay(self, event: DetectionEvent) -> None:
+        """bbox overlay만 구독자에게 내보낸다. 저장소를 전혀 쓰지 않는다.
+
+        `receive_inference_event`와 달리 강의실 확인도 하지 않는다. 구독자는
+        `camera_id`로만 걸러 받으므로 등록되지 않은 카메라의 payload는 아무에게도
+        닿지 않고, 확인하려면 저장소 왕복이 생겨 이 경로를 만든 이유가 없어진다.
+        """
+        self._publish_detection_overlay(event)
+
     def _publish_detection_overlay(self, event: DetectionEvent) -> None:
         """bbox overlay용 SSE를 내보낸다. 저장소를 거치지 않는다.
 

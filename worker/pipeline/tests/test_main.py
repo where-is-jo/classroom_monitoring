@@ -271,12 +271,20 @@ def test_조립_시_FASTAPI_URL_설정이면_FastAPIResultHandler가_주입된�
     handler = runner._consumer._result_handler  # type: ignore[attr-defined]
     assert isinstance(handler, ByteTrackResultHandler)
 
-    # 전송 분리가 기본값이라 ByteTrack 바로 안쪽은 dispatcher다. **순서가 중요하다** —
-    # ByteTrack은 프레임 순서에 기대는 상태를 들고 있어 소비자 스레드에 남아야 하고,
-    # 그보다 안쪽(전송)만 전용 스레드로 넘어간다.
-    chain = _handler_chain(handler)
-    assert isinstance(chain[1], AsyncResultDispatcher)
-    assert isinstance(chain[2], FastAPIResultHandler)
+    # ByteTrack은 프레임 순서에 기대는 상태를 들고 있어 소비자 스레드에 남고,
+    # 그보다 안쪽만 전용 스레드로 넘어간다. **오버레이와 저장이 갈라지므로**
+    # ByteTrack 안쪽은 둘을 나누는 tee다.
+    inner = handler._inner  # type: ignore[attr-defined]
+    assert callable(inner)
+
+    dispatchers = runner._result_dispatchers  # type: ignore[attr-defined]
+    channels = sorted(item.channel for item in dispatchers)
+    # 오버레이 채널과 저장 채널이 각자의 전송 스레드를 가진다.
+    assert channels == ["detection", "overlay"]
+
+    detection = next(item for item in dispatchers if item.channel == "detection")
+    chain = _handler_chain(detection)
+    assert isinstance(chain[1], FastAPIResultHandler)
     assert chain[-1] is log_result
 
 

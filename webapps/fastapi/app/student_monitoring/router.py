@@ -7,7 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..shared.broadcaster import InMemoryBroadcaster
@@ -51,13 +51,9 @@ internal_router = APIRouter(prefix="/internal", tags=["student-monitoring-intern
 api_router = APIRouter(prefix="/api/v1", tags=["student-monitoring"])
 
 
-@internal_router.post("/inference/events", response_model=InferenceEventResponse)
-def receive_inference_event(
-    request: InferenceEventRequest,
-    service: StudentMonitoringService = Depends(get_student_monitoring_service),
-) -> InferenceEventResponse | JSONResponse:
-    """Receive inference event from worker."""
-    event = DetectionEvent(
+def _to_detection_event(request: InferenceEventRequest) -> DetectionEvent:
+    """요청 본문을 도메인 이벤트로 옮긴다. 저장 경로와 오버레이 경로가 함께 쓴다."""
+    return DetectionEvent(
         event_id=request.event_id,
         camera_id=request.camera_id,
         stream_id="",
@@ -85,6 +81,34 @@ def receive_inference_event(
         received_at=utc_now(),
         schema_version=1,
     )
+
+
+@internal_router.post("/inference/overlays", status_code=status.HTTP_202_ACCEPTED)
+def receive_inference_overlay(
+    request: InferenceEventRequest,
+    service: StudentMonitoringService = Depends(get_student_monitoring_service),
+) -> Response:
+    """bbox overlay만 실시간으로 내보낸다. **저장하지 않는다.**
+
+    화면에 상자를 그리는 일과 이벤트를 남기는 일은 요구가 반대다. 오버레이는 자주
+    와야 하고 놓쳐도 다음 프레임이 덮어 그리지만, 저장은 이벤트마다 한 번뿐이고
+    좌석 판정까지 이어져 비싸다. 같은 경로에 두면 저장 주기가 곧 화면 갱신 주기가
+    된다(결정 0047).
+
+    저장소를 전혀 건드리지 않으므로 응답이 빠르다. 받은 즉시 구독자에게 넘기고
+    202로 답한다 — 만들어진 자원이 없어 201도 200도 맞지 않는다.
+    """
+    service.publish_overlay(_to_detection_event(request))
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@internal_router.post("/inference/events", response_model=InferenceEventResponse)
+def receive_inference_event(
+    request: InferenceEventRequest,
+    service: StudentMonitoringService = Depends(get_student_monitoring_service),
+) -> InferenceEventResponse | JSONResponse:
+    """Receive inference event from worker."""
+    event = _to_detection_event(request)
 
     result = service.receive_inference_event(event)
 
