@@ -498,7 +498,9 @@ def test_new_event_publishes_safe_detection_labels_and_student_state_once() -> N
     assert second.is_new is False
     detection_events = [item for item in published if item["type"] == "detection"]
     student_events = [item for item in published if item["type"] == "student-state"]
-    assert len(detection_events) == 1
+    # bbox overlay는 저장 여부를 확인하기 전에 내보내므로 재수신에서도 한 번 더 나간다.
+    # 같은 상자를 덮어 그리는 것이라 화면 결과는 같다.
+    assert len(detection_events) == 2
     assert len(student_events) == 1
     detections = detection_events[0]["detections"]
     assert isinstance(detections, list)

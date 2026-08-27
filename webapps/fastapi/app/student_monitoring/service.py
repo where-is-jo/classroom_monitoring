@@ -178,6 +178,15 @@ class StudentMonitoringService:
             classroom_id=stream.classroom_id,
         )
 
+        # **bbox overlay를 먼저 내보낸다.** 화면에 상자를 그리는 데 저장소는 필요
+        # 없는데, 예전에는 재수신 확인·저장·마지막 탐지 갱신을 모두 마친 뒤에야
+        # 발행했다. 이 저장소는 원격 Atlas라 그 세 번이 왕복 세 번이고, 회선이
+        # 흔들리면 그대로 곱해진다(결정 0045의 실측: 왕복 41ms~118ms).
+        #
+        # 재수신이면 같은 상자를 한 번 더 그린다. 덮어 그리는 것이라 화면은 같고,
+        # 저장 여부를 확인하려고 오버레이를 늦추는 것보다 낫다.
+        self._publish_detection_overlay(resolved_event)
+
         # Check if event already exists
         existing = self._detection_repository.find_by_event_id(event.event_id)
         is_new = existing is None
@@ -189,36 +198,6 @@ class StudentMonitoringService:
         if is_new:
             self._stream_repository.update_last_detection(
                 saved_event.camera_id, saved_event.captured_at
-            )
-
-            # Publish to SSE only for new events
-            # frame·detections를 함께 보내야 브라우저가 bbox overlay를 그릴 수 있다.
-            self._broadcaster.publish(
-                {
-                    "type": "detection",
-                    "event_id": saved_event.event_id,
-                    "camera_id": saved_event.camera_id,
-                    "captured_at": saved_event.captured_at.isoformat(),
-                    "sequence": saved_event.sequence,
-                    "frame": {
-                        "width_pixels": saved_event.frame.width_pixels,
-                        "height_pixels": saved_event.frame.height_pixels,
-                    },
-                    "detections": [
-                        {
-                            "detection_id": d.detection_id,
-                            "class_id": d.class_id,
-                            "class_name": d.class_name,
-                            "confidence": d.confidence,
-                            "bbox": list(d.bbox),
-                            "student_id": d.student_id,
-                            "track_id": d.track_id,
-                            "display_label": self._safe_detection_label(d),
-                        }
-                        for d in saved_event.detections
-                    ],
-                    "detections_count": len(saved_event.detections),
-                }
             )
 
             # 탐지→좌석 매핑: 새 이벤트일 때만 좌석 관측 batch를 만들고,
@@ -309,6 +288,47 @@ class StudentMonitoringService:
                     )
 
         return InferenceEventResult(event=saved_event, is_new=is_new)
+
+    def _publish_detection_overlay(self, event: DetectionEvent) -> None:
+        """bbox overlay용 SSE를 내보낸다. 저장소를 거치지 않는다.
+
+        구독자는 `camera_id`로만 걸러 받으므로(`stream_detection_events`) 저장 결과인
+        `stream_id`·`classroom_id`는 payload에 필요 없다. frame과 detections를 함께
+        보내야 브라우저가 화면 크기에 맞춰 상자를 환산할 수 있다.
+
+        **발행 실패가 탐지 저장을 막지 않는다.** 오버레이는 놓쳐도 다음 프레임이
+        덮어 그리지만, 저장은 그 이벤트가 유일한 기회다.
+        """
+        try:
+            self._broadcaster.publish(
+                {
+                    "type": "detection",
+                    "event_id": event.event_id,
+                    "camera_id": event.camera_id,
+                    "captured_at": event.captured_at.isoformat(),
+                    "sequence": event.sequence,
+                    "frame": {
+                        "width_pixels": event.frame.width_pixels,
+                        "height_pixels": event.frame.height_pixels,
+                    },
+                    "detections": [
+                        {
+                            "detection_id": d.detection_id,
+                            "class_id": d.class_id,
+                            "class_name": d.class_name,
+                            "confidence": d.confidence,
+                            "bbox": list(d.bbox),
+                            "student_id": d.student_id,
+                            "track_id": d.track_id,
+                            "display_label": self._safe_detection_label(d),
+                        }
+                        for d in event.detections
+                    ],
+                    "detections_count": len(event.detections),
+                }
+            )
+        except Exception:
+            logger.exception("bbox overlay 발행에 실패했습니다. event_id=%s", event.event_id)
 
     def _safe_detection_label(self, detection: Detection) -> str:
         """활성 학생의 임계값 이상 식별만 이름으로 표시한다."""

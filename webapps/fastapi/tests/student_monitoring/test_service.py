@@ -448,11 +448,18 @@ class TestAutomaticSeatMapping:
 
         assert first.is_new is True
         assert second.is_new is False
-        # 첫 수신의 탐지·점유 이벤트 이후에 새 이벤트가 없어야 한다.
-        queue.get_nowait()
-        queue.get_nowait()
-        queue.get_nowait()
-        assert queue.empty()
+
+        published = []
+        while not queue.empty():
+            published.append(queue.get_nowait())
+        kinds = [item.get("type") for item in published]
+        # **점유 이벤트는 재수신에서 다시 나가지 않는다.** 좌석 상태를 두 번 바꾸면
+        # 안 되기 때문이다. 첫 수신의 좌석 2개분만 있어야 한다.
+        assert kinds.count("occupancy") == 2
+        # 반면 bbox overlay는 두 번 나간다. 저장 여부를 확인하기 전에 내보내기
+        # 때문이며(오버레이는 저장소가 필요 없다), 같은 상자를 덮어 그리므로
+        # 화면 결과는 같다.
+        assert kinds.count("detection") == 2
 
 
 def _seat_state(classroom_service: ClassroomService, seat_id: str) -> SeatOccupancy:
