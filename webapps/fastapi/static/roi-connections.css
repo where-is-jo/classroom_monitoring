@@ -28,7 +28,11 @@
    그대로 유효하다. */
 .roi-media-stage { position: relative; width: fit-content; max-width: 100%; margin-inline: auto; min-height: 320px; overflow: hidden; background: #d8dddc; border-radius: 18px; box-shadow: var(--shadow); user-select: none; }
 .roi-media-stage[data-state="empty"] { width: 100%; }
-#roi-reference-image { display: block; width: auto; max-width: 100%; height: auto; max-height: 72vh; background: #111817; }
+/* 세로로 긴 화각(1280x1944)에서는 높이가 병목이라 max-height가 실제 크기를 정한다.
+   좌석 하나가 화면의 몇 %밖에 되지 않아 72vh로는 ROI를 눈으로 대조하기 어려웠다.
+   화면이 낮은 기기에서도 최소 크기를 확보하려고 vh와 절대값 중 큰 쪽을 쓴다 —
+   뷰포트를 넘으면 페이지가 세로로 스크롤되지만 ROI 작업에는 크기가 더 중요하다. */
+#roi-reference-image { display: block; width: auto; max-width: 100%; height: auto; max-height: max(92vh, 820px); background: #111817; }
 .roi-media-placeholder, #roi-live-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .roi-media-stage [hidden] { display: none !important; }
 .roi-media-placeholder { display: grid; align-content: center; justify-items: center; gap: 8px; padding: 30px; color: #53605e; text-align: center; background: #d8dddc; }
@@ -66,7 +70,7 @@ button.danger:disabled { cursor: not-allowed; opacity: .45; }
 .roi-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 body.roi-modal-open { overflow: hidden; }
 /* 좁은 화면에서도 버튼은 가로로 흐른다. 세로로 쌓으면 12개가 화면을 통째로 차지한다. */
-@media (max-width: 680px) { .roi-filter-line { align-items: stretch; } .roi-classroom-filter { justify-content: space-between; } .roi-classroom-filter select { min-width: 0; width: 70%; } .roi-action-buttons button { flex: 1 1 auto; } #roi-reference-image { max-height: 60vh; } }
+@media (max-width: 680px) { .roi-filter-line { align-items: stretch; } .roi-classroom-filter { justify-content: space-between; } .roi-classroom-filter select { min-width: 0; width: 70%; } .roi-action-buttons button { flex: 1 1 auto; } #roi-reference-image { max-height: max(78vh, 560px); } }
 
 /* 탐지에서 찾은 자리. 좌석이 아직 정해지지 않아 저장된 ROI·격자 미리보기와 구분한다. */
 #roi-auto-preview polygon[data-spot-index] { fill: rgba(0, 170, 90, .18); stroke: #00c46a; stroke-dasharray: 6 3; }

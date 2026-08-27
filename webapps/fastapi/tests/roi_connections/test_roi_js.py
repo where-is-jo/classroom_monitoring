@@ -161,10 +161,12 @@ def test_capture_stage_is_scaled_to_fit_the_page() -> None:
     """1280x1944 원본을 그대로 두면 페이지가 한없이 길어진다.
 
     stage와 이미지의 상자가 같아야 ROI 좌표가 맞으므로 stage 크기를 이미지가 정한다.
+    다만 너무 줄이면 좌석 하나가 몇 십 px이라 ROI를 눈으로 대조할 수 없다. 화면이
+    낮은 기기에서도 최소 크기를 확보하려고 vh와 절대값 중 큰 쪽을 쓴다.
     """
     style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
 
-    assert "max-height: 72vh" in style
+    assert "max-height: max(92vh, 820px)" in style
     assert "width: fit-content" in style
 
 
