@@ -269,6 +269,16 @@ def handle_workbook(payload: dict[str, object]) -> dict[str, object]:
     ]
     result = _run("create_management_workbook.py", args)
     result["workbook_path"] = str(out_path)
+    if result["ok"]:
+        result["page_path"] = _report_page(
+            "일간",
+            [
+                "--date", _require(payload, "date"),
+                "--classroom", _require(payload, "classroom"),
+                "--events-base64", events_base64,
+            ],
+            out_path,
+        )
 
     _echo_context(payload, result)
     if result["ok"]:
@@ -308,6 +318,17 @@ def handle_weekly_workbook(payload: dict[str, object]) -> dict[str, object]:
     ]
     result = _run("create_weekly_workbook.py", args)
     result["workbook_path"] = str(out_path)
+    if result["ok"]:
+        result["page_path"] = _report_page(
+            "주간",
+            [
+                "--from", _require(payload, "from"),
+                "--to", _require(payload, "to"),
+                "--classroom", _require(payload, "classroom"),
+                "--data-dir", str(DATA_DIR),
+            ],
+            out_path,
+        )
     _echo_context(payload, result)
     append_run_log(
         {
@@ -332,14 +353,10 @@ def handle_email(payload: dict[str, object]) -> dict[str, object]:
     ``.env``에서 직접 읽는다. 실행 이력에도 수신자 주소를 남기지 않는다.
     """
     args = ["--subject", _require(payload, "subject"), "--body", _require(payload, "body")]
-    attachment = payload.get("file")
-    attached_name = None
-    if isinstance(attachment, str) and attachment:
-        file_path = _resolve_inside(REPORT_DIR, attachment)
-        if not file_path.exists():
-            raise RunnerError(f"첨부할 파일이 없습니다: {file_path}")
-        attached_name = file_path.name
-        args += ["--file", str(file_path)]
+    paths = _resolve_attachments(payload)
+    attached_name = ", ".join(path.name for path in paths) or None
+    for path in paths:
+        args += ["--file", str(path)]
 
     result = _skipped_by_dry_run("email") or _run("send_email.py", args)
     _echo_context(payload, result)
@@ -354,6 +371,46 @@ def handle_email(payload: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _resolve_attachments(payload: dict[str, object]) -> list[Path]:
+    """``file`` 하나 또는 ``files`` 여러 개를 받아 reports/ 안으로 좁혀 돌려준다.
+
+    관리 문서와 같은 내용의 HTML을 함께 보내려고 여러 개를 받는다. 경로 제한은
+    그대로다 — 워크플로에서 넘어오는 값이라 저장소 전체를 허용하면 같은 저장소의
+    ``.env``를 보내라고 시킬 수 있다.
+    """
+    raw = payload.get("files")
+    candidates = raw if isinstance(raw, list) else []
+    single = payload.get("file")
+    if isinstance(single, str) and single:
+        candidates = [single, *candidates]
+
+    resolved: list[Path] = []
+    for item in candidates:
+        if not isinstance(item, str) or not item:
+            continue
+        path = _resolve_inside(REPORT_DIR, item)
+        if not path.exists():
+            raise RunnerError(f"보낼 파일이 없습니다: {path}")
+        if path not in resolved:
+            resolved.append(path)
+    return resolved
+
+
+def _report_page(kind: str, args: list[str], out_path: Path) -> str | None:
+    """관리 문서 옆에 둘 HTML을 만든다.
+
+    **실패해도 본 작업을 실패로 만들지 않는다.** 관리 문서가 주 산출물이고 HTML은
+    보기 편하라고 더한 것이다. 여기서 예외를 올리면 이미 만들어진 .xlsx까지 실패로
+    보고하게 된다.
+    """
+    page_path = out_path.with_suffix(".html")
+    result = _run("create_report_page.py", [*args, "--out", str(page_path)])
+    if not result["ok"]:
+        logger.warning("%s 보고서 HTML을 만들지 못했습니다: %s", kind, str(result["stderr"])[:300])
+        return None
+    return str(page_path)
+
+
 def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
     """관리 문서를 Slack 채널에 올린다.
 
@@ -361,15 +418,13 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
     ``RPAs/study-status-report/.env``를 ``slack_upload_file.py``가 직접 읽는다.
     n8n 워크플로나 실행 이력에 비밀값이 남지 않게 하려는 것이다.
     """
-    file_path = _resolve_inside(REPORT_DIR, _require(payload, "file"))
-    if not file_path.exists():
-        raise RunnerError(f"업로드할 파일이 없습니다: {file_path}")
+    paths = _resolve_attachments(payload)
+    if not paths:
+        raise RunnerError("업로드할 파일이 필요합니다.")
 
-    args = [
-        "--file", str(file_path),
-        "--title", _require(payload, "title"),
-        "--comment", _require(payload, "comment"),
-    ]
+    args = ["--title", _require(payload, "title"), "--comment", _require(payload, "comment")]
+    for path in paths:
+        args += ["--file", str(path)]
     result = _skipped_by_dry_run("slack_upload") or _run("slack_upload_file.py", args)
     context = _echo_context(payload, result).get("context") or {}
     # 업로드에 실패해도 만들어 둔 파일은 지우지 않는다. 관리자가 그대로 올릴 수
@@ -378,7 +433,7 @@ def handle_slack_upload(payload: dict[str, object]) -> dict[str, object]:
         {
             "action": "slack_upload",
             "ok": result["ok"],
-            "workbook": file_path.name,
+            "workbook": ", ".join(path.name for path in paths),
             # 어느 교시를 올렸는지 남긴다. 교시 보고가 빠졌을 때 원장(reportedPeriods)과
             # 대조할 근거가 이력에 있어야 한다. 교시 이름은 개인정보가 아니다.
             "period": context.get("periodName"),

@@ -59,24 +59,37 @@ def post_file_bytes(upload_url: str, path: Path) -> None:
             raise RuntimeError(f"Slack file byte upload failed with status {response.status}")
 
 
-def upload_file(token: str, channel_id: str, path: Path, title: str, comment: str) -> dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(path)
+def upload_file(
+    token: str, channel_id: str, paths: list[Path], title: str, comment: str
+) -> dict[str, Any]:
+    """파일 여러 개를 **한 메시지로** 올린다.
 
-    upload = api_call(
-        "files.getUploadURLExternal",
-        token,
-        {
-            "filename": path.name,
-            "length": str(path.stat().st_size),
-        },
-    )
-    post_file_bytes(upload["upload_url"], path)
+    관리 문서(.xlsx)와 같은 내용의 HTML을 함께 보내는데, 따로 올리면 채널에 메시지가
+    두 번 쌓이고 둘이 짝이라는 것도 드러나지 않는다. Slack은 업로드 URL을 파일마다
+    받고 완료 호출 한 번에 묶어 보내는 방식이라 그대로 쓴다.
+
+    제목은 첫 파일에만 그대로 붙이고, 나머지는 파일 이름을 쓴다. 같은 제목이 여러 개
+    붙으면 어느 것이 무엇인지 구분되지 않는다.
+    """
+    if not paths:
+        raise ValueError("업로드할 파일이 없습니다.")
+    entries = []
+    for index, path in enumerate(paths):
+        if not path.exists():
+            raise FileNotFoundError(path)
+        upload = api_call(
+            "files.getUploadURLExternal",
+            token,
+            {"filename": path.name, "length": str(path.stat().st_size)},
+        )
+        post_file_bytes(upload["upload_url"], path)
+        entries.append({"id": upload["file_id"], "title": title if index == 0 else path.name})
+
     return api_call(
         "files.completeUploadExternal",
         token,
         {
-            "files": json.dumps([{"id": upload["file_id"], "title": title}], ensure_ascii=False),
+            "files": json.dumps(entries, ensure_ascii=False),
             "channel_id": channel_id,
             "initial_comment": comment,
         },
@@ -110,7 +123,8 @@ def parse_args() -> argparse.Namespace:
     load_env_file(ENV_FILE)
     parser = argparse.ArgumentParser()
     # 메시지만 보내는 모드에서는 첨부할 파일이 없다.
-    parser.add_argument("--file", type=Path)
+    # 여러 번 줄 수 있다. 관리 문서와 같은 내용의 HTML을 함께 보낼 때 쓴다.
+    parser.add_argument("--file", type=Path, action="append", dest="files")
     parser.add_argument("--title")
     parser.add_argument("--comment", required=True)
     parser.add_argument("--token", default=os.environ.get("SLACK_BOT_TOKEN", ""))
@@ -143,10 +157,10 @@ def main() -> None:
         raise SystemExit("SLACK_BOT_TOKEN is required")
     if not args.channel_id:
         raise SystemExit("SLACK_CHANNEL_ID is required for file upload")
-    if args.file is None or args.title is None:
+    if not args.files or args.title is None:
         raise SystemExit("--file and --title are required for file upload")
 
-    result = upload_file(args.token, args.channel_id, args.file, args.title, args.comment)
+    result = upload_file(args.token, args.channel_id, args.files, args.title, args.comment)
     file_ids = [item.get("id") for item in result.get("files", [])]
     print(f"OK: Slack file upload complete ({', '.join(file_ids)})")
 

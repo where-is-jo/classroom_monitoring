@@ -74,6 +74,8 @@ check(
 // Slack 업로드를 거치고 나면 응답에 workbook_path가 없다. 메일 노드가 첨부 경로를
 // context에서 읽으므로 여기 담겨 있어야 한다.
 check('context가 워크북 경로를 들고 간다', context.workbookPath, result.workbookPath);
+// HTML도 함께 첨부한다. Slack 업로드 응답에는 경로가 없어서 메일이 첨부를 잃는다.
+check('context가 HTML 경로도 들고 간다', context.pagePath, result.workbookPath.replace(/\.xlsx$/, '.html'));
 check('제목에 기간이 들어간다', context.subject.includes('2026-08-24 ~ 2026-08-28'), true);
 check(
   '워크북 경로가 기간과 강의실로 정해진다',
