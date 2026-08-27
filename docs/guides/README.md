@@ -18,6 +18,8 @@
    [monitoring/external](../../monitoring/external/README.md) ·
    [RPAs](../../RPAs/README.md)
 5. [개발 규칙](../conventions/) — 전부 읽을 필요는 없다. 필요할 때 본다
+6. [기능 점검 (2026-08-27)](./feature-review-2026-08-27.md) — 화면별로 지금 어디까지
+   됐고 무엇이 결정을 기다리는지. 시점 기록이라 최신이 아닐 수 있다
 
 | 상황 | 문서 |
 | --- | --- |
