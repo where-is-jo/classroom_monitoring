@@ -100,3 +100,7 @@ RPAs/study-status-report/logs/
 deeplearning/**/data/
 deeplearning/**/runs/
 deeplearning/**/weights/
+
+# 주간 집계가 읽는 일일 이벤트 원본. **학생 실명이 들어 있다** — reports/의 .xlsx와
+# 같은 등급이라 저장소에 올리지 않는다.
+RPAs/study-status-report/data/
