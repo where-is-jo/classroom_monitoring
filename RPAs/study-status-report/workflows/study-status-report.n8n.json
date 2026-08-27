@@ -115,7 +115,7 @@
       "parameters": {
         "url": "={{($env.FASTAPI_BASE_URL || 'http://fastapi:8001') + '/api/v1/classrooms/' + $json.classroomId + '/student-states'}}",
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "id": "b18dd6c1-1a98-4d05-a5f7-8a8e96de4101",
@@ -279,7 +279,9 @@
         100,
         340
       ],
-      "retryOnFail": false
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "id": "schedule-ok-if",
@@ -397,6 +399,106 @@
           "timeout": 30000
         }
       }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "10 18 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -860,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// **주간 보고서가 담을 기간을 정한다.** 금요일 저녁에 돌아 그 주 월요일부터 오늘까지를\n// 담는다. 주말에 자습이 없으므로 토·일을 넣어도 '기록 없음' 줄만 늘어난다.\n//\n// Parse Schedule과 같은 이유로 KST를 직접 계산한다 — Code 노드는 별도 러너 프로세스에서\n// 돌아 컨테이너 TZ를 물려받지 않는다.\nconst now = new Date(Date.now() + 9 * 60 * 60 * 1000);\nconst to = now.toISOString().slice(0, 10);\n// getUTCDay는 0=일요일이다. 월요일을 0으로 옮겨 이번 주 시작까지 며칠 전인지 센다.\nconst mondayOffset = (now.getUTCDay() + 6) % 7;\nconst from = new Date(now.getTime() - mondayOffset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);\nconst classroomId = $env.CLASSROOM_ID;\nconst classroomName = $env.CLASSROOM_NAME || classroomId;\nconst workbookPath = `RPAs/study-status-report/reports/weekly_study_status_${from}_${to}_${classroomId}.xlsx`;\n// 교시 보고와 같이 context로 실어 보낸다 — 뒤 노드가 이 노드를 이름으로 참조하지 않게.\nconst context = {\n  today: to,\n  classroomId,\n  classroomName,\n  periodName: 'weekly-report',\n  from,\n  to,\n  workbookPath,\n  subject: `주간 자습 현황 - ${classroomName} ${from} ~ ${to}`,\n  body: [\n    `${classroomName} 주간 자습 현황을 보냅니다.`,\n    '',\n    `기간: ${from} ~ ${to}`,\n    '',\n    \"첨부한 파일의 '주간 요약' 시트에 기간 전체 수치가, '학생별' 시트에 자리 이탈률이 높은\",\n    \"순으로 정리돼 있습니다. 기록이 없는 날은 0이 아니라 '기록 없음'으로 표시됩니다.\",\n    '',\n    '이 메일은 study-status-report 자동화가 보냈습니다.',\n  ].join('\\n'),\n};\nreturn [{ json: { from, to, classroomId, classroomName, workbookPath, context } }];\n"
+      },
+      "id": "weekly-range",
+      "name": "Build Weekly Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/weekly-workbook' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, to: $json.to, classroom: $json.classroomName, out: $json.workbookPath, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "weekly-workbook",
+      "name": "Create Weekly Workbook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -380,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/email' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ subject: $json.context.subject, body: $json.context.body, file: $json.context.workbookPath, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "weekly-email",
+      "name": "Send Weekly Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        100,
+        700
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-upload' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ file: $json.workbook_path, title: $json.context.subject, comment: '[주간 자습 현황] ' + $json.context.from + ' ~ ' + $json.context.to + ' 집계입니다. 상세는 첨부의 '주간 요약'과 '학생별' 시트에 있습니다.', context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "weekly-slack",
+      "name": "Upload Weekly to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        700
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -590,6 +692,50 @@
           }
         ]
       ]
+    },
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Weekly Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Weekly Range": {
+      "main": [
+        [
+          {
+            "node": "Create Weekly Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Weekly Workbook": {
+      "main": [
+        [
+          {
+            "node": "Upload Weekly to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Weekly to Slack": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "pinData": {},
@@ -606,7 +752,7 @@
       "name": "study-status"
     }
   ],
-  "triggerCount": 3,
+  "triggerCount": 4,
   "updatedAt": "2026-08-22T00:00:00.000Z",
   "versionId": "study-status-report-v1"
 }
