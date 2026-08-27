@@ -115,7 +115,7 @@
       "parameters": {
         "url": "={{($env.FASTAPI_BASE_URL || 'http://fastapi:8001') + '/api/v1/classrooms/' + $json.classroomId + '/student-states'}}",
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "id": "b18dd6c1-1a98-4d05-a5f7-8a8e96de4101",
