@@ -146,6 +146,68 @@ def test_partition_creates_disjoint_dataset_and_evaluation_manifests(
     )
 
 
+def _partition_with_row_overrides(
+    tmp_path: Path, overrides: dict[str, str]
+) -> Path:
+    """세션 배정 CSV의 첫 줄을 고쳐 partition을 돌린다."""
+    root = tmp_path / "videos"
+    _video(root / "camera-01" / "20260819_090000.mp4", "dataset")
+    _video(root / "camera-01" / "20260820_090000.mp4", "benchmark")
+    scan_dir = scan_video_folder(root, tmp_path / "scan", duration_probe=_probe)
+    assignments = scan_dir / "session_assignments.csv"
+    with assignments.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fields = list(rows[0])
+    rows[0]["role"] = "dataset"
+    rows[0]["requested_split"] = "train"
+    rows[0].update(overrides)
+    rows[1]["role"] = "benchmark"
+    rows[1]["evaluation_scope"] = "benchmark"
+    with assignments.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    return assignments
+
+
+def test_partition_rejects_expired_retention_even_when_metadata_is_optional(
+    tmp_path: Path,
+) -> None:
+    """`require_approval_metadata=False`가 보존 기한 만료까지 풀어서는 안 된다.
+
+    예전에는 이 플래그가 `_validate_approval` 호출 전체를 건너뛰어서, 완화 대상이
+    아닌 만료 검사까지 함께 사라졌다. 이미 지난 보존 기한이 그대로 통과했다.
+    """
+    assignments = _partition_with_row_overrides(
+        tmp_path, {"retention_expires_at": "2020-01-01T00:00:00+00:00"}
+    )
+
+    with pytest.raises(AutoLabelingError, match="retention_expires_at"):
+        partition_sessions(
+            tmp_path / "scan",
+            assignments,
+            tmp_path / "partition",
+            require_approval_metadata=False,
+        )
+
+
+def test_partition_rejects_student_session_even_when_metadata_is_optional(
+    tmp_path: Path,
+) -> None:
+    """학생 세션은 플래그와 무관하게 --allow-approved-student-data를 요구한다."""
+    assignments = _partition_with_row_overrides(
+        tmp_path, {"subject_category": "student"}
+    )
+
+    with pytest.raises(AutoLabelingError, match="학생 데이터"):
+        partition_sessions(
+            tmp_path / "scan",
+            assignments,
+            tmp_path / "partition",
+            require_approval_metadata=False,
+        )
+
+
 def test_partition_allows_blank_approval_metadata_for_local_prelabel(
     tmp_path: Path,
 ) -> None:
