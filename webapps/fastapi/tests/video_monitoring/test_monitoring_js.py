@@ -8,7 +8,7 @@
 브라우저 검증(Edge/Chrome headless, 없으면 skip):
   - playback session 생성·삭제
   - WebRTC signaling 연결
-  - SSE 구독과 bbox·탐지 수·마지막 탐지 갱신
+  - SSE 구독과 bbox·마지막 탐지 갱신
   - 오류 카드 한정
   - unload 시 EventSource·RTCPeerConnection·session 정리
 
@@ -137,7 +137,6 @@ class TestMonitoringJsStatic:
             "data-webrtc",
             "data-video-error",
             "data-last-detection",
-            "data-detection-count",
             "data-source-status",
             "data-analysis-status",
         ):
@@ -208,13 +207,12 @@ class TestMonitoringJsBrowser:
         assert checkpoint["ok"]
 
     def test_bbox_and_detection_metadata_updated(self, browser_results: dict[str, object]) -> None:
-        """SSE detection으로 bbox·안전한 식별 라벨·탐지 metadata가 갱신된다."""
+        """SSE detection으로 bbox·안전한 식별 라벨·마지막 탐지가 갱신된다."""
         _assert_all_checkpoints(browser_results)
         for name in (
             "bbox-drawn",
             "safe-identification-labels",
             "track-label-visible",
-            "detection-count-updated",
             "last-detection-updated",
             "face-source-connected",
             "face-analysis-error-visible",

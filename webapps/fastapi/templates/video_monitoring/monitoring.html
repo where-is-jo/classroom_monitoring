@@ -16,14 +16,13 @@
         <span class="fullscreen-toggle-icon" aria-hidden="true">⛶</span>
         <span data-fullscreen-label>전체화면</span>
       </button>
-      <div class="camera-monitoring-refresh-time"><span>마지막 화면 갱신</span><strong>{{ current_time|kst_datetime }}</strong></div>
     </div>
   </header>
 
   {% if real_streams %}
     <section aria-labelledby="monitoring-streams-title">
       <div class="section-heading">
-        <div><h2 id="monitoring-streams-title">연결된 카메라 영상</h2><p class="summary">카메라 {{ real_streams|length }}대 중 1대 표시</p></div>
+        <h2 id="monitoring-streams-title">연결된 카메라 영상</h2>
       </div>
       {% if real_streams|length > 1 %}
         {# 한 번에 한 화면만 본다. 카메라마다 화각과 비율이 다르고(어안 CCTV는 세로,
@@ -60,13 +59,11 @@
               <div class="camera-monitoring-identity">
                 <p class="eyebrow">{{ stream.camera_id }}</p>
                 <h3>{{ stream.camera_label }}</h3>
-                <p>{{ stream.classroom_id }}</p>
               </div>
               <span data-source-status class="status-label status-label--{{ 'active' if status_value == 'CONNECTED' else ('stale' if status_value == 'STALE' else ('no-video' if status_value == 'NO_VIDEO' else 'unknown')) }}">{{ '탐지 수신 중' if status_value == 'CONNECTED' else ('탐지 지연' if status_value == 'STALE' else ('최근 탐지 없음' if status_value == 'NO_VIDEO' else '상태 확인 중')) }}</span>
             </div>
             <p class="card-meta">
-              <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime if stream.last_detection_at else '없음' }}</strong></span>
-              <span>탐지 <strong data-detection-count>0</strong>건</span>
+              <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime_plain if stream.last_detection_at else '없음' }}</strong></span>
             </p>
             <p class="camera-analysis-status" data-analysis-status hidden role="status"></p>
           </article>
