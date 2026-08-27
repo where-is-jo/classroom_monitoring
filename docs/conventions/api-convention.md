@@ -17,7 +17,7 @@
 - 상태 변경처럼 CRUD로 표현하기 어려운 동작은 하위 리소스로 만든다:
   `POST /students/{student_id}/face-enrollments`
 - 부작용 없는 조회에 본문이 필요하면 동작을 리소스로 만들고 `POST`를 쓴다:
-  `POST /video-searches`
+  `POST /llm-searches`
 
 ### 브라우저가 부르지 않는 경로
 
