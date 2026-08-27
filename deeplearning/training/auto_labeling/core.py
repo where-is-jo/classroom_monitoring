@@ -228,11 +228,15 @@ def _parse_source(
         raise AutoLabelingError(
             f"source_id={source_id}: 허용되지 않은 subject_category입니다."
         )
-    if (
-        require_approval_metadata
-        and subject_category == "student"
-        and not allow_approved_student_data
-    ):
+    # **`require_approval_metadata`와 묶지 않는다.** 그 플래그는 "메타데이터가 비어
+    # 있어도 허용한다"는 뜻이지 "명시된 학생 데이터의 승인 요구까지 없앤다"가 아니다.
+    # 묶어 두면 `require_session_approval_metadata: false`인 프로필에서
+    # `subject_category: "student"`가 적혀 있어도 그냥 통과한다 — 실제 학생 CCTV
+    # 프레임이 동의 범위·승인 참조 없이 추출된다.
+    #
+    # 바로 위 두 검사가 이미 올바른 형태다. 값이 비었을 때만 플래그를 보고, 값이
+    # 있으면 언제나 검사한다. 여기도 같은 규칙을 따른다.
+    if subject_category == "student" and not allow_approved_student_data:
         raise AutoLabelingError(
             f"source_id={source_id}: 실제 학생 영상은 "
             "--allow-approved-student-data가 필요합니다."
