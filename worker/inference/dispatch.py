@@ -26,17 +26,31 @@
 의존하는 상태를 들고 있어서 소비자 스레드에 남는다. 순서가 섞이면 track이 깨진다.
 조립 순서상 이 dispatcher는 그 둘보다 안쪽에 들어간다.
 
-## 밀리면 버린다
+## 밀리면 최신으로 덮는다
 
-큐가 가득 차면 **가장 오래된 것을 버린다.** 프레임 버퍼와 같은 판단이다 — 실시간
-파이프라인에서 밀린 결과는 이미 지난 상태이고, FastAPI는 최신 이벤트로 좌석을
-판정한다. 버린 수는 지표로 남기므로 조용히 사라지지 않는다.
+카메라마다 아직 못 보낸 결과를 **하나만** 들고 있고, 새 결과가 오면 그것으로 덮는다.
+프레임 버퍼의 per-camera 모드와 같은 판단이다 — 전송이 생산보다 느릴 때 옛 결과를
+보내는 것은 지난 상태를 뒤늦게 반영하는 일이고, FastAPI는 최신 이벤트로 좌석을
+판정하며 `event_id`로 멱등 처리한다. 덮은 수는 `coalesced`로, 큐가 넘쳐 버린 수는
+`dropped`로 따로 센다.
+
+## 보내는 주기에 하한을 둘 수 있다
+
+`min_interval_seconds`를 주면 카메라 하나를 그 간격보다 자주 보내지 않는다. 추론
+주기와 전송 주기를 나누기 위한 것이다 — ByteTrack은 초당 5장을 봐야 track이
+유지되지만, 좌석 점유는 그만큼 자주 바뀌지 않는다(실측 `changed_count` 중앙값 0).
+같은 것을 초당 다섯 번 보내면 받는 쪽만 그만큼 일한다.
+
+**이 간격은 처리량을 늘리지 않는다.** 전송 스레드는 한 번에 한 건을 보내므로
+도달량의 상한은 건당 처리 시간이 정한다. 간격이 줄이는 것은 만들어 놓고 버리는
+낭비와 받는 쪽의 부하다.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -45,6 +59,7 @@ from typing import Generic, TypeVar
 from shared.types import CapturedFrame
 
 from .metrics import (
+    RESULT_DISPATCH_COALESCED_TOTAL,
     RESULT_DISPATCH_DROPPED_TOTAL,
     RESULT_DISPATCH_DURATION_SECONDS,
     RESULT_DISPATCH_FAILED_TOTAL,
@@ -76,6 +91,9 @@ class DispatcherStats:
     dropped: int
     """큐가 가득 차 버린 결과 수."""
 
+    coalesced: int
+    """같은 카메라의 더 새로운 결과로 덮인 수. 버린 것과 원인이 다르다."""
+
     failed: int
     """핸들러가 예외로 끝난 횟수."""
 
@@ -92,23 +110,36 @@ class AsyncResultDispatcher(Generic[ResultT]):
         *,
         channel: str,
         maxsize: int = _DEFAULT_QUEUE_MAXSIZE,
+        min_interval_seconds: float = 0.0,
         close_timeout_seconds: float = _DEFAULT_CLOSE_TIMEOUT_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if maxsize < 1:
             raise ValueError("전송 큐 크기는 1 이상이어야 합니다.")
+        if min_interval_seconds < 0:
+            raise ValueError("최소 전송 간격은 0 이상이어야 합니다.")
 
         self._handler = handler
         self._channel = channel
         self._maxsize = maxsize
+        self._min_interval_seconds = min_interval_seconds
         self._close_timeout_seconds = close_timeout_seconds
+        self._monotonic = monotonic
 
-        self._queue: deque[tuple[CapturedFrame, ResultT]] = deque()
+        # **카메라마다 최신 결과 하나만 들고 있는다.** 프레임 버퍼와 같은 판단이다 —
+        # 아직 못 보낸 결과가 있는데 새 결과가 오면, 옛것을 보내는 것은 지난 상태를
+        # 뒤늦게 반영하는 일이다. 순서는 유지해 빠른 카메라가 느린 카메라의 차례를
+        # 계속 뺏지 않게 한다.
+        self._pending: dict[str, tuple[CapturedFrame, ResultT]] = {}
+        self._order: deque[str] = deque()
+        self._last_sent_at: dict[str, float] = {}
         self._condition = threading.Condition()
         self._is_closed = False
 
         self._accepted = 0
         self._dispatched = 0
         self._dropped = 0
+        self._coalesced = 0
         self._failed = 0
 
         self._thread = threading.Thread(
@@ -127,11 +158,16 @@ class AsyncResultDispatcher(Generic[ResultT]):
                 accepted=self._accepted,
                 dispatched=self._dispatched,
                 dropped=self._dropped,
+                coalesced=self._coalesced,
                 failed=self._failed,
             )
 
     def __call__(self, captured: CapturedFrame, result: ResultT) -> None:
         """결과를 큐에 넣는다. **절대 블로킹하지 않는다.**
+
+        같은 카메라의 아직 못 보낸 결과가 있으면 **최신 것으로 덮는다.** 그래야
+        전송이 밀려도 보내는 값이 항상 지금 상태다. 덮은 수는 `coalesced`로 센다 —
+        큐가 넘쳐 버린 것(`dropped`)과 원인이 달라 함께 세면 안 된다.
 
         닫힌 뒤에 들어온 결과는 버린다. 종료 중에 새 전송을 시작하면 그만큼 종료가
         늦어지고, 어차피 곧 사라질 상태다.
@@ -139,14 +175,23 @@ class AsyncResultDispatcher(Generic[ResultT]):
         with self._condition:
             if self._is_closed:
                 return
-            if len(self._queue) >= self._maxsize:
-                self._queue.popleft()
-                self._dropped += 1
-                RESULT_DISPATCH_DROPPED_TOTAL.labels(channel=self._channel).inc()
-            self._queue.append((captured, result))
+            camera_id = captured.camera_id
+            if camera_id in self._pending:
+                self._pending[camera_id] = (captured, result)
+                self._coalesced += 1
+                RESULT_DISPATCH_COALESCED_TOTAL.labels(channel=self._channel).inc()
+            else:
+                if len(self._pending) >= self._maxsize:
+                    # 카메라 수가 큐 크기를 넘는 구성이다. 가장 오래 기다린 것을 버린다.
+                    oldest = self._order.popleft()
+                    del self._pending[oldest]
+                    self._dropped += 1
+                    RESULT_DISPATCH_DROPPED_TOTAL.labels(channel=self._channel).inc()
+                self._pending[camera_id] = (captured, result)
+                self._order.append(camera_id)
             self._accepted += 1
             RESULT_DISPATCH_QUEUE_DEPTH.labels(channel=self._channel).set(
-                len(self._queue)
+                len(self._pending)
             )
             self._condition.notify()
 
@@ -171,33 +216,58 @@ class AsyncResultDispatcher(Generic[ResultT]):
                 self._close_timeout_seconds,
             )
 
+    def _wait_seconds_for(self, camera_id: str) -> float:
+        """그 카메라를 다시 보내기까지 남은 시간. 0이면 지금 보내도 된다."""
+        if self._min_interval_seconds <= 0:
+            return 0.0
+        last = self._last_sent_at.get(camera_id)
+        if last is None:
+            return 0.0
+        return max(0.0, self._min_interval_seconds - (self._monotonic() - last))
+
     def _take(self) -> tuple[CapturedFrame, ResultT] | None:
         with self._condition:
             is_ready = self._condition.wait_for(
-                lambda: bool(self._queue) or self._is_closed,
+                lambda: bool(self._pending) or self._is_closed,
                 timeout=_POLL_TIMEOUT_SECONDS,
             )
             if not is_ready:
                 return None
-            if not self._queue:
+            if not self._pending:
                 # 닫혔고 남은 것도 없다.
                 return None
-            item = self._queue.popleft()
+
+            camera_id = self._order[0]
+            # **간격이 남았으면 기다린다.** 닫히는 중이면 남은 것을 바로 내보낸다 —
+            # 종료를 간격만큼 늦출 이유가 없다.
+            if not self._is_closed:
+                remaining = self._wait_seconds_for(camera_id)
+                if remaining > 0:
+                    self._condition.wait(timeout=min(remaining, _POLL_TIMEOUT_SECONDS))
+                    return None
+
+            self._order.popleft()
+            item = self._pending.pop(camera_id)
+            self._last_sent_at[camera_id] = self._monotonic()
             RESULT_DISPATCH_QUEUE_DEPTH.labels(channel=self._channel).set(
-                len(self._queue)
+                len(self._pending)
             )
             return item
 
     def _run(self) -> None:
-        logger.info("%s 결과 전송 스레드를 시작한다", self._channel)
+        logger.info(
+            "%s 결과 전송 스레드를 시작한다 (카메라당 최소 간격 %.2f초)",
+            self._channel,
+            self._min_interval_seconds,
+        )
         try:
             while True:
                 item = self._take()
                 if item is None:
                     with self._condition:
-                        # 닫혔고 큐도 비었으면 끝낸다. 닫히지 않았다면 timeout이라
-                        # 다시 기다린다.
-                        if self._is_closed and not self._queue:
+                        # 닫혔고 큐도 비었으면 끝낸다. 닫히지 않았다면 timeout이거나
+                        # 전송 간격을 기다리는 중이라 다시 돈다.
+                        if self._is_closed and not self._pending:
                             return
                     continue
                 self._dispatch(*item)

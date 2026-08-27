@@ -21,7 +21,9 @@ from app.llm_search.models import (
     PersonSummary,
     SearchOutcome,
     SearchQuery,
+    SortOrder,
 )
+from app.llm_search.planning import MAX_LIMIT
 from app.main import app
 from app.shared.config import Settings
 from app.shared.dependencies import get_llm_search_service, get_settings
@@ -55,8 +57,14 @@ class FakeService:
     ) -> None:
         self._outcome = outcome
         self._error = error
+        self.limits: list[int] = []
+        self.sorts: list[SortOrder] = []
 
-    def search(self, question: str, *, limit: int) -> SearchOutcome:
+    def search(
+        self, question: str, *, limit: int, sort: SortOrder = SortOrder.TIME_DESC
+    ) -> SearchOutcome:
+        self.limits.append(limit)
+        self.sorts.append(sort)
         if self._error is not None:
             raise self._error
         assert self._outcome is not None
@@ -71,12 +79,14 @@ def _outcome(
     query: SearchQuery = _QUERY,
     person: PersonSummary | None = None,
     briefing: str = "2026년 8월 14일 09:00~2026년 8월 15일 09:00 동안 A101 1강의실에서 찾았어요.",
+    sort: SortOrder = SortOrder.TIME_DESC,
 ) -> SearchOutcome:
     return SearchOutcome(
         query=query,
         target_label="A101 1강의실",
         person=person,
         briefing=briefing,
+        sort=sort,
         hits=hits,
         truncated=truncated,
         snapshot_lookup_failed=snapshot_failed,
@@ -262,9 +272,23 @@ def test_화면이_해석한_계획과_조정_사유를_보여준다(client: Tes
 
     response = client.post("/llm-search", data={"question": "이번 달 A101"})
 
-    assert "이렇게 이해했어요" in response.text
+    assert "질문 해석" in response.text
     assert "마지막 7일만 찾았습니다" in response.text
-    assert "이것이 전부가 아닙니다" in response.text
+
+
+def test_잘렸다는_말을_결과_제목_옆에_또_적지_않는다(client: TestClient) -> None:
+    """그 말은 브리핑 문장이 이미 한다(briefing.py의 _count_clause). 제목 옆에 한 번
+    더 두면 긴 붉은 문장이 정렬 표시를 덮는다."""
+    briefing = "2026년 8월 14일 09:00~09:30 동안 A101 1강의실에서 찾았어요. 상한에 걸려 1건까지만 보여드려요. 이게 전부는 아니에요."
+    _override(FakeService(_outcome(hits=(_HIT,), truncated=True, briefing=briefing)))
+
+    response = client.post("/llm-search", data={"question": "이번 달 A101"})
+
+    # 사실 자체는 브리핑 문장으로 그대로 나간다.
+    assert "이게 전부는 아니에요" in response.text
+    # 제목 옆 줄은 정렬만 말한다.
+    assert "이것이 전부가 아닙니다" not in response.text
+    assert "최신순" in response.text
 
 
 def test_화면은_해석한_기간을_한국_시각으로_보여준다(client: TestClient) -> None:
@@ -415,7 +439,7 @@ def test_화면이_걸지_못한_인물_조건을_표시한다(client: TestClien
     assert "조건 적용 안 됨" in response.text
 
 
-def test_화면이_탐지_한_건을_카드_하나로_묶는다(client: TestClient) -> None:
+def test_화면이_탐지_한_건을_격자_칸_하나로_묶는다(client: TestClient) -> None:
     """예전에는 이미지·카메라·시각·인원이 한 줄씩 이어져 한 건의 경계가 보이지 않았다."""
     second = DetectionHit(
         event_id="event-2",
@@ -432,7 +456,110 @@ def test_화면이_탐지_한_건을_카드_하나로_묶는다(client: TestClie
 
     response = client.post("/llm-search", data={"question": "오늘 A101"})
 
-    assert response.text.count('class="detection-card"') == 2
+    assert response.text.count('class="shot-grid__item"') == 2
+    # 상세는 칸마다 template로 미리 그려 둔다. JS가 문장을 만들지 않는다.
+    assert response.text.count("data-shot-detail") == 2
+    # 칸의 시각은 날짜를 떼고 KST 시:분:초만 적는다(06:30 UTC = 15:30 KST).
+    assert ">15:30:00<" in response.text
+
+
+def test_화면이_결과를_스무_건씩_쪽으로_나눈다(client: TestClient) -> None:
+    """한 화면에 다섯 칸씩 네 줄로 놓는다. 쪽 크기를 JS에 적어 두면 격자 열 수와 따로 논다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert 'data-page-size="20"' in response.text
+    # 쪽 문구는 서버가 그려 둔다. 스크립트가 만들면 한국어가 JS로 샌다.
+    assert 'id="shot-pager"' in response.text
+
+
+def test_화면이_상세_정보를_모달로_미룬다(client: TestClient) -> None:
+    """칸마다 설명을 붙이면 100건짜리 화면이 다시 줄글이 된다."""
+    _override(FakeService(_outcome(hits=(_HIT,))))
+
+    response = client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert 'id="shot-modal"' in response.text
+    assert "상세 정보" in response.text
+    assert "식별 대상" in response.text
+
+
+def test_화면이_상한만큼_결과를_요청한다(client: TestClient) -> None:
+    """20건만 받아 오면 쪽을 나눌 것이 없다. 상한까지 받아 화면이 쪽으로 나눈다."""
+    service = FakeService(_outcome(hits=(_HIT,)))
+    _override(service)
+
+    client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert service.limits == [MAX_LIMIT]
+
+
+def test_화면이_고른_정렬을_조회에_함께_보낸다(client: TestClient) -> None:
+    """받아 온 뒤 화면에서 뒤집기만 하면, 상한이 걸렸을 때 최근 것들만 뒤집혀 나온다."""
+    service = FakeService(_outcome(hits=(_HIT,), sort=SortOrder.TIME_ASC))
+    _override(service)
+
+    response = client.post("/llm-search", data={"question": "오늘 A101", "sort": "time_asc"})
+
+    assert service.sorts == [SortOrder.TIME_ASC]
+    # 고른 값이 폼에 남아야 한다. 되돌아가면 다음 검색이 조용히 최신순이 된다.
+    assert 'value="time_asc" selected' in response.text
+
+
+def test_정렬을_말하지_않으면_최신순으로_조회한다(client: TestClient) -> None:
+    service = FakeService(_outcome(hits=(_HIT,)))
+    _override(service)
+
+    client.post("/llm-search", data={"question": "오늘 A101"})
+
+    assert service.sorts == [SortOrder.TIME_DESC]
+
+
+def test_모르는_정렬값이_와도_검색을_버리지_않는다(client: TestClient) -> None:
+    """정렬은 타이핑하는 값이 아니라 고르는 값이다. 이상한 값이 왔다면 사용자 잘못이
+    아니므로, 질문까지 함께 버리는 대신 최신순으로 보여주고 검색은 진행한다."""
+    service = FakeService(_outcome(hits=(_HIT,)))
+    _override(service)
+
+    response = client.post("/llm-search", data={"question": "오늘 A101", "sort": "아무거나"})
+
+    assert response.status_code == 200
+    assert service.sorts == [SortOrder.TIME_DESC]
+
+
+def test_화면이_지금_정렬이_무엇인지_적는다(client: TestClient) -> None:
+    """칸에 시:분:초만 있어 격자만 보고는 위가 최신인지 갈리지 않는다."""
+    _override(FakeService(_outcome(hits=(_HIT,), sort=SortOrder.TIME_ASC)))
+
+    response = client.post("/llm-search", data={"question": "오늘 A101", "sort": "time_asc"})
+
+    assert "오래된순" in response.text
+
+
+def test_API가_정렬을_받아_결과에_적는다(client: TestClient) -> None:
+    service = FakeService(_outcome(hits=(_HIT,), sort=SortOrder.TIME_ASC))
+    _override(service)
+
+    response = client.post(
+        "/api/v1/llm-searches", json={"question": "오늘 A101", "sort": "time_asc"}
+    )
+
+    assert response.status_code == 200
+    assert service.sorts == [SortOrder.TIME_ASC]
+    assert response.json()["sort"] == "time_asc"
+
+
+def test_API는_규격에_없는_정렬값을_거절한다(client: TestClient) -> None:
+    """화면과 갈리는 지점이다. API 호출자는 값을 코드로 적으므로 조용히 바꿔 주면
+    자기가 무엇을 받았는지 모른 채 다른 순서의 결과를 쓰게 된다."""
+    _override(FakeService(_outcome()))
+
+    response = client.post(
+        "/api/v1/llm-searches", json={"question": "오늘 A101", "sort": "아무거나"}
+    )
+
+    assert response.status_code == 422
 
 
 def test_화면은_질문을_주소가_아니라_본문으로_받는다(client: TestClient) -> None:

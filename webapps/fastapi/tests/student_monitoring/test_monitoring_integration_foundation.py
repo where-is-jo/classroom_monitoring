@@ -428,7 +428,9 @@ def test_approved_fixture_runs_post_rest_and_all_sse_payloads_idempotently() -> 
     detection_events = [event for event in events if event["type"] == "detection"]
     occupancy_events = [event for event in events if event["type"] == "occupancy"]
     student_events = [event for event in events if event["type"] == "student-state"]
-    assert len(detection_events) == 1
+    # bbox overlay는 저장 전에 내보내므로 같은 이벤트를 두 번 받으면 두 번 나간다.
+    # 상태를 바꾸는 occupancy·student-state는 그대로 한 번만 나간다(아래 단언).
+    assert len(detection_events) == 2
     assert len(occupancy_events) == 2
     assert len(student_events) == 1
     assert detection_events[0]["detections"][0]["display_label"] == "합성 학생 A"

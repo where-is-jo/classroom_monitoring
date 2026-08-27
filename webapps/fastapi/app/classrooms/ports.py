@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -16,6 +17,7 @@ from .models import (
     SeatMigrationSnapshot,
     SeatMigrationSnapshotPayload,
     SeatObservationBatchRecord,
+    SeatOccupancyApplication,
     SeatOccupancyHistory,
     SeatPage,
 )
@@ -31,6 +33,14 @@ class ClassroomRepository(Protocol):
 
     def create_seat(self, seat: Seat) -> Seat: ...
     def get_seat(self, seat_id: str) -> Seat | None: ...
+    def get_seats(self, seat_ids: Sequence[str]) -> dict[str, Seat]:
+        """좌석 여러 개를 한 번에 읽는다. 없는 좌석은 결과에서 빠진다.
+
+        **좌석마다 `get_seat`을 부르면 저장소 왕복이 좌석 수만큼 늘어난다.** 관측
+        batch는 한 이벤트에서 좌석 여러 개를 함께 검증하므로 그 자리에서만 쓴다.
+        """
+        ...
+
     def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage: ...
     def list_all_seats_for_allocation(self, classroom_id: str) -> list[Seat]:
         """allocator용: 비활성 포함 강의실의 모든 좌석을 돌려준다."""
@@ -57,6 +67,14 @@ class ClassroomRepository(Protocol):
     def get_history_by_event_and_seat(
         self, event_id: str, seat_id: str
     ) -> SeatOccupancyHistory | None: ...
+    def get_histories_by_event(self, event_id: str) -> dict[str, SeatOccupancyHistory]:
+        """한 이벤트의 좌석별 이력을 좌석 id로 묶어 한 번에 읽는다.
+
+        재수신 판정을 좌석마다 따로 물으면 왕복이 좌석 수만큼 늘어난다. 같은
+        event_id의 이력은 한 번에 다 가져와도 양이 좌석 수를 넘지 않는다.
+        """
+        ...
+
     def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory: ...
 
 
@@ -141,6 +159,30 @@ class SeatMutationUnitOfWork(Protocol):
         - ``occupancy``가 ``None``이면 history만 기록한다 (과거 관측 재생).
         - 같은 (event_id, seat_id) history가 이미 있으면 기존 값을 돌려주고,
           내용이 다르면 ``SeatBatchConflictError``를 던진다.
+        """
+        ...
+
+    def append_histories_and_apply_occupancies(
+        self,
+        applications: Sequence[SeatOccupancyApplication],
+        *,
+        updated_at: datetime,
+    ) -> tuple[SeatOccupancyHistory, ...] | None:
+        """여러 좌석의 관측을 **한 transaction/lock에서** 함께 적용한다.
+
+        좌석마다 따로 열면 원격 저장소 왕복이 좌석 수만큼 곱해진다. 실측에서
+        이벤트 하나가 좌석 7개를 관측할 때 이 구간이 전체 처리 시간의 대부분이었다
+        (결정 0045의 남은 일).
+
+        단건 계약과 다른 점은 **실패 단위가 batch 전체**라는 것이다.
+
+        - 좌석이 하나라도 없거나 비활성이면 아무것도 쓰지 않고
+          ``SeatNotFoundError``를 던진다.
+        - 좌석 version이 하나라도 어긋나면 아무것도 쓰지 않고 ``None``을 돌려준다.
+          호출자는 **전체를** 최신 상태로 다시 만들어 재시도한다.
+        - 이미 있는 (event_id, seat_id) history는 기존 값을 그대로 돌려주고,
+          내용이 다르면 ``SeatBatchConflictError``를 던진다.
+        - 돌려주는 순서는 ``applications``와 같다.
         """
         ...
 

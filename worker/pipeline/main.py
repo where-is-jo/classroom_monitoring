@@ -35,6 +35,7 @@ from inference.identity_handover import (
     RefreshingIdentityHandoverResultHandler,
 )
 from inference.model import Yolo8nDetector
+from inference.overlay import FastAPIOverlayHandler
 from inference.processor import InferenceProcessor
 from inference.snapshot import SnapshotResultHandler
 from inference.tracking import ByteTrackConfig, ByteTrackResultHandler
@@ -126,6 +127,20 @@ def _sequence_entry_handlers(
     return handle
 
 
+def _tee_handlers(first: ResultHandler, second: ResultHandler) -> ResultHandler:
+    """결과를 두 곳에 순서대로 넘긴다.
+
+    오버레이와 저장은 주기도 실패 정책도 달라 각자의 전송 스레드를 가진다. 둘 다
+    큐에 넣고 즉시 돌아오므로 이 함수가 소비자 스레드를 붙잡지 않는다.
+    """
+
+    def handle(captured: CapturedFrame, result: InferenceResult) -> None:
+        first(captured, result)
+        second(captured, result)
+
+    return handle
+
+
 def build_result_handlers(
     settings: InferenceSettings,
     *,
@@ -146,7 +161,11 @@ def build_result_handlers(
     classroom_camera_ids: frozenset[str] = frozenset(),
     result_dispatch_enabled: bool = False,
     result_dispatch_queue_maxsize: int = 32,
+    result_dispatch_min_interval_seconds: float = 0.0,
     result_dispatch_close_timeout_seconds: float = 5.0,
+    overlay_dispatch_enabled: bool = False,
+    overlay_dispatch_min_interval_seconds: float = 0.0,
+    overlay_timeout_seconds: float = 2.0,
 ) -> tuple[ResultHandler, EntryResultHandler | None, tuple[ResultDispatcher, ...]]:
     """CCTV 탐지와 입구 얼굴 관측의 서로 다른 결과 경계를 조립한다.
 
@@ -171,19 +190,45 @@ def build_result_handlers(
             # **여기가 소비자 스레드와 네트워크의 경계다.** 아래(전송·스냅샷)는 전용
             # 스레드가, 위(ByteTrack·신원 인계)는 소비자 스레드가 맡는다.
             logger.info(
-                "탐지 결과 전송을 별도 스레드로 분리한다. 큐 %d건, 넘치면 오래된 것을 버린다.",
+                "탐지 결과 전송을 별도 스레드로 분리한다. 큐 %d건, 카메라당 최소 간격 %.2f초.",
                 result_dispatch_queue_maxsize,
+                result_dispatch_min_interval_seconds,
             )
             detection_dispatcher: AsyncResultDispatcher[InferenceResult] = (
                 AsyncResultDispatcher(
                     handler,
                     channel="detection",
                     maxsize=result_dispatch_queue_maxsize,
+                    min_interval_seconds=result_dispatch_min_interval_seconds,
                     close_timeout_seconds=result_dispatch_close_timeout_seconds,
                 )
             )
             dispatchers.append(detection_dispatcher)
             handler = detection_dispatcher
+
+        if overlay_dispatch_enabled:
+            # **오버레이는 저장 경로와 갈라진다.** 저장은 위 간격(기본 1초)으로 묶여
+            # 있고 건당 비용도 크지만, 화면의 상자는 추론이 만든 만큼 따라와야 한다.
+            # tee는 소비자 스레드에서 돌지만 둘 다 큐에 넣고 즉시 돌아온다.
+            logger.info(
+                "bbox overlay를 저장과 분리해 FastAPI(%s)로 보낸다. 카메라당 최소 간격 %.2f초.",
+                fastapi_url,
+                overlay_dispatch_min_interval_seconds,
+            )
+            overlay_dispatcher: AsyncResultDispatcher[InferenceResult] = (
+                AsyncResultDispatcher(
+                    FastAPIOverlayHandler(
+                        fastapi_url, timeout_seconds=overlay_timeout_seconds
+                    ),
+                    channel="overlay",
+                    maxsize=result_dispatch_queue_maxsize,
+                    min_interval_seconds=overlay_dispatch_min_interval_seconds,
+                    close_timeout_seconds=result_dispatch_close_timeout_seconds,
+                )
+            )
+            dispatchers.append(overlay_dispatcher)
+            # 오버레이를 먼저 넣는다. 지연에 민감한 쪽을 앞에 둔다.
+            handler = _tee_handlers(overlay_dispatcher, handler)
 
     coordinator: (
         IdentityHandoverResultHandler | RefreshingIdentityHandoverResultHandler | None
@@ -260,6 +305,7 @@ def build_result_handlers(
                     ),
                     channel="entry",
                     maxsize=result_dispatch_queue_maxsize,
+                    min_interval_seconds=result_dispatch_min_interval_seconds,
                     close_timeout_seconds=result_dispatch_close_timeout_seconds,
                 )
             )
@@ -477,6 +523,14 @@ def build_runner(
         classroom_camera_ids=tracking_camera_ids,
         result_dispatch_enabled=pipeline_settings.result_dispatch_enabled,
         result_dispatch_queue_maxsize=pipeline_settings.result_dispatch_queue_maxsize,
+        result_dispatch_min_interval_seconds=(
+            pipeline_settings.result_dispatch_min_interval_seconds
+        ),
+        overlay_dispatch_enabled=pipeline_settings.overlay_dispatch_enabled,
+        overlay_dispatch_min_interval_seconds=(
+            pipeline_settings.overlay_dispatch_min_interval_seconds
+        ),
+        overlay_timeout_seconds=pipeline_settings.overlay_timeout_seconds,
         result_dispatch_close_timeout_seconds=(
             pipeline_settings.result_dispatch_close_timeout_seconds
         ),
