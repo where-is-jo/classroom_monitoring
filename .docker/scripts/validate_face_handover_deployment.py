@@ -17,10 +17,16 @@ EXPECTED_THRESHOLD_METADATA = {
     "model_version": "insightface-buffalo_l-w600k_r50-v0.7",
     "preprocessing_version": "insightface-norm-crop-112-v1",
 }
+# **네 번째 값(model_path)을 빠뜨리면 교차 연결이 열린다.** deeplearning의
+# `_MODEL_DEFAULTS`는 인식기당 (버전, 전처리, 컬렉션, 상대 경로) 4-튜플인데 여기에는
+# 앞의 셋만 옮겨져 있었다. 그래서 AdaFace 설정에 ArcFace 가중치를 물려도 대조할
+# 근거가 없어 그대로 통과했다 — 두 모델 모두 (N,3,112,112) -> (N,512)라 형태로는
+# 구분되지 않고, ArcFace 벡터가 AdaFace로 라벨링돼 갤러리에 들어간다.
 FACE_MODEL_CONFIGS = {
     "arcface": {
         "metadata": EXPECTED_THRESHOLD_METADATA,
         "collection": "face_embeddings_arcface",
+        "model_path": "buffalo_l/w600k_r50.onnx",
     },
     "adaface": {
         "metadata": {
@@ -29,6 +35,7 @@ FACE_MODEL_CONFIGS = {
             "preprocessing_version": "cvlface-rgb-norm-crop-112-v1",
         },
         "collection": "face_embeddings_adaface",
+        "model_path": "adaface/adaface_ir50_webface4m.onnx",
     },
 }
 COMMON_FACE_MODEL_PATHS = (
@@ -214,7 +221,6 @@ def validate(docker_root: Path) -> list[str]:
     worker_env: dict[str, str] = {}
     for path, destination in (
         (deep_env_path, deep_env),
-        (fastapi_env_path, fastapi_env),
         (worker_env_path, worker_env),
     ):
         if not path.is_file():
@@ -222,6 +228,16 @@ def validate(docker_root: Path) -> list[str]:
             continue
         try:
             destination.update(read_env(path))
+        except (OSError, UnicodeError, ValueError) as error:
+            errors.append(str(error))
+
+    # **fastapi.dev.env는 이 서버에 없는 것이 정상이다.** README.server.md가 두지
+    # 말라고 명시한다 — fastapi는 개인 PC로 갔고(결정 0026) 여기서는 읽히지 않는데
+    # MongoDB Atlas 접속 정보만 공용 장비에 남기 때문이다. 필수로 요구하면 그 문서를
+    # 따르는 배포가 **전부 실패하고 롤백된다.** 있으면 교차 검사에 쓰고 없으면 넘긴다.
+    if fastapi_env_exists:
+        try:
+            fastapi_env.update(read_env(fastapi_env_path))
         except (OSError, UnicodeError, ValueError) as error:
             errors.append(str(error))
 
@@ -267,6 +283,15 @@ def validate(docker_root: Path) -> list[str]:
             errors.append("FACE_EMBEDDING_COLLECTION이 선택 모델과 다릅니다.")
 
         recognition_path = deep_env.get("FACE_RECOGNITION_MODEL_PATH", "").strip()
+        expected_model_path = face_model_config["model_path"]
+        if recognition_path and not recognition_path.replace("\\", "/").endswith(
+            str(expected_model_path)
+        ):
+            # 파일이 있느냐와 별개로 **선택한 인식기의 가중치인지**를 본다.
+            errors.append(
+                f"FACE_RECOGNITION_MODEL_PATH가 선택 모델과 다릅니다. "
+                f"{face_recognizer}는 .../{expected_model_path}를 써야 합니다."
+            )
         if recognition_path:
             try:
                 host_recognition_path = host_model_path(docker_root, recognition_path)

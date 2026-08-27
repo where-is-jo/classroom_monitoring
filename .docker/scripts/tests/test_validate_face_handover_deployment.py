@@ -308,3 +308,44 @@ def test_GPU_compose는_재빌드할_때_덮어쓰는_latest_이미지명을_쓴
     assert "local-202" not in compose
     assert "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:local" not in compose
     assert "ghcr.io/where-is-jo/classroom-monitoring-worker:local" not in compose
+
+
+def test_gpu_server_passes_without_fastapi_env(tmp_path: Path) -> None:
+    """`fastapi.dev.env`가 없는 것이 GPU 서버의 정상 상태다.
+
+    README.server.md가 그 파일을 여기 두지 말라고 명시한다 — fastapi는 개인 PC로
+    갔고 여기서는 읽히지 않는데 MongoDB Atlas 접속 정보만 공용 장비에 남기 때문이다.
+    필수로 요구하면 문서를 따르는 배포가 전부 실패하고 롤백된다.
+    """
+    docker_root = build_deployment(tmp_path)
+    (docker_root / "env" / "fastapi.dev.env").unlink()
+
+    assert validate(docker_root) == []
+
+
+def test_adaface_rejects_arcface_weights(tmp_path: Path) -> None:
+    """모델 경로가 선택한 인식기의 것인지 본다.
+
+    두 모델 모두 (N,3,112,112) -> (N,512)라 형태로는 구분되지 않는다. 경로를 대조하지
+    않으면 ArcFace 벡터가 AdaFace로 라벨링돼 갤러리에 들어간다.
+    """
+    docker_root = build_deployment(tmp_path)
+    env_path = docker_root / "env" / "deeplearning.dev.env"
+    env_path.write_text(
+        env_path.read_text(encoding="utf-8")
+        .replace("FACE_RECOGNIZER=arcface", "FACE_RECOGNIZER=adaface")
+        .replace(
+            "FACE_RECOGNITION_MODEL_VERSION=insightface-buffalo_l-w600k_r50-v0.7",
+            "FACE_RECOGNITION_MODEL_VERSION=cvlface-adaface-ir50-webface4m-fe7718c6",
+        )
+        .replace(
+            "FACE_EMBEDDING_COLLECTION=face_embeddings_arcface",
+            "FACE_EMBEDDING_COLLECTION=face_embeddings_adaface",
+        ),
+        encoding="utf-8",
+    )
+    # 경로만 ArcFace 그대로 남겨 둔다 — 운영자가 잊기 가장 쉬운 값이다.
+    errors = validate(docker_root)
+
+    assert any("FACE_RECOGNITION_MODEL_PATH" in error for error in errors), errors
+
