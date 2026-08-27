@@ -122,6 +122,24 @@ def test_deleting_face_embedding_removes_student_from_gallery_source() -> None:
     assert service.find_by_student("student-uuid", "arcface") is None
 
 
+def test_deleting_face_embedding_also_clears_the_registration_flag() -> None:
+    """동의 철회는 등록 표시까지 되돌려야 한다.
+
+    벡터만 지우고 `face_registered`를 참으로 남기면, 갤러리 완전성 검사가 "등록됐다는데
+    벡터가 없는 학생"을 보고 **전체 얼굴 식별을 닫는다.** 한 사람의 철회가 서비스 전체
+    정지로 번지고, 사람이 학생 문서를 손으로 고치기 전까지 복구되지 않는다.
+    """
+    service, students = make_service()
+    service.create_for_student("student-uuid", "enrollment-uuid")
+    assert students.get_student("student-uuid").face_registered is True
+
+    service.delete_for_student("student-uuid")
+
+    student = students.get_student("student-uuid")
+    assert student.face_registered is False
+    assert student.face_enrollment_id is None
+
+
 def test_서로_다른_모델_metadata가_섞이면_저장하지_않는다() -> None:
     class MixedAnalyzer(Analyzer):
         def create(self, image: bytes) -> SampleEmbedding:

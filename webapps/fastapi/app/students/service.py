@@ -78,6 +78,14 @@ class StudentService:
             raise StudentNotFoundError()
         return student
 
+    def unregister_face(self, student_id: str) -> Student | None:
+        """얼굴 등록 표시를 되돌린다. 학생이 없으면 조용히 넘어간다.
+
+        동의 철회 경로에서 불린다. 학생이 이미 지워졌더라도 embedding 삭제는 이미
+        끝났으므로, 여기서 실패로 만들면 되돌릴 수 없는 것을 실패로 보고하게 된다.
+        """
+        return self._repository.unregister_face(student_id, self._clock())
+
 
 def _required_text(value: str, label: str, max_length: int) -> str:
     normalized = value.strip()
