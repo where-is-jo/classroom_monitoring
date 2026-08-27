@@ -35,13 +35,19 @@ def test_student_management_page_embeds_face_enrollment_modal() -> None:
         response = client.get("/students/new")
 
     assert response.status_code == 200
+    assert "현재 등록 모델" in response.text
+    assert "ArcFace" in response.text
+    assert "AdaFace" in response.text
     assert 'class="face-status face-status-needed open-face-enrollment"' in response.text
+    assert 'data-model-name="arcface"' in response.text
+    assert "ArcFace 등록" in response.text
     assert '<dialog id="student-face-enrollment-dialog"' in response.text
     assert 'id="consent-confirmed"' in response.text
     assert 'id="start-enrollment"' in response.text
     assert 'id="camera-preview"' in response.text
     assert 'id="overall-progress"' in response.text
     assert 'id="face-enrollment-complete"' in response.text
+    assert 'id="face-complete-model-label"' in response.text
     assert 'id="pose-progress"' not in response.text
 
 

@@ -6,18 +6,24 @@
 {% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">Student management</p><h1>학생 관리</h1><p class="summary">등록된 학생과 얼굴 등록 상태를 한 화면에서 관리합니다.</p></div>
+  <div><p class="eyebrow">Student management</p><h1>학생 관리</h1><p class="summary">등록된 학생과 모델별 얼굴 등록 상태를 한 화면에서 관리합니다.</p></div>
   <button id="open-student-registration" type="button">학생 등록</button>
 </header>
 
 <section class="panel student-list-panel" aria-labelledby="student-list-title">
-  <div class="student-list-heading"><div><h2 id="student-list-title">등록 학생</h2><p>데이터베이스에 저장된 학생 {{ students|length }}명입니다.</p></div></div>
+  <div class="student-list-heading"><div><h2 id="student-list-title">등록 학생</h2><p>데이터베이스에 저장된 학생 {{ students|length }}명입니다.</p></div><p class="active-face-model">현재 등록 모델 <strong>{{ active_face_model_label }}</strong></p></div>
+  <p class="face-model-help">현재 모델로 등록하거나 다시 등록해도 다른 모델의 embedding은 유지됩니다.</p>
   {% if students %}
   <div class="student-table-wrap"><table class="student-table">
-    <thead><tr><th>학생 이름</th><th>학생 번호</th><th>소속 반</th><th>등록일</th><th>얼굴 정보</th></tr></thead>
+    <thead><tr><th>학생 이름</th><th>학생 번호</th><th>소속 반</th><th>등록일</th><th>모델별 얼굴 정보</th><th>현재 모델 작업</th></tr></thead>
     <tbody>{% for student in students %}<tr data-student-id="{{ student.id }}">
       <td><strong>{{ student.name }}</strong></td><td>{{ student.student_number }}</td><td>{{ student.classroom_name }}</td><td>{{ student.created_at.strftime('%Y-%m-%d') }}</td>
-      <td>{% if student.face_registered %}<span class="face-status face-status-complete"><span aria-hidden="true">✓</span> 얼굴 등록 완료</span>{% else %}<button class="face-status face-status-needed open-face-enrollment" type="button" data-student-id="{{ student.id }}" data-student-name="{{ student.name }}" data-student-number="{{ student.student_number }}">얼굴 등록 필요</button>{% endif %}</td>
+      <td><div class="face-model-statuses">
+        <span class="face-model-status {% if student.id in face_embedding_student_ids['arcface'] %}is-complete{% else %}is-needed{% endif %}"><span aria-hidden="true">{% if student.id in face_embedding_student_ids['arcface'] %}✓{% else %}–{% endif %}</span> ArcFace</span>
+        <span class="face-model-status {% if student.id in face_embedding_student_ids['adaface'] %}is-complete{% else %}is-needed{% endif %}"><span aria-hidden="true">{% if student.id in face_embedding_student_ids['adaface'] %}✓{% else %}–{% endif %}</span> AdaFace</span>
+      </div></td>
+      {% set active_model_registered = student.id in face_embedding_student_ids[active_face_model] %}
+      <td><button class="face-status {% if active_model_registered %}face-status-reregister{% else %}face-status-needed{% endif %} open-face-enrollment" type="button" data-student-id="{{ student.id }}" data-student-name="{{ student.name }}" data-student-number="{{ student.student_number }}" data-model-name="{{ active_face_model }}" data-model-label="{{ active_face_model_label }}">{{ active_face_model_label }} {% if active_model_registered %}다시 등록{% else %}등록{% endif %}</button></td>
     </tr>{% endfor %}</tbody>
   </table></div>
   {% else %}<div class="student-empty-state"><strong>아직 등록된 학생이 없습니다.</strong><p>상단의 학생 등록 버튼으로 첫 학생을 추가해 주세요.</p></div>{% endif %}
@@ -29,7 +35,7 @@
 <dialog id="student-face-enrollment-dialog" class="student-face-dialog" aria-labelledby="face-dialog-title">
   <div class="student-face-dialog-shell">
     <section id="enrollment-setup" class="face-dialog-step face-consent-step">
-      <div class="face-dialog-heading"><p class="eyebrow">Face enrollment</p><h2 id="face-dialog-title">얼굴 등록 및 수집 동의</h2><p><strong id="face-student-name"></strong> 학생의 얼굴 이미지를 여러 방향에서 촬영합니다.</p><p class="face-dialog-student">학생 번호: <strong id="face-student-number"></strong><span id="student-id" hidden></span></p></div>
+      <div class="face-dialog-heading"><p class="eyebrow">Face enrollment · <span id="face-model-label">{{ active_face_model_label }}</span></p><h2 id="face-dialog-title">얼굴 등록 및 수집 동의</h2><p><strong id="face-student-name"></strong> 학생의 얼굴 이미지를 여러 방향에서 촬영해 <strong id="face-model-description">{{ active_face_model_label }}</strong> embedding을 생성합니다.</p><p class="face-dialog-student">학생 번호: <strong id="face-student-number"></strong><span id="student-id" hidden></span></p></div>
       <label class="face-consent-check"><input id="consent-confirmed" type="checkbox"> 학생의 얼굴 데이터 수집 및 학습 목적 이용 동의를 확인했습니다.</label>
       <input id="confirmed-by" type="hidden" value="admin"><p id="setup-error" class="form-error" role="alert" hidden></p>
       <div class="face-dialog-actions"><button id="close-face-enrollment" class="secondary" type="button">닫기</button><button id="start-enrollment" type="button">등록 시작</button></div>
@@ -40,7 +46,7 @@
         <div class="overall-capture-progress"><div class="overall-progress-heading"><strong>전체 진행률</strong><strong id="overall-progress-percent">0%</strong></div><progress id="overall-progress" max="100" value="0">0%</progress></div><p id="connection-status" class="connection-status">연결 준비 중</p><p id="capture-error" class="form-error" role="alert" hidden></p>
       </div>
     </section>
-    <section id="face-enrollment-complete" class="face-dialog-step face-complete-step" role="status" hidden><span>✓</span><h2>얼굴 등록을 완료했습니다.</h2><p>학생 목록의 얼굴 등록 상태가 자동으로 갱신됩니다.</p></section>
+    <section id="face-enrollment-complete" class="face-dialog-step face-complete-step" role="status" hidden><span>✓</span><h2><span id="face-complete-model-label">{{ active_face_model_label }}</span> 얼굴 등록을 완료했습니다.</h2><p>학생 목록의 모델별 얼굴 등록 상태가 자동으로 갱신됩니다.</p></section>
   </div>
 </dialog>
 {% endblock %}

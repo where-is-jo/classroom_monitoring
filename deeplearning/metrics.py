@@ -30,6 +30,9 @@ SCRFD 검출인지 MediaPipe 자세 추정인지 로그로는 알 수 없어서 
 | `face_analysis_requests_total` | `result` | 5 |
 | `face_embedding_duration_seconds` | 없음 | 1 |
 | `face_embedding_requests_total` | `result` | 6 |
+| `face_identification_duration_seconds` | `model` | 2 |
+| `face_identification_requests_total` | `model`, `result` | 12 이하 |
+| `face_identification_observations_total` | `model`, `result` | 6 |
 | `face_analysis_sessions_active` | 없음 | 1 |
 
 **`enrollment_id`를 label로 쓰지 않는다.** 값이 무한히 늘어나고, 얼굴 등록 세션은
@@ -46,17 +49,29 @@ import time
 from collections.abc import Callable
 from typing import Literal
 
-from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 __all__ = [
     "METRIC_PREFIX",
     "AnalysisResult",
     "AnalysisStage",
     "EmbeddingResult",
+    "FaceModelLabel",
+    "IdentificationObservationResult",
+    "IdentificationRequestResult",
     "install_session_gauge",
     "observe_analysis_stage",
     "record_analysis_request",
     "record_embedding_request",
+    "record_identification_observations",
+    "record_identification_request",
     "render_metrics",
 ]
 
@@ -93,6 +108,17 @@ EmbeddingResult = Literal[
 거리, `invalid_vector`는 모델 쪽 문제다. `error`는 예상하지 못한 실패(500)다.
 """
 
+FaceModelLabel = Literal["arcface", "adaface"]
+IdentificationRequestResult = Literal[
+    "ok",
+    "bad_image",
+    "invalid_camera",
+    "disabled",
+    "gallery_unavailable",
+    "error",
+]
+IdentificationObservationResult = Literal["registered", "unknown", "uncertain", "none"]
+
 # 프레임마다 불리는 실시간 경로다. 사람이 "반응이 없다"고 느끼기 시작하는 구간을
 # 촘촘히 본다. 1초를 넘어가면 이미 등록 화면이 끊겨 보이므로 그 위는 뭉뚱그린다.
 _STAGE_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5)
@@ -124,6 +150,25 @@ _EMBEDDING_REQUESTS_TOTAL = Counter(
     labelnames=("result",),
 )
 
+_IDENTIFICATION_DURATION_SECONDS = Histogram(
+    f"{METRIC_PREFIX}face_identification_duration_seconds",
+    "얼굴 식별 요청에 걸린 시간",
+    labelnames=("model",),
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0),
+)
+
+_IDENTIFICATION_REQUESTS_TOTAL = Counter(
+    f"{METRIC_PREFIX}face_identification_requests_total",
+    "얼굴 식별 요청 수",
+    labelnames=("model", "result"),
+)
+
+_IDENTIFICATION_OBSERVATIONS_TOTAL = Counter(
+    f"{METRIC_PREFIX}face_identification_observations_total",
+    "얼굴 식별 관측 결과 수",
+    labelnames=("model", "result"),
+)
+
 _SESSIONS_ACTIVE = Gauge(
     f"{METRIC_PREFIX}face_analysis_sessions_active",
     "메모리에 남아 있는 얼굴 등록 세션 수. 계속 늘면 세션이 정리되지 않는 것이다",
@@ -132,14 +177,18 @@ _SESSIONS_ACTIVE = Gauge(
 
 def observe_analysis_stage(stage: AnalysisStage, started_at: float) -> None:
     """구간 하나의 소요 시간을 남긴다. `started_at`은 `time.perf_counter()` 값이다."""
-    _ANALYSIS_DURATION_SECONDS.labels(stage=stage).observe(time.perf_counter() - started_at)
+    _ANALYSIS_DURATION_SECONDS.labels(stage=stage).observe(
+        time.perf_counter() - started_at
+    )
 
 
 def record_analysis_request(result: AnalysisResult) -> None:
     _ANALYSIS_REQUESTS_TOTAL.labels(result=result).inc()
 
 
-def record_embedding_request(result: EmbeddingResult, started_at: float | None = None) -> None:
+def record_embedding_request(
+    result: EmbeddingResult, started_at: float | None = None
+) -> None:
     """embedding 요청 하나를 남긴다.
 
     `started_at`이 있으면 소요 시간도 함께 남긴다. 요청 본문을 읽기 전에 실패한
@@ -148,6 +197,31 @@ def record_embedding_request(result: EmbeddingResult, started_at: float | None =
     _EMBEDDING_REQUESTS_TOTAL.labels(result=result).inc()
     if started_at is not None:
         _EMBEDDING_DURATION_SECONDS.observe(time.perf_counter() - started_at)
+
+
+def record_identification_request(
+    model: FaceModelLabel,
+    result: IdentificationRequestResult,
+    started_at: float,
+) -> None:
+    """개인 식별자 없이 모델·종료 사유와 지연만 남긴다."""
+
+    _IDENTIFICATION_REQUESTS_TOTAL.labels(model=model, result=result).inc()
+    _IDENTIFICATION_DURATION_SECONDS.labels(model=model).observe(
+        time.perf_counter() - started_at
+    )
+
+
+def record_identification_observations(
+    model: FaceModelLabel,
+    results: list[IdentificationObservationResult],
+) -> None:
+    """학생·카메라 ID를 label에 넣지 않고 관측 상태만 센다."""
+
+    if not results:
+        results = ["none"]
+    for result in results:
+        _IDENTIFICATION_OBSERVATIONS_TOTAL.labels(model=model, result=result).inc()
 
 
 def install_session_gauge(count: Callable[[], int]) -> None:

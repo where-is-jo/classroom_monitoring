@@ -49,12 +49,15 @@ class FaceGallerySnapshot:
     entries: tuple[GalleryEntry, ...]
     revision: GalleryRevision
     excluded_entries: int = 0
+    active_registered_students: int | None = None
 
 
 @dataclass(frozen=True)
 class FaceGalleryReadiness:
     gallery_entries: int
     excluded_gallery_entries: int
+    active_registered_students: int = 0
+    missing_gallery_entries: int = 0
 
 
 class FaceGalleryLoader(Protocol):
@@ -245,8 +248,15 @@ class MongoFaceGalleryLoader:
 
         if not entries:
             raise FaceGalleryUnavailable("등록된 학생 얼굴 갤러리가 비어 있습니다.")
+        if seen_student_ids != active_student_ids:
+            raise FaceGalleryUnavailable(
+                "활성 얼굴 등록 학생 중 현재 모델 embedding이 없는 항목이 있습니다."
+            )
         return FaceGallerySnapshot(
-            tuple(entries), tuple(revision), excluded_entries=excluded_entries
+            tuple(entries),
+            tuple(revision),
+            excluded_entries=excluded_entries,
+            active_registered_students=len(active_student_ids),
         )
 
 
@@ -323,6 +333,12 @@ class FaceIdentificationRuntime:
             readiness = FaceGalleryReadiness(
                 gallery_entries=len(snapshot.entries),
                 excluded_gallery_entries=snapshot.excluded_entries,
+                active_registered_students=(
+                    snapshot.active_registered_students
+                    if snapshot.active_registered_students is not None
+                    else len(snapshot.entries)
+                ),
+                missing_gallery_entries=0,
             )
             if self._engine is not None and snapshot.revision == self._gallery_revision:
                 self._gallery_loaded_at = now
@@ -367,8 +383,8 @@ class FaceIdentificationRuntime:
         """현재 MongoDB 갤러리를 실제 엔진으로 만들 수 있는지 확인한다.
 
         모델 파일 존재만 보는 `/health`와 달리 readiness에서 호출한다. 갤러리가
-        비었거나 현재 ArcFace metadata와 다르면 요청이 들어오기 전에 배포를 unhealthy로
-        표시한다.
+        비었거나 현재 모델 metadata와 다르거나 등록 학생이 누락되면 요청이 들어오기
+        전에 배포를 unhealthy로 표시한다.
         """
         self._refresh_gallery()
         assert self._gallery_readiness is not None

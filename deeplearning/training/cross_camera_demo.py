@@ -268,7 +268,9 @@ def build_face_engine() -> tuple[FaceIdentityEngine, dict[str, str]]:
             raise FileNotFoundError(path)
     mongodb_uri = os.environ.get("MONGODB_URI") or os.environ.get("DATABASE_URL", "")
     mongodb_database = os.environ.get("MONGODB_DATABASE") or os.environ.get("DATABASE_NAME", "")
-    collection_name = os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings")
+    collection_name = os.environ.get(
+        "FACE_EMBEDDING_COLLECTION", "face_embeddings_arcface"
+    )
     expected_metadata = ("arcface", "insightface-buffalo_l-w600k_r50-v0.7", "insightface-norm-crop-112-v1")
     names: dict[str, str] = {}
     entries: list[GalleryEntry] = []

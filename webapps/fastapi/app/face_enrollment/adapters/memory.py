@@ -67,11 +67,13 @@ class InMemoryFaceEnrollmentRepository:
 class InMemoryFaceObjectStorage:
     def __init__(self) -> None:
         self._samples: dict[str, dict[str, bytes]] = {}
+        self._student_ids: dict[str, str] = {}
         self._lock = RLock()
 
     def prepare_enrollment(self, enrollment_id: str, student_id: str, created_at: datetime) -> None:
         with self._lock:
             self._samples.setdefault(enrollment_id, {})
+            self._student_ids[enrollment_id] = student_id
 
     def put_sample(self, enrollment_id: str, metadata: FaceSampleMetadata, content: bytes) -> None:
         with self._lock:
@@ -82,9 +84,20 @@ class InMemoryFaceObjectStorage:
     ) -> None:
         return None
 
+    def read_originals(
+        self, *, enrollment_id: str, student_id: str, student_number: str
+    ) -> list[bytes]:
+        """파일 보존을 끈 local 테스트에서도 완료 직후 벡터화를 허용한다."""
+
+        with self._lock:
+            if self._student_ids.get(enrollment_id) != student_id:
+                return []
+            return list(self._samples.get(enrollment_id, {}).values())
+
     def delete_enrollment(self, enrollment_id: str) -> None:
         with self._lock:
             self._samples.pop(enrollment_id, None)
+            self._student_ids.pop(enrollment_id, None)
 
 
 class SyntheticFaceAnalyzer:
