@@ -73,6 +73,15 @@ class PipelineSettings(BaseSettings):
     # 이 값은 도달량을 늘리지 않는다 — 전송 스레드가 한 번에 한 건을 보내므로 상한은
     # 건당 처리 시간이 정한다. 줄이는 것은 만들어 놓고 버리는 낭비와 받는 쪽 부하다.
     result_dispatch_min_interval_seconds: float = Field(default=1.0, ge=0, le=60)
+
+    # --- bbox overlay 전용 경로 ---
+    # 화면에 상자를 그리는 일과 이벤트를 저장하는 일을 나눈다. 저장 경로는 위 간격으로
+    # 묶여 있어 화면 갱신이 그만큼 성겨진다(실측 SSE 갱신 p50 3.27초). 오버레이는
+    # 저장을 하지 않는 endpoint로 따로 보내 추론 주기 그대로 흘린다(결정 0047).
+    overlay_dispatch_enabled: bool = True
+    # 0이면 제한하지 않는다 — 추론이 만든 만큼 그대로 보낸다(CCTV 기준 초당 5장).
+    overlay_dispatch_min_interval_seconds: float = Field(default=0.0, ge=0, le=10)
+    overlay_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     # 종료할 때 남은 전송을 기다리는 상한. FastAPI가 죽어 있으면 끝나지 않으므로 둔다.
     result_dispatch_close_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 

@@ -25,6 +25,13 @@ result_dispatch_enabled: true
 result_dispatch_queue_maxsize: 32
 # 카메라 하나를 이 간격보다 자주 보내지 않는다. 추론 주기(5FPS)와 전송 주기를 나눈다.
 result_dispatch_min_interval_seconds: 1.0
+
+# --- bbox overlay 전용 경로 ---
+# 저장을 하지 않는 endpoint로 따로 보내 화면 갱신을 추론 주기에 맞춘다.
+overlay_dispatch_enabled: true
+# 0 = 제한 없음. 추론이 만든 만큼(CCTV 초당 5장) 그대로 보낸다.
+overlay_dispatch_min_interval_seconds: 0.0
+overlay_timeout_seconds: 2.0
 result_dispatch_close_timeout_seconds: 5.0
 
 # 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의
