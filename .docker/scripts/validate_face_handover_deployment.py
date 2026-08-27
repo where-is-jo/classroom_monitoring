@@ -10,12 +10,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-WORKER_ROOT = REPO_ROOT / "worker"
-if str(WORKER_ROOT) not in sys.path:
-    sys.path.insert(0, str(WORKER_ROOT))
-
-from shared.person_model_contract import verify_person_model_contract
+from deployment_person_model_contract import verify_person_model_contract
 
 EXPECTED_THRESHOLD_METADATA = {
     "model_name": "arcface",
