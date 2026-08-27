@@ -161,6 +161,88 @@ def test_approved_original_export_preserves_image_and_declares_contract(
     }
 
 
+def test_approved_original_export_rejects_corrupt_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _dataset(tmp_path)
+    (dataset / "images" / "train" / "frame-001.jpg").write_bytes(b"not-a-jpeg")
+    monkeypatch.setattr(
+        privacy,
+        "validate_dataset",
+        lambda path: {"dataset_version": "person-v0001", "frame_count": 1},
+    )
+
+    with pytest.raises(AutoLabelingError, match="이미지를 읽을 수 없습니다"):
+        privacy.export_deidentified_dataset(
+            dataset,
+            tmp_path / "original-export",
+            operator_id="operator-001",
+            approved_cohort_policy="ai-student-cohort-person-detection-v1",
+            preprocessing_method="original-frame-v1",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("approved_student_data", False),
+        ("approval_type", "automatic"),
+        ("approval_reference", ""),
+        ("consent_scope", "other-purpose"),
+        ("subject_category", "adult"),
+    ),
+)
+def test_original_export_rejects_incomplete_student_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    dataset = _dataset(tmp_path)
+    manifest_path = dataset / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["items"][0][field] = value
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        privacy,
+        "validate_dataset",
+        lambda path: {"dataset_version": "person-v0001", "frame_count": 1},
+    )
+
+    with pytest.raises(AutoLabelingError, match="사람 검수된 학생 탐지 학습 승인"):
+        privacy.export_deidentified_dataset(
+            dataset,
+            tmp_path / "original-export",
+            operator_id="operator-001",
+            approved_cohort_policy="approved-cohort-v1",
+            preprocessing_method="original-frame-v1",
+        )
+
+
+def test_original_export_rejects_expired_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = _dataset(tmp_path)
+    manifest_path = dataset / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["items"][0]["retention_expires_at"] = "2020-01-01T00:00:00+00:00"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        privacy,
+        "validate_dataset",
+        lambda path: {"dataset_version": "person-v0001", "frame_count": 1},
+    )
+
+    with pytest.raises(AutoLabelingError, match="보존 기한"):
+        privacy.export_deidentified_dataset(
+            dataset,
+            tmp_path / "original-export",
+            operator_id="operator-001",
+            approved_cohort_policy="approved-cohort-v1",
+            preprocessing_method="original-frame-v1",
+        )
+
+
 def test_extend_colab_export_adds_reviewed_val_and_applies_exclusions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

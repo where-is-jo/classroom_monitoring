@@ -62,9 +62,12 @@ from .models import PersonPresence, SearchQuery
 # "멈추지 않는 모델"을 걸러내기 위한 것이라 넉넉하게 잡는다.
 MAX_PLAN_TEXT_BYTES: Final = 8192
 
-# app/video_monitoring/schemas.py의 VideoSearchRequest와 같은 상한을 쓴다.
-# 검색 결과 수의 의미가 화면마다 다르면 사용자가 혼란스럽다.
-MAX_LIMIT: Final = 50
+# 화면이 20건씩 다섯 쪽으로 나눠 보여주므로 다섯 쪽을 채우는 수다.
+# 영상 검색(app/video_monitoring/schemas.py)의 50과 갈리는데, 그쪽은 한 화면에
+# 끝까지 늘어놓는 목록이라 50이 넘으면 스크롤로만 읽어야 한다. 여기는 쪽이 나뉘어
+# 100건이어도 한 화면에 20건씩만 놓인다. **같은 수를 쓰는 것보다 각자 화면이
+# 감당하는 수를 쓰는 편이 맞다.**
+MAX_LIMIT: Final = 100
 
 _INTENT: Final = "detection_search"
 _ALLOWED_KEYS: Final = frozenset(

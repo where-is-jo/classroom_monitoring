@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -32,7 +33,10 @@ def build_deployment(tmp_path: Path) -> Path:
         "STREAM_SOURCES=entry-camera=rtsp://mediamtx:8554/entry-camera,"
         "classroom-cctv=rtsp://mediamtx:8554/classroom-cctv\n"
         "MODEL_PATH=/models/person.pt\n"
+        "MODEL_CONTRACT_PATH=/models/person.model_contract.json\n"
         "INFERENCE_DEVICE=cuda\n"
+        "INFERENCE_IMAGE_SIZE=1280\n"
+        'INFERENCE_TARGET_CLASS_IDS={"0":"person"}\n'
         "FASTAPI_URL=http://fastapi.example.invalid:8076\n"
         "FACE_IDENTITY_URL=http://deeplearning:8100\n"
         "FACE_IDENTITY_CAMERA_IDS=entry-camera\n"
@@ -46,6 +50,24 @@ def build_deployment(tmp_path: Path) -> Path:
         "person.pt",
     ):
         (models / relative).write_bytes(b"model")
+    (models / "person.model_contract.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "model_sha256": hashlib.sha256(b"model").hexdigest(),
+                "target_class_ids": {"0": "person"},
+                "image_size": 1280,
+                "preprocessing_contract": {
+                    "schema_version": 1,
+                    "method": "original-frame-v1",
+                    "label_derived": False,
+                    "training_compatible": True,
+                    "inference_preprocessing_required": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     thresholds = {
         **EXPECTED_THRESHOLD_METADATA,
         "similarity_threshold": 0.5,
@@ -73,6 +95,39 @@ def test_thresholds_json이_없으면_실패한다(tmp_path: Path) -> None:
     errors = validate(docker_root)
 
     assert any("임계값 파일이 없습니다" in error for error in errors)
+
+
+def test_사람_모델_계약이_없으면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    (docker_root / "models" / "person.model_contract.json").unlink()
+
+    errors = validate(docker_root)
+
+    assert any("person.model_contract.json" in error for error in errors)
+
+
+def test_사람_모델_해시가_계약과_다르면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    (docker_root / "models" / "person.pt").write_bytes(b"different")
+
+    errors = validate(docker_root)
+
+    assert any("SHA-256" in error for error in errors)
+
+
+def test_사람_모델_image_size가_계약과_다르면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    worker_env = docker_root / "env" / "worker.dev.env"
+    worker_env.write_text(
+        worker_env.read_text(encoding="utf-8").replace(
+            "INFERENCE_IMAGE_SIZE=1280", "INFERENCE_IMAGE_SIZE=640"
+        ),
+        encoding="utf-8",
+    )
+
+    errors = validate(docker_root)
+
+    assert any("INFERENCE_IMAGE_SIZE" in error for error in errors)
 
 
 def test_track_임계값이_누락되면_실패한다(tmp_path: Path) -> None:

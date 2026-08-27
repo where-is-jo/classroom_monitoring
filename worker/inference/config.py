@@ -111,7 +111,9 @@ class InferenceSettings(ObjectStorageSettings):
 
     @model_validator(mode="after")
     def _validate_environment_contract(self) -> Self:
-        if self.app_env in {"dev", "prod"} and not self.model_contract_path:
+        if self.app_env in {"dev", "prod"} and not (
+            self.model_contract_path and self.model_contract_path.strip()
+        ):
             raise ValueError("dev/prod에서는 MODEL_CONTRACT_PATH가 필요합니다.")
         if not self.inference_target_class_ids:
             raise ValueError(

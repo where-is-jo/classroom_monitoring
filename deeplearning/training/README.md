@@ -112,7 +112,7 @@ python -m auto_labeling pipeline-train --config /absolute/path/to/training.yml
 학습 명령이 쓰는 위치는 설정의 `extract_root`와 `output_root`뿐이다. `mode: smoke-full`은
 1 epoch smoke가 끝난 뒤 정식 학습을 이어가며, 완료 시 `best.pt`, 학습 영수증, validation
 F1 threshold, `model_contract.json`, 결과 ZIP과 각 SHA-256 영수증을 남긴다. 모델 계약에는
-가중치 해시, 대상 클래스와 학습 데이터의 전처리 계약이 들어간다. 서버가 오프라인이면
+가중치 해시, 대상 클래스, 학습 image size와 학습 데이터의 전처리 계약이 들어간다. 서버가 오프라인이면
 `base_model`에 미리 준비한 `yolo11n.pt`의 절대 경로를, `base_model_sha256`에 실제 해시를
 지정한다.
 
@@ -125,7 +125,7 @@ export는 모든 항목이 학생 데이터, 사람 탐지 학습 범위, 사람
 가져야 하며 하나라도 빠지면 생성하지 않는다.
 
 배포할 때 `best.pt`와 같은 결과의 `model_contract.json`을 함께 복사한다. dev/prod worker와
-GPU 배포 사전점검은 모델 해시·클래스·전처리 계약을 확인하고, 해시가 다르거나
+GPU 배포 사전점검은 모델 해시·클래스·image size·전처리 계약을 확인하고, 값이 다르거나
 `inference_preprocessing_required: true`인 기존 픽셀화 모델이면 기동하지 않는다.
 
 2026-08-25에 승인된 `person-v0002` 320장(train 240 / val 80), seed 42, 640px로 50 epoch

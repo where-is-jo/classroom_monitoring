@@ -85,29 +85,28 @@ def sample_evaluation_frames(
             raise AutoLabelingError("추출된 평가 프레임이 없습니다.")
         quality_failures: list[dict[str, object]] = []
         clean_records: list[dict[str, Any]] = []
-        if target_frame_count is None:
-            clean_records = records
-        else:
-            seen_image_hashes: set[str] = set()
-            for record in records:
-                image_path = temporary / str(record["image_path"])
-                quality = inspect_frame_quality(image_path, FrameQualityThresholds())
-                digest = str(record["image_sha256"])
-                reasons = list(quality.get("reasons", []))
-                if digest in seen_image_hashes:
-                    reasons.append("exact-duplicate-frame")
-                if reasons:
-                    quality_failures.append(
-                        {
-                            "frame_id": record["frame_id"],
-                            "source_id": record["source_id"],
-                            "timestamp_ms": record["timestamp_ms"],
-                            "reasons": reasons,
-                        }
-                    )
-                    continue
-                seen_image_hashes.add(digest)
-                clean_records.append(record)
+        # 목표 장수 지정 여부는 선택 개수만 바꾼다. 디코딩·단색·중복 검사를 건너뛸
+        # 이유가 없고, 검사하지 않은 프레임이 동결되면 이후 수정할 수도 없다.
+        seen_image_hashes: set[str] = set()
+        for record in records:
+            image_path = temporary / str(record["image_path"])
+            quality = inspect_frame_quality(image_path, FrameQualityThresholds())
+            digest = str(record["image_sha256"])
+            reasons = list(quality.get("reasons", []))
+            if digest in seen_image_hashes:
+                reasons.append("exact-duplicate-frame")
+            if reasons:
+                quality_failures.append(
+                    {
+                        "frame_id": record["frame_id"],
+                        "source_id": record["source_id"],
+                        "timestamp_ms": record["timestamp_ms"],
+                        "reasons": reasons,
+                    }
+                )
+                continue
+            seen_image_hashes.add(digest)
+            clean_records.append(record)
         records, allocations = _select_evaluation_records(
             clean_records,
             target_frame_count,
@@ -198,30 +197,35 @@ def prelabel_evaluation_set(
         input_preprocessing=input_preprocessing,
     )
     files: list[dict[str, object]] = []
-    for record in records:
-        frame_id = str(record.get("frame_id", ""))
-        image_path = root / "images" / f"{frame_id}.jpg"
-        label_path = root / "labels" / f"{frame_id}.txt"
-        if label_path.read_text(encoding="utf-8").strip():
-            raise AutoLabelingError(
-                "평가 후보 라벨 생성 전 라벨 파일이 비어 있어야 합니다."
+    # 모든 추론 결과를 임시 디렉터리에 먼저 만든다. 중간 프레임에서 추론이 실패해도
+    # 실제 labels에는 손대지 않으므로 같은 고정 Test 선택을 그대로 재개할 수 있다.
+    with tempfile.TemporaryDirectory(prefix=".prelabel-", dir=root) as temp:
+        generated_labels = Path(temp)
+        for record in records:
+            frame_id = str(record.get("frame_id", ""))
+            image_path = root / "images" / f"{frame_id}.jpg"
+            generated_label = generated_labels / f"{frame_id}.txt"
+            candidates = predictor.predict(image_path)
+            write_yolo_file(
+                generated_label,
+                [
+                    YoloBox(candidate.class_id, *candidate.bbox_yolo)
+                    for candidate in candidates
+                ],
             )
-        candidates = predictor.predict(image_path)
-        write_yolo_file(
-            label_path,
-            [
-                YoloBox(candidate.class_id, *candidate.bbox_yolo)
-                for candidate in candidates
-            ],
-        )
-        files.append(
-            {
-                "frame_id": frame_id,
-                "image_sha256": sha256_file(image_path),
-                "candidate_count": len(candidates),
-                "candidate_label_sha256": sha256_file(label_path),
-            }
-        )
+            files.append(
+                {
+                    "frame_id": frame_id,
+                    "image_sha256": sha256_file(image_path),
+                    "candidate_count": len(candidates),
+                    "candidate_label_sha256": sha256_file(generated_label),
+                }
+            )
+        for record in records:
+            frame_id = str(record.get("frame_id", ""))
+            (generated_labels / f"{frame_id}.txt").replace(
+                root / "labels" / f"{frame_id}.txt"
+            )
     write_json(
         receipt_path,
         {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from threading import RLock
@@ -28,6 +28,7 @@ from ..models import (
     SeatMigrationSnapshot,
     SeatMigrationSnapshotPayload,
     SeatObservationBatchRecord,
+    SeatOccupancyApplication,
     SeatOccupancyHistory,
     SeatPage,
 )
@@ -111,6 +112,11 @@ class InMemoryClassroomRepository:
     def get_seat(self, seat_id: str) -> Seat | None:
         with self._lock:
             return self._seats.get(seat_id)
+
+    def get_seats(self, seat_ids: Sequence[str]) -> dict[str, Seat]:
+        """없는 좌석은 결과에서 빠진다. MongoDB의 `$in` 조회와 같은 계약이다."""
+        with self._lock:
+            return {seat_id: self._seats[seat_id] for seat_id in seat_ids if seat_id in self._seats}
 
     def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage:
         with self._lock:
@@ -205,6 +211,12 @@ class InMemoryClassroomRepository:
                 ),
                 None,
             )
+
+    def get_histories_by_event(self, event_id: str) -> dict[str, SeatOccupancyHistory]:
+        with self._lock:
+            return {
+                item.seat_id: item for item in self._history.values() if item.event_id == event_id
+            }
 
     def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory:
         with self._lock:
@@ -467,6 +479,48 @@ class InMemorySeatMutationUnitOfWork:
                     expected_version=expected_version,
                 )
             return stored
+
+    def append_histories_and_apply_occupancies(
+        self,
+        applications: Sequence[SeatOccupancyApplication],
+        *,
+        updated_at: datetime,
+    ) -> tuple[SeatOccupancyHistory, ...] | None:
+        """여러 좌석의 관측을 같은 lock 안에서 함께 적용한다.
+
+        **검사를 모두 끝낸 뒤에 쓴다.** 좌석이 하나라도 없거나 version이 어긋나면
+        아무것도 쓰지 않아야 하는데, 검사와 쓰기를 섞으면 앞쪽 좌석은 이미 쓰인
+        상태로 중간에 실패한다. MongoDB transaction의 all-or-nothing과 같은
+        동작을 lock 안에서 재현한다.
+        """
+        if not applications:
+            return ()
+
+        with self._store._lock:
+            seats: list[Seat] = []
+            for item in applications:
+                seat = self._store.get_seat(item.history.seat_id)
+                if seat is None or not seat.is_active:
+                    raise SeatNotFoundError()
+                seats.append(seat)
+            for seat, item in zip(seats, applications, strict=True):
+                if seat.version != item.expected_version:
+                    return None
+
+            stored: list[SeatOccupancyHistory] = []
+            for seat, item in zip(seats, applications, strict=True):
+                stored.append(self._store.append_occupancy_history(item.history))
+                if item.occupancy is not None:
+                    self._store.replace_seat(
+                        replace(
+                            seat,
+                            current_occupancy=item.occupancy,
+                            updated_at=updated_at,
+                            version=seat.version + 1,
+                        ),
+                        expected_version=item.expected_version,
+                    )
+            return tuple(stored)
 
 
 class InMemorySeatMigrationRepository:

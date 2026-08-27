@@ -110,7 +110,7 @@ def test_server_bundle_contains_runtime_code_only_and_is_deterministic(
 def test_server_bundle_marks_approved_original_frames(tmp_path: Path) -> None:
     dataset = tmp_path / "original-export-v005.zip"
     _write_dataset_archive(dataset, original_frames=True)
-    model = tmp_path / "yolo11n.pt"
+    model = tmp_path / "yolo26n.pt"
     model.write_bytes(b"model")
     config = tmp_path / "training.yml"
     config.write_text(
@@ -124,7 +124,7 @@ def test_server_bundle_marks_approved_original_frames(tmp_path: Path) -> None:
                 ),
                 "archive_sha256": sha256_file(dataset),
                 "base_model": (
-                    "/home/training-operator/classroom-training/input/yolo11n.pt"
+                    "/home/training-operator/classroom-training/input/yolo26n.pt"
                 ),
                 "base_model_sha256": sha256_file(model),
             },
@@ -145,3 +145,4 @@ def test_server_bundle_marks_approved_original_frames(tmp_path: Path) -> None:
     assert report["privacy_boundary"]["deidentified_dataset_only"] is False
     assert report["privacy_boundary"]["approved_original_frames_included"] is True
     assert report["transfer_items"][1]["role"] == "approved-original-frame-dataset"
+    assert report["transfer_items"][2]["local_file_name"] == "yolo26n.pt"

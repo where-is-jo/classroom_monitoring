@@ -415,15 +415,18 @@ def advance_local_pipeline(
             expected_width=config.expected_frame_width,
             expected_height=config.expected_frame_height,
         )
-        prelabel_evaluation_set(
-            evaluation_dir,
-            prelabel_model_path,
-            settings,
-            device=config.prelabel_device,
-            expected_model_sha256=prelabel_model_sha256,
-            image_size=config.prelabel_image_size,
-            input_preprocessing=prelabel_contract,
-        )
+        # 동결된 Test는 불변 산출물이다. 재개 실행에서 후보 라벨 단계를 다시 호출하면
+        # status=frozen을 awaiting-manual-review로 되돌릴 수 없어서 영구히 막힌다.
+        if not (evaluation_dir / "evaluation_frozen.json").is_file():
+            prelabel_evaluation_set(
+                evaluation_dir,
+                prelabel_model_path,
+                settings,
+                device=config.prelabel_device,
+                expected_model_sha256=prelabel_model_sha256,
+                image_size=config.prelabel_image_size,
+                input_preprocessing=prelabel_contract,
+            )
 
     source_run = prepare_clean_source_run(
         partition_dir / "dataset_manifest.json",
@@ -444,25 +447,15 @@ def advance_local_pipeline(
             expected_width=config.expected_frame_width,
             expected_height=config.expected_frame_height,
         )
-    if config.prelabel_image_size is None:
-        run_prelabel(
-            source_run,
-            prelabel_model_path,
-            settings,
-            device=config.prelabel_device,
-            expected_model_sha256=prelabel_model_sha256,
-            input_preprocessing=prelabel_contract,
-        )
-    else:
-        run_prelabel(
-            source_run,
-            prelabel_model_path,
-            settings,
-            device=config.prelabel_device,
-            expected_model_sha256=prelabel_model_sha256,
-            image_size=config.prelabel_image_size,
-            input_preprocessing=prelabel_contract,
-        )
+    run_prelabel(
+        source_run,
+        prelabel_model_path,
+        settings,
+        device=config.prelabel_device,
+        expected_model_sha256=prelabel_model_sha256,
+        image_size=config.prelabel_image_size,
+        input_preprocessing=prelabel_contract,
+    )
     review_dir = prepare_review(
         source_run,
         settings,
@@ -538,7 +531,6 @@ def advance_local_pipeline(
         raise AutoLabelingError(
             "자동 학습 export에는 train과 val 프레임이 각각 한 장 이상 필요합니다."
         )
-    archive_receipt = create_dataset_archive(export_dir, archive_path)
     frozen_evaluation: dict[str, object] | None = None
     if config.target_test_frames is not None:
         if config.reviewer_id is None:
@@ -553,6 +545,9 @@ def advance_local_pipeline(
         frozen_evaluation = verify_frozen_evaluation_set(evaluation_dir)
         if frozen_evaluation.get("frame_count") != config.target_test_frames:
             raise AutoLabelingError("동결된 Test 프레임 수가 설정과 다릅니다.")
+    # 고정 Test와 학습 데이터의 누출 검사를 통과한 뒤에만 외부 반출 ZIP을 만든다.
+    # 순서를 바꾸면 누출 실패 뒤에도 학습 가능한 ZIP과 영수증이 디스크에 남는다.
+    archive_receipt = create_dataset_archive(export_dir, archive_path)
     return _write_local_state(
         config,
         status="ready-for-training",
@@ -793,6 +788,7 @@ def run_training_pipeline(config: TrainingPipelineConfig) -> dict[str, object]:
         dataset=dataset,
         training_receipt=full_receipt,
         privacy_report=privacy_report,
+        image_size=config.image_size,
     )
     bundle_path = experiment_dir.parent / f"{experiment_dir.name}-result.zip"
     bundle_receipt = _create_training_result_bundle(experiment_dir, bundle_path)
@@ -1265,6 +1261,7 @@ def _write_or_verify_model_contract(
     dataset: Path,
     training_receipt: Path,
     privacy_report: dict[str, Any],
+    image_size: int,
 ) -> Path:
     preprocessing_contract = privacy_report.get("preprocessing_contract")
     if not isinstance(preprocessing_contract, dict):
@@ -1274,6 +1271,7 @@ def _write_or_verify_model_contract(
         "model_sha256": sha256_file(best_weight),
         "preprocessing_contract": preprocessing_contract,
         "target_class_ids": {"0": "person"},
+        "image_size": image_size,
         "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
         "training_receipt_sha256": sha256_file(training_receipt),
     }

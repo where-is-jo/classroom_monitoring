@@ -48,11 +48,9 @@ def create_server_transfer_bundle(
         path_key="base_model",
         hash_key="base_model_sha256",
         local_path=model_source,
-        expected_name="yolo11n.pt",
+        expected_name=model_source.name,
         server_root=server_root,
     )
-    if model_source.name != "yolo11n.pt":
-        raise AutoLabelingError("기준 모델 로컬 파일명은 yolo11n.pt여야 합니다.")
     privacy = _inspect_training_archive(dataset_source)
     original_frames_included = bool(privacy["original_frames_included"])
     entries = _runtime_source_entries(config_source, bundle_id=bundle_id)

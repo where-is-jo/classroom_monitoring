@@ -732,12 +732,13 @@ def _write_deidentified_image(
     preprocessing_contract: dict[str, object],
 ) -> None:
     method = preprocessing_contract.get("method")
-    if method == ORIGINAL_FRAME:
-        shutil.copy2(source_image, target_image)
-        return
+    # 원본 보존 경로도 실제 학습기가 읽을 수 있는 이미지인지 먼저 확인한다.
     image = cv2.imread(str(source_image))
     if image is None:
         raise AutoLabelingError(f"frame_id={frame_id}: 이미지를 읽을 수 없습니다.")
+    if method == ORIGINAL_FRAME:
+        shutil.copy2(source_image, target_image)
+        return
     if method == UNIFORM_FULL_FRAME_PIXELATION:
         block_size = preprocessing_contract.get("pixelation_block_size")
         if not isinstance(block_size, int):

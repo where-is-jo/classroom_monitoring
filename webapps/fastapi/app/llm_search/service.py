@@ -62,6 +62,7 @@ from .models import (
     PersonSummary,
     SearchOutcome,
     SearchQuery,
+    SortOrder,
 )
 from .planning import MAX_LIMIT, parse_plan
 from .ports import PlanPrompt, QueryPlanner
@@ -108,7 +109,9 @@ class LlmSearchService:
         self._scan_limit = scan_limit
         self._clock = clock
 
-    def search(self, question: str, *, limit: int) -> SearchOutcome:
+    def search(
+        self, question: str, *, limit: int, sort: SortOrder = SortOrder.TIME_DESC
+    ) -> SearchOutcome:
         """자연어 질문 하나를 탐지 검색 결과로 바꾼다. 걸린 시간을 지표로 남긴다.
 
         본문을 `_run_search`로 뺀 이유는 계측 때문이다. **실패로 끝난 검색도 사용자는
@@ -117,7 +120,7 @@ class LlmSearchService:
         """
         started_at = time.perf_counter()
         try:
-            outcome = self._run_search(question, limit=limit)
+            outcome = self._run_search(question, limit=limit, sort=sort)
         except LlmSearchPlannerUnavailableError:
             record_search(outcome="unavailable", started_at=started_at)
             raise
@@ -131,7 +134,7 @@ class LlmSearchService:
             record_search_truncated()
         return outcome
 
-    def _run_search(self, question: str, *, limit: int) -> SearchOutcome:
+    def _run_search(self, question: str, *, limit: int, sort: SortOrder) -> SearchOutcome:
         now = self._clock()
         streams = self._streams.find_all_enabled()
         classrooms = self._load_classrooms(streams)
@@ -146,7 +149,19 @@ class LlmSearchService:
         events, scan_truncated = self._collect_events(query, targets)
 
         changes = [event for target in targets for event in _keep_changes(events.get(target, []))]
-        changes.sort(key=lambda event: (event.captured_at, event.sequence), reverse=True)
+        # 변화 시점을 고르는 일(_keep_changes)은 언제나 시간순으로 한다. 보여주는
+        # 순서가 인원이 바뀐 시점의 판정을 바꾸면 같은 질문의 답이 정렬에 따라 달라진다.
+        changes.sort(
+            key=lambda event: (event.captured_at, event.sequence),
+            reverse=sort is SortOrder.TIME_DESC,
+        )
+        if scan_truncated and sort is SortOrder.TIME_ASC:
+            # 저장소는 최신순으로 잘라 준다(_collect_events). 오름차순으로 보면 목록의
+            # 첫 건이 기간의 첫 건처럼 읽히는데, 잘린 쪽이 바로 그 앞이다.
+            notes.append(
+                "저장소가 최신순으로 잘라 주어 기간 앞쪽이 빠졌습니다. "
+                "이 목록의 첫 건이 그 기간의 첫 건은 아닙니다. 기간을 좁혀 다시 물어보세요."
+            )
 
         # 인물 조건은 **변화 시점을 고른 뒤에** 건다. 먼저 걸러 내면 남은 프레임들
         # 사이에서 인원 변화를 다시 세게 되고, "그 사람이 없는 동안 인원이 몇 번
@@ -165,6 +180,7 @@ class LlmSearchService:
             query=replace(query, notes=query.notes + tuple(notes)),
             target_label=target_label,
             person=person,
+            sort=sort,
             briefing=build_briefing(
                 from_at=query.from_at,
                 to_at=query.to_at,

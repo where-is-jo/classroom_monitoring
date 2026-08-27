@@ -182,6 +182,7 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
     review_dir = tmp_path / "run" / "review" / "review-main"
     dataset_dir = tmp_path / "dataset"
     export_dir = workspace / "06-colab-export"
+    evaluation_dir = workspace / "05-fixed-test"
     video_dir.mkdir()
     scan_dir.mkdir(parents=True)
     (scan_dir / "session_assignments.csv").write_text(
@@ -191,13 +192,18 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
     write_json(review_dir / "review-batch.json", {"frame_ids": ["frame-001"]})
     write_json(review_dir / "review-completed.json", {"status": "complete"})
     dataset_dir.mkdir()
+    evaluation_dir.mkdir()
+    write_json(evaluation_dir / "evaluation_frozen.json", {"schema_version": 1})
     prelabel_calls: list[dict[str, object]] = []
     review_calls: list[dict[str, object]] = []
+    completion_order: list[str] = []
     config = LocalPipelineConfig(
         pipeline_id="classroom-v009",
         video_dir=video_dir,
         workspace_dir=workspace,
         camera_id="camera-01",
+        target_test_frames=1,
+        reviewer_id="reviewer-001",
     )
 
     monkeypatch.setattr(pipeline, "_verify_scan_contract", lambda *_args: None)
@@ -215,6 +221,21 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         pipeline,
         "_verify_partition_contract",
         lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_fixed_evaluation_set",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "prelabel_evaluation_set",
+        lambda *_args, **_kwargs: pytest.fail("동결 Test를 다시 prelabel했습니다."),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "verify_frozen_evaluation_set",
+        lambda *_args: completion_order.append("isolation") or {"frame_count": 1},
     )
     monkeypatch.setattr(
         pipeline,
@@ -264,11 +285,12 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         },
     )
     monkeypatch.setattr(pipeline, "_verify_export_source", lambda *_args: None)
-    monkeypatch.setattr(
-        pipeline,
-        "create_dataset_archive",
-        lambda _dataset, archive: archive.with_suffix(".zip.receipt.json"),
-    )
+
+    def fake_archive(_dataset: Path, archive: Path) -> Path:
+        completion_order.append("archive")
+        return archive.with_suffix(".zip.receipt.json")
+
+    monkeypatch.setattr(pipeline, "create_dataset_archive", fake_archive)
 
     state = advance_local_pipeline(config)
 
@@ -277,6 +299,7 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         {
             "device": "cpu",
             "expected_model_sha256": pipeline.N1_MODEL_SHA256,
+            "image_size": None,
             "input_preprocessing": {
                 "schema_version": 1,
                 "method": "uniform-full-frame-pixelation-v1",
@@ -288,6 +311,7 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         }
     ]
     assert review_calls == [{"batch_id": "review-main", "force_full": True}]
+    assert completion_order == ["isolation", "archive"]
 
 
 def test_dataset_archive_is_deterministic_and_safely_materialized(
@@ -468,6 +492,7 @@ def test_training_pipeline_runs_smoke_then_full_and_bundles_results(
     assert model_contract["model_sha256"] == sha256_file(
         Path(str(result["best_weight"]))
     )
+    assert model_contract["image_size"] == config.image_size
     assert (
         model_contract["preprocessing_contract"]["inference_preprocessing_required"]
         is False

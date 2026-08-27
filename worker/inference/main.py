@@ -45,6 +45,7 @@ def main() -> int:
         settings.model_path,
         settings.model_contract_path,
         settings.inference_target_class_ids,
+        settings.inference_image_size,
     )
     detector = Yolo8nDetector(
         model_path=settings.model_path,

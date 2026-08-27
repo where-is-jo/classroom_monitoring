@@ -62,15 +62,25 @@ def test_invalid_yolo_labels_are_rejected(
         parse_yolo_file(label_path)
 
 
-def test_exact_duplicate_yolo_boxes_are_rejected(tmp_path: Path) -> None:
+def test_legacy_exact_duplicate_yolo_boxes_can_be_revalidated(tmp_path: Path) -> None:
     label_path = tmp_path / "duplicate.txt"
     label_path.write_text(
         "0 0.5 0.5 0.2 0.4\n0 0.5 0.5 0.2 0.4\n",
         encoding="utf-8",
     )
 
+    assert len(parse_yolo_file(label_path)) == 2
+
     with pytest.raises(AutoLabelingError, match="완전히 중복"):
-        parse_yolo_file(label_path)
+        parse_yolo_file(label_path, reject_exact_duplicates=True)
+
+
+def test_new_exact_duplicate_yolo_boxes_are_rejected(tmp_path: Path) -> None:
+    label_path = tmp_path / "duplicate.txt"
+    duplicate = YoloBox(0, 0.5, 0.5, 0.2, 0.4)
+
+    with pytest.raises(AutoLabelingError, match="완전히 중복"):
+        write_yolo_file(label_path, [duplicate, duplicate])
 
 
 def test_iou_matches_identical_and_disjoint_boxes() -> None:

@@ -448,11 +448,18 @@ class TestAutomaticSeatMapping:
 
         assert first.is_new is True
         assert second.is_new is False
-        # 첫 수신의 탐지·점유 이벤트 이후에 새 이벤트가 없어야 한다.
-        queue.get_nowait()
-        queue.get_nowait()
-        queue.get_nowait()
-        assert queue.empty()
+
+        published = []
+        while not queue.empty():
+            published.append(queue.get_nowait())
+        kinds = [item.get("type") for item in published]
+        # **점유 이벤트는 재수신에서 다시 나가지 않는다.** 좌석 상태를 두 번 바꾸면
+        # 안 되기 때문이다. 첫 수신의 좌석 2개분만 있어야 한다.
+        assert kinds.count("occupancy") == 2
+        # 반면 bbox overlay는 두 번 나간다. 저장 여부를 확인하기 전에 내보내기
+        # 때문이며(오버레이는 저장소가 필요 없다), 같은 상자를 덮어 그리므로
+        # 화면 결과는 같다.
+        assert kinds.count("detection") == 2
 
 
 def _seat_state(classroom_service: ClassroomService, seat_id: str) -> SeatOccupancy:
@@ -674,3 +681,46 @@ def test_늦게_도착한_프레임이_유지_시간을_되돌리지_않는다()
 
     service.receive_inference_event(_event("e-gone", (), captured_at=base + timedelta(seconds=10)))
     assert _seat_state(classrooms, "seat-1") == SeatOccupancy.VACANT
+
+
+class TestOverlayPath:
+    """bbox overlay 전용 경로는 저장소를 건드리지 않는다."""
+
+    def test_오버레이는_저장하지_않고_발행만_한다(self) -> None:
+        classroom_service = _build_classroom_service(_two_seats())
+        broadcaster = InMemoryBroadcaster()
+        queue = broadcaster.subscribe()
+        service, detection_repo, _ = _make_service(
+            classroom_service, broadcaster=broadcaster, rois=_two_seat_rois()
+        )
+        event = _event("event-overlay", (_person("det-1", (150, 150, 250, 250)),))
+
+        service.publish_overlay(event)
+
+        published = queue.get_nowait()
+        assert published["type"] == "detection"
+        assert published["event_id"] == "event-overlay"
+        assert published["detections"][0]["bbox"] == [150, 150, 250, 250]
+        # **저장은 하지 않는다.** 화면에 상자를 그리는 데 저장소가 필요 없고,
+        # 저장을 끼우면 저장 주기가 곧 화면 갱신 주기가 된다.
+        assert detection_repo.find_by_event_id("event-overlay") is None
+        # 좌석 판정도 돌지 않는다.
+        assert queue.empty()
+
+    def test_오버레이는_강의실_확인_없이도_발행한다(self) -> None:
+        """구독자가 camera_id로 거르므로 등록되지 않은 카메라는 아무에게도 닿지 않는다.
+
+        확인하려면 저장소 왕복이 생겨 이 경로를 만든 이유가 없어진다.
+        """
+        classroom_service = _build_classroom_service(_two_seats())
+        broadcaster = InMemoryBroadcaster()
+        queue = broadcaster.subscribe()
+        service, _, _ = _make_service(classroom_service, broadcaster=broadcaster)
+        event = replace(
+            _event("event-unknown", (_person("det-1", (10, 10, 20, 20)),)),
+            camera_id="camera-없음",
+        )
+
+        service.publish_overlay(event)
+
+        assert queue.get_nowait()["camera_id"] == "camera-없음"
