@@ -1,0 +1,40 @@
+# 원본 CCTV 500장(train 350 / val 75 / 고정 test 75) 준비 예시.
+# 상대 경로는 deeplearning/training을 기준으로 해석합니다.
+schema_version: 1
+pipeline_id: person-original-500-v001
+video_dir: data/person-pipeline
+workspace_dir: data/person-pipeline-workflows/person-original-500-v001
+camera_id: camera-01
+timezone_name: Asia/Seoul
+expected_clip_seconds: 300.0
+session_gap_seconds: 60.0
+overlap_tolerance_seconds: 2.0
+expected_frame_width: 1280
+expected_frame_height: 1944
+allow_approved_student_data: true
+# 로컬 프레임 추출과 자동 라벨링에는 승인 메타데이터를 요구하지 않습니다.
+# 외부 반출·학습 export 검증은 별도 단계에서 유지됩니다.
+require_session_approval_metadata: false
+
+# 공식 yolo26n.pt 파일을 Git 제외 로컬 경로에 두고 실제 SHA-256으로 교체합니다.
+prelabel_model_path: data/person-pipeline-workflows/person-original-500-v001/models/yolo26n.pt
+prelabel_model_sha256: REPLACE_WITH_64_HEX_SHA256
+prelabel_device: cpu
+prelabel_image_size: 1280
+prelabel_preprocessing_method: original-frame-v1
+training_export_preprocessing_method: original-frame-v1
+
+target_train_frames: 350
+target_val_frames: 75
+target_test_frames: 75
+evaluation_interval_seconds: 5.0
+force_full_review: true
+manual_excluded_frame_ids: []
+
+# LabelImg 검수 완료 뒤 채우고 --complete-review로 재실행합니다.
+reviewer_id: null
+labelimg_executable: null
+labelimg_smoke_confirmed: false
+
+operator_id: person-detection-pipeline-auto
+approved_cohort_policy: REPLACE_WITH_APPROVED_POLICY_REFERENCE

@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,9 +16,11 @@ from .errors import AutoLabelingError
 from .preprocessing import (
     DEFAULT_PIXELATION_BLOCK_SIZE,
     LEGACY_COMBINED_PIXELATION,
+    ORIGINAL_FRAME,
     PERSON_BBOX_TOP_PIXELATION,
     UNIFORM_FULL_FRAME_PIXELATION,
     apply_training_preprocessing,
+    original_frame_contract,
     uniform_pixelation_contract,
 )
 from .publish import validate_dataset
@@ -36,7 +39,7 @@ def export_deidentified_dataset(
     preprocessing_method: str = UNIFORM_FULL_FRAME_PIXELATION,
     pixelation_block_size: int = DEFAULT_PIXELATION_BLOCK_SIZE,
 ) -> Path:
-    """라벨과 독립적인 비식별 전처리로 Colab용 사본을 만든다."""
+    """라벨 독립 비식별 또는 승인된 원본 프레임 학습 사본을 만든다."""
 
     if not operator_id.strip():
         raise AutoLabelingError("operator_id가 필요합니다.")
@@ -54,10 +57,18 @@ def export_deidentified_dataset(
         if manual_privacy_review_confirmed
         else "approved-student-cohort-policy"
     )
+    if (
+        preprocessing_method == ORIGINAL_FRAME
+        and approval_mode != "approved-student-cohort-policy"
+    ):
+        raise AutoLabelingError(
+            "원본 프레임 반출은 승인된 학생 집단 정책으로만 허용됩니다."
+        )
     if not 0.2 <= head_fraction <= 0.5:
         raise AutoLabelingError("head_fraction은 0.2~0.5여야 합니다.")
     if preprocessing_method not in {
         UNIFORM_FULL_FRAME_PIXELATION,
+        ORIGINAL_FRAME,
         PERSON_BBOX_TOP_PIXELATION,
     }:
         raise AutoLabelingError("지원하지 않는 개인정보 전처리 방식입니다.")
@@ -73,9 +84,11 @@ def export_deidentified_dataset(
     manifest = read_json(source / "manifest.json")
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 3:
         raise AutoLabelingError("Colab export는 schema v3 데이터셋만 지원합니다.")
+    if preprocessing_method == ORIGINAL_FRAME:
+        _validate_original_frame_approvals(manifest)
     target = output_dir.resolve()
     if target.exists():
-        raise AutoLabelingError("비식별화 출력 디렉터리가 이미 있습니다.")
+        raise AutoLabelingError("학습 export 출력 디렉터리가 이미 있습니다.")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -115,16 +128,22 @@ def export_deidentified_dataset(
             )
         shutil.copy2(source / "data.yaml", temporary / "data.yaml")
         source_manifest_sha256 = sha256_file(source / "manifest.json")
+        original_frames_included = preprocessing_method == ORIGINAL_FRAME
         write_json(
             temporary / "manifest.json",
             {
                 "schema_version": 1,
-                "artifact_type": "deidentified-colab-dataset",
+                "artifact_type": (
+                    "approved-original-frame-training-dataset"
+                    if original_frames_included
+                    else "deidentified-colab-dataset"
+                ),
                 "source_dataset_version": report["dataset_version"],
                 "source_manifest_sha256": source_manifest_sha256,
                 "class_names": ["person"],
                 "raw_video_paths_included": False,
                 "source_metadata_included": False,
+                "original_frames_included": original_frames_included,
                 "items": sanitized_items,
             },
         )
@@ -146,11 +165,49 @@ def export_deidentified_dataset(
                 "audio_included": False,
                 "raw_video_included": False,
                 "absolute_source_paths_included": False,
+                "original_frames_included": original_frames_included,
                 "source_manifest_sha256": source_manifest_sha256,
             },
         )
         temporary.replace(target)
     return target
+
+
+def _validate_original_frame_approvals(manifest: dict[str, object]) -> None:
+    """원본 이미지 반출 전에 모든 항목의 명시적 학습 승인을 확인한다."""
+
+    items = manifest.get("items")
+    if not isinstance(items, list) or not items:
+        raise AutoLabelingError("원본 프레임 데이터셋에 승인 항목이 없습니다.")
+    now = datetime.now(UTC)
+    for item in items:
+        if not isinstance(item, dict):
+            raise AutoLabelingError("원본 프레임 승인 항목이 객체가 아닙니다.")
+        if (
+            item.get("approved_student_data") is not True
+            or item.get("approval_type") != "human-reviewed"
+            or item.get("consent_scope") != "person-detection-training"
+            or item.get("subject_category") != "student"
+            or not str(item.get("approval_reference", "")).strip()
+        ):
+            raise AutoLabelingError(
+                "원본 프레임에는 사람 검수된 학생 탐지 학습 승인이 필요합니다."
+            )
+        try:
+            retention_expires_at = datetime.fromisoformat(
+                str(item.get("retention_expires_at", ""))
+            )
+        except ValueError as exc:
+            raise AutoLabelingError(
+                "원본 프레임 보존 기한이 올바르지 않습니다."
+            ) from exc
+        if (
+            retention_expires_at.tzinfo is None
+            or retention_expires_at.astimezone(UTC) <= now
+        ):
+            raise AutoLabelingError(
+                "보존 기한이 지난 원본 프레임은 반출할 수 없습니다."
+            )
 
 
 def extend_deidentified_dataset_with_reviewed_validation(
@@ -674,10 +731,14 @@ def _write_deidentified_image(
     head_fraction: float,
     preprocessing_contract: dict[str, object],
 ) -> None:
+    method = preprocessing_contract.get("method")
+    # 원본 보존 경로도 실제 학습기가 읽을 수 있는 이미지인지 먼저 확인한다.
     image = cv2.imread(str(source_image))
     if image is None:
         raise AutoLabelingError(f"frame_id={frame_id}: 이미지를 읽을 수 없습니다.")
-    method = preprocessing_contract.get("method")
+    if method == ORIGINAL_FRAME:
+        shutil.copy2(source_image, target_image)
+        return
     if method == UNIFORM_FULL_FRAME_PIXELATION:
         block_size = preprocessing_contract.get("pixelation_block_size")
         if not isinstance(block_size, int):
@@ -710,6 +771,8 @@ def _preprocessing_contract(
 ) -> dict[str, object]:
     if method == UNIFORM_FULL_FRAME_PIXELATION:
         return uniform_pixelation_contract(pixelation_block_size)
+    if method == ORIGINAL_FRAME:
+        return original_frame_contract()
     if method == PERSON_BBOX_TOP_PIXELATION:
         return {
             "schema_version": 1,
@@ -746,7 +809,24 @@ def _receipt_preprocessing_contract(
         if contract.get("training_compatible") is not False:
             raise AutoLabelingError("정답 기반 전처리는 학습 호환일 수 없습니다.")
         return contract
-    if contract.get("method") != UNIFORM_FULL_FRAME_PIXELATION:
+    contract_method = contract.get("method")
+    if contract_method == ORIGINAL_FRAME:
+        if contract.get("label_derived") is not False:
+            raise AutoLabelingError("원본 프레임 계약은 라벨에서 파생될 수 없습니다.")
+        if contract.get("training_compatible") is not True:
+            raise AutoLabelingError("원본 프레임 계약의 학습 호환 값이 잘못됐습니다.")
+        if contract.get("inference_preprocessing_required") is not False:
+            raise AutoLabelingError(
+                "원본 프레임 계약은 추론 전처리를 요구할 수 없습니다."
+            )
+        if receipt.get("original_frames_included") is not True:
+            raise AutoLabelingError("원본 프레임 반출 사실이 영수증에 없습니다.")
+        if receipt.get("approval_mode") != "approved-student-cohort-policy":
+            raise AutoLabelingError(
+                "원본 프레임 반출은 승인된 학생 집단 정책이 필요합니다."
+            )
+        return contract
+    if contract_method != UNIFORM_FULL_FRAME_PIXELATION:
         raise AutoLabelingError("지원하지 않는 라벨 독립 전처리 방식입니다.")
     if contract.get("training_compatible") is not True:
         raise AutoLabelingError("라벨 독립 전처리의 학습 호환 값이 잘못됐습니다.")

@@ -30,7 +30,9 @@ class YoloBox:
         )
 
 
-def parse_yolo_file(path: Path) -> list[YoloBox]:
+def parse_yolo_file(
+    path: Path, *, reject_exact_duplicates: bool = False
+) -> list[YoloBox]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
@@ -53,6 +55,10 @@ def parse_yolo_file(path: Path) -> list[YoloBox]:
             ) from exc
         box = YoloBox(class_id, center_x, center_y, width, height)
         validate_yolo_box(box, path.name, line_number)
+        if reject_exact_duplicates and box in boxes:
+            raise AutoLabelingError(
+                f"{path.name} {line_number}번째 bbox가 앞선 bbox와 완전히 중복됐습니다."
+            )
         boxes.append(box)
     return boxes
 
@@ -84,6 +90,8 @@ def validate_yolo_box(box: YoloBox, file_name: str, line_number: int) -> None:
 
 
 def write_yolo_file(path: Path, boxes: list[YoloBox]) -> None:
+    if len(set(boxes)) != len(boxes):
+        raise AutoLabelingError(f"{path.name}에 완전히 중복된 bbox가 있습니다.")
     for index, box in enumerate(boxes, start=1):
         validate_yolo_box(box, path.name, index)
     text = "".join(

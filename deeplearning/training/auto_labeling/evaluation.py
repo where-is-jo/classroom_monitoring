@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from .core import (
+    Settings,
     read_json,
     read_jsonl,
     sha256_bytes,
@@ -19,8 +20,10 @@ from .core import (
     write_jsonl,
 )
 from .errors import AutoLabelingError
+from .prelabel import UltralyticsPredictor
 from .preprocessing import apply_training_preprocessing
-from .yolo import parse_yolo_file
+from .quality import FrameQualityThresholds, inspect_frame_quality
+from .yolo import YoloBox, parse_yolo_file, write_yolo_file
 
 ISOLATION_PHASH_HAMMING_THRESHOLD = 4
 ISOLATION_PIXEL_MAE_THRESHOLD = 0.02
@@ -33,12 +36,15 @@ def sample_evaluation_frames(
     *,
     interval_seconds: float = 5.0,
     max_frames_per_video: int = 500,
+    target_frame_count: int | None = None,
     jpeg_quality: int = 95,
 ) -> Path:
     if not math.isfinite(interval_seconds) or interval_seconds <= 0:
         raise AutoLabelingError("평가 프레임 간격은 0보다 커야 합니다.")
     if max_frames_per_video < 1:
         raise AutoLabelingError("영상당 평가 프레임 수는 1 이상이어야 합니다.")
+    if target_frame_count is not None and target_frame_count < 1:
+        raise AutoLabelingError("고정 평가 프레임 수는 1 이상이어야 합니다.")
     if not 1 <= jpeg_quality <= 100:
         raise AutoLabelingError("JPEG 품질은 1~100이어야 합니다.")
     manifest_path = evaluation_manifest_path.resolve(strict=True)
@@ -77,6 +83,41 @@ def sample_evaluation_frames(
             )
         if not records:
             raise AutoLabelingError("추출된 평가 프레임이 없습니다.")
+        quality_failures: list[dict[str, object]] = []
+        clean_records: list[dict[str, Any]] = []
+        # 목표 장수 지정 여부는 선택 개수만 바꾼다. 디코딩·단색·중복 검사를 건너뛸
+        # 이유가 없고, 검사하지 않은 프레임이 동결되면 이후 수정할 수도 없다.
+        seen_image_hashes: set[str] = set()
+        for record in records:
+            image_path = temporary / str(record["image_path"])
+            quality = inspect_frame_quality(image_path, FrameQualityThresholds())
+            digest = str(record["image_sha256"])
+            reasons = list(quality.get("reasons", []))
+            if digest in seen_image_hashes:
+                reasons.append("exact-duplicate-frame")
+            if reasons:
+                quality_failures.append(
+                    {
+                        "frame_id": record["frame_id"],
+                        "source_id": record["source_id"],
+                        "timestamp_ms": record["timestamp_ms"],
+                        "reasons": reasons,
+                    }
+                )
+                continue
+            seen_image_hashes.add(digest)
+            clean_records.append(record)
+        records, allocations = _select_evaluation_records(
+            clean_records,
+            target_frame_count,
+        )
+        selected_ids = {str(record["frame_id"]) for record in records}
+        for image_path in images_dir.glob("*.jpg"):
+            if image_path.stem not in selected_ids:
+                image_path.unlink()
+        for label_path in labels_dir.glob("*.txt"):
+            if label_path.stem not in selected_ids:
+                label_path.unlink()
         write_jsonl(temporary / "evaluation_frames.jsonl", records)
         (temporary / "classes.txt").write_text("person\n", encoding="utf-8")
         (temporary / "data.yaml").write_text(
@@ -92,14 +133,184 @@ def sample_evaluation_frames(
                 "source_manifest_sha256": sha256_file(manifest_path),
                 "interval_seconds": interval_seconds,
                 "max_frames_per_video": max_frames_per_video,
+                "target_frame_count": target_frame_count,
                 "jpeg_quality": jpeg_quality,
                 "frame_count": len(records),
+                "quality_failed_frame_count": len(quality_failures),
+                "quality_failures": quality_failures,
+                "source_allocations": allocations,
                 "class_names": ["person"],
                 "status": "awaiting-manual-review",
             },
         )
         temporary.replace(target)
     return target
+
+
+def prelabel_evaluation_set(
+    evaluation_dir: Path,
+    model_path: Path,
+    settings: Settings,
+    *,
+    device: str,
+    expected_model_sha256: str | None = None,
+    image_size: int | None = None,
+    input_preprocessing: dict[str, object] | None = None,
+) -> Path:
+    """고정 Test 이미지에 후보 라벨을 만들고 모델·입력 계약을 기록한다."""
+
+    root = evaluation_dir.resolve(strict=True)
+    metadata_path = root / "evaluation_set.json"
+    metadata = read_json(metadata_path)
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("status") != "awaiting-manual-review"
+    ):
+        raise AutoLabelingError("수동 검수 대기 중인 평가 세트가 아닙니다.")
+    model = model_path.resolve(strict=True)
+    observed_sha256 = sha256_file(model)
+    if expected_model_sha256 is not None and observed_sha256 != expected_model_sha256:
+        raise AutoLabelingError("평가 자동 라벨링 모델 SHA-256이 다릅니다.")
+    receipt_path = root / "evaluation_prelabel.json"
+    records = read_jsonl(root / "evaluation_frames.jsonl")
+    if receipt_path.exists():
+        receipt = read_json(receipt_path)
+        if not isinstance(receipt, dict):
+            raise AutoLabelingError("평가 자동 라벨링 영수증이 올바르지 않습니다.")
+        expected = {
+            "model_sha256": observed_sha256,
+            "image_size": image_size,
+            "input_preprocessing": input_preprocessing,
+            "frames_manifest_sha256": sha256_file(root / "evaluation_frames.jsonl"),
+        }
+        if any(receipt.get(key) != value for key, value in expected.items()):
+            raise AutoLabelingError(
+                "기존 평가 자동 라벨링 계약이 현재 설정과 다릅니다."
+            )
+        return receipt_path
+
+    predictor = UltralyticsPredictor(
+        model,
+        confidence_threshold=settings.candidate_confidence_threshold,
+        device=device,
+        image_size=image_size,
+        input_preprocessing=input_preprocessing,
+    )
+    files: list[dict[str, object]] = []
+    # 모든 추론 결과를 임시 디렉터리에 먼저 만든다. 중간 프레임에서 추론이 실패해도
+    # 실제 labels에는 손대지 않으므로 같은 고정 Test 선택을 그대로 재개할 수 있다.
+    with tempfile.TemporaryDirectory(prefix=".prelabel-", dir=root) as temp:
+        generated_labels = Path(temp)
+        for record in records:
+            frame_id = str(record.get("frame_id", ""))
+            image_path = root / "images" / f"{frame_id}.jpg"
+            generated_label = generated_labels / f"{frame_id}.txt"
+            candidates = predictor.predict(image_path)
+            write_yolo_file(
+                generated_label,
+                [
+                    YoloBox(candidate.class_id, *candidate.bbox_yolo)
+                    for candidate in candidates
+                ],
+            )
+            files.append(
+                {
+                    "frame_id": frame_id,
+                    "image_sha256": sha256_file(image_path),
+                    "candidate_count": len(candidates),
+                    "candidate_label_sha256": sha256_file(generated_label),
+                }
+            )
+        for record in records:
+            frame_id = str(record.get("frame_id", ""))
+            (generated_labels / f"{frame_id}.txt").replace(
+                root / "labels" / f"{frame_id}.txt"
+            )
+    write_json(
+        receipt_path,
+        {
+            "schema_version": 1,
+            "model_file_name": model.name,
+            "model_sha256": observed_sha256,
+            "device": device,
+            "image_size": image_size,
+            "input_preprocessing": input_preprocessing,
+            "candidate_confidence_threshold": settings.candidate_confidence_threshold,
+            "frames_manifest_sha256": sha256_file(root / "evaluation_frames.jsonl"),
+            "files": files,
+            "created_at": utc_now_iso(),
+        },
+    )
+    return receipt_path
+
+
+def _select_evaluation_records(
+    records: list[dict[str, Any]],
+    target_frame_count: int | None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    if not records:
+        raise AutoLabelingError("품질 검사를 통과한 평가 프레임이 없습니다.")
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        source_id = str(record.get("source_id", ""))
+        if not source_id:
+            raise AutoLabelingError("평가 프레임의 source_id가 비어 있습니다.")
+        by_source.setdefault(source_id, []).append(record)
+    for values in by_source.values():
+        values.sort(key=lambda item: int(item.get("timestamp_ms", 0)))
+
+    target = len(records) if target_frame_count is None else target_frame_count
+    if target > len(records):
+        raise AutoLabelingError(
+            f"정상 평가 프레임 {len(records)}장은 목표 {target}장보다 적습니다."
+        )
+    source_ids = sorted(by_source)
+    if target < len(source_ids):
+        raise AutoLabelingError(
+            "고정 평가 프레임 수가 평가 원본 영상 수보다 적습니다. "
+            "모든 영상에서 한 장 이상 선택할 수 있어야 합니다."
+        )
+    allocations = {source_id: 1 for source_id in source_ids}
+    remaining = target - len(source_ids)
+    while remaining:
+        progressed = False
+        for source_id in source_ids:
+            if allocations[source_id] >= len(by_source[source_id]):
+                continue
+            allocations[source_id] += 1
+            remaining -= 1
+            progressed = True
+            if remaining == 0:
+                break
+        if not progressed:
+            raise AutoLabelingError("평가 프레임 목표 수를 배분할 수 없습니다.")
+
+    selected: list[dict[str, Any]] = []
+    for source_id in source_ids:
+        values = by_source[source_id]
+        count = allocations[source_id]
+        if count == len(values):
+            selected.extend(values)
+            continue
+        indices = (
+            [round(index * (len(values) - 1) / (count - 1)) for index in range(count)]
+            if count > 1
+            else [len(values) // 2]
+        )
+        selected.extend(values[index] for index in indices)
+    selected.sort(
+        key=lambda item: (
+            str(item.get("session_id", "")),
+            str(item.get("source_id", "")),
+            int(item.get("timestamp_ms", 0)),
+        )
+    )
+    if (
+        len(selected) != target
+        or len({item["frame_id"] for item in selected}) != target
+    ):
+        raise AutoLabelingError("고정 평가 프레임 선택 결과가 목표 수와 다릅니다.")
+    return selected, allocations
 
 
 def freeze_evaluation_set(
@@ -433,6 +644,7 @@ def _sample_source(
         fps = float(capture.get(cv2.CAP_PROP_FPS))
         if fps <= 0:
             raise AutoLabelingError(f"source_id={source_id}: FPS를 확인할 수 없습니다.")
+        reported_frame_count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         interval_frames = max(1, round(fps * interval_seconds))
         frame_index = 0
         records: list[dict[str, Any]] = []
@@ -466,6 +678,13 @@ def _sample_source(
                     }
                 )
             frame_index += 1
+        if len(records) < max_frames and reported_frame_count > 0:
+            tolerance = max(1, round(reported_frame_count * 0.001))
+            if frame_index + tolerance < round(reported_frame_count):
+                raise AutoLabelingError(
+                    f"source_id={source_id}: 평가 영상 디코딩이 끝까지 도달하지 "
+                    f"못했습니다({frame_index}/{round(reported_frame_count)} frames)."
+                )
         return records
     finally:
         capture.release()
