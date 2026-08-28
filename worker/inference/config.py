@@ -81,6 +81,15 @@ class InferenceSettings(ObjectStorageSettings):
         default_factory=lambda: {0: "person", 67: "cell phone"}
     )
 
+    # --- 익명 사람 탐지 trace ---
+    # 모델 NMS 직후 결과를 ByteTrack 변경 전에 짧게 기록한다. 실제 카메라 ID·영상·
+    # 얼굴·학생 식별자는 저장하지 않는다. 현장 진단 때만 환경변수로 켠다.
+    person_detection_trace_enabled: bool = False
+    person_detection_trace_directory: Path = DEFAULT_DATA_DIR / "traces"
+    person_detection_trace_max_seconds: float = Field(default=600.0, gt=0, le=3600)
+    person_detection_trace_max_frames: int = Field(default=3_000, ge=1, le=100_000)
+    person_detection_trace_retention_hours: float = Field(default=24.0, gt=0, le=168)
+
     # --- 탐지 스냅샷 (결정 0011) ---
     # 영상 원본을 저장하지 않는 대신 탐지 시점 정지 이미지를 남긴다.
     # 저장은 명시적으로 켠다. recorder의 RECORDING_ENABLED가 기본 꺼짐인 것과 같다.

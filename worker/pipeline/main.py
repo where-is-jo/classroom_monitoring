@@ -22,6 +22,10 @@ from inference.consumer import (
     log_result,
 )
 from inference.dispatch import AsyncResultDispatcher
+from inference.detection_trace import (
+    PersonDetectionTraceHandler,
+    PersonDetectionTraceRecorder,
+)
 from inference.entry_overlay import FastAPIEntryOverlayHandler
 from inference.face_identity import (
     EntryFaceProcessor,
@@ -146,6 +150,7 @@ def _tee_handlers(first: ResultHandler, second: ResultHandler) -> ResultHandler:
 def build_result_handlers(
     settings: InferenceSettings,
     *,
+    person_model_contract: dict[str, object] | None = None,
     fastapi_url: str | None = None,
     face_identity_url: str | None = None,
     person_tracking_config: ByteTrackConfig | None = None,
@@ -285,6 +290,38 @@ def build_result_handlers(
                 coordinator.expire_classroom_tracks if coordinator is not None else None
             ),
         )
+
+    # 호출 순서의 가장 바깥에서 raw 결과를 먼저 기록한다. 따라서 ByteTrack·신원 인계·
+    # 오버레이·스냅샷이 결과를 바꾸기 전의 모델 NMS 출력을 보존한다.
+    if settings.person_detection_trace_enabled:
+        model_sha256: str | None = None
+        if person_model_contract is not None:
+            candidate = person_model_contract.get("model_sha256")
+            if isinstance(candidate, str):
+                model_sha256 = candidate
+        try:
+            recorder = PersonDetectionTraceRecorder(
+                settings.person_detection_trace_directory,
+                model_sha256=model_sha256,
+                confidence_threshold=settings.inference_confidence_threshold,
+                image_size=settings.inference_image_size,
+                target_class_ids=settings.inference_target_class_ids,
+                max_seconds=settings.person_detection_trace_max_seconds,
+                max_frames=settings.person_detection_trace_max_frames,
+                retention_hours=settings.person_detection_trace_retention_hours,
+            )
+        except OSError as error:
+            logger.warning(
+                "익명 사람 탐지 trace를 준비하지 못해 끄고 계속한다: %s", error
+            )
+        else:
+            logger.info(
+                "익명 사람 탐지 trace를 켠다: 최대 %.0f초/%d프레임, 보존 %.0f시간.",
+                settings.person_detection_trace_max_seconds,
+                settings.person_detection_trace_max_frames,
+                settings.person_detection_trace_retention_hours,
+            )
+            handler = PersonDetectionTraceHandler(recorder, inner=handler)
     entry_handler: EntryResultHandler | None = None
     if face_identity_url is not None:
         observe_entry: EntryResultHandler = (
@@ -370,7 +407,7 @@ def build_runner(
         )
 
     # 가중치와 전처리 계약이 다르면 모델을 로딩하기 전에 기동을 거부한다.
-    verify_person_model_contract(
+    person_model_contract = verify_person_model_contract(
         inference_settings.model_path,
         inference_settings.model_contract_path,
         inference_settings.inference_target_class_ids,
@@ -516,6 +553,7 @@ def build_runner(
     )
     result_handler, entry_result_handler, result_dispatchers = build_result_handlers(
         inference_settings,
+        person_model_contract=person_model_contract,
         fastapi_url=fastapi_url,
         face_identity_url=face_identity_url,
         person_tracking_config=person_tracking_config,
