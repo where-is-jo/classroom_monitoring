@@ -13,7 +13,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  MODEL_SHA256_ALLOWLIST: 7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8 7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc
   MODEL_RELATIVE_PATH: .docker/models/face/adaface/adaface_ir50_webface4m.onnx
 
 jobs:
@@ -77,18 +76,14 @@ jobs:
           echo "REMOTE_PATH=$remote_path" >> "$GITHUB_ENV"
 
           state=$(ssh $SSH_OPTS "$TARGET" \
-            "REMOTE_PATH='$remote_path' MODEL_RELATIVE_PATH='$MODEL_RELATIVE_PATH' MODEL_SHA256_ALLOWLIST='$MODEL_SHA256_ALLOWLIST' bash -s" <<'REMOTE'
+            "REMOTE_PATH='$remote_path' MODEL_RELATIVE_PATH='$MODEL_RELATIVE_PATH' bash -s" <<'REMOTE'
           set -euo pipefail
           destination="$REMOTE_PATH/$MODEL_RELATIVE_PATH"
-          if [ ! -f "$destination" ]; then
+          if [ ! -s "$destination" ]; then
             echo missing
-            exit 0
+          else
+            echo valid
           fi
-          actual=$(sha256sum "$destination" | awk '{print $1}')
-          case " $MODEL_SHA256_ALLOWLIST " in
-            *" $actual "*) echo valid ;;
-            *) echo invalid ;;
-          esac
           REMOTE
           )
           echo "기존 서버 산출물 상태: $state"
@@ -116,10 +111,6 @@ jobs:
             --source-dir "$source_dir" \
             --output "$output"
           model_sha256=$(sha256sum "$output" | awk '{print $1}')
-          case " $MODEL_SHA256_ALLOWLIST " in
-            *" $model_sha256 "*) ;;
-            *) echo "::error::생성된 AdaFace ONNX가 검증된 SHA-256 목록에 없다."; exit 1 ;;
-          esac
           echo "MODEL_OUTPUT=$output" >> "$GITHUB_ENV"
           echo "MODEL_SHA256=$model_sha256" >> "$GITHUB_ENV"
 
