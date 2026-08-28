@@ -10,6 +10,7 @@ import pytest
 from inference.config import InferenceSettings
 from inference.consumer import log_result
 from inference.dispatch import AsyncResultDispatcher
+from inference.detection_trace import PersonDetectionTraceHandler
 from inference.face_identity import FastAPIEntryIdentityEventHandler
 from inference.handler import FastAPIResultHandler
 from inference.identity_handover import (
@@ -332,6 +333,24 @@ def test_CCTV와_입구_핸들러가_공유_인계_coordinator로_조립된다()
     assert isinstance(handover._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
     assert isinstance(entry_handler, FastAPIEntryIdentityEventHandler)
     assert entry_handler._inner == handover.observe_entry  # type: ignore[attr-defined]
+
+
+def test_익명_trace는_ByteTrack보다_먼저_raw_결과를_받는다(tmp_path: object) -> None:
+    settings = InferenceSettings(  # type: ignore[call-arg]
+        _env_file=None,
+        person_detection_trace_enabled=True,
+        person_detection_trace_directory=tmp_path,
+    )
+
+    handler, _entry_handler, _dispatchers = pipeline_main.build_result_handlers(
+        settings,
+        person_model_contract={"model_sha256": "a" * 64},
+        person_tracking_config=pipeline_main.ByteTrackConfig(),
+        person_tracking_camera_ids=frozenset({"classroom-cctv"}),
+    )
+
+    assert isinstance(handler, PersonDetectionTraceHandler)
+    assert isinstance(handler._inner, ByteTrackResultHandler)  # type: ignore[attr-defined]
 
 
 def test_다중_카메라_조립은_카메라마다_최신_프레임을_보존한다(

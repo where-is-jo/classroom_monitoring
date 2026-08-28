@@ -180,6 +180,7 @@ python -m pipeline.main
 | `MODEL_CONTRACT_PATH` | 가중치 해시·클래스·image size·전처리 계약 JSON | dev/prod 필수. 학습 결과의 `model_contract.json` |
 | `INFERENCE_TARGET_CLASS_IDS` | 탐지할 모델 클래스 JSON | 기본 `{"0":"person","67":"cell phone"}`. 사람 전용 학습 모델은 `{"0":"person"}` |
 | `INFERENCE_DEVICE` | 실행 장치 | `cpu` / `cuda`. local은 보통 cpu, dev는 cuda |
+| `PERSON_DETECTION_TRACE_ENABLED` | 익명 사람 탐지 raw trace | 기본 `false`. 현장 기준선 수집 중에만 `true` |
 | `OBJECT_STORAGE_BACKEND` | 객체 저장소 종류 | `local` / `minio`. local은 보통 `local` |
 | `OBJECT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필요. 비밀값 |
 
@@ -195,6 +196,7 @@ python -m pipeline.main
 | --- | --- | --- |
 | `inference_confidence_threshold` | 탐지 신뢰도 임계값 | 기본 0.25. 좌석 점유로 인정할지는 fastapi가 다시 판단한다 |
 | `inference_image_size` | 추론 입력 크기(긴 변) | **기본 1280.** 지정하지 않으면 ultralytics가 640으로 줄여 뒤쪽에 앉은 사람을 놓친다. 실측 근거는 `config/settings.yml` 주석에 있다 |
+| `person_detection_trace_*` | 익명 trace 경로·시간·프레임·보존 상한 | 기본 꺼짐, 최대 600초/3,000프레임, 24시간 보존 |
 | `snapshot_enabled` | 탐지 스냅샷 적재 | 기본 `false`. 저장은 명시적으로 켠다 |
 | `snapshot_max_long_side_px` | 긴 변 상한 | 기본 1280(720p). 확대하지 않는다 |
 | `snapshot_jpeg_quality` | JPEG 품질 | 기본 80 |
@@ -203,6 +205,31 @@ python -m pipeline.main
 
 소비자 루프의 대기 시간과 연속 실패 허용치는 조립 쪽 설정이다.
 [pipeline README](../pipeline/README.md#환경변수와-설정)를 따른다.
+
+## 익명 사람 탐지 trace와 기준선
+
+`PERSON_DETECTION_TRACE_ENABLED=true`로 시작하면 Ultralytics NMS 직후 결과를
+`inference/data/traces`에 JSONL로 남긴다. ByteTrack·신원 인계·오버레이·스냅샷보다
+먼저 기록하므로 후처리 전 중복 bbox를 재현할 수 있다. 기본 상한인 600초 또는
+3,000프레임 중 먼저 도달한 시점에 기록을 멈추고 파일은 24시간 뒤 삭제한다. dev
+compose는 이 경로를 `inference-traces` named volume으로 보존한다.
+
+파일에는 실행 중 만든 `session-N`·`source-N` 별칭, 프레임 내 `object-N`, bbox,
+confidence, 중복 후보 그룹만 있다. 실제 camera ID, 촬영 시각, RTSP 주소, 이미지,
+얼굴 bbox, track ID, 학생 ID는 기록하지 않는다. 테스트 fixture는 다음 명령으로 허용
+필드만 다시 골라 최대 1,000프레임으로 만든다.
+
+```bash
+cd worker
+python -m inference.detection_trace \
+  inference/data/traces/person-detections-<token>.jsonl \
+  inference/fixtures/person_detection_trace.jsonl \
+  --max-frames 1000
+```
+
+공식 기준선은 같은 30분 구간에서 person 탐지 수와 track 생성·만료 수를 함께 기록한다.
+계산식은 `monitoring/internal/README.md`의 정규화 PromQL을 사용하며, trace의 모델 SHA,
+Ultralytics 버전, confidence·image size 설정을 결과에 함께 남긴다.
 
 ## 탐지 스냅샷
 

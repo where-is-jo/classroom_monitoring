@@ -4,7 +4,8 @@ pydantic>=2.7
 pydantic-settings>=2.3
 # config/settings.yml(환경과 무관한 일반 설정·판정 기준값)을 읽는 데 필요하다.
 pyyaml
-ultralytics>=8.0
+# 학습 서버에서 검증한 버전과 맞춰 NMS·결과 변환 편차를 없앤다.
+ultralytics==8.4.123
 
 # 탐지 스냅샷을 객체 저장소에 올린다(결정 0011).
 # OBJECT_STORAGE_BACKEND=local만 쓴다면 없어도 된다.

@@ -12,6 +12,14 @@ inference_confidence_threshold: 0.25
 # **가까운 사람은 오히려 640이 유리하다** — 전체 재현율을 기준으로 1280을 골랐다.
 inference_image_size: 1280
 
+# --- 익명 사람 탐지 trace ---
+# 실제 카메라 ID·촬영 시각·영상·얼굴·학생 식별자를 쓰지 않는다. 현장 기준선을 잡는
+# 동안만 PERSON_DETECTION_TRACE_ENABLED=true로 켜고, 아래 상한에 도달하면 멈춘다.
+person_detection_trace_enabled: false
+person_detection_trace_max_seconds: 600
+person_detection_trace_max_frames: 3000
+person_detection_trace_retention_hours: 24
+
 # --- 탐지 스냅샷 (결정 0011) ---
 # 영상 원본은 저장하지 않는다. 탐지 개수가 직전 적재와 달라질 때만 정지 이미지를 남긴다.
 # 저장은 명시적으로 켠다.
