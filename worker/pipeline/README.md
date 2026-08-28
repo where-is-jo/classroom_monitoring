@@ -74,7 +74,7 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
 | `PERSON_TRACKING_CAMERA_IDS` | YOLO·ByteTrack 대상 CCTV camera ID | 비우면 `STREAM_SOURCES`에서 얼굴 전용 camera를 뺀 나머지. 얼굴 전용 목록과 겹치면 기동 실패 |
 | `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | FastAPI 설정을 처음 읽기 전과 장애 시 사용할 정적 초기·fallback 값 |
-| `bytetrack_*` | 두 단계 매칭·track buffer 기준 | `config/settings.yml` |
+| `bytetrack_*` | 두 단계 매칭·track buffer와 Kalman 예측 | Kalman은 기본 꺼짐. develop compose에서만 활성화 |
 | `person_detection_postprocess_*` | 사람 전용 IoU/IoS 중복 제거와 미매칭 저신뢰 제거 | 기본 꺼짐. develop compose에서만 활성화 |
 | `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도와 동적 설정 on/off·갱신 주기·timeout | `config/settings.yml` |
 | `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |

@@ -386,6 +386,7 @@ def test_GPU_develop은_사람_탐지_후처리를_명시적으로_켠다() -> N
 
     worker = compose.split("  inference-worker:", 1)[1].split("\n  mediamtx:", 1)[0]
     assert 'PERSON_DETECTION_POSTPROCESS_ENABLED: "true"' in worker
+    assert 'BYTETRACK_KALMAN_ENABLED: "true"' in worker
 
 
 def test_gpu_server_passes_without_fastapi_env(tmp_path: Path) -> None:

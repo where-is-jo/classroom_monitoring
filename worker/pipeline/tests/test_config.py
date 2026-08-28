@@ -55,6 +55,25 @@ def test_사람_후처리는_기존_동작이_기본이고_임계값을_고정�
     assert settings.person_detection_duplicate_ios_threshold == 0.85
 
 
+def test_Kalman_예측기는_기존_동작이_기본이다() -> None:
+    settings = build_settings()
+
+    assert settings.bytetrack_kalman_enabled is False
+    assert settings.bytetrack_buffer_frames == 30
+    assert settings.bytetrack_first_match_iou_threshold == 0.3
+    assert settings.bytetrack_second_match_iou_threshold == 0.2
+
+
+def test_Kalman_예측기는_환경변수로_활성화할_수_있다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BYTETRACK_KALMAN_ENABLED", "true")
+
+    settings = build_settings()
+
+    assert settings.bytetrack_kalman_enabled is True
+
+
 def test_사람_후처리는_환경변수로_활성화할_수_있다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

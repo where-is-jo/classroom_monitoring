@@ -52,6 +52,8 @@ bytetrack_new_track_threshold: 0.6
 bytetrack_first_match_iou_threshold: 0.3
 bytetrack_second_match_iou_threshold: 0.2
 bytetrack_buffer_frames: 30
+# 기존 속도 예측을 기본으로 유지하고 develop compose에서 명시적으로 켠다.
+bytetrack_kalman_enabled: false
 # 기존 결과를 기본으로 유지하고 develop compose에서 명시적으로 켠다.
 person_detection_postprocess_enabled: false
 person_detection_duplicate_iou_threshold: 0.5

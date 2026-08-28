@@ -126,6 +126,8 @@ class PipelineSettings(BaseSettings):
     bytetrack_first_match_iou_threshold: float = Field(default=0.3, ge=0, le=1)
     bytetrack_second_match_iou_threshold: float = Field(default=0.2, ge=0, le=1)
     bytetrack_buffer_frames: int = Field(default=30, ge=1, le=600)
+    # 기존 속도 예측을 기본으로 유지하고 develop compose에서 단계별로 활성화한다.
+    bytetrack_kalman_enabled: bool = False
     # 기존 동작이 기본값이다. develop compose에서만 켜 단계별 롤백을 보장한다.
     person_detection_postprocess_enabled: bool = False
     person_detection_duplicate_iou_threshold: float = Field(
