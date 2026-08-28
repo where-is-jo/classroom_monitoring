@@ -5,8 +5,9 @@ name: GPU 서버 배포
 # 오래된 image ID를 계속 가리키므로 두 이미지를 현재 커밋으로 함께 갱신한다.
 #
 # 배포 대상은 커밋되는 파일뿐이다. .docker/env/(비밀값)와 .docker/models/(가중치)는
-# 저장소에 없고 서버 로컬에만 있으므로 이 워크플로우는 그 둘을 절대 건드리지 않는다
-# (결정 0018).
+# 저장소에 없고 서버 로컬에만 있으므로 전송하거나 삭제하지 않는다(결정 0018).
+# 단, 선택한 얼굴 인식기와 경로가 어긋나 모든 배포가 막히는 것을 복구하기 위해 실제
+# 모델 파일을 확인한 뒤 FACE_RECOGNITION_MODEL_PATH 한 줄만 계약값으로 정렬한다.
 #
 # 여기서는 paths 필터를 써도 안전하다. ci.yml이 paths-ignore를 피한 이유는 필수 상태
 # 체크가 "대기 중"으로 남는 함정 때문인데, 이 워크플로우는 필수 체크가 아니다.
@@ -311,6 +312,11 @@ jobs:
           set -uo pipefail
           cd "$REMOTE_PATH"
           failed=""
+          # env 전체를 전송하거나 출력하지 않는다. 선택한 인식기와 실제 ONNX를 확인한
+          # 뒤 비민감 경로 키 한 줄만 원자적으로 정렬한다.
+          if ! python3 .docker/scripts/sync_face_recognizer_model_path.py; then
+            failed="$failed face-model-path"
+          fi
           for stack in $STACKS; do
             if ! docker compose -f ".docker/$stack" config --quiet; then
               failed="$failed $stack"
