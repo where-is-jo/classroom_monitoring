@@ -90,6 +90,22 @@ def test_track_상태전환은_환경변수로_활성화할_수_있다(
     assert settings.person_track_lifecycle_enabled is True
 
 
+def test_lost_신원_복구는_기존_문영역_인계가_기본이다() -> None:
+    settings = build_settings()
+
+    assert settings.identity_track_recovery_enabled is False
+
+
+def test_lost_신원_복구는_환경변수로_활성화할_수_있다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IDENTITY_TRACK_RECOVERY_ENABLED", "true")
+
+    settings = build_settings()
+
+    assert settings.identity_track_recovery_enabled is True
+
+
 def test_사람_후처리는_환경변수로_활성화할_수_있다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

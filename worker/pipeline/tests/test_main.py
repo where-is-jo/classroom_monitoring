@@ -333,6 +333,9 @@ def test_CCTV와_입구_핸들러가_공유_인계_coordinator로_조립된다()
     assert (  # type: ignore[attr-defined]
         handler._internal_track_handler == handover.observe_classroom_tracking
     )
+    assert (  # type: ignore[attr-defined]
+        handler._transition_handler == handover.handle_track_transitions
+    )
     assert isinstance(handover._inner, FastAPIResultHandler)  # type: ignore[attr-defined]
     assert isinstance(entry_handler, FastAPIEntryIdentityEventHandler)
     assert entry_handler._inner == handover.observe_entry  # type: ignore[attr-defined]

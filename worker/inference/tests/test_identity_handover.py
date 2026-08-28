@@ -15,6 +15,7 @@ from ..identity_handover import (
     parse_identity_handover_routes,
 )
 from ..metrics import METRIC_PREFIX
+from ..tracking import PersonTrackState, PersonTrackTransition
 from ..types import (
     Detection,
     EntryFaceObservation,
@@ -84,7 +85,9 @@ def result(*detections: Detection) -> InferenceResult:
     return InferenceResult((100, 200, 3), detections)
 
 
-def handler() -> tuple[
+def handler(
+    *, recovery_enabled: bool = False
+) -> tuple[
     IdentityHandoverResultHandler,
     list[tuple[CapturedFrame, InferenceResult]],
 ]:
@@ -96,8 +99,26 @@ def handler() -> tuple[
         clock_skew_seconds=0.5,
         track_stale_seconds=30,
         minimum_identity_confidence=0.6,
+        identity_track_recovery_enabled=recovery_enabled,
     )
     return active, handled
+
+
+def transition(
+    track_id: str,
+    previous_state: PersonTrackState | None,
+    next_state: PersonTrackState,
+    bbox: tuple[float, float, float, float],
+    seconds: float,
+) -> PersonTrackTransition:
+    return PersonTrackTransition(
+        track_id=track_id,
+        previous_state=previous_state,
+        next_state=next_state,
+        last_bbox=bbox,
+        velocity=(0.0, 0.0, 0.0, 0.0),
+        last_observed_at=(STARTED_AT + timedelta(seconds=seconds)).timestamp(),
+    )
 
 
 def test_등록_얼굴을_CCTV_문_ROI의_신규_track에_인계한다() -> None:
@@ -212,6 +233,195 @@ def test_인계한_신원은_문_ROI를_벗어나도_같은_track에_유지한�
     active(
         captured("classroom-cctv", 6),
         result(person("person-12", (120, 20, 190, 100))),
+    )
+
+    assert handled[-1][1].detections[0].student_id == "student-001"
+
+
+def test_lost_신원은_전역_유일한_새_track으로_이동한다() -> None:
+    active, handled = handler(recovery_enabled=True)
+    before = metric_value("identity_track_recovery_total", outcome="recovered")
+    active.observe_entry(captured("entry-camera", 1), batch(face()))
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (40, 10, 60, 90))),
+    )
+
+    active.handle_track_transitions(
+        "classroom-cctv",
+        (100, 200, 3),
+        (STARTED_AT + timedelta(seconds=3)).timestamp(),
+        (
+            transition(
+                "person-12",
+                PersonTrackState.TRACKED,
+                PersonTrackState.LOST,
+                (40, 10, 60, 90),
+                2,
+            ),
+            transition(
+                "person-13",
+                None,
+                PersonTrackState.TENTATIVE,
+                (50, 10, 70, 90),
+                3,
+            ),
+        ),
+    )
+    active(
+        captured("classroom-cctv", 3),
+        result(person("person-13", (50, 10, 70, 90))),
+    )
+    recovered = handled[-1][1].detections[0]
+
+    assert recovered.student_id == "student-001"
+    assert metric_value(
+        "identity_track_recovery_total", outcome="recovered"
+    ) == before + 1
+
+    # 복구는 복사가 아니라 이동이다. 옛 track이 재획득되어도 신원이 부활하지 않는다.
+    active(
+        captured("classroom-cctv", 3.1),
+        result(person("person-12", (40, 10, 60, 90))),
+    )
+    assert handled[-1][1].detections[0].student_id is None
+    state = active._states[ROUTE]
+    assert set(state.active_identities) == {"person-13"}
+
+
+def test_새_track_후보가_둘이면_복구를_보류한다() -> None:
+    active, handled = handler(recovery_enabled=True)
+    before = metric_value("identity_track_recovery_total", outcome="deferred")
+    active.observe_entry(captured("entry-camera", 1), batch(face()))
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (40, 10, 60, 90))),
+    )
+
+    active.handle_track_transitions(
+        "classroom-cctv",
+        (100, 200, 3),
+        (STARTED_AT + timedelta(seconds=3)).timestamp(),
+        (
+            transition(
+                "person-12",
+                PersonTrackState.TRACKED,
+                PersonTrackState.LOST,
+                (40, 10, 60, 90),
+                2,
+            ),
+            transition(
+                "person-13", None, PersonTrackState.TENTATIVE,
+                (45, 10, 65, 90), 3,
+            ),
+            transition(
+                "person-14", None, PersonTrackState.TENTATIVE,
+                (50, 10, 70, 90), 3,
+            ),
+        ),
+    )
+    active(
+        captured("classroom-cctv", 3),
+        result(
+            person("person-13", (45, 10, 65, 90)),
+            person("person-14", (50, 10, 70, 90)),
+        ),
+    )
+
+    assert all(item.student_id is None for item in handled[-1][1].detections)
+    assert set(active._states[ROUTE].active_identities) == {"person-12"}
+    assert metric_value(
+        "identity_track_recovery_total", outcome="deferred"
+    ) == before + 2
+
+
+def test_lost_복구_후보는_3초를_넘으면_만료한다() -> None:
+    active, handled = handler(recovery_enabled=True)
+    before = metric_value("identity_track_recovery_total", outcome="expired")
+    active.observe_entry(captured("entry-camera", 1), batch(face()))
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (40, 10, 60, 90))),
+    )
+    active.handle_track_transitions(
+        "classroom-cctv",
+        (100, 200, 3),
+        (STARTED_AT + timedelta(seconds=2)).timestamp(),
+        (
+            transition(
+                "person-12",
+                PersonTrackState.TRACKED,
+                PersonTrackState.LOST,
+                (40, 10, 60, 90),
+                2,
+            ),
+        ),
+    )
+
+    active.handle_track_transitions(
+        "classroom-cctv",
+        (100, 200, 3),
+        (STARTED_AT + timedelta(seconds=5.01)).timestamp(),
+        (
+            transition(
+                "person-13", None, PersonTrackState.TENTATIVE,
+                (50, 10, 70, 90), 5.01,
+            ),
+        ),
+    )
+    active(
+        captured("classroom-cctv", 5.01),
+        result(person("person-13", (50, 10, 70, 90))),
+    )
+
+    assert handled[-1][1].detections[0].student_id is None
+    assert metric_value(
+        "identity_track_recovery_total", outcome="expired"
+    ) == before + 1
+
+
+@pytest.mark.parametrize(
+    "new_bbox,new_seconds",
+    (
+        ((57.88854381999832, 10, 77.88854381999832, 90), 3.0),
+        ((45, 10, 55, 90), 3.0),
+        ((30, 10, 70, 90), 5.0),
+    ),
+)
+def test_lost_복구는_거리_면적비_시간_경계값을_포함한다(
+    new_bbox: tuple[float, float, float, float],
+    new_seconds: float,
+) -> None:
+    active, handled = handler(recovery_enabled=True)
+    active.observe_entry(captured("entry-camera", 1), batch(face()))
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (40, 10, 60, 90))),
+    )
+    active.handle_track_transitions(
+        "classroom-cctv",
+        (100, 200, 3),
+        (STARTED_AT + timedelta(seconds=new_seconds)).timestamp(),
+        (
+            transition(
+                "person-12",
+                PersonTrackState.TRACKED,
+                PersonTrackState.LOST,
+                (40, 10, 60, 90),
+                2,
+            ),
+            transition(
+                "person-13",
+                None,
+                PersonTrackState.TENTATIVE,
+                new_bbox,
+                new_seconds,
+            ),
+        ),
+    )
+    active(
+        captured("classroom-cctv", new_seconds),
+        result(person("person-13", tuple(int(value) for value in new_bbox))),
     )
 
     assert handled[-1][1].detections[0].student_id == "student-001"
