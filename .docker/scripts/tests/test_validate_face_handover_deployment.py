@@ -28,7 +28,17 @@ def build_deployment(tmp_path: Path) -> Path:
     (models / "face" / "config").mkdir(parents=True)
     (env_dir / "deeplearning.dev.env").write_text(
         "FACE_GALLERY_DATABASE_URL=mongodb://example.invalid\n"
-        "FACE_GALLERY_DATABASE_NAME=classroom\n",
+        "FACE_GALLERY_DATABASE_NAME=classroom\n"
+        "FACE_RECOGNIZER=arcface\n"
+        "FACE_RECOGNITION_MODEL_PATH=/models/face/buffalo_l/w600k_r50.onnx\n"
+        "FACE_RECOGNITION_MODEL_VERSION=insightface-buffalo_l-w600k_r50-v0.7\n"
+        "FACE_IDENTIFICATION_ENABLED=true\n"
+        "FACE_IDENTITY_THRESHOLD_FILE=/models/face/config/thresholds.json\n"
+        "FACE_EMBEDDING_COLLECTION=face_embeddings_arcface\n",
+        encoding="utf-8",
+    )
+    (env_dir / "fastapi.dev.env").write_text(
+        "FACE_RECOGNIZER=arcface\n",
         encoding="utf-8",
     )
     (env_dir / "worker.dev.env").write_text(
@@ -118,6 +128,47 @@ def test_검증기는_worker_소스가_없는_배포_경계에서도_실행된�
     assert completed.returncode == 0, completed.stderr
 
 
+def test_target_far가_0점001_이하면_통과한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    threshold_path = docker_root / "models" / "face" / "config" / "thresholds.json"
+    thresholds = json.loads(threshold_path.read_text(encoding="utf-8"))
+    thresholds["target_far"] = 0.0005
+    threshold_path.write_text(json.dumps(thresholds), encoding="utf-8")
+
+    assert validate(docker_root) == []
+
+
+def test_target_far가_0점001을_초과하면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    threshold_path = docker_root / "models" / "face" / "config" / "thresholds.json"
+    thresholds = json.loads(threshold_path.read_text(encoding="utf-8"))
+    thresholds["target_far"] = 0.0011
+    threshold_path.write_text(json.dumps(thresholds), encoding="utf-8")
+
+    errors = validate(docker_root)
+
+    assert any("target_far" in error for error in errors)
+
+
+def test_필수_전처리가_있는_모델이면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    contract_path = docker_root / "models" / "person.model_contract.json"
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    contract["preprocessing_contract"] = {
+        "schema_version": 1,
+        "method": "uniform-full-frame-pixelation-v1",
+        "label_derived": False,
+        "training_compatible": True,
+        "inference_preprocessing_required": True,
+        "pixelation_block_size": 8,
+    }
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+
+    errors = validate(docker_root)
+
+    assert any("원본 프레임 모델" in error for error in errors)
+
+
 def test_thresholds_json이_없으면_실패한다(tmp_path: Path) -> None:
     docker_root = build_deployment(tmp_path)
     (docker_root / "models" / "face" / "config" / "thresholds.json").unlink()
@@ -170,6 +221,72 @@ def test_track_임계값이_누락되면_실패한다(tmp_path: Path) -> None:
     errors = validate(docker_root)
 
     assert any("track_similarity_threshold" in error for error in errors)
+
+
+def test_AdaFace_모델_컬렉션_임계값을_같이_전환하면_통과한다(
+    tmp_path: Path,
+) -> None:
+    docker_root = build_deployment(tmp_path)
+    model_path = docker_root / "models" / "face" / "adaface"
+    model_path.mkdir()
+    (model_path / "adaface_ir50_webface4m.onnx").write_bytes(b"adaface-model")
+    deep_env_path = docker_root / "env" / "deeplearning.dev.env"
+    deep_env = deep_env_path.read_text(encoding="utf-8")
+    deep_env = deep_env.replace("FACE_RECOGNIZER=arcface", "FACE_RECOGNIZER=adaface")
+    deep_env = deep_env.replace(
+        "/models/face/buffalo_l/w600k_r50.onnx",
+        "/models/face/adaface/adaface_ir50_webface4m.onnx",
+    )
+    deep_env = deep_env.replace(
+        "insightface-buffalo_l-w600k_r50-v0.7",
+        "cvlface-adaface-ir50-webface4m-fe7718c6",
+    )
+    deep_env = deep_env.replace("face_embeddings_arcface", "face_embeddings_adaface")
+    deep_env_path.write_text(deep_env, encoding="utf-8")
+    threshold_path = docker_root / "models" / "face" / "config" / "thresholds.json"
+    thresholds = json.loads(threshold_path.read_text(encoding="utf-8"))
+    thresholds.update(
+        {
+            "model_name": "adaface",
+            "model_version": "cvlface-adaface-ir50-webface4m-fe7718c6",
+            "preprocessing_version": "cvlface-rgb-norm-crop-112-v1",
+            "similarity_threshold": 0.37,
+        }
+    )
+    threshold_path.write_text(json.dumps(thresholds), encoding="utf-8")
+    (docker_root / "env" / "fastapi.dev.env").write_text(
+        "FACE_RECOGNIZER=adaface\nSTUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE=0.37\n",
+        encoding="utf-8",
+    )
+
+    assert validate(docker_root) == []
+
+
+def test_AdaFace가_ArcFace_컬렉션을_가리키면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    deep_env_path = docker_root / "env" / "deeplearning.dev.env"
+    deep_env_path.write_text(
+        deep_env_path.read_text(encoding="utf-8").replace(
+            "FACE_RECOGNIZER=arcface", "FACE_RECOGNIZER=adaface"
+        ),
+        encoding="utf-8",
+    )
+
+    errors = validate(docker_root)
+
+    assert any("FACE_EMBEDDING_COLLECTION" in error for error in errors)
+
+
+def test_FastAPI와_AI서버의_활성_모델이_다르면_실패한다(tmp_path: Path) -> None:
+    docker_root = build_deployment(tmp_path)
+    (docker_root / "env" / "fastapi.dev.env").write_text(
+        "FACE_RECOGNIZER=adaface\nSTUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE=0.37\n",
+        encoding="utf-8",
+    )
+
+    errors = validate(docker_root)
+
+    assert any("FACE_RECOGNIZER가 다릅니다" in error for error in errors)
 
 
 def test_입구_카메라가_스트림에_없으면_실패한다(tmp_path: Path) -> None:
@@ -246,3 +363,43 @@ def test_GPU_compose는_재빌드할_때_덮어쓰는_latest_이미지명을_쓴
     assert "local-202" not in compose
     assert "ghcr.io/where-is-jo/classroom-monitoring-deeplearning:local" not in compose
     assert "ghcr.io/where-is-jo/classroom-monitoring-worker:local" not in compose
+
+
+def test_gpu_server_passes_without_fastapi_env(tmp_path: Path) -> None:
+    """`fastapi.dev.env`가 없는 것이 GPU 서버의 정상 상태다.
+
+    README.server.md가 그 파일을 여기 두지 말라고 명시한다 — fastapi는 개인 PC로
+    갔고 여기서는 읽히지 않는데 MongoDB Atlas 접속 정보만 공용 장비에 남기 때문이다.
+    필수로 요구하면 문서를 따르는 배포가 전부 실패하고 롤백된다.
+    """
+    docker_root = build_deployment(tmp_path)
+    (docker_root / "env" / "fastapi.dev.env").unlink()
+
+    assert validate(docker_root) == []
+
+
+def test_adaface_rejects_arcface_weights(tmp_path: Path) -> None:
+    """모델 경로가 선택한 인식기의 것인지 본다.
+
+    두 모델 모두 (N,3,112,112) -> (N,512)라 형태로는 구분되지 않는다. 경로를 대조하지
+    않으면 ArcFace 벡터가 AdaFace로 라벨링돼 갤러리에 들어간다.
+    """
+    docker_root = build_deployment(tmp_path)
+    env_path = docker_root / "env" / "deeplearning.dev.env"
+    env_path.write_text(
+        env_path.read_text(encoding="utf-8")
+        .replace("FACE_RECOGNIZER=arcface", "FACE_RECOGNIZER=adaface")
+        .replace(
+            "FACE_RECOGNITION_MODEL_VERSION=insightface-buffalo_l-w600k_r50-v0.7",
+            "FACE_RECOGNITION_MODEL_VERSION=cvlface-adaface-ir50-webface4m-fe7718c6",
+        )
+        .replace(
+            "FACE_EMBEDDING_COLLECTION=face_embeddings_arcface",
+            "FACE_EMBEDDING_COLLECTION=face_embeddings_adaface",
+        ),
+        encoding="utf-8",
+    )
+    # 경로만 ArcFace 그대로 남겨 둔다 — 운영자가 잊기 가장 쉬운 값이다.
+    errors = validate(docker_root)
+
+    assert any("FACE_RECOGNITION_MODEL_PATH" in error for error in errors), errors

@@ -17,12 +17,31 @@ EXPECTED_THRESHOLD_METADATA = {
     "model_version": "insightface-buffalo_l-w600k_r50-v0.7",
     "preprocessing_version": "insightface-norm-crop-112-v1",
 }
-FACE_MODEL_PATHS = (
+# **네 번째 값(model_path)을 빠뜨리면 교차 연결이 열린다.** deeplearning의
+# `_MODEL_DEFAULTS`는 인식기당 (버전, 전처리, 컬렉션, 상대 경로) 4-튜플인데 여기에는
+# 앞의 셋만 옮겨져 있었다. 그래서 AdaFace 설정에 ArcFace 가중치를 물려도 대조할
+# 근거가 없어 그대로 통과했다 — 두 모델 모두 (N,3,112,112) -> (N,512)라 형태로는
+# 구분되지 않고, ArcFace 벡터가 AdaFace로 라벨링돼 갤러리에 들어간다.
+FACE_MODEL_CONFIGS = {
+    "arcface": {
+        "metadata": EXPECTED_THRESHOLD_METADATA,
+        "collection": "face_embeddings_arcface",
+        "model_path": "buffalo_l/w600k_r50.onnx",
+    },
+    "adaface": {
+        "metadata": {
+            "model_name": "adaface",
+            "model_version": "cvlface-adaface-ir50-webface4m-fe7718c6",
+            "preprocessing_version": "cvlface-rgb-norm-crop-112-v1",
+        },
+        "collection": "face_embeddings_adaface",
+        "model_path": "adaface/adaface_ir50_webface4m.onnx",
+    },
+}
+COMMON_FACE_MODEL_PATHS = (
     "/models/face/scrfd/scrfd_10g_bnkps.onnx",
     "/models/face/mediapipe/face_landmarker.task",
-    "/models/face/buffalo_l/w600k_r50.onnx",
 )
-THRESHOLD_PATH = "/models/face/config/thresholds.json"
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -95,7 +114,11 @@ def parse_target_class_ids(raw_value: str) -> dict[int, str]:
     return result
 
 
-def validate_thresholds(path: Path) -> list[str]:
+def validate_thresholds(
+    path: Path,
+    expected_metadata: dict[str, str] | None = None,
+) -> list[str]:
+    expected_metadata = expected_metadata or EXPECTED_THRESHOLD_METADATA
     errors: list[str] = []
     if not path.is_file():
         return [f"임계값 파일이 없습니다: {path}"]
@@ -105,9 +128,9 @@ def validate_thresholds(path: Path) -> list[str]:
         return [f"임계값 파일을 JSON으로 읽을 수 없습니다: {path}"]
     if not isinstance(values, dict):
         return [f"임계값 JSON 최상위 값은 object여야 합니다: {path}"]
-    for key, expected in EXPECTED_THRESHOLD_METADATA.items():
+    for key, expected in expected_metadata.items():
         if values.get(key) != expected:
-            errors.append(f"thresholds.json의 {key}가 현재 ArcFace 모델과 다릅니다.")
+            errors.append(f"thresholds.json의 {key}가 현재 얼굴 모델과 다릅니다.")
     for key, upper in (
         ("similarity_threshold", 1.0),
         ("margin_threshold", 2.0),
@@ -126,9 +149,9 @@ def validate_thresholds(path: Path) -> list[str]:
         not isinstance(target_far, (int, float))
         or isinstance(target_far, bool)
         or not math.isfinite(float(target_far))
-        or not 0.0 <= float(target_far) <= 1.0
+        or not 0.0 <= float(target_far) <= 0.001
     ):
-        errors.append("thresholds.json의 target_far 범위가 올바르지 않습니다.")
+        errors.append("thresholds.json의 target_far는 0.001 이하여야 합니다.")
     track_target = values.get("track_target_false_association")
     if (
         not isinstance(track_target, (int, float))
@@ -145,10 +168,13 @@ def validate_thresholds(path: Path) -> list[str]:
 def validate(docker_root: Path) -> list[str]:
     errors: list[str] = []
     deep_env_path = docker_root / "env" / "deeplearning.dev.env"
+    fastapi_env_path = docker_root / "env" / "fastapi.dev.env"
     worker_env_path = docker_root / "env" / "worker.dev.env"
     deep_env_exists = deep_env_path.is_file()
+    fastapi_env_exists = fastapi_env_path.is_file()
     worker_env_exists = worker_env_path.is_file()
     deep_env: dict[str, str] = {}
+    fastapi_env: dict[str, str] = {}
     worker_env: dict[str, str] = {}
     for path, destination in (
         (deep_env_path, deep_env),
@@ -162,8 +188,26 @@ def validate(docker_root: Path) -> list[str]:
         except (OSError, UnicodeError, ValueError) as error:
             errors.append(str(error))
 
+    # **fastapi.dev.env는 이 서버에 없는 것이 정상이다.** README.server.md가 두지
+    # 말라고 명시한다 — fastapi는 개인 PC로 갔고(결정 0026) 여기서는 읽히지 않는데
+    # MongoDB Atlas 접속 정보만 공용 장비에 남기 때문이다. 필수로 요구하면 그 문서를
+    # 따르는 배포가 **전부 실패하고 롤백된다.** 있으면 교차 검사에 쓰고 없으면 넘긴다.
+    if fastapi_env_exists:
+        try:
+            fastapi_env.update(read_env(fastapi_env_path))
+        except (OSError, UnicodeError, ValueError) as error:
+            errors.append(str(error))
+
     if deep_env_exists:
-        for key in ("FACE_GALLERY_DATABASE_URL", "FACE_GALLERY_DATABASE_NAME"):
+        for key in (
+            "FACE_GALLERY_DATABASE_URL",
+            "FACE_GALLERY_DATABASE_NAME",
+            "FACE_RECOGNIZER",
+            "FACE_RECOGNITION_MODEL_PATH",
+            "FACE_RECOGNITION_MODEL_VERSION",
+            "FACE_IDENTITY_THRESHOLD_FILE",
+            "FACE_EMBEDDING_COLLECTION",
+        ):
             if not deep_env.get(key, "").strip():
                 errors.append(f"deeplearning.dev.env에 {key}가 필요합니다.")
         database_url = deep_env.get("FACE_GALLERY_DATABASE_URL", "").strip()
@@ -171,6 +215,104 @@ def validate(docker_root: Path) -> list[str]:
             ("mongodb://", "mongodb+srv://")
         ):
             errors.append("FACE_GALLERY_DATABASE_URL은 MongoDB URL이어야 합니다.")
+        if deep_env.get("FACE_IDENTIFICATION_ENABLED", "").strip().lower() != "true":
+            errors.append(
+                "deeplearning.dev.env의 FACE_IDENTIFICATION_ENABLED는 true여야 합니다."
+            )
+
+    face_recognizer = deep_env.get("FACE_RECOGNIZER", "").strip().lower()
+    face_model_config = FACE_MODEL_CONFIGS.get(face_recognizer)
+    threshold_values: dict[str, object] | None = None
+    if face_recognizer and face_model_config is None:
+        errors.append("FACE_RECOGNIZER는 arcface 또는 adaface여야 합니다.")
+    if face_model_config is not None:
+        expected_metadata = face_model_config["metadata"]
+        assert isinstance(expected_metadata, dict)
+        if (
+            deep_env.get("FACE_RECOGNITION_MODEL_VERSION", "").strip()
+            != expected_metadata["model_version"]
+        ):
+            errors.append("FACE_RECOGNITION_MODEL_VERSION이 선택 모델 계약과 다릅니다.")
+        if (
+            deep_env.get("FACE_EMBEDDING_COLLECTION", "").strip()
+            != face_model_config["collection"]
+        ):
+            errors.append("FACE_EMBEDDING_COLLECTION이 선택 모델과 다릅니다.")
+
+        recognition_path = deep_env.get("FACE_RECOGNITION_MODEL_PATH", "").strip()
+        expected_model_path = face_model_config["model_path"]
+        if recognition_path and not recognition_path.replace("\\", "/").endswith(
+            str(expected_model_path)
+        ):
+            # 파일이 있느냐와 별개로 **선택한 인식기의 가중치인지**를 본다.
+            errors.append(
+                f"FACE_RECOGNITION_MODEL_PATH가 선택 모델과 다릅니다. "
+                f"{face_recognizer}는 .../{expected_model_path}를 써야 합니다."
+            )
+        if recognition_path:
+            try:
+                host_recognition_path = host_model_path(docker_root, recognition_path)
+            except ValueError as error:
+                errors.append(str(error))
+            else:
+                if (
+                    not host_recognition_path.is_file()
+                    or host_recognition_path.stat().st_size == 0
+                ):
+                    errors.append(
+                        f"얼굴 인식 모델 파일이 없습니다: {host_recognition_path}"
+                    )
+
+        threshold_path = deep_env.get("FACE_IDENTITY_THRESHOLD_FILE", "").strip()
+        if threshold_path:
+            try:
+                host_threshold_path = host_model_path(docker_root, threshold_path)
+            except ValueError as error:
+                errors.append(str(error))
+            else:
+                errors.extend(
+                    validate_thresholds(host_threshold_path, expected_metadata)
+                )
+                try:
+                    loaded_thresholds = json.loads(
+                        host_threshold_path.read_text(encoding="utf-8")
+                    )
+                    if isinstance(loaded_thresholds, dict):
+                        threshold_values = loaded_thresholds
+                except (OSError, json.JSONDecodeError):
+                    pass
+
+    if fastapi_env_exists:
+        fastapi_model = fastapi_env.get("FACE_RECOGNIZER", "").strip().lower()
+        if fastapi_model != face_recognizer:
+            errors.append(
+                "fastapi.dev.env와 deeplearning.dev.env의 FACE_RECOGNIZER가 다릅니다."
+            )
+        if face_recognizer == "adaface":
+            raw_fastapi_threshold = fastapi_env.get(
+                "STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE", ""
+            ).strip()
+            try:
+                fastapi_threshold = float(raw_fastapi_threshold)
+            except ValueError:
+                errors.append(
+                    "fastapi.dev.env에 AdaFace 학생 식별 임계값이 필요합니다."
+                )
+            else:
+                selected_threshold = (
+                    threshold_values.get("similarity_threshold")
+                    if threshold_values is not None
+                    else None
+                )
+                if not isinstance(selected_threshold, (int, float)) or not math.isclose(
+                    fastapi_threshold,
+                    float(selected_threshold),
+                    rel_tol=0,
+                    abs_tol=1e-12,
+                ):
+                    errors.append(
+                        "FastAPI AdaFace 학생 식별 임계값이 thresholds.json과 다릅니다."
+                    )
 
     required_worker_keys = (
         "STREAM_SOURCES",
@@ -282,11 +424,10 @@ def validate(docker_root: Path) -> list[str]:
                 "IDENTITY_HANDOVER_ROUTES의 카메라 또는 ROI 형식이 올바르지 않습니다."
             )
 
-    for container_path in FACE_MODEL_PATHS:
+    for container_path in COMMON_FACE_MODEL_PATHS:
         path = host_model_path(docker_root, container_path)
         if not path.is_file() or path.stat().st_size == 0:
             errors.append(f"얼굴 모델 파일이 없습니다: {path}")
-    errors.extend(validate_thresholds(host_model_path(docker_root, THRESHOLD_PATH)))
 
     worker_model = worker_env.get("MODEL_PATH", "").strip()
     worker_contract = worker_env.get("MODEL_CONTRACT_PATH", "").strip()
