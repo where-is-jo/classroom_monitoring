@@ -451,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--recognizer-path",
-        default="deeplearning/.models/adaface/adaface_ir50.onnx",
+        default="deeplearning/.models/adaface/adaface_ir50_webface4m.onnx",
     )
     parser.add_argument("--database-url", default="")
     parser.add_argument("--database-name", default="classroom_monitoring")

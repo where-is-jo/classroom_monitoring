@@ -57,8 +57,7 @@ def test_adaface_선택이면_경로_한_줄만_원자적으로_맞춘다(
     text = env_file.read_text(encoding="utf-8")
     assert changed is True
     assert (
-        "FACE_RECOGNITION_MODEL_PATH="
-        "/models/face/adaface/adaface_ir50_webface4m.onnx"
+        "FACE_RECOGNITION_MODEL_PATH=/models/face/adaface/adaface_ir50_webface4m.onnx"
     ) in text
     assert "secret-user:secret-password" in text
     assert "FACE_EMBEDDING_COLLECTION=private-collection" in text
@@ -105,7 +104,9 @@ def test_이미_정확하면_파일을_다시_쓰지_않는다(tmp_path: Path) -
 
 def test_선택한_모델_파일이_없으면_env를_바꾸지_않는다(tmp_path: Path) -> None:
     docker_root, env_file = build_server(tmp_path)
-    (docker_root / "models" / "face" / "adaface" / "adaface_ir50_webface4m.onnx").unlink()
+    (
+        docker_root / "models" / "face" / "adaface" / "adaface_ir50_webface4m.onnx"
+    ).unlink()
     before = env_file.read_bytes()
 
     with pytest.raises(ValueError, match="모델 파일이 서버에 없습니다"):
@@ -156,8 +157,7 @@ def test_경로_키가_중복이면_어느_줄도_바꾸지_않는다(tmp_path: 
 def test_중복된_마지막_값이_정확해도_거부한다(tmp_path: Path) -> None:
     docker_root, env_file = build_server(tmp_path)
     env_file.write_text(
-        env_file.read_text(encoding="utf-8")
-        + "FACE_RECOGNITION_MODEL_PATH="
+        env_file.read_text(encoding="utf-8") + "FACE_RECOGNITION_MODEL_PATH="
         "/models/face/adaface/adaface_ir50_webface4m.onnx\n",
         encoding="utf-8",
     )
