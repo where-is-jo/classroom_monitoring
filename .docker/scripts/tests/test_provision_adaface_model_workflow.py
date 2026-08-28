@@ -66,6 +66,7 @@ def test_AdaFace_export_의존성은_CPU와_정확한_버전으로_고정한다(
     ]
 
     assert "torch==2.7.1+cpu" in package_lines
+    assert "torchvision==0.22.1+cpu" in package_lines
     assert "onnx==1.18.0" in package_lines
     assert "onnxruntime==1.22.0" in package_lines
     assert all("==" in line for line in package_lines)
@@ -80,4 +81,3 @@ def test_새_모델_배치_workflow도_GPU_배포_설정_검증을_실행한다(
         "fastapi-checks:", 1
     )[0]
     assert "'.github/workflows/provision-adaface-model.yml'" in deployment_filter
-
