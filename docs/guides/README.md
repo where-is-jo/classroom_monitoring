@@ -43,9 +43,8 @@ python -m uvicorn app.main:app --reload --port 8001
 `http://127.0.0.1:8001`을 열면 `/classrooms`로 이동한다. **로그인은 없다.**
 비밀값을 채우지 않아도 기동한다.
 
-`.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 합성 영상과 고정 검색
-catalog가 붙어 `/monitoring`과 `/video-search`를 시연할 수 있다.
-`APP_ENV=prod`에서는 활성화를 거부한다.
+`.env`에서 `DEMO_MODE_ENABLED=true`로 바꾸면 개인정보 없는 강의실·좌석 seed가 붙어
+카메라 없이도 `/classrooms`를 볼 수 있다. `APP_ENV=prod`에서는 활성화를 거부한다.
 
 화면과 환경변수 전체는 [fastapi README](../../webapps/fastapi/README.md)가 기준이다.
 

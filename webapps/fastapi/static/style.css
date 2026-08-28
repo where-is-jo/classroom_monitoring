@@ -77,7 +77,7 @@ img, video { display: block; max-width: 100%; }
 .form-section { margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border); }
 .form-section h3 { margin-bottom: 4px; }
 
-.panel, .summary-card, .demo-video-card, .empty, .empty-state {
+.panel, .summary-card, .empty, .empty-state {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -266,23 +266,11 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .state--absent { color: #dc2626; }
 .state--unknown { color: #6b7280; }
 
-.camera-monitoring-refresh-time { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }
-.camera-monitoring-refresh-time span, .camera-monitoring-refresh-time strong { display: block; }
-.camera-monitoring-refresh-time span { font-size: .75rem; }
 .page-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .fullscreen-toggle { color: var(--primary-dark); background: var(--surface); border-color: var(--border); }
 .fullscreen-toggle:hover { background: var(--primary-soft); }
 .fullscreen-toggle[hidden] { display: none; }
 .fullscreen-toggle-icon { margin-right: 7px; font-size: 16px; line-height: 1; }
-.demo-video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
-.demo-video-card { overflow: hidden; }
-.demo-video-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #142220; }
-.demo-video-frame video, .demo-video-frame img { width: 100%; height: 100%; object-fit: cover; }
-.demo-video-error, .demo-video-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; color: #fff; background: rgb(20 34 32 / 88%); text-align: center; }
-.demo-video-error[hidden] { display: none; }
-.demo-ribbon { position: absolute; top: 12px; left: 12px; padding: 4px 9px; color: #173b36; background: #b7e4dc; border-radius: 999px; font-size: .72rem; font-weight: 800; }
-.demo-video-copy { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 18px 8px; }
-.demo-video-copy p:last-child { margin-bottom: 0; }
 .status-label { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; white-space: nowrap; font-size: .78rem; font-weight: 800; }
 .status-label--active { color: #004f3d; background: #c8ede2; }
 .status-label--stale { color: #674300; background: #fff3cd; }
@@ -298,7 +286,7 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .example-list { display: grid; gap: 10px; margin-bottom: 0; }
 
 /* 연결 카메라 중심 실시간 모니터링 (TASK-003)
-   demo/search 화면의 demo-video-* grid와 분리된 페이지 전용 클래스다. */
+   페이지 전용 클래스다. */
 /* **한 번에 한 카메라만 본다.** 예전에는 2열 grid로 전부 늘어놓았는데, 카메라마다
    비율이 달라(어안 CCTV는 세로 1280x1944, 입구 카메라는 가로) 나란히 두면 둘 다
    작아진다. 관제는 "지금 무엇이 보이는가"가 중요하므로 하나를 크게 본다. */
@@ -409,8 +397,6 @@ main:fullscreen {
   .content { padding: 28px 16px; }
   .page-header, .section-heading { display: grid; gap: 14px; }
   .metric-grid, .filter-form, .form-grid { grid-template-columns: 1fr; }
-  .demo-video-grid { grid-template-columns: 1fr; }
-  .camera-monitoring-refresh-time { white-space: normal; }
   .filter-bar > label, .filter-bar > button { flex: 1 1 100%; }
 }
 

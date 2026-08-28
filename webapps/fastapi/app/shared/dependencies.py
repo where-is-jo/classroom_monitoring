@@ -115,7 +115,6 @@ from ..video_monitoring.adapters.whep_client import HttpWhepClient
 from ..video_monitoring.ports import PlaybackSessionRepository, VideoStreamRepository, WhepClient
 from ..video_monitoring.service import (
     PlaybackSessionService,
-    VideoDemoService,
     VideoStreamService,
 )
 from .broadcaster import InMemoryBroadcaster
@@ -726,14 +725,6 @@ def get_llm_search_service(
         scan_limit=settings.llm_search_scan_limit,
         clock=utc_now,
     )
-
-
-def get_video_demo_service(
-    settings: Settings = Depends(get_settings),
-) -> VideoDemoService:
-    if settings.demo_mode_enabled and settings.app_env in {"local", "dev"}:
-        return VideoDemoService(clock=utc_now)
-    return VideoDemoService(streams=(), clips=(), clock=utc_now)
 
 
 @lru_cache

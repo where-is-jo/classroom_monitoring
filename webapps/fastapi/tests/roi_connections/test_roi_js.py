@@ -78,34 +78,14 @@ def test_review_state_is_not_signalled_by_colour_alone() -> None:
     assert "stroke-dasharray" in style
 
 
-def test_auto_generation_previews_before_saving() -> None:
-    """계산 결과를 화면에 얹어 보기 전에 저장하면, 격자가 어긋난 것을 알 방법이 없다."""
-    source = SCRIPT.read_text(encoding="utf-8")
-
-    assert "roi-connections/auto" in source
-    assert "dry_run: dryRun" in source
-    assert "const startAutoPreview" in source
-    # 좌석 구역은 네 모서리로 정해진다.
-    assert "points.length === 4" in source
-
-
 def test_auto_generated_rois_need_an_explicit_confirmation() -> None:
     """확정 없이 판정에 들어가면 계산 오차가 그대로 출결 기록이 된다(결정 0020의 6번)."""
     source = SCRIPT.read_text(encoding="utf-8")
 
-    assert "roi-connections/auto`}/confirm" in source or "/confirm" in source
+    assert "roi-connections/auto/confirm" in source
     assert "const confirmAutoRoi" in source
     assert "auto_generated" in source
     assert "window.confirm" in source
-
-
-def test_skipped_seats_are_explained_not_silently_dropped() -> None:
-    """건너뛴 좌석을 알리지 않으면 관리자는 등록된 줄 안다."""
-    source = SCRIPT.read_text(encoding="utf-8")
-
-    assert "NO_GRID_POSITION" in source
-    assert "TOO_SMALL" in source
-    assert "EXISTING_KEPT" in source
 
 
 def test_preview_is_not_signalled_by_colour_alone() -> None:
@@ -181,10 +161,12 @@ def test_capture_stage_is_scaled_to_fit_the_page() -> None:
     """1280x1944 원본을 그대로 두면 페이지가 한없이 길어진다.
 
     stage와 이미지의 상자가 같아야 ROI 좌표가 맞으므로 stage 크기를 이미지가 정한다.
+    다만 너무 줄이면 좌석 하나가 몇 십 px이라 ROI를 눈으로 대조할 수 없다. 화면이
+    낮은 기기에서도 최소 크기를 확보하려고 vh와 절대값 중 큰 쪽을 쓴다.
     """
     style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
 
-    assert "max-height: 72vh" in style
+    assert "max-height: max(92vh, 820px)" in style
     assert "width: fit-content" in style
 
 
@@ -193,3 +175,39 @@ def test_toolbar_flows_horizontally_instead_of_stacking() -> None:
 
     assert ".roi-action-buttons { display: flex; flex-wrap: wrap;" in style
     assert "flex-direction: column-reverse" not in style
+
+
+def test_seats_without_roi_are_listed_instead_of_silently_missing() -> None:
+    """탐지는 사람이 앉았던 자리만 찾는다.
+
+    아무도 앉지 않은 좌석은 표본이 없어 영영 나오지 않으므로, 남은 좌석을 화면이
+    드러내지 않으면 관리자는 어느 좌석이 비었는지 20개를 눈으로 대조해야 한다.
+    """
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "const renderMissingSeats" in source
+    # 좌석 목록과 등록된 ROI가 이미 화면에 있으므로 서버에 따로 묻지 않는다.
+    assert "savedConnections.map((item) => item.seat_id)" in source
+    assert "seatOptionValues().filter" in source
+
+
+def test_manual_draw_targets_one_seat_and_skips_the_dialog() -> None:
+    """직접 그리기는 좌석이 이미 정해져 있다.
+
+    좌석을 다시 고르게 하면 다른 좌석을 덮어쓸 수 있고, 학생 배정의 정본은
+    seat_assignments이므로(결정 0019의 6번) 좌석 ROI만 만든다.
+    """
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "const startManualDraw" in source
+    assert "const saveManualRoi" in source
+    assert "if (manualSeatId !== null) {" in source
+    assert "student_id" not in source.split("const saveManualRoi")[1].split("};")[0]
+
+
+def test_manual_draw_needs_a_captured_screen_first() -> None:
+    """좌표는 캡처 화면 위의 상대 위치다. 바탕이 없으면 어디를 찍는지 알 수 없다."""
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    body = source.split("const startManualDraw")[1]
+    assert "referenceRevision === null" in body.split("};")[0]

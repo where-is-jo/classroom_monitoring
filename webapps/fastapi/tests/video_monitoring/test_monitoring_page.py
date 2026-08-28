@@ -71,9 +71,9 @@ def test_monitoring_page_renders_real_streams_only(monitoring_client: TestClient
     assert response.status_code == 200
     assert 'data-camera-id="camera-01"' in response.text
     assert 'data-camera-id="camera-02"' in response.text
-    # 카메라 식별자·강의실 식별자·label이 영상 아래에 노출된다.
+    # 카메라 식별자와 label만 영상 아래에 노출된다.
     assert "camera-01" in response.text
-    assert "classroom-a101" in response.text
+    assert "classroom-a101" not in response.text
     assert "A101 전면 카메라" in response.text
     # demo/disabled source는 렌더링되지 않는다 (MON-002).
     assert "camera-demo" not in response.text
@@ -113,7 +113,7 @@ def test_monitoring_page_has_no_filter_or_demo_markup(monitoring_client: TestCli
 def test_monitoring_page_card_has_identity_status_detection_and_webrtc(
     monitoring_client: TestClient,
 ) -> None:
-    """각 카드는 카메라·강의실 식별자, 탐지 수신 text 상태, 마지막 탐지,
+    """각 카드는 카메라 식별자, 탐지 수신 text 상태, 마지막 탐지,
     WebRTC 재생과 카드 한정 오류 alert를 제공한다."""
     response = monitoring_client.get("/monitoring")
 
@@ -123,7 +123,7 @@ def test_monitoring_page_card_has_identity_status_detection_and_webrtc(
     assert "data-video-error" in response.text
     assert 'role="alert"' in response.text
     assert "data-last-detection" in response.text
-    assert "data-detection-count" in response.text
+    assert "data-detection-count" not in response.text
     assert "data-camera-role" in response.text
     assert "data-source-status" in response.text
     assert "data-analysis-status" in response.text
@@ -133,6 +133,35 @@ def test_monitoring_page_card_has_identity_status_detection_and_webrtc(
     assert "muted autoplay playsinline" in response.text
     # last_detection_at이 없는 fixture stream은 "상태 확인 중"으로 표시된다.
     assert "상태 확인 중" in response.text
+
+
+def test_monitoring_page_omits_requested_summary_and_refresh_metadata(
+    monitoring_client: TestClient,
+) -> None:
+    """화면 요약·갱신 시각·탐지 건수·강의실 UUID를 표시하지 않는다."""
+    response = monitoring_client.get("/monitoring")
+
+    assert response.status_code == 200
+    assert "대 중 1대 표시" not in response.text
+    assert "마지막 화면 갱신" not in response.text
+    assert "data-detection-count" not in response.text
+    assert "classroom-a101" not in response.text
+
+
+def test_monitoring_page_last_detection_omits_kst_suffix() -> None:
+    """마지막 탐지 시각은 한국 시각으로 변환하되 KST 꼬리표는 반복하지 않는다."""
+    service = _make_service(
+        replace(
+            make_stream(stream_id="stream-fresh", camera_id="camera-fresh"),
+            last_detection_at=NOW - timedelta(seconds=60),
+        )
+    )
+    with _client_with(service) as client:
+        response = client.get("/monitoring")
+
+    assert response.status_code == 200
+    assert "마지막 탐지" in response.text
+    assert "KST" not in response.text
 
 
 def test_monitoring_page_renders_detection_status_text_by_freshness() -> None:

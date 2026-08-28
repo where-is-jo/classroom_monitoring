@@ -21,7 +21,6 @@
     <span data-source-status class="status-label status-label--no-video">최근 탐지 없음</span>
     <p class="card-meta">
       <span>마지막 탐지 <strong data-last-detection>없음</strong></span>
-      <span>탐지 <strong data-detection-count>0</strong>건</span>
     </p>
     <p data-analysis-status hidden role="status"></p>
   </article>
@@ -34,7 +33,6 @@
     <span data-source-status class="status-label status-label--no-video">최근 탐지 없음</span>
     <p class="card-meta">
       <span>마지막 탐지 <strong data-last-detection>없음</strong></span>
-      <span>탐지 <strong data-detection-count>0</strong>건</span>
     </p>
     <p data-analysis-status hidden role="status"></p>
   </article>
@@ -231,14 +229,13 @@
             frame: { width_pixels: 1280, height_pixels: 720 },
             processing_status: "SUCCEEDED",
             observations: [
-              { display_label: "김로운", face_track_id: "face-17", detection_confidence: 0.9, face_bbox: [10, 20, 100, 200] },
-              { display_label: "미등록 얼굴", face_track_id: "face-18", detection_confidence: 0.8, face_bbox: [300, 50, 400, 250] }
+              { student_id: "52ccf5df-611e-4282-b8f0-6b892c62cc7d", display_label: "김로운", face_track_id: "face-17", detection_confidence: 0.9, face_bbox: [10, 20, 100, 200] },
+              { student_id: null, display_label: "미등록 얼굴", face_track_id: "face-18", detection_confidence: 0.8, face_bbox: [300, 50, 400, 250] }
             ],
             observations_count: 2
           });
         }
         var card1 = document.querySelector('[data-camera-id="camera-01"]');
-        var countEl = card1.querySelector("[data-detection-count]");
         var lastEl = card1.querySelector("[data-last-detection]");
         var boxCount = card1.querySelectorAll(".bbox-box").length;
         checkpoint("bbox-drawn", boxCount === 2, "boxes=" + boxCount);
@@ -246,12 +243,11 @@
           return item.textContent;
         });
         checkpoint("safe-identification-labels",
-          labels[0].indexOf("김로운") !== -1 && labels[1].indexOf("미등록 얼굴") !== -1,
+          labels[0] === "52ccf5df-611e-4282-b8f0-6b892c62cc7d" && labels[1] === "unknown",
           JSON.stringify(labels));
         checkpoint("track-label-visible",
-          labels[0].indexOf("#face-17") !== -1,
+          labels[0].indexOf("#face-17") === -1 && labels[0].indexOf("90%") === -1,
           JSON.stringify(labels));
-        checkpoint("detection-count-updated", countEl.textContent === "2", countEl.textContent);
         checkpoint("last-detection-updated", lastEl.textContent !== "없음", lastEl.textContent);
         var sourceStatus = card1.querySelector("[data-source-status]");
         checkpoint("face-source-connected",
@@ -297,7 +293,7 @@
             captured_at: "2026-08-14T12:00:00+09:00",
             frame: { width_pixels: 1280, height_pixels: 720 },
             detections: [
-              { display_label: "사람", track_id: "person-7", confidence: 0.88, bbox: [20, 30, 120, 210] }
+              { student_id: "cctv-student-uuid", display_label: "사람", track_id: "person-7", confidence: 0.88, bbox: [20, 30, 120, 210] }
             ],
             detections_count: 1
           });
@@ -305,7 +301,7 @@
         var card2 = document.querySelector('[data-camera-id="camera-02"]');
         checkpoint("cctv-object-detection-kept",
           card2.querySelectorAll(".bbox-box").length === 1 &&
-          card2.querySelector(".bbox-label").textContent.indexOf("#person-7") !== -1,
+          card2.querySelector(".bbox-label").textContent === "cctv-student-uuid",
           card2.querySelector(".bbox-label").textContent);
 
         /* 5) 오류 카드 한정: stream-02 signaling 실패는 카드 2에만 표시 */
