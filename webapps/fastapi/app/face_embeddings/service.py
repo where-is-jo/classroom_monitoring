@@ -82,7 +82,13 @@ class FaceEmbeddingService:
         return self._repository.list_student_ids(model_name)
 
     def delete_for_student(self, student_id: str) -> None:
+        """동의 철회. 벡터를 지우고 **등록 표시도 함께 되돌린다.**
+
+        표시를 남겨 두면 갤러리 완전성 검사가 "등록됐다는데 벡터가 없는 학생"을 보고
+        전체 얼굴 식별을 닫는다. 한 사람의 철회가 서비스 전체 정지로 번진다.
+        """
         self._repository.delete_by_student(student_id)
+        self._students.unregister_face(student_id)
 
 
 def select_evenly[T](values: list[T], maximum: int) -> list[T]:

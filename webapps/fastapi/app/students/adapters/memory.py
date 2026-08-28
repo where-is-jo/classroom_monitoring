@@ -52,6 +52,20 @@ class InMemoryStudentRepository:
             self._students[student_id] = saved
             return saved
 
+    def unregister_face(self, student_id: str, updated_at: datetime) -> Student | None:
+        with self._lock:
+            student = self._students.get(student_id)
+            if student is None:
+                return None
+            saved = replace(
+                student,
+                face_enrollment_id=None,
+                face_registered=False,
+                updated_at=updated_at,
+            )
+            self._students[student_id] = saved
+            return saved
+
     def find_by_id(self, student_id: str) -> StudentIdentity | None:
         student = self.get_student(student_id)
         return None if student is None else _to_identity(student)

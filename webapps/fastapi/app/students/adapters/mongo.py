@@ -80,6 +80,30 @@ class MongoStudentRepository:
             raise RepositoryUnavailableError() from None
         return None if document is None else _to_domain(document)
 
+    def unregister_face(self, student_id: str, updated_at: datetime) -> Student | None:
+        """얼굴 등록 표시를 되돌린다.
+
+        **이것이 없어서 동의 철회가 서비스를 멈추게 했다.** embedding만 지우고
+        `face_registered`를 참으로 남기면, 갤러리 완전성 검사가 "등록됐다는데 벡터가
+        없는 학생"을 보고 전체 식별을 실패로 닫는다. 사람이 학생 문서를 손으로 고치기
+        전까지 복구되지 않는다.
+        """
+        try:
+            document = self._collection.find_one_and_update(
+                document_id_filter(student_id),
+                {
+                    "$set": {
+                        "face_enrollment_id": None,
+                        "face_registered": False,
+                        "updated_at": updated_at,
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+        except PyMongoError:
+            raise RepositoryUnavailableError() from None
+        return None if document is None else _to_domain(document)
+
     def find_by_id(self, student_id: str) -> StudentIdentity | None:
         student = self.get_student(student_id)
         return None if student is None else _to_identity(student)
