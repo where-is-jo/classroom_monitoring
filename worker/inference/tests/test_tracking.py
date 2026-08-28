@@ -8,7 +8,12 @@ import numpy as np
 import pytest
 from shared.types import CapturedFrame
 
-from ..tracking import ByteTrackConfig, ByteTrackResultHandler, CameraByteTracker
+from ..tracking import (
+    ByteTrackConfig,
+    ByteTrackResultHandler,
+    CameraByteTracker,
+    _KalmanBBoxFilter,
+)
 from ..types import Detection, InferenceResult
 
 
@@ -60,6 +65,65 @@ def test_실제_촬영_간격으로_빠르게_이동한_bbox를_예측한다() -
     third = tracker.update(result(person(0.9, (50, 10, 70, 180))), observed_at=1.0)
 
     assert third.detections[0].track_id == first.detections[0].track_id
+
+
+def test_Kalman은_8차원_상태와_covariance를_초기화한다() -> None:
+    kalman_filter = _KalmanBBoxFilter.initiate(
+        np.asarray((0, 10, 20, 180), dtype=np.float64)
+    )
+
+    assert kalman_filter.mean.shape == (8,)
+    assert kalman_filter.covariance.shape == (8, 8)
+    assert tuple(kalman_filter.mean[:4]) == pytest.approx((10, 95, 2 / 17, 170))
+    assert tuple(kalman_filter.mean[4:]) == pytest.approx((0, 0, 0, 0))
+
+
+def test_Kalman_예측으로_빠르게_이동한_bbox의_ID를_유지한다() -> None:
+    tracker = CameraByteTracker(config(kalman_enabled=True))
+
+    first = tracker.update(result(person(0.9, (0, 10, 20, 180))), observed_at=0.0)
+    tracker.update(result(person(0.9, (10, 10, 30, 180))), observed_at=0.2)
+    third = tracker.update(result(person(0.9, (50, 10, 70, 180))), observed_at=1.0)
+
+    assert third.detections[0].track_id == first.detections[0].track_id
+
+
+def test_Kalman은_역행_timestamp에서_상태와_covariance를_이동시키지_않는다() -> None:
+    kalman_filter = _KalmanBBoxFilter.initiate(
+        np.asarray((0, 10, 20, 180), dtype=np.float64)
+    )
+    kalman_filter.mean[4] = 30.0
+    previous_mean = kalman_filter.mean.copy()
+    previous_covariance = kalman_filter.covariance.copy()
+
+    kalman_filter.predict(-0.5)
+
+    np.testing.assert_array_equal(kalman_filter.mean, previous_mean)
+    np.testing.assert_array_equal(kalman_filter.covariance, previous_covariance)
+
+
+def test_Kalman은_과도한_timestamp_간격을_1초로_제한한다() -> None:
+    bbox = np.asarray((0, 10, 20, 180), dtype=np.float64)
+    one_second = _KalmanBBoxFilter.initiate(bbox)
+    long_gap = _KalmanBBoxFilter.initiate(bbox)
+    one_second.mean[4] = long_gap.mean[4] = 30.0
+
+    one_second.predict(1.0)
+    long_gap.predict(30.0)
+
+    np.testing.assert_allclose(long_gap.mean, one_second.mean)
+    np.testing.assert_allclose(long_gap.covariance, one_second.covariance)
+
+
+def test_Kalman을_끄면_기존_속도_예측기를_유지한다() -> None:
+    tracker = CameraByteTracker(config(kalman_enabled=False))
+
+    tracker.update(result(person(0.9, (0, 10, 20, 180))), observed_at=0.0)
+    tracker.update(result(person(0.9, (10, 10, 30, 180))), observed_at=0.2)
+
+    track = tracker._tracks[1]
+    assert track.kalman_filter is None
+    assert tuple(track.predicted_bbox(1.0)) == pytest.approx((50, 10, 70, 180))
 
 
 def test_예측으로_설명되지_않는_큰_단절은_새_track으로_둔다() -> None:
@@ -242,6 +306,19 @@ def test_짧은_미탐_뒤에도_이동_예측으로_track을_회복한다() -> 
     tracker.update(result())
 
     recovered = tracker.update(result(person(0.9, (40, 10, 90, 180))))
+
+    assert recovered.detections[0].track_id == "person-1"
+
+
+def test_Kalman은_짧은_미탐_뒤에도_track을_회복한다() -> None:
+    tracker = CameraByteTracker(config(track_buffer_frames=3, kalman_enabled=True))
+    tracker.update(result(person(0.9, (10, 10, 60, 180))), observed_at=0.0)
+    tracker.update(result(person(0.9, (20, 10, 70, 180))), observed_at=0.2)
+    tracker.update(result(), observed_at=0.4)
+
+    recovered = tracker.update(
+        result(person(0.9, (40, 10, 90, 180))), observed_at=0.6
+    )
 
     assert recovered.detections[0].track_id == "person-1"
 

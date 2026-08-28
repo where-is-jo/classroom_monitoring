@@ -174,21 +174,212 @@ def _minimum_cost_assignment(costs: np.ndarray) -> tuple[tuple[int, int], ...]:
     return tuple(pairs)
 
 
+_KALMAN_POSITION_WEIGHT = 1.0 / 20
+_KALMAN_VELOCITY_WEIGHT = 1.0 / 160
+_MINIMUM_BOX_SIZE = 1e-6
+
+
+def _bbox_to_xyah(bbox: np.ndarray) -> np.ndarray:
+    width = max(float(bbox[2] - bbox[0]), _MINIMUM_BOX_SIZE)
+    height = max(float(bbox[3] - bbox[1]), _MINIMUM_BOX_SIZE)
+    return np.asarray(
+        (
+            float(bbox[0] + bbox[2]) / 2.0,
+            float(bbox[1] + bbox[3]) / 2.0,
+            width / height,
+            height,
+        ),
+        dtype=np.float64,
+    )
+
+
+def _xyah_to_bbox(xyah: np.ndarray) -> np.ndarray:
+    aspect_ratio = max(float(xyah[2]), _MINIMUM_BOX_SIZE)
+    height = max(float(xyah[3]), _MINIMUM_BOX_SIZE)
+    width = aspect_ratio * height
+    return np.asarray(
+        (
+            float(xyah[0]) - width / 2.0,
+            float(xyah[1]) - height / 2.0,
+            float(xyah[0]) + width / 2.0,
+            float(xyah[1]) + height / 2.0,
+        ),
+        dtype=np.float64,
+    )
+
+
+@dataclass
+class _KalmanBBoxFilter:
+    """bbox를 ``[cx, cy, a, h, vx, vy, va, vh]`` 상태로 추정한다."""
+
+    mean: np.ndarray
+    covariance: np.ndarray
+
+    @classmethod
+    def initiate(cls, bbox: np.ndarray) -> _KalmanBBoxFilter:
+        measurement = _bbox_to_xyah(bbox)
+        height = measurement[3]
+        mean = np.r_[measurement, np.zeros(4, dtype=np.float64)]
+        standard_deviation = np.asarray(
+            (
+                2 * _KALMAN_POSITION_WEIGHT * height,
+                2 * _KALMAN_POSITION_WEIGHT * height,
+                1e-2,
+                2 * _KALMAN_POSITION_WEIGHT * height,
+                10 * _KALMAN_VELOCITY_WEIGHT * height,
+                10 * _KALMAN_VELOCITY_WEIGHT * height,
+                1e-5,
+                10 * _KALMAN_VELOCITY_WEIGHT * height,
+            ),
+            dtype=np.float64,
+        )
+        return cls(mean=mean, covariance=np.diag(standard_deviation**2))
+
+    @property
+    def bbox(self) -> np.ndarray:
+        return _xyah_to_bbox(self.mean[:4])
+
+    def predict(self, elapsed_seconds: float) -> None:
+        dt = min(max(float(elapsed_seconds), 0.0), 1.0)
+        if dt == 0.0:
+            return
+
+        motion = np.eye(8, dtype=np.float64)
+        motion[:4, 4:] = np.eye(4, dtype=np.float64) * dt
+        height = max(float(self.mean[3]), _MINIMUM_BOX_SIZE)
+        standard_deviation = np.asarray(
+            (
+                _KALMAN_POSITION_WEIGHT * height,
+                _KALMAN_POSITION_WEIGHT * height,
+                1e-2,
+                _KALMAN_POSITION_WEIGHT * height,
+                _KALMAN_VELOCITY_WEIGHT * height,
+                _KALMAN_VELOCITY_WEIGHT * height,
+                1e-5,
+                _KALMAN_VELOCITY_WEIGHT * height,
+            ),
+            dtype=np.float64,
+        ) * dt
+        self.mean = motion @ self.mean
+        self.covariance = (
+            motion @ self.covariance @ motion.T
+            + np.diag(standard_deviation**2)
+        )
+        self._normalize()
+
+    def update(self, bbox: np.ndarray) -> None:
+        measurement = _bbox_to_xyah(bbox)
+        height = max(float(self.mean[3]), _MINIMUM_BOX_SIZE)
+        projection = np.zeros((4, 8), dtype=np.float64)
+        projection[:4, :4] = np.eye(4, dtype=np.float64)
+        measurement_deviation = np.asarray(
+            (
+                _KALMAN_POSITION_WEIGHT * height,
+                _KALMAN_POSITION_WEIGHT * height,
+                1e-1,
+                _KALMAN_POSITION_WEIGHT * height,
+            ),
+            dtype=np.float64,
+        )
+        measurement_covariance = np.diag(measurement_deviation**2)
+        projected_covariance = (
+            projection @ self.covariance @ projection.T
+            + measurement_covariance
+        )
+        cross_covariance = self.covariance @ projection.T
+        kalman_gain = np.linalg.solve(
+            projected_covariance, cross_covariance.T
+        ).T
+        innovation = measurement - projection @ self.mean
+        self.mean = self.mean + kalman_gain @ innovation
+
+        # Joseph form은 부동소수점 오차로 covariance가 비대칭·음수가 되는 것을 막는다.
+        identity = np.eye(8, dtype=np.float64)
+        residual = identity - kalman_gain @ projection
+        self.covariance = (
+            residual @ self.covariance @ residual.T
+            + kalman_gain @ measurement_covariance @ kalman_gain.T
+        )
+        self._normalize()
+
+    def _normalize(self) -> None:
+        self.mean[2] = max(float(self.mean[2]), _MINIMUM_BOX_SIZE)
+        self.mean[3] = max(float(self.mean[3]), _MINIMUM_BOX_SIZE)
+        self.covariance = (self.covariance + self.covariance.T) / 2.0
+
+
 @dataclass
 class _Track:
     track_id: int
     bbox: np.ndarray
     last_observed_at: float
+    last_observed_bbox: np.ndarray | None = None
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float64))
+    kalman_filter: _KalmanBBoxFilter | None = None
+    prediction_observed_at: float | None = None
     hits: int = 1
     missed_frames: int = 0
     age_frames: int = 1
 
+    @classmethod
+    def create(
+        cls,
+        track_id: int,
+        bbox: np.ndarray,
+        *,
+        observed_at: float,
+        kalman_enabled: bool,
+    ) -> _Track:
+        return cls(
+            track_id=track_id,
+            bbox=bbox,
+            last_observed_at=observed_at,
+            last_observed_bbox=bbox.copy(),
+            kalman_filter=(
+                _KalmanBBoxFilter.initiate(bbox) if kalman_enabled else None
+            ),
+            prediction_observed_at=observed_at if kalman_enabled else None,
+        )
+
+    def predict(self, observed_at: float) -> None:
+        if self.kalman_filter is None:
+            return
+        previous = self.prediction_observed_at
+        if previous is None:
+            previous = self.last_observed_at
+        self.kalman_filter.predict(observed_at - previous)
+        self.prediction_observed_at = max(previous, observed_at)
+        self.bbox = self.kalman_filter.bbox
+
     def predicted_bbox(self, observed_at: float) -> np.ndarray:
+        if self.kalman_filter is not None:
+            return self.bbox
         elapsed_seconds = max(0.0, observed_at - self.last_observed_at)
         return self.bbox + self.velocity * elapsed_seconds
 
     def update(self, bbox: np.ndarray, observed_at: float) -> None:
+        if self.kalman_filter is not None:
+            elapsed_seconds = observed_at - self.last_observed_at
+            if (
+                self.hits == 1
+                and elapsed_seconds > 1e-6
+                and self.last_observed_bbox is not None
+            ):
+                # 첫 두 실관측으로 초당 속도를 초기화한다. 표준 ByteTrack은 프레임
+                # 단위 dt=1을 전제로 하지만 여기서는 실제 촬영 시각(초)을 쓰므로,
+                # 초기 속도를 0으로 두면 짧은 간격의 이동을 지나치게 작게 본다.
+                self.kalman_filter.mean[4:] = (
+                    _bbox_to_xyah(bbox)
+                    - _bbox_to_xyah(self.last_observed_bbox)
+                ) / elapsed_seconds
+            self.kalman_filter.update(bbox)
+            self.bbox = self.kalman_filter.bbox
+            self.last_observed_bbox = bbox.copy()
+            self.last_observed_at = max(self.last_observed_at, observed_at)
+            self.hits += 1
+            self.missed_frames = 0
+            return
+
         elapsed_seconds = observed_at - self.last_observed_at
         if elapsed_seconds > 1e-6:
             observed_velocity = (bbox - self.bbox) / elapsed_seconds
@@ -211,6 +402,7 @@ class ByteTrackConfig:
     first_match_iou_threshold: float = 0.3
     second_match_iou_threshold: float = 0.2
     track_buffer_frames: int = 30
+    kalman_enabled: bool = False
     person_detection_postprocess_enabled: bool = False
     duplicate_iou_threshold: float = 0.5
     duplicate_ios_threshold: float = 0.85
@@ -310,6 +502,7 @@ class CameraByteTracker:
         self.expired_track_ids_last_update = ()
         for track in self._tracks.values():
             track.age_frames += 1
+            track.predict(current_observed_at)
         people: Sequence[tuple[int, Detection]] = [
             (index, detection)
             for index, detection in enumerate(result.detections)
@@ -373,10 +566,11 @@ class CameraByteTracker:
                 continue
             track_id = self._next_track_id
             self._next_track_id += 1
-            self._tracks[track_id] = _Track(
+            self._tracks[track_id] = _Track.create(
                 track_id,
                 _bbox_array(detection.bbox),
-                last_observed_at=current_observed_at,
+                observed_at=current_observed_at,
+                kalman_enabled=self._config.kalman_enabled,
             )
             assignments[detection_index] = track_id
             self.created_last_update += 1

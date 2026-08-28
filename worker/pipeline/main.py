@@ -547,6 +547,7 @@ def build_runner(
                 pipeline_settings.bytetrack_second_match_iou_threshold
             ),
             track_buffer_frames=pipeline_settings.bytetrack_buffer_frames,
+            kalman_enabled=pipeline_settings.bytetrack_kalman_enabled,
             person_detection_postprocess_enabled=(
                 pipeline_settings.person_detection_postprocess_enabled
             ),
