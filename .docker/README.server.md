@@ -401,6 +401,13 @@ FACE_RECOGNITION_MODEL_VERSION=cvlface-adaface-ir50-webface4m-fe7718c6
 FACE_EMBEDDING_COLLECTION=face_embeddings_adaface
 ```
 
+GPU 배포 workflow는 서버의 비밀 env를 저장소에서 덮어쓰거나 출력하지 않는다. 다만
+`FACE_RECOGNIZER`와 `FACE_RECOGNITION_MODEL_PATH`가 어긋나 전체 배포가 막히는 경우,
+선택 모델의 ONNX 파일이 `.docker/models/face/` 아래 실제로 있는지 먼저 확인한 뒤 경로
+키 한 줄만 위 계약값으로 원자적으로 맞춘다. 다른 MongoDB·갤러리·threshold 값은
+수정하지 않으며, 모델 파일이 없거나 인식기가 올바르지 않으면 env를 변경하지 않고
+배포를 중단한다.
+
 `.docker/env/worker.dev.env`에는 입구와 교실 CCTV가 모두 있어야 한다. 아래 camera ID는
 FastAPI 카메라 설정 및 인계 ROI 설정의 ID와 정확히 같아야 한다.
 
