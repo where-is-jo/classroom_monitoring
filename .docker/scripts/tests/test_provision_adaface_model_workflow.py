@@ -12,7 +12,7 @@ REQUIREMENTS_PATH = (
     / "requirements-adaface-export.txt"
 )
 EXPECTED_SHA256 = (
-    "7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8"
+    "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc"
 )
 
 
