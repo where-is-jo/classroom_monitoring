@@ -396,8 +396,13 @@ def test_classroom_list_page_shows_assigned_student_on_seat_map(
 def test_classroom_list_page_shows_seat_status_student_and_info_cards(
     client: TestClient,
 ) -> None:
-    """좌표 없는 좌석 카드에는 좌석 정보·상태·학생 이름을 명시한다."""
-    classroom = _create_classroom(client, code="R-C01", name="카드테스트 강의실")
+    """좌표 없는 좌석 카드는 핵심 좌석·학생 정보 네 가지만 표시한다."""
+    classroom = _create_classroom(
+        client,
+        code="R-C01",
+        name="카드테스트 강의실",
+        location="숨길 위치 4A",
+    )
     classroom_id = str(classroom["id"])
     assigned_seat = _create_seat(
         client,
@@ -417,6 +422,7 @@ def test_classroom_list_page_shows_seat_status_student_and_info_cards(
 
     assert response.status_code == 200
     assert "좌석 현황" in response.text
+    assert "숨길 위치 4A" not in response.text
     assert "마지막 관측 -" not in response.text
     assert '<h2 id="seat-list-title">' not in response.text
     assert 'aria-label="좌석 현황 상세"' in response.text
@@ -426,6 +432,18 @@ def test_classroom_list_page_shows_seat_status_student_and_info_cards(
     assert response.text.count("좌석 정보") == 2
     assert response.text.count("좌석 상태") >= 2
     assert response.text.count("학생 이름") == 2
+    assert response.text.count("학생 상태") == 2
+    cards = re.findall(
+        r'<li class="seat-list-card[^>]*>.*?</li>',
+        response.text,
+        flags=re.DOTALL,
+    )
+    assert len(cards) == 2
+    assert all(card.count("<dt>") == 4 for card in cards)
+    assert all("지정 좌석" not in card for card in cards)
+    assert all("신뢰도" not in card for card in cards)
+    assert all("마지막 관측" not in card for card in cards)
+    assert all("data-student-state-icon" not in card for card in cards)
     assert "SC01" in response.text
     assert "확인 필요" in response.text
     assert "김철수" in response.text

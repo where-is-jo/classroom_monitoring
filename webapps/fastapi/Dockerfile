@@ -17,7 +17,6 @@ COPY app ./app
 COPY config ./config
 COPY static ./static
 COPY templates ./templates
-COPY demo_assets ./demo_assets
 COPY api-spec ./api-spec
 
 RUN useradd --create-home --shell /usr/sbin/nologin appuser
