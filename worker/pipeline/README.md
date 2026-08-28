@@ -66,7 +66,7 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `inference_poll_timeout_seconds` | 소비자가 종료 신호를 확인하는 주기 | 기본 0.5 |
 | `inference_max_consecutive_failures` | 연속 추론 실패 허용 횟수 | 기본 5 |
 | `face_identity_sample_interval_frames` (`FACE_IDENTITY_SAMPLE_INTERVAL_FRAMES`) | 입구 얼굴 프레임 샘플링 간격 | 기본 20. 20 FPS 입력에서 약 1 FPS. 괄호의 환경변수로 재정의 가능 |
-| `person_tracking_sample_interval_frames` (`PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES`) | CCTV 사람 추적 프레임 샘플링 간격 | 기본 4. 20 FPS 입력에서 약 5 FPS. 괄호의 환경변수로 재정의 가능 |
+| `person_tracking_sample_interval_frames` (`PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES`) | CCTV 사람 추적 프레임 샘플링 간격 | 기본 4. develop compose는 2로 재정의해 20 FPS 입력에서 약 10 FPS로 처리 |
 | `FACE_IDENTITY_URL` | deeplearning 내부 서비스 주소 | `.env.{APP_ENV}`. 비우면 얼굴 식별 비활성 |
 | `FACE_IDENTITY_CAMERA_IDS` | 얼굴 식별할 입구 camera ID 목록 | `.env.{APP_ENV}`. URL을 주면 필수 |
 | `MODEL_PATH` | 사람 탐지 가중치 | 가중치 파일은 저장소에 커밋하지 않는다 |
@@ -74,7 +74,7 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `INFERENCE_TARGET_CLASS_IDS` | 모델 클래스 번호→이름 JSON | 학습 모델과 함께 설정. 사람 전용 모델은 보통 `{"0":"person"}` |
 | `PERSON_TRACKING_CAMERA_IDS` | YOLO·ByteTrack 대상 CCTV camera ID | 비우면 `STREAM_SOURCES`에서 얼굴 전용 camera를 뺀 나머지. 얼굴 전용 목록과 겹치면 기동 실패 |
 | `IDENTITY_HANDOVER_ROUTES` | 입구·CCTV camera ID와 CCTV 문 영역 JSON | FastAPI 설정을 처음 읽기 전과 장애 시 사용할 정적 초기·fallback 값 |
-| `bytetrack_*` | 두 단계 매칭·track buffer와 Kalman 예측 | Kalman은 기본 꺼짐. develop compose에서만 활성화 |
+| `bytetrack_*` | 두 단계 매칭·track buffer와 Kalman 예측 | buffer 기본 30. develop compose는 샘플 간격 단축과 함께 60으로 재정의해 약 6초 복구 창 유지. Kalman은 기본 꺼짐 |
 | `person_track_lifecycle_enabled` | tentative → tracked → lost → removed 상태 전환 | 기본 꺼짐. develop에서는 tentative를 외부 payload에서만 숨김 |
 | `person_detection_postprocess_*` | 사람 전용 IoU/IoS 중복 제거와 미매칭 저신뢰 제거 | 기본 꺼짐. develop compose에서만 활성화 |
 | `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도와 동적 설정 on/off·갱신 주기·timeout | `config/settings.yml` |
