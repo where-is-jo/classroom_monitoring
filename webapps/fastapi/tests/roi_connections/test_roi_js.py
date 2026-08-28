@@ -173,8 +173,14 @@ def test_capture_stage_is_scaled_to_fit_the_page() -> None:
 def test_toolbar_flows_horizontally_instead_of_stacking() -> None:
     style = (SCRIPT.parent / "roi-connections.css").read_text(encoding="utf-8")
 
-    assert ".roi-filter-row { display: flex; justify-content: space-between; align-items: center; gap: 5px;" in style
-    assert ".roi-filter-wrap { display: flex; justify-content: center; align-items: center; gap: 8px;" in style
+    assert (
+        ".roi-filter-row { display: flex; justify-content: space-between; align-items: center; gap: 5px;"
+        in style
+    )
+    assert (
+        ".roi-filter-wrap { display: flex; justify-content: center; align-items: center; gap: 8px;"
+        in style
+    )
     assert "flex-direction: column-reverse" not in style
 
 
