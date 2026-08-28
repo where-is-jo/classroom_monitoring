@@ -380,6 +380,14 @@ def test_GPU_compose는_재빌드할_때_덮어쓰는_latest_이미지명을_쓴
     assert "ghcr.io/where-is-jo/classroom-monitoring-worker:local" not in compose
 
 
+def test_GPU_develop은_사람_탐지_후처리를_명시적으로_켠다() -> None:
+    compose_path = Path(__file__).resolve().parents[2] / "compose.main.dev.gpu.yml"
+    compose = compose_path.read_text(encoding="utf-8")
+
+    worker = compose.split("  inference-worker:", 1)[1].split("\n  mediamtx:", 1)[0]
+    assert 'PERSON_DETECTION_POSTPROCESS_ENABLED: "true"' in worker
+
+
 def test_gpu_server_passes_without_fastapi_env(tmp_path: Path) -> None:
     """`fastapi.dev.env`가 없는 것이 GPU 서버의 정상 상태다.
 

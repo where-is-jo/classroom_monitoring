@@ -47,6 +47,24 @@ def test_입구와_CCTV는_역할별_샘플링_주기를_쓴다() -> None:
     assert settings.person_tracking_sample_interval_frames == 4
 
 
+def test_사람_후처리는_기존_동작이_기본이고_임계값을_고정한다() -> None:
+    settings = build_settings()
+
+    assert settings.person_detection_postprocess_enabled is False
+    assert settings.person_detection_duplicate_iou_threshold == 0.5
+    assert settings.person_detection_duplicate_ios_threshold == 0.85
+
+
+def test_사람_후처리는_환경변수로_활성화할_수_있다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PERSON_DETECTION_POSTPROCESS_ENABLED", "true")
+
+    settings = build_settings()
+
+    assert settings.person_detection_postprocess_enabled is True
+
+
 def test_역할별_샘플링_주기는_환경변수로_재정의할_수_있다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
