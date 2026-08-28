@@ -26,10 +26,14 @@ MODEL_FILE_SHA256 = {
         "da82e6e1dbe98ce23afb78283b858ad65e32484a2bac82e9adae298d04ff845d"
     ),
 }
-# GitHub Linux CPU builder에서 아래 고정 source·의존성으로 만든 산출물이다. Windows에서
-# 만든 기존 ONNX는 그래프 직렬화가 달라 바이트 SHA가 다르므로 배포 산출물은 이 값으로
-# 한정한다. source 가중치 두 개의 SHA도 위에서 별도로 검증한다.
-ONNX_FILE_SHA256 = "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc"
+# 동일한 공식 source·고정 의존성의 ONNX 직렬화가 아래 두 바이트열로 재현됐다.
+# 두 산출물 모두 467/467 가중치 로드와 CPU (N, 512) 실행 검증을 통과했다.
+ONNX_FILE_SHA256_ALLOWLIST = frozenset(
+    {
+        "7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8",
+        "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc",
+    }
+)
 DEFAULT_MODEL_ROOT = Path(__file__).resolve().parents[1] / ".models" / "adaface"
 DEFAULT_SOURCE_DIR = DEFAULT_MODEL_ROOT / "cvlface_ir50_webface4m"
 DEFAULT_OUTPUT_PATH = DEFAULT_MODEL_ROOT / "adaface_ir50_webface4m.onnx"
@@ -134,10 +138,10 @@ def export_onnx(model, output_path: Path) -> None:
 
 def verify_onnx(output_path: Path) -> None:
     actual_sha256 = sha256_file(output_path)
-    if actual_sha256 != ONNX_FILE_SHA256:
+    if actual_sha256 not in ONNX_FILE_SHA256_ALLOWLIST:
         raise RuntimeError(
-            "AdaFace ONNX SHA-256이 고정 산출물과 다릅니다. "
-            f"expected={ONNX_FILE_SHA256} actual={actual_sha256}"
+            "AdaFace ONNX SHA-256이 검증된 산출물 목록에 없습니다. "
+            f"actual={actual_sha256}"
         )
 
     import numpy as np
@@ -175,7 +179,7 @@ def main() -> None:
     model = load_model(args.source_dir)
     print("3/4 ONNX 변환")
     export_onnx(model, args.output)
-    print("4/4 ONNX SHA-256 및 CPU (N, 512) 검증")
+    print("4/4 ONNX 허용 SHA-256 및 CPU (N, 512) 검증")
     verify_onnx(args.output)
     print(f"완료: {args.output}")
     print(
