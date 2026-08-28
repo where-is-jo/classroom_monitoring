@@ -23,9 +23,7 @@ from validate_face_handover_deployment import (
 )
 
 MODEL_PATH_KEY = "FACE_RECOGNITION_MODEL_PATH"
-_ASSIGNMENT = re.compile(
-    rf"^(?P<prefix>\s*(?:export\s+)?{MODEL_PATH_KEY}\s*=).*$"
-)
+_ASSIGNMENT = re.compile(rf"^(?P<prefix>\s*(?:export\s+)?{MODEL_PATH_KEY}\s*=).*$")
 
 
 def expected_model_path(recognizer: str) -> str:
@@ -109,7 +107,9 @@ def synchronize_face_recognizer_model_path(
     # 중복을 그대로 두면 사람이 보는 줄과 실제 적용 값이 달라질 수 있다.
     updated = _replace_assignment(content, expected)
     if values.get(MODEL_PATH_KEY, "").strip() == expected:
-        print(f"얼굴 인식 모델 경로가 이미 {recognizer.strip().lower()} 계약과 일치합니다.")
+        print(
+            f"얼굴 인식 모델 경로가 이미 {recognizer.strip().lower()} 계약과 일치합니다."
+        )
         return False
 
     _atomic_write(env_path, updated, has_utf8_bom=has_utf8_bom)
