@@ -25,11 +25,10 @@ from app.main import app
 from app.shared.config import Settings
 from app.shared.dependencies import (
     get_classroom_service,
-    get_video_demo_service,
     get_video_stream_service,
 )
 from app.shared.errors import RepositoryUnavailableError
-from app.video_monitoring.service import VideoDemoService, VideoStreamService
+from app.video_monitoring.service import VideoStreamService
 
 NOW = datetime(2026, 8, 10, 3, 0, tzinfo=UTC)
 
@@ -74,9 +73,7 @@ def build_service() -> ClassroomService:
 @pytest.fixture
 def minimal_client() -> Iterator[TestClient]:
     classroom_service = build_service()
-    video_service = VideoDemoService(clock=lambda: NOW)
     app.dependency_overrides[get_classroom_service] = lambda: classroom_service
-    app.dependency_overrides[get_video_demo_service] = lambda: video_service
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
@@ -90,8 +87,6 @@ def test_product_navigation_shows_current_product_sections(minimal_client: TestC
     for path, heading in (
         ("/classrooms", "강의실 좌석 현황"),
         ("/monitoring", "실시간 모니터링"),
-        # 규칙 기반 데모 카탈로그 검색이다. LLM 검색과 이름이 겹치지 않게 정리했다.
-        ("/video-search", "데모 영상 검색"),
         ("/llm-search", "자연어 탐지 검색"),
     ):
         response = minimal_client.get(path)
@@ -103,13 +98,22 @@ def test_product_navigation_shows_current_product_sections(minimal_client: TestC
             "강의실 좌석 현황",
             "실시간 모니터링",
             "자연어 탐지 검색",
-            "데모 영상 검색",
             "학생 관리",
             "ROI 연결",
             "좌석 관리",
         ):
             assert label in response.text
-        for removed in ("얼굴 등록", "로그인", "사용자 관리", "직원 관리", "면담", "알림"):
+        for removed in (
+            "얼굴 등록",
+            "로그인",
+            "사용자 관리",
+            "직원 관리",
+            "면담",
+            "알림",
+            # 데모 영상 검색은 걷어냈다. 메뉴가 되살아나면 여기서 잡힌다.
+            "데모 영상 검색",
+            "/video-search",
+        ):
             assert removed not in response.text
         assert "set-cookie" not in response.headers
 
@@ -202,7 +206,6 @@ def test_openapi_contains_required_domain_apis(minimal_client: TestClient) -> No
         "/api/v1/video-streams/{stream_id}/entry-identity-events/stream",
         "/api/v1/video-streams/{stream_id}/playback-sessions",
         "/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}",
-        "/api/v1/video-searches",
         "/api/v1/video-segments",
         # 얼굴 등록
         "/api/v1/students/{student_id}/face-enrollments",
@@ -256,48 +259,17 @@ def test_observation_batch_is_idempotent_and_older_data_does_not_replace_current
     assert current_state == SeatOccupancy.OCCUPIED
 
 
-def test_natural_language_demo_search_and_validation(minimal_client: TestClient) -> None:
-    result = minimal_client.post(
-        "/api/v1/video-searches",
-        json={"query": "B203 장비 구역 이동", "limit": 10},
-    )
-    invalid = minimal_client.post("/api/v1/video-searches", json={"query": ""})
-    assert result.status_code == 200
-    assert result.json()["total"] == 1
-    assert result.json()["items"][0]["is_demo"] is True
-    assert invalid.status_code == 422
-    assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
-
-
-def test_search_page_accepts_blank_optional_period_fields(minimal_client: TestClient) -> None:
-    response = minimal_client.get(
-        "/video-search",
-        params={"query": "B203 장비 구역 이동", "from": "", "to": "", "limit": 20},
-    )
-    assert response.status_code == 200
-    assert "검색 결과" in response.text
-    assert "B203 실습 장비 구역 움직임" in response.text
-
-
-def test_empty_provider_keeps_monitoring_and_search_pages_available(
+def test_empty_provider_keeps_monitoring_page_available(
     minimal_client: TestClient,
 ) -> None:
-    empty_video_service = VideoDemoService(streams=(), clips=(), clock=lambda: NOW)
-    app.dependency_overrides[get_video_demo_service] = lambda: empty_video_service
-
+    """등록된 카메라가 없어도 화면은 열리고, 빈 상태를 그대로 말한다."""
     monitoring = minimal_client.get("/monitoring")
-    search = minimal_client.get("/video-search")
     streams = minimal_client.get("/api/v1/video-streams")
-    results = minimal_client.post("/api/v1/video-searches", json={"query": "사람"})
 
     assert monitoring.status_code == 200
     assert "연결된 카메라가 없습니다." in monitoring.text
     assert "학생 부재로 해석하지 않습니다" in monitoring.text
-    assert search.status_code == 200
-    assert "검색할 운영 metadata가 없습니다." in search.text
     assert streams.json() == {"items": [], "total": 0}
-    assert results.status_code == 200
-    assert results.json()["items"] == []
 
 
 def test_classroom_page_distinguishes_no_classroom_no_seat_and_unobserved_seat(
@@ -332,7 +304,7 @@ def test_classroom_page_distinguishes_no_classroom_no_seat_and_unobserved_seat(
     assert unobserved.json()["seats"][0]["current_occupancy"]["observed_at"] is None
 
 
-def test_repository_failures_are_not_replaced_with_demo_data(
+def test_repository_failures_surface_instead_of_empty_results(
     minimal_client: TestClient,
 ) -> None:
     def unavailable_classroom_service() -> ClassroomService:
@@ -350,27 +322,6 @@ def test_repository_failures_are_not_replaced_with_demo_data(
     monitoring = minimal_client.get("/monitoring")
     assert monitoring.status_code == 503
     assert "요청을 처리할 수 없습니다" in monitoring.text
-
-
-def test_search_rejects_reversed_period_and_returns_empty_result(
-    minimal_client: TestClient,
-) -> None:
-    invalid = minimal_client.post(
-        "/api/v1/video-searches",
-        json={
-            "query": "사람",
-            "from": "2026-08-10T10:00:00+09:00",
-            "to": "2026-08-10T09:00:00+09:00",
-        },
-    )
-    empty = minimal_client.post(
-        "/api/v1/video-searches",
-        json={"query": "존재하지않는검색어", "limit": 5},
-    )
-    assert invalid.status_code == 422
-    assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
-    assert empty.status_code == 200
-    assert empty.json() == {"items": [], "total": 0, "limit": 5}
 
 
 def test_demo_seed_is_idempotent() -> None:
