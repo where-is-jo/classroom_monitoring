@@ -22,6 +22,7 @@
 | `identity_handoff_total` | `outcome` | 4 |
 | `identity_handoff_attach_seconds` | 없음 | 1 |
 | `identity_handoff_timestamp_issues_total` | `reason` | 3 (`negative`, `expired`, `missing`) |
+| `identity_track_recovery_total` | `outcome` | 3 (`recovered`, `deferred`, `expired`) |
 
 `camera_id`는 `STREAM_SOURCES`에 적은 카메라만 나오므로 대수가 고정이다. **프레임
 번호·이벤트 id·학생 id는 label로 쓰지 않는다** — 값이 무한히 늘어나고, 학생 id는
@@ -44,6 +45,7 @@ __all__ = [
     "IDENTITY_HANDOFF_ATTACH_SECONDS",
     "IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL",
     "IDENTITY_HANDOFF_TOTAL",
+    "IDENTITY_TRACK_RECOVERY_TOTAL",
     "INFERENCE_DURATION_SECONDS",
     "PERSON_TRACKS_ACTIVE",
     "PERSON_TRACKS_CREATED_TOTAL",
@@ -184,6 +186,14 @@ IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL = Counter(
     f"{METRIC_PREFIX}identity_handoff_timestamp_issues_total",
     "신원 인계 지연을 측정하지 못한 시각 문제",
     labelnames=("reason",),
+)
+
+# lost 신원을 새 track으로 옮긴 결과다. 학생·track ID는 label로 내보내지 않고,
+# 양방향 유일성이 깨진 보류(deferred)와 3초 만료를 고정된 outcome으로만 센다.
+IDENTITY_TRACK_RECOVERY_TOTAL = Counter(
+    f"{METRIC_PREFIX}identity_track_recovery_total",
+    "lost 사람 track 신원 복구 결과",
+    labelnames=("outcome",),
 )
 
 

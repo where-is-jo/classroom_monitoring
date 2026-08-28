@@ -163,6 +163,7 @@ def build_result_handlers(
     identity_handover_clock_skew_seconds: float = 0.5,
     identity_handover_track_stale_seconds: float = 30.0,
     identity_handover_min_confidence: float = 0.0,
+    identity_track_recovery_enabled: bool = False,
     available_camera_ids: frozenset[str] | None = None,
     entry_camera_ids: frozenset[str] = frozenset(),
     classroom_camera_ids: frozenset[str] = frozenset(),
@@ -257,6 +258,7 @@ def build_result_handlers(
             clock_skew_seconds=identity_handover_clock_skew_seconds,
             track_stale_seconds=identity_handover_track_stale_seconds,
             minimum_identity_confidence=identity_handover_min_confidence,
+            identity_track_recovery_enabled=identity_track_recovery_enabled,
             available_camera_ids=available_camera_ids,
             entry_camera_ids=entry_camera_ids,
             classroom_camera_ids=classroom_camera_ids,
@@ -273,6 +275,7 @@ def build_result_handlers(
             clock_skew_seconds=identity_handover_clock_skew_seconds,
             track_stale_seconds=identity_handover_track_stale_seconds,
             minimum_identity_confidence=identity_handover_min_confidence,
+            identity_track_recovery_enabled=identity_track_recovery_enabled,
         )
 
     if coordinator is not None:
@@ -291,6 +294,11 @@ def build_result_handlers(
             ),
             internal_track_handler=(
                 coordinator.observe_classroom_tracking
+                if coordinator is not None
+                else None
+            ),
+            transition_handler=(
+                coordinator.handle_track_transitions
                 if coordinator is not None
                 else None
             ),
@@ -602,6 +610,9 @@ def build_runner(
         ),
         identity_handover_min_confidence=(
             pipeline_settings.identity_handover_min_confidence
+        ),
+        identity_track_recovery_enabled=(
+            pipeline_settings.identity_track_recovery_enabled
         ),
         available_camera_ids=frozenset(configured_camera_ids),
         entry_camera_ids=face_identity_camera_ids,
