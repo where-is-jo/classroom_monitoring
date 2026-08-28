@@ -52,6 +52,10 @@ bytetrack_new_track_threshold: 0.6
 bytetrack_first_match_iou_threshold: 0.3
 bytetrack_second_match_iou_threshold: 0.2
 bytetrack_buffer_frames: 30
+# 기존 결과를 기본으로 유지하고 develop compose에서 명시적으로 켠다.
+person_detection_postprocess_enabled: false
+person_detection_duplicate_iou_threshold: 0.5
+person_detection_duplicate_ios_threshold: 0.85
 
 # 입구에서 식별된 시각과 CCTV 문 영역에서 새 track이 생긴 시각의 허용 범위.
 # FastAPI의 인계 ROI 관리 화면을 설정 정본으로 사용하고 5초마다 갱신한다. 조회 실패 시
