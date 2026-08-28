@@ -45,7 +45,7 @@ FACE_MODEL_CONFIGS = {
         # 배치하는 ONNX의 해시이며, training/prepare_adaface_model.py의
         # ONNX_FILE_SHA256과 같은 값이다. 셋 중 하나만 바꾸면 배포가 막힌다.
         "model_sha256": (
-            "7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8"
+            "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc"
         ),
     },
 }

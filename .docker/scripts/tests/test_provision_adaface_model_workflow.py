@@ -1,13 +1,15 @@
+import sys
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPOSITORY_ROOT / ".docker" / "scripts"))
 WORKFLOW_PATH = (
     REPOSITORY_ROOT / ".github" / "workflows" / "provision-adaface-model.yml"
 )
 REQUIREMENTS_PATH = (
     REPOSITORY_ROOT / "deeplearning" / "training" / "requirements-adaface-export.txt"
 )
-EXPECTED_SHA256 = "7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8"
+EXPECTED_SHA256 = "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc"
 
 
 def test_AdaFace_모델_배치는_수동_실행만_허용한다() -> None:

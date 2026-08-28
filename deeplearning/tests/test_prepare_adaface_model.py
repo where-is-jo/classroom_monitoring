@@ -41,5 +41,5 @@ def test_ONNX_hash가_고정_산출물과_다르면_거부한다(tmp_path: Path)
     output_path = tmp_path / "adaface.onnx"
     output_path.write_bytes(b"tampered")
 
-    with pytest.raises(RuntimeError, match="ONNX SHA-256"):
+    with pytest.raises(RuntimeError, match="expected=.* actual="):
         prepare_adaface_model.verify_onnx(output_path)
