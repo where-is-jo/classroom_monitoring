@@ -406,9 +406,10 @@ FastAPI 카메라 설정 및 인계 ROI 설정의 ID와 정확히 같아야 한�
 
 ```dotenv
 STREAM_SOURCES=camera-01=rtsp://mediamtx:8554/camera-01,classroom-cctv=rtsp://mediamtx:8554/classroom-cctv
-MODEL_PATH=/models/person-yolo11n-original-v005.pt
-MODEL_CONTRACT_PATH=/models/person-yolo11n-original-v005.contract.json
+MODEL_PATH=/models/person-yolo11n-n1-v008.pt
+MODEL_CONTRACT_PATH=/models/person-yolo11n-n1-v008.model_contract.json
 INFERENCE_DEVICE=cuda
+INFERENCE_IMAGE_SIZE=1280
 INFERENCE_TARGET_CLASS_IDS={"0":"person"}
 INFERENCE_CONFIDENCE_THRESHOLD=0.30
 FASTAPI_URL=http://<개인-PC-Tailscale-IP>:8076

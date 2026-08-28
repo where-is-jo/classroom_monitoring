@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-labelledby="title description">
-  <title id="title">청록색 합성 강의실 포스터</title><desc id="description">실제 카메라가 아닌 격자와 도형으로 만든 데모 이미지</desc>
-  <rect width="640" height="360" fill="#062f34"/><g stroke="#15575c" opacity=".8"><path d="M0 40h640M0 80h640M0 120h640M0 160h640M0 200h640M0 240h640M0 280h640M0 320h640"/><path d="M40 0v360M80 0v360M120 0v360M160 0v360M200 0v360M240 0v360M280 0v360M320 0v360M360 0v360M400 0v360M440 0v360M480 0v360M520 0v360M560 0v360M600 0v360"/></g>
-  <g fill="#fff" opacity=".1"><rect x="70" y="88" width="70" height="42" rx="5"/><rect x="180" y="88" width="70" height="42" rx="5"/><rect x="290" y="88" width="70" height="42" rx="5"/><rect x="400" y="88" width="70" height="42" rx="5"/><rect x="510" y="88" width="70" height="42" rx="5"/><rect x="70" y="184" width="70" height="42" rx="5"/><rect x="180" y="184" width="70" height="42" rx="5"/><rect x="290" y="184" width="70" height="42" rx="5"/></g>
-  <circle cx="330" cy="205" r="24" fill="#58e0c3"/><rect x="450" y="235" width="34" height="34" fill="#ffcf70"/><text x="24" y="34" fill="#fff" font-family="system-ui,sans-serif" font-size="18" font-weight="700">SYNTHETIC DEMO · A101</text><text x="24" y="334" fill="#bdeee5" font-family="system-ui,sans-serif" font-size="14">NO REAL CAMERA · NO PERSONAL DATA</text>
-</svg>

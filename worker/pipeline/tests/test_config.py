@@ -41,7 +41,9 @@ def test_신원_인계는_얼굴_서비스가_확정한_학생을_다시_탈락�
 def test_입구와_CCTV는_역할별_샘플링_주기를_쓴다() -> None:
     settings = build_settings()
 
-    assert settings.face_identity_sample_interval_frames == 20
+    # 얼굴 모델을 GPU로 옮긴 뒤 입구를 20에서 4로 올렸다(#181·#183). CPU 시절의 20은
+    # 초당 0.74장이었고 그것이 입구 화면 갱신 주기의 상한이었다.
+    assert settings.face_identity_sample_interval_frames == 4
     assert settings.person_tracking_sample_interval_frames == 4
 
 

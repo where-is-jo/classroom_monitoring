@@ -74,27 +74,34 @@ volumes:
 
 services:
   # 얼굴 분석 내부 서비스(SCRFD + MediaPipe). **fastapi만 호출한다.**
-  # **GPU를 예약하지 않는다** — app.py가 onnxruntime의 CPUExecutionProvider를
-  # 고정하고 있어 GPU를 줘도 쓰지 않는다. 그래서 inference-worker와 달리
-  # 드라이버 조건이 없고 GPU가 없는 호스트에서도 뜬다.
+  #
+  # **GPU 1번만 쓴다.** 예전에는 GPU를 예약하지 않고 CPUExecutionProvider를 고정해
+  # CPU로 돌았고, 얼굴 분석이 평균 88.8ms(p95 287ms)였다. 그 상태가 오래 이어졌는데
+  # 아무도 알아채지 못했다 — 조용히 느린 것이라 지표에 "느리다"로만 보였다.
+  #
+  # **device_ids를 반드시 명시한다.** 빠뜨리면 컨테이너가 보이는 GPU를 모두 잡고,
+  # 이 서버는 0·2·3번을 다른 팀이 쓰고 있어(각각 89%·93%·42% 점유) 남의 작업을
+  # 밀어낸다. 1번만 넘기면 컨테이너 안에서 그것이 0번이 되므로 app.py는 물리 번호를
+  # 알 필요가 없다(ctx_id=0).
   deeplearning:
     # 서버에서 현재 develop 소스로 빌드한 :latest를 같은 이름으로 덮어쓴다.
     # registry에서 받지 않고 GPU 서버가 방금 빌드한 image ID만 사용한다.
     image: ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
     pull_policy: never
     env_file:
-      # MongoDB URL·DB 이름만 서버에서 주입한다. 변수 기준은 deeplearning/.env.example.
+      # MongoDB 비밀값과 ArcFace/AdaFace 선택 계약을 서버에서 주입한다.
+      # 변수 기준은 deeplearning/.env.example이다.
       - ./env/deeplearning.dev.env
     environment:
       # 가중치는 이미지에도 저장소에도 없다. .docker/models/face에 미리 올려 둔다.
       # 셋 다 실제 파일이어야 하며, 없으면 기동 시점에 죽는다(app.py의 lifespan).
       FACE_DETECTION_MODEL_PATH: /models/face/scrfd/scrfd_10g_bnkps.onnx
       FACE_LANDMARKER_MODEL_PATH: /models/face/mediapipe/face_landmarker.task
-      FACE_RECOGNITION_MODEL_PATH: /models/face/buffalo_l/w600k_r50.onnx
-      # 식별을 켜면 readiness가 MongoDB 갤러리와 metadata까지 실제로 읽는다.
+      # 식별 기능 활성화
       FACE_IDENTIFICATION_ENABLED: "true"
-      FACE_IDENTITY_THRESHOLD_FILE: /models/face/config/thresholds.json
-      FACE_EMBEDDING_COLLECTION: face_embeddings
+
+      # GPU 사용 강제
+      FACE_EXECUTION_PROVIDER: cuda
     volumes:
       - ./models:/models:ro
     # **호스트 분할로 새로 열게 된 포트다.** 전에는 fastapi가 같은 network 안에서
@@ -104,6 +111,16 @@ services:
       - "100.85.0.72:18100:8100"
     networks:
       - backend
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # **1번만이다.** 우리 계정에 할당된 카드가 그것뿐이고, inference-worker와
+              # llama-server도 같은 1번을 쓴다. count나 all을 쓰면 다른 팀 카드까지
+              # 잡는다. 컨테이너 안에서는 이 카드가 0번으로 보인다.
+              device_ids: ["1"]
+              capabilities: [gpu]
     logging: *default-logging
     restart: unless-stopped
 

@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
-import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
+
+from deployment_person_model_contract import verify_person_model_contract
 
 EXPECTED_THRESHOLD_METADATA = {
     "model_name": "arcface",
@@ -42,7 +42,6 @@ COMMON_FACE_MODEL_PATHS = (
     "/models/face/scrfd/scrfd_10g_bnkps.onnx",
     "/models/face/mediapipe/face_landmarker.task",
 )
-ORIGINAL_FRAME_METHOD = "original-frame-v1"
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -97,6 +96,24 @@ def parse_camera_ids(stream_sources: str) -> set[str]:
     return camera_ids
 
 
+def parse_target_class_ids(raw_value: str) -> dict[int, str]:
+    try:
+        value = json.loads(raw_value)
+        if not isinstance(value, dict) or not value:
+            raise ValueError
+        result = {int(key): name for key, name in value.items()}
+        if any(
+            key < 0 or not isinstance(name, str) or not name.strip()
+            for key, name in result.items()
+        ):
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "INFERENCE_TARGET_CLASS_IDS가 올바른 JSON 객체가 아닙니다."
+        ) from error
+    return result
+
+
 def validate_thresholds(
     path: Path,
     expected_metadata: dict[str, str] | None = None,
@@ -146,66 +163,6 @@ def validate_thresholds(
             "thresholds.json의 track_target_false_association은 0.001 이하여야 합니다."
         )
     return errors
-
-
-def validate_person_model_contract(
-    model_path: Path,
-    contract_path: Path,
-    target_class_ids: str,
-) -> list[str]:
-    """사람 탐지 가중치의 해시·클래스·전처리 계약을 배포 전에 검증한다."""
-
-    errors: list[str] = []
-    if not contract_path.is_file():
-        return [f"사람 탐지 모델 계약 파일이 없습니다: {contract_path}"]
-    try:
-        contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return [f"사람 탐지 모델 계약을 JSON으로 읽을 수 없습니다: {contract_path}"]
-    if not isinstance(contract, dict) or contract.get("schema_version") != 1:
-        return ["사람 탐지 모델 계약 schema_version은 1이어야 합니다."]
-
-    expected_hash = contract.get("model_sha256")
-    if (
-        not isinstance(expected_hash, str)
-        or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None
-    ):
-        errors.append("사람 탐지 모델 계약의 model_sha256이 올바르지 않습니다.")
-    elif model_path.is_file() and _sha256_file(model_path) != expected_hash:
-        errors.append("MODEL_PATH의 SHA-256이 사람 탐지 모델 계약과 다릅니다.")
-
-    try:
-        configured_classes = json.loads(target_class_ids)
-    except json.JSONDecodeError:
-        configured_classes = None
-    if not isinstance(configured_classes, dict):
-        errors.append("INFERENCE_TARGET_CLASS_IDS는 JSON object여야 합니다.")
-    elif contract.get("target_class_ids") != configured_classes:
-        errors.append("INFERENCE_TARGET_CLASS_IDS가 사람 탐지 모델 계약과 다릅니다.")
-
-    preprocessing = contract.get("preprocessing_contract")
-    if not isinstance(preprocessing, dict) or preprocessing.get("schema_version") != 1:
-        errors.append("사람 탐지 모델의 전처리 계약이 올바르지 않습니다.")
-    elif (
-        preprocessing.get("label_derived") is not False
-        or preprocessing.get("training_compatible") is not True
-    ):
-        errors.append("실제 추론에서 재현할 수 없는 사람 탐지 전처리 계약입니다.")
-    elif preprocessing.get("inference_preprocessing_required") is not False:
-        errors.append(
-            "현재 worker는 필수 추론 전처리를 지원하지 않으므로 원본 프레임 모델이 필요합니다."
-        )
-    elif preprocessing.get("method") != ORIGINAL_FRAME_METHOD:
-        errors.append("현재 worker가 지원하는 사람 탐지 입력은 원본 프레임뿐입니다.")
-    return errors
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def validate(docker_root: Path) -> list[str]:
@@ -362,6 +319,7 @@ def validate(docker_root: Path) -> list[str]:
         "MODEL_PATH",
         "MODEL_CONTRACT_PATH",
         "INFERENCE_DEVICE",
+        "INFERENCE_IMAGE_SIZE",
         "INFERENCE_TARGET_CLASS_IDS",
         "FASTAPI_URL",
         "FACE_IDENTITY_URL",
@@ -472,33 +430,25 @@ def validate(docker_root: Path) -> list[str]:
             errors.append(f"얼굴 모델 파일이 없습니다: {path}")
 
     worker_model = worker_env.get("MODEL_PATH", "").strip()
-    resolved_worker_model: Path | None = None
-    if worker_model:
-        try:
-            path = host_model_path(docker_root, worker_model)
-        except ValueError as error:
-            errors.append(str(error))
-        else:
-            if not path.is_file() or path.stat().st_size == 0:
-                errors.append(f"객체 탐지 모델 파일이 없습니다: {path}")
-            else:
-                resolved_worker_model = path
-
     worker_contract = worker_env.get("MODEL_CONTRACT_PATH", "").strip()
-    if worker_contract:
+    raw_target_classes = worker_env.get("INFERENCE_TARGET_CLASS_IDS", "").strip()
+    raw_image_size = worker_env.get("INFERENCE_IMAGE_SIZE", "").strip()
+    if worker_model and worker_contract and raw_target_classes and raw_image_size:
         try:
+            model_path = host_model_path(docker_root, worker_model)
             contract_path = host_model_path(docker_root, worker_contract)
-        except ValueError as error:
+            target_classes = parse_target_class_ids(raw_target_classes)
+            image_size = int(raw_image_size)
+            if not 320 <= image_size <= 4096:
+                raise ValueError("INFERENCE_IMAGE_SIZE는 320~4096이어야 합니다.")
+            verify_person_model_contract(
+                str(model_path),
+                str(contract_path),
+                target_classes,
+                image_size,
+            )
+        except (OSError, ValueError) as error:
             errors.append(str(error))
-        else:
-            if resolved_worker_model is not None:
-                errors.extend(
-                    validate_person_model_contract(
-                        resolved_worker_model,
-                        contract_path,
-                        worker_env.get("INFERENCE_TARGET_CLASS_IDS", ""),
-                    )
-                )
     return errors
 
 

@@ -12,7 +12,10 @@ inference_poll_timeout_seconds: 0.5
 inference_max_consecutive_failures: 5
 
 # 입구 얼굴 HTTP와 CCTV YOLO는 독립 처리 경로다. 20 FPS 입력 기준 각각 약 1 FPS와 5 FPS다.
-face_identity_sample_interval_frames: 20
+# 얼굴 모델을 GPU로 옮긴 뒤 올렸다(#181·#183). 입구 카메라 15fps 기준 초당 3.75장이며,
+# 얼굴 분석이 p95 24.9ms라 GPU 점유는 10% 안쪽이다. 예전 20은 CPU 시절 값으로
+# 초당 0.74장이었고, 그것이 입구 화면 갱신 주기의 상한이었다.
+face_identity_sample_interval_frames: 4
 person_tracking_sample_interval_frames: 4
 
 # --- 결과 전송 분리 ---
@@ -21,8 +24,17 @@ person_tracking_sample_interval_frames: 4
 # Atlas 왕복 5~6회), 그 대기 때문에 들어온 프레임의 73%를 버렸다. 근거는
 # worker/inference/dispatch.py의 모듈 주석에 있다.
 result_dispatch_enabled: true
-# 전송이 밀렸을 때 들고 있을 최대 건수. 넘치면 오래된 것부터 버린다.
+# 전송이 밀렸을 때 들고 있을 최대 건수. 카메라마다 최신 하나만 들고 있는다.
 result_dispatch_queue_maxsize: 32
+# 카메라 하나를 이 간격보다 자주 보내지 않는다. 추론 주기(5FPS)와 전송 주기를 나눈다.
+result_dispatch_min_interval_seconds: 1.0
+
+# --- bbox overlay 전용 경로 ---
+# 저장을 하지 않는 endpoint로 따로 보내 화면 갱신을 추론 주기에 맞춘다.
+overlay_dispatch_enabled: true
+# 0 = 제한 없음. 추론이 만든 만큼(CCTV 초당 5장) 그대로 보낸다.
+overlay_dispatch_min_interval_seconds: 0.0
+overlay_timeout_seconds: 2.0
 result_dispatch_close_timeout_seconds: 5.0
 
 # 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의

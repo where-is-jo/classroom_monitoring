@@ -99,7 +99,6 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/identity-handover` | 입구 얼굴 신원을 CCTV 사람 track에 넘길 **CCTV 문 사각형 ROI** 관리. 현재 CCTV 화면을 캡처해 저장 영역을 겹쳐 보고 다시 그리며, 저장값은 worker가 주기적으로 읽어 재시작 없이 반영한다 |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
-| `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
 | `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다. **`LLM_SEARCH_MODE=disabled`(기본값)에서는 검색 폼 없이 안내만 나온다** — GPU가 있는 환경에서만 동작한다 |
 
 `/classrooms/{id}` 상세 페이지는 없다. `/classrooms?classroom_id={id}`에서 같은
@@ -151,7 +150,6 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events` | 입구 얼굴 관측 이벤트 조회. 상태·학생·시간·limit·cursor 필터, 기본 최신 50건 |
 | `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events/stream` | 활성 `IDENTITY_ONLY` 입구 카메라의 얼굴 관측 SSE 구독. `entry-identity` 이벤트로 bbox·화면용 이름·분석 상태를 전달 |
 | `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
-| `POST` | `/api/v1/video-searches` | 부작용 없는 데모 catalog 검색 실행 (규칙 기반) |
 | `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
 | `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
 | `POST` | `/internal/entry-identity-events` | worker 입구 얼굴 관측 이벤트 수신. 신규 201, 동일 재전송 200, 충돌 409 |
@@ -190,13 +188,15 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 
 ### 합성 데모
 
-`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 합성 영상 source와
-고정 검색 catalog를 제공하고 `/demo-assets/*`를 mount한다. demo 응답은 `is_demo=true`를
-유지한다.
+`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 강의실·좌석 seed를
+넣는다(`app/demo_seed.py`). 개인정보가 없는 고정 fixture다.
 
-이 기능은 카메라·스트림·추론·영상 저장을 구현하지 않는다. 외부 미디어, 사용자 업로드,
-운영 데이터도 사용하지 않는다. demo가 꺼져 있으면 `/monitoring`과 `/video-search`는
-404가 아니라 빈 상태를 반환한다.
+**데모 영상 검색(`/video-search`)과 합성 영상 catalog는 걷어냈다.** 실제 카메라가
+붙은 뒤로는 쓰이지 않았고, `/api/v1/video-streams`가 합성 source를 실제 source와 섞어
+돌려주고 있었다. 지금은 등록된 실제 카메라만 나온다.
+
+영상 원본은 저장하지 않는다. 등록된 카메라가 없으면 `/monitoring`은 404가 아니라
+빈 상태를 반환한다.
 
 ## 핵심 도메인 규칙
 
@@ -234,7 +234,6 @@ app/
 
 templates/              기능별 Jinja2 화면
 static/                 CSS와 화면 보조 JavaScript
-demo_assets/            합성 데모 SVG 자산
 api-spec/               구현 전 API 설계 명세 JSON
 tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스트
 ```
@@ -266,7 +265,7 @@ REST·SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인
 - **`ABSENT`는 지정 좌석이 비어 있는 것을 유예 시간 동안 계속 본 경우에만 나온다.**
   카메라가 죽거나 ROI가 없어 관측이 끊기면 `UNKNOWN`이다 — 미관측은 부재가 아니다.
 
-입구 SCRFD·ArcFace 결과는 좌석 탐지와 분리된 얼굴 관측 이벤트로 저장되고, worker가
+입구 SCRFD·활성 얼굴 인식 모델 결과는 좌석 탐지와 분리된 얼굴 관측 이벤트로 저장되고, worker가
 CCTV 문 ROI의 유일한 ByteTrack에 인계한 `student_id`·`identity_confidence`만 학생 상태
 판정으로 들어온다. 세부 계약은
 [worker/inference/MODEL_INTEGRATION.md](../../worker/inference/MODEL_INTEGRATION.md)를 본다.
@@ -320,6 +319,8 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `PLAYBACK_SESSION_COOKIE_SECURE` | owner cookie Secure 플래그 | 기본 true. local/http에서는 false로 내려야 전송된다 |
 | `PLAYBACK_SESSION_SDP_MAX_BYTES` | SDP 본문 최대 크기 | 기본 65536 |
 | `FACE_ANALYZER_MODE`, `FACE_ANALYZER_URL` | 얼굴 분석 companion 방식과 주소 | local은 보통 `synthetic`, dev/prod는 `http` |
+| `FACE_RECOGNIZER` | 활성 얼굴 인식 모델 | AI 서버와 같은 `arcface` / `adaface` |
+| `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE` | AdaFace 학생 상태 판정 최소 similarity | AdaFace일 때 필수, 모델 평가값 사용 |
 | `SNAPSHOT_STORAGE_BACKEND` | 탐지 스냅샷 저장소 | `memory` / `minio`. local은 보통 `memory` |
 | `SNAPSHOT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필수. 비밀값 |
 | `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `disabled`(기능 차단). `stub`은 질문을 읽지 않고 "오늘 하루"만 돌려주는 **테스트 전용** 대역, `llama`는 llama-server 호출. [결정 0021](../../docs/architecture/decisions.md#0021--자연어-검색을-gpu-서버에서만-켜고-그-밖의-환경에서는-기능을-끈다) |
@@ -347,7 +348,7 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 | `sse_reconnection_timeout_seconds` | SSE 재연결 타임아웃 | 기본 60 |
 | `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
 | `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
-| `student_identity_confidence_threshold` | 학생 상태 판정에 사용할 최소 식별 신뢰도 | 기본 0.5. `0 <= x <= 1` |
+| `student_identity_confidence_threshold` | ArcFace 학생 상태 판정 최소 similarity | 기존 기본 0.5. `0 <= x <= 1` |
 | `student_identity_hold_seconds` | 마지막 식별 뒤 직전 판정을 이어받는 시간 | 기본 15. **실측 근거 없는 기본값이다** |
 | `student_absent_grace_seconds` | 지정 좌석이 비어 있는 것을 이만큼 계속 본 뒤 `ABSENT` | 기본 300. **팀 합의값이 아니다** |
 | `student_state_history_limit` | 상태 전이 이력 조회 개수 | 기본 50. 최대 200 |
@@ -374,6 +375,40 @@ OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 
 현재 local 구현은 SCRFD 중앙 분석 서비스와 메모리 메타데이터 저장소를 사용한다.
 실제 얼굴 원본을 운영에서 처리하려면 관리자 인증과 MongoDB·MinIO 접근 통제가 선행돼야 한다.
+
+모델별 대표 embedding은 `face_embeddings_arcface`와 `face_embeddings_adaface`에
+분리한다. `/students` 화면은 두 모델의 등록 여부와 현재 `FACE_RECOGNIZER`를 표시하고,
+기존 등록 학생도 활성 모델로 다시 촬영할 수 있다. 재등록은 활성 모델 컬렉션만 upsert하며
+다른 모델 embedding은 유지한다. FastAPI 설정과 분석 서버가 반환한 모델명이 다르면 저장하지
+않는다. 학생 얼굴 삭제는 두 컬렉션과 레거시 `face_embeddings`를 모두 정리한다.
+
+레거시 ArcFace 복사와 저장소 밖 원본 폴더 기반 AdaFace 일괄 생성은 관리자 CLI를 사용한다.
+두 명령은 기본 dry-run이며 `--apply`를 명시하기 전에는 MongoDB에 쓰지 않는다.
+
+```bash
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  migrate-arcface-gallery
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  build-gallery --model adaface \
+  --manifest <외부 절대경로>/adaface-gallery.json \
+  --analyzer-url http://<deeplearning-host>:18100
+```
+
+manifest는 `schema_version=1`과 학생별 `student_id`, 절대 `image_dir`만 허용한다. CLI
+출력에는 학생 ID·이름·학번·이미지 경로·embedding을 남기지 않는다.
+
+직접 등록 테스트는 다음 순서로 한다.
+
+1. FastAPI와 분석 서버의 `FACE_RECOGNIZER`를 같은 모델로 설정한다.
+2. `/students`에서 현재 등록 모델과 학생별 ArcFace/AdaFace 상태를 확인한다.
+3. 활성 모델의 `등록` 또는 `다시 등록`을 눌러 동의를 확인하고 촬영을 완료한다.
+4. 화면을 새로 고친 뒤 해당 모델 상태가 완료인지 확인한다.
+5. 등록에 쓰지 않은 별도 촬영본으로 known 평가를 하고, 미등록 인물 촬영본으로 unknown
+   평가를 한다. ArcFace 임계값을 AdaFace에 재사용하지 않는다.
+
+`face_local_sample_storage_enabled: false`인 local 테스트에서는 수집 원본을 프로세스
+메모리에서 완료 직후 embedding 생성에만 넘기고 파일로 보존하지 않는다. 서버를 재시작하면
+미완료 수집본은 사라진다.
 
 수집된 JPEG를 local에서 직접 확인하려면 `config/settings.yml`에서
 `face_local_sample_storage_enabled: true`로 바꾼다. 완료된 세션은

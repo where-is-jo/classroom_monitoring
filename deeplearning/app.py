@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -15,13 +16,24 @@ from typing import Any, Literal
 import cv2
 import mediapipe as mp
 import numpy as np
+import onnxruntime
 from dotenv import load_dotenv
+from execution_provider import (
+    active_provider,
+    requested_providers,
+    verify_execution_provider,
+)
 from face_identification import (
     FaceGalleryUnavailable,
     FaceIdentificationConfig,
     FaceIdentificationRuntime,
     FaceModelMetadata,
     MongoFaceGalleryLoader,
+)
+from face_recognizer import (
+    FaceRecognizerConfig,
+    build_face_recognizer,
+    load_face_recognizer_config,
 )
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
@@ -36,6 +48,8 @@ from metrics import (
     observe_analysis_stage,
     record_analysis_request,
     record_embedding_request,
+    record_identification_observations,
+    record_identification_request,
     render_metrics,
 )
 from pydantic import BaseModel
@@ -45,7 +59,7 @@ from pydantic import BaseModel
 # 복사하지 않는다(Dockerfile·.dockerignore).
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
-FACE_MODEL_METADATA = FaceModelMetadata(
+DEFAULT_FACE_MODEL_METADATA = FaceModelMetadata(
     model_name="arcface",
     model_version="insightface-buffalo_l-w600k_r50-v0.7",
     preprocessing_version="insightface-norm-crop-112-v1",
@@ -125,6 +139,9 @@ def _active_session_count() -> int:
 install_session_gauge(_active_session_count)
 
 
+logger = logging.getLogger(__name__)
+
+
 def _model_path() -> Path:
     value = os.environ.get("FACE_DETECTION_MODEL_PATH")
     if not value:
@@ -142,21 +159,6 @@ def _landmarker_path() -> Path:
     path = Path(value)
     if not path.is_file():
         raise RuntimeError("MediaPipe Face Landmarker 모델 파일을 찾을 수 없습니다.")
-    return path
-
-
-def _recognition_model_path() -> Path:
-    configured = os.environ.get("FACE_RECOGNITION_MODEL_PATH")
-    path = (
-        Path(configured)
-        if configured
-        else Path(__file__).resolve().parent
-        / ".models"
-        / "buffalo_l"
-        / "w600k_r50.onnx"
-    )
-    if not path.is_file():
-        raise RuntimeError("얼굴 인식 ONNX 모델 파일을 찾을 수 없습니다.")
     return path
 
 
@@ -184,7 +186,10 @@ def _face_detection_threshold() -> float:
     return value
 
 
-def _identity_thresholds() -> tuple[float, float, float]:
+def _identity_thresholds(
+    metadata: FaceModelMetadata | None = None,
+) -> tuple[float, float, float]:
+    metadata = metadata or DEFAULT_FACE_MODEL_METADATA
     configured_path = os.environ.get("FACE_IDENTITY_THRESHOLD_FILE", "").strip()
     if not configured_path:
         return (
@@ -198,10 +203,9 @@ def _identity_thresholds() -> tuple[float, float, float]:
     try:
         values = json.loads(path.read_text(encoding="utf-8"))
         if (
-            values.get("model_name") != FACE_MODEL_METADATA.model_name
-            or values.get("model_version") != FACE_MODEL_METADATA.model_version
-            or values.get("preprocessing_version")
-            != FACE_MODEL_METADATA.preprocessing_version
+            values.get("model_name") != metadata.model_name
+            or values.get("model_version") != metadata.model_version
+            or values.get("preprocessing_version") != metadata.preprocessing_version
         ):
             raise ValueError
         return (
@@ -216,18 +220,18 @@ def _identity_thresholds() -> tuple[float, float, float]:
 
 
 def _build_face_identification_runtime(
-    *, detector: Any, recognizer: Any
+    *, detector: Any, recognizer: Any, recognizer_config: FaceRecognizerConfig
 ) -> FaceIdentificationRuntime | None:
     if not _environment_bool("FACE_IDENTIFICATION_ENABLED"):
         return None
     similarity_threshold, margin_threshold, track_similarity_threshold = (
-        _identity_thresholds()
+        _identity_thresholds(recognizer_config.metadata)
     )
     gallery_loader = MongoFaceGalleryLoader(
         database_url=_required_environment("FACE_GALLERY_DATABASE_URL"),
         database_name=_required_environment("FACE_GALLERY_DATABASE_NAME"),
-        collection_name=os.environ.get("FACE_EMBEDDING_COLLECTION", "face_embeddings"),
-        expected_metadata=FACE_MODEL_METADATA,
+        collection_name=recognizer_config.collection_name,
+        expected_metadata=recognizer_config.metadata,
         timeout_seconds=float(os.environ.get("FACE_GALLERY_TIMEOUT_SECONDS", "5")),
     )
     config = FaceIdentificationConfig(
@@ -270,21 +274,30 @@ def _build_face_identification_runtime(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    detector = get_model(str(_model_path()), providers=["CPUExecutionProvider"])
+    recognizer_config = load_face_recognizer_config()
+
+    choice, providers = requested_providers()
+    detector = get_model(str(_model_path()), providers=providers)
+    ctx_id = verify_execution_provider(detector, choice)
+    app.state.execution_provider = active_provider(detector)
+    
     detector.prepare(
-        ctx_id=-1,
+        ctx_id=ctx_id,
         input_size=(640, 640),
         det_thresh=_face_detection_threshold(),
     )
     app.state.detector = detector
-    recognizer = get_model(
-        str(_recognition_model_path()), providers=["CPUExecutionProvider"]
+    recognizer = build_face_recognizer(
+        recognizer_config,
+        providers=providers,
     )
-    recognizer.prepare(ctx_id=-1)
     app.state.recognizer = recognizer
+    app.state.face_recognizer_config = recognizer_config
+    app.state.face_model_metadata = recognizer_config.metadata
     app.state.face_identification_runtime = _build_face_identification_runtime(
         detector=detector,
         recognizer=recognizer,
+        recognizer_config=recognizer_config,
     )
     app.state.landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
         mp.tasks.vision.FaceLandmarkerOptions(
@@ -553,13 +566,16 @@ async def _create_embedding(
         )
     normalized = vector / norm
     record_embedding_request("ok", started_at)
+    metadata: FaceModelMetadata = getattr(
+        request.app.state, "face_model_metadata", DEFAULT_FACE_MODEL_METADATA
+    )
     return EmbeddingResponse(
         vector=normalized.tolist(),
         dimension=int(normalized.size),
         normalized=True,
-        model_name=FACE_MODEL_METADATA.model_name,
-        model_version=FACE_MODEL_METADATA.model_version,
-        preprocessing_version=FACE_MODEL_METADATA.preprocessing_version,
+        model_name=metadata.model_name,
+        model_version=metadata.model_version,
+        preprocessing_version=metadata.preprocessing_version,
     )
 
 
@@ -569,17 +585,42 @@ async def _create_embedding(
 )
 async def identify_faces(request: Request) -> FaceIdentificationResponse:
     """입구 카메라 JPEG에서 얼굴을 검출·추적하고 오픈셋 신원을 판정한다."""
+    started_at = time.perf_counter()
+    metadata: FaceModelMetadata = getattr(
+        request.app.state, "face_model_metadata", DEFAULT_FACE_MODEL_METADATA
+    )
+    model_name: Literal["arcface", "adaface"] = metadata.model_name  # type: ignore[assignment]
+    try:
+        return await _identify_faces(
+            request, started_at=started_at, model_name=model_name
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        record_identification_request(model_name, "error", started_at)
+        raise
+
+
+async def _identify_faces(
+    request: Request,
+    *,
+    started_at: float,
+    model_name: Literal["arcface", "adaface"],
+) -> FaceIdentificationResponse:
     runtime: FaceIdentificationRuntime | None = getattr(
         request.app.state, "face_identification_runtime", None
     )
     if runtime is None:
+        record_identification_request(model_name, "disabled", started_at)
         raise HTTPException(status_code=503, detail="얼굴 식별 기능이 꺼져 있습니다.")
     camera_id = request.headers.get("X-Camera-ID", "").strip()
     if not camera_id or len(camera_id) > 128:
+        record_identification_request(model_name, "invalid_camera", started_at)
         raise HTTPException(status_code=400, detail="카메라 ID가 필요합니다.")
     content = await request.body()
     image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
+        record_identification_request(model_name, "bad_image", started_at)
         raise HTTPException(status_code=400, detail="JPEG 이미지를 해석할 수 없습니다.")
     try:
         identities = runtime.identify(
@@ -587,11 +628,12 @@ async def identify_faces(request: Request) -> FaceIdentificationResponse:
             image_bgr=image,
         )
     except FaceGalleryUnavailable:
+        record_identification_request(model_name, "gallery_unavailable", started_at)
         # DB 주소나 embedding 값은 응답과 로그에 싣지 않는다.
         raise HTTPException(
             status_code=503, detail="얼굴 갤러리를 사용할 수 없습니다."
         ) from None
-    return FaceIdentificationResponse(
+    response = FaceIdentificationResponse(
         observations=[
             FaceObservationResponse(
                 face_track_id=f"face-{identity.track_id}",
@@ -608,6 +650,15 @@ async def identify_faces(request: Request) -> FaceIdentificationResponse:
             for identity in identities
         ]
     )
+    record_identification_request(model_name, "ok", started_at)
+    record_identification_observations(
+        model_name,
+        [
+            identity.status.name.lower()  # type: ignore[misc]
+            for identity in identities
+        ],
+    )
+    return response
 
 
 @app.get("/health")
@@ -621,8 +672,20 @@ def readiness(request: Request) -> dict[str, str]:
     runtime: FaceIdentificationRuntime | None = getattr(
         request.app.state, "face_identification_runtime", None
     )
+    metadata: FaceModelMetadata = getattr(
+        request.app.state, "face_model_metadata", DEFAULT_FACE_MODEL_METADATA
+    )
+    common = {
+        "active_face_model": metadata.model_name,
+        "face_model_version": metadata.model_version,
+        "face_preprocessing_version": metadata.preprocessing_version,
+    }
     if runtime is None:
-        return {"status": "ready", "face_identification": "disabled"}
+        return {
+            "status": "ready",
+            "face_identification": "disabled",
+            **common,
+        }
     try:
         gallery_status = runtime.ensure_ready()
     except FaceGalleryUnavailable:
@@ -632,8 +695,11 @@ def readiness(request: Request) -> dict[str, str]:
     return {
         "status": "ready",
         "face_identification": "ready",
+        **common,
         "gallery_entries": str(gallery_status.gallery_entries),
         "excluded_gallery_entries": str(gallery_status.excluded_gallery_entries),
+        "active_registered_students": str(gallery_status.active_registered_students),
+        "missing_gallery_entries": str(gallery_status.missing_gallery_entries),
     }
 
 

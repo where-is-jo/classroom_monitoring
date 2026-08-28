@@ -3,3 +3,11 @@
 # requirements를 재사용하고, .env 로딩만 평가 도구에 추가한다.
 -r ../requirements.txt
 python-dotenv>=1.0
+torch==2.7.1
+torchvision==0.22.1
+onnx==1.18.0
+huggingface-hub==0.34.4
+transformers==4.53.3
+omegaconf==2.3.0
+safetensors==0.5.3
+fvcore==0.1.5.post20221221

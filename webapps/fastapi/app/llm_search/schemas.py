@@ -23,6 +23,7 @@ from .models import (
     PersonSummary,
     SearchOutcome,
     SearchQuery,
+    SortOrder,
 )
 from .planning import MAX_LIMIT
 
@@ -36,6 +37,13 @@ class LlmSearchRequest(BaseModel):
         ge=1,
         le=MAX_LIMIT,
         description="결과 수의 상한. 모델이 더 큰 수를 내도 이 값을 넘지 않는다.",
+    )
+    sort: SortOrder = Field(
+        default=SortOrder.TIME_DESC,
+        description=(
+            "시간 정렬 방향. limit과 함께 작동해 **어느 100건을 고를지**를 바꾼다 — "
+            "time_desc는 가장 최근, time_asc는 가장 오래된 쪽부터 고른다."
+        ),
     )
 
 
@@ -174,6 +182,7 @@ class LlmSearchResponse(BaseModel):
         description="돌려준 건수다. 조건에 맞는 전체 건수가 아니다 — truncated를 함께 본다."
     )
     limit: int
+    sort: SortOrder = Field(description="이 결과가 어느 순서로 골라지고 정렬되었는지.")
     truncated: bool = Field(description="상한에 걸려 결과가 잘렸는지. 참이면 이것이 전부가 아니다.")
     snapshot_lookup_failed: bool = Field(
         description="스냅샷 저장소 조회 실패 여부. 참이면 이미지 없음이 아니라 확인 실패다."
@@ -195,6 +204,7 @@ class LlmSearchResponse(BaseModel):
             items=items,
             total=len(items),
             limit=outcome.query.limit,
+            sort=outcome.sort,
             truncated=outcome.truncated,
             snapshot_lookup_failed=outcome.snapshot_lookup_failed,
         )
