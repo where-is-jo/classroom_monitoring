@@ -192,9 +192,15 @@ def test_신규_얼굴_이벤트는_이름을_보강하고_안전한_본문만_�
         "미등록 얼굴",
         "판정 보류",
     ]
+    assert [item["student_id"] for item in event["observations"]] == [
+        "active-student",
+        "inactive-student",
+        "missing-student",
+        None,
+        None,
+    ]
     serialized = json.dumps(event, ensure_ascii=False)
     for forbidden in (
-        "student_id",
         "student_no",
         "similarity",
         "margin",
