@@ -110,19 +110,19 @@ DETECTION_CONFIDENCE = Histogram(
 # student_id는 label로 내보내지 않는다.
 PERSON_TRACKS_CREATED_TOTAL = Counter(
     f"{METRIC_PREFIX}person_tracks_created_total",
-    "ByteTrack이 새로 만든 사람 track 수",
+    "상태 전환을 켜면 tentative에서 tracked로 승격한 사람 track 수",
     labelnames=("camera_id",),
 )
 
 PERSON_TRACKS_EXPIRED_TOTAL = Counter(
     f"{METRIC_PREFIX}person_tracks_expired_total",
-    "track buffer를 넘겨 만료된 사람 track 수",
+    "tracked 또는 lost에서 removed로 전환한 사람 track 수",
     labelnames=("camera_id",),
 )
 
 PERSON_TRACKS_ACTIVE = Gauge(
     f"{METRIC_PREFIX}person_tracks_active",
-    "카메라별 활성·유실 대기 중 사람 track 수",
+    "카메라별 tracked·lost 사람 track 수(tentative 제외)",
     labelnames=("camera_id",),
 )
 

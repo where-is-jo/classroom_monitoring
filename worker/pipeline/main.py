@@ -289,6 +289,11 @@ def build_result_handlers(
             expired_track_handler=(
                 coordinator.expire_classroom_tracks if coordinator is not None else None
             ),
+            internal_track_handler=(
+                coordinator.observe_classroom_tracking
+                if coordinator is not None
+                else None
+            ),
         )
 
     # 호출 순서의 가장 바깥에서 raw 결과를 먼저 기록한다. 따라서 ByteTrack·신원 인계·
@@ -548,6 +553,9 @@ def build_runner(
             ),
             track_buffer_frames=pipeline_settings.bytetrack_buffer_frames,
             kalman_enabled=pipeline_settings.bytetrack_kalman_enabled,
+            track_lifecycle_enabled=(
+                pipeline_settings.person_track_lifecycle_enabled
+            ),
             person_detection_postprocess_enabled=(
                 pipeline_settings.person_detection_postprocess_enabled
             ),
