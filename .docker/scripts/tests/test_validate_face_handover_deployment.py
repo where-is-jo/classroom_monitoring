@@ -388,6 +388,7 @@ def test_GPU_develop은_사람_탐지_후처리를_명시적으로_켠다() -> N
     assert 'PERSON_DETECTION_POSTPROCESS_ENABLED: "true"' in worker
     assert 'BYTETRACK_KALMAN_ENABLED: "true"' in worker
     assert 'PERSON_TRACK_LIFECYCLE_ENABLED: "true"' in worker
+    assert 'IDENTITY_TRACK_RECOVERY_ENABLED: "true"' in worker
 
 
 def test_gpu_server_passes_without_fastapi_env(tmp_path: Path) -> None:
