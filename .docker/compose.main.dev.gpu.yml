@@ -155,6 +155,9 @@ services:
       # PR 3: bbox 속도 예측만 Kalman 상태 추정으로 교체한다.
       # false로 override하고 force recreate하면 기존 예측기로 즉시 돌아간다.
       BYTETRACK_KALMAN_ENABLED: "true"
+      # PR 4: 2회 연속 관측 전 tentative track은 외부 payload에서 숨긴다.
+      # false로 override하고 force recreate하면 기존 즉시 출력으로 돌아간다.
+      PERSON_TRACK_LIFECYCLE_ENABLED: "true"
     volumes:
       # 모델 가중치는 이미지에도 저장소에도 넣지 않는다(.docker/models/는 .gitignore).
       # env/worker.dev.env의 MODEL_PATH가 이 안의 파일을 가리켜야 한다.
