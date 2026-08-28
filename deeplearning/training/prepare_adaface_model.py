@@ -26,7 +26,10 @@ MODEL_FILE_SHA256 = {
         "da82e6e1dbe98ce23afb78283b858ad65e32484a2bac82e9adae298d04ff845d"
     ),
 }
-ONNX_FILE_SHA256 = "7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8"
+# GitHub Linux CPU builder에서 아래 고정 source·의존성으로 만든 산출물이다. Windows에서
+# 만든 기존 ONNX는 그래프 직렬화가 달라 바이트 SHA가 다르므로 배포 산출물은 이 값으로
+# 한정한다. source 가중치 두 개의 SHA도 위에서 별도로 검증한다.
+ONNX_FILE_SHA256 = "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc"
 DEFAULT_MODEL_ROOT = Path(__file__).resolve().parents[1] / ".models" / "adaface"
 DEFAULT_SOURCE_DIR = DEFAULT_MODEL_ROOT / "cvlface_ir50_webface4m"
 DEFAULT_OUTPUT_PATH = DEFAULT_MODEL_ROOT / "adaface_ir50_webface4m.onnx"
