@@ -1,0 +1,12 @@
+# AdaFace ONNX 산출물 생성에만 쓰는 고정 CPU 의존성이다.
+# 운영 deeplearning 이미지의 CUDA 런타임과 섞지 않는다.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu
+onnx==1.18.0
+onnxruntime==1.22.0
+huggingface-hub==0.34.4
+transformers==4.53.3
+omegaconf==2.3.0
+safetensors==0.5.3
+fvcore==0.1.5.post20221221
+
