@@ -55,6 +55,7 @@ jobs:
             deployment:
               - '.docker/**'
               - '.github/workflows/deploy-gpu-server.yml'
+              - '.github/workflows/provision-adaface-model.yml'
               - '.github/workflows/ci.yml'
 
   fastapi-checks:
