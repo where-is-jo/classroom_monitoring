@@ -297,6 +297,13 @@ python -m deeplearning.training.prepare_adaface_model \
   --output .docker/models/face/adaface/adaface_ir50_webface4m.onnx
 ```
 
+GPU 서버에서 이 파일만 유실됐고 로컬 SSH 키가 없는 경우에는 Actions의
+`AdaFace 모델 배치` workflow를 수동 실행한다. 일반 배포와 자동으로 묶지 않으며, 고정된
+공식 revision에서 CPU용 의존성으로 ONNX를 다시 생성한다. 러너와 서버에서 각각 최종
+SHA-256 `7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8`을 확인한
+뒤 같은 디렉터리 안에서 원자적으로 교체한다. 이미 올바른 파일이 있으면 서버를 변경하지
+않고, 기존 파일의 SHA가 다르면 `*.invalid-<run-id>`로 남겨 복구할 수 있게 한다.
+
 AdaFace 갤러리는 저장소 밖의 manifest와 동의된 원본 폴더로 만든다. manifest는
 `schema_version: 1`과 `students: [{student_id, image_dir}]` 형식이고 `image_dir`은 반드시
 절대경로다. 학생마다 정렬된 파일 순서에서 최대 25장을 균등 선택하며 유효 샘플 5장
