@@ -194,7 +194,6 @@ class EntryIdentityEventService:
                 "face_bbox": list(observation.face_bbox),
                 "detection_confidence": observation.detection_confidence,
                 "identity_status": observation.identity_status.value,
-                "student_id": observation.student_id,
                 "display_label": self._display_label(observation),
             }
             for observation in event.observations

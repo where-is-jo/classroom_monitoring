@@ -164,7 +164,7 @@
       label.className = "bbox-label";
       label.style.cssText =
         "position:absolute;top:-20px;left:0;padding:2px 6px;background:#00ff88;color:#000;font-size:11px;font-weight:700;border-radius:3px;white-space:nowrap;";
-      label.textContent = det.student_id || "unknown";
+      label.textContent = det.display_label || "인식 불가";
       box.appendChild(label);
 
       overlay.appendChild(box);
@@ -230,7 +230,7 @@
         bbox: observation.face_bbox,
         confidence: observation.detection_confidence,
         track_id: observation.face_track_id,
-        student_id: observation.student_id,
+        display_label: observation.display_label,
       };
     });
     if (data.frame) {
