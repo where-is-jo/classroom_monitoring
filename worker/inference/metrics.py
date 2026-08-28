@@ -20,6 +20,8 @@
 | `face_identification_requests_total` | `outcome` | 2 (`ok`, `error`) |
 | `face_identification_duration_seconds` | 없음 | 1 |
 | `identity_handoff_total` | `outcome` | 4 |
+| `identity_handoff_attach_seconds` | 없음 | 1 |
+| `identity_handoff_timestamp_issues_total` | `reason` | 3 (`negative`, `expired`, `missing`) |
 
 `camera_id`는 `STREAM_SOURCES`에 적은 카메라만 나오므로 대수가 고정이다. **프레임
 번호·이벤트 id·학생 id는 label로 쓰지 않는다** — 값이 무한히 늘어나고, 학생 id는
@@ -39,6 +41,8 @@ __all__ = [
     "FRAMES_PROCESSED_TOTAL",
     "FACE_IDENTIFICATION_DURATION_SECONDS",
     "FACE_IDENTIFICATION_REQUESTS_TOTAL",
+    "IDENTITY_HANDOFF_ATTACH_SECONDS",
+    "IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL",
     "IDENTITY_HANDOFF_TOTAL",
     "INFERENCE_DURATION_SECONDS",
     "PERSON_TRACKS_ACTIVE",
@@ -150,6 +154,36 @@ IDENTITY_HANDOFF_TOTAL = Counter(
     f"{METRIC_PREFIX}identity_handoff_total",
     "입구 신원을 교실 CCTV track으로 인계한 시도 결과",
     labelnames=("outcome",),
+)
+
+# 입구 얼굴 식별 프레임의 관측 시각부터, 같은 신원이 CCTV track의 외부 출력에
+# 처음 붙은 프레임의 관측 시각까지다. 학생·track 식별자는 label로 넣지 않는다.
+# 1초 목표 부근을 촘촘히 보고 최대 인계 시간(기본 8초) 밖의 지연도 구분한다.
+IDENTITY_HANDOFF_ATTACH_SECONDS = Histogram(
+    f"{METRIC_PREFIX}identity_handoff_attach_seconds",
+    "입구 얼굴 식별 관측부터 CCTV track 첫 신원 부착까지 걸린 시간",
+    buckets=(
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        5.0,
+        8.0,
+        10.0,
+        30.0,
+    ),
+)
+
+# 음수 지연은 두 카메라 clock skew, expired는 30초 안에 첫 부착 프레임을 보지
+# 못한 경우, missing은 연결 상태에 필요한 시각이 없거나 유효하지 않은 경우다.
+IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL = Counter(
+    f"{METRIC_PREFIX}identity_handoff_timestamp_issues_total",
+    "신원 인계 지연을 측정하지 못한 시각 문제",
+    labelnames=("reason",),
 )
 
 

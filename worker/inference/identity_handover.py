@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -20,7 +21,11 @@ import requests
 from shared.types import CapturedFrame
 
 from .consumer import ResultHandler
-from .metrics import IDENTITY_HANDOFF_TOTAL
+from .metrics import (
+    IDENTITY_HANDOFF_ATTACH_SECONDS,
+    IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL,
+    IDENTITY_HANDOFF_TOTAL,
+)
 from .types import (
     Detection,
     EntryFaceObservationBatch,
@@ -32,6 +37,7 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 HANDOVER_ROUTES_PATH = "/internal/identity-handover-routes"
+HANDOFF_MEASUREMENT_RETENTION_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -296,6 +302,13 @@ class _ActiveIdentity:
     student_id: str
     confidence: float
     last_seen_at: float
+    attach_measurement_pending: bool
+
+
+@dataclass(frozen=True)
+class _HandoffMeasurement:
+    entry_observed_at: float | None
+    started_at: float
 
 
 @dataclass
@@ -308,7 +321,31 @@ class _RouteState:
         default_factory=dict
     )
     active_identities: dict[str, _ActiveIdentity] = field(default_factory=dict)
+    handoff_measurements: dict[str, _HandoffMeasurement] = field(
+        default_factory=dict
+    )
     watermark: float = float("-inf")
+
+
+def _observe_identity_handoff_attach(
+    entry_observed_at: float | None,
+    attached_at: float | None,
+) -> None:
+    """유효한 두 관측 시각만 지연 분포에 넣고 이상 원인을 따로 센다."""
+
+    if (
+        entry_observed_at is None
+        or attached_at is None
+        or not math.isfinite(entry_observed_at)
+        or not math.isfinite(attached_at)
+    ):
+        IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL.labels(reason="missing").inc()
+        return
+    delay_seconds = attached_at - entry_observed_at
+    if delay_seconds < 0:
+        IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL.labels(reason="negative").inc()
+        return
+    IDENTITY_HANDOFF_ATTACH_SECONDS.observe(delay_seconds)
 
 
 def _person_detections(result: InferenceResult) -> list[tuple[int, Detection]]:
@@ -413,6 +450,29 @@ class IdentityHandoverResultHandler:
                 state.classroom_tracks_in_entry_zone.pop(track_id, None)
                 state.unmatched_classroom_tracks.pop(track_id, None)
                 state.active_identities.pop(track_id, None)
+                measurement = state.handoff_measurements.pop(track_id, None)
+                if measurement is not None:
+                    IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL.labels(
+                        reason="expired"
+                    ).inc()
+
+    def _expire_handoff_measurements(
+        self,
+        state: _RouteState,
+        observed_at: float,
+    ) -> None:
+        expired_track_ids = [
+            track_id
+            for track_id, measurement in state.handoff_measurements.items()
+            if observed_at - measurement.started_at
+            >= HANDOFF_MEASUREMENT_RETENTION_SECONDS
+        ]
+        for track_id in expired_track_ids:
+            del state.handoff_measurements[track_id]
+            active = state.active_identities.get(track_id)
+            if active is not None:
+                active.attach_measurement_pending = False
+            IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL.labels(reason="expired").inc()
 
     def _expire(self, state: _RouteState, observed_at: float) -> bool:
         """오래된 후보를 버리고 인계 입력 집합이 바뀌었는지 돌려준다.
@@ -423,6 +483,7 @@ class IdentityHandoverResultHandler:
         """
         state.watermark = max(state.watermark, observed_at)
         now = state.watermark
+        self._expire_handoff_measurements(state, now)
         pending_count = len(state.pending)
         unmatched_count = len(state.unmatched_classroom_tracks)
         state.pending = {
@@ -451,10 +512,25 @@ class IdentityHandoverResultHandler:
             for track_id, inside in state.classroom_tracks_in_entry_zone.items()
             if track_id in state.known_classroom_tracks
         }
+        stale_active_track_ids = {
+            track_id
+            for track_id, identity in state.active_identities.items()
+            if now - identity.last_seen_at > self._track_stale_seconds
+        }
+        for track_id in stale_active_track_ids:
+            if state.handoff_measurements.pop(track_id, None) is not None:
+                IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL.labels(
+                    reason="expired"
+                ).inc()
         state.active_identities = {
             track_id: identity
             for track_id, identity in state.active_identities.items()
-            if now - identity.last_seen_at <= self._track_stale_seconds
+            if track_id not in stale_active_track_ids
+        }
+        state.handoff_measurements = {
+            track_id: measurement
+            for track_id, measurement in state.handoff_measurements.items()
+            if track_id in state.active_identities
         }
         return (
             len(state.pending) != pending_count
@@ -558,6 +634,13 @@ class IdentityHandoverResultHandler:
             identity = state.active_identities.get(detection.track_id)
             if identity is None:
                 continue
+            if identity.attach_measurement_pending:
+                self._record_handoff_attachment(
+                    state,
+                    detection.track_id,
+                    identity,
+                    observed_at,
+                )
             enriched[index] = replace(
                 detection,
                 student_id=identity.student_id,
@@ -566,6 +649,23 @@ class IdentityHandoverResultHandler:
                 face_bbox=None,
             )
         return InferenceResult(result.frame_shape, tuple(enriched))
+
+    @staticmethod
+    def _record_handoff_attachment(
+        state: _RouteState,
+        track_id: str,
+        identity: _ActiveIdentity,
+        attached_at: float,
+    ) -> None:
+        identity.attach_measurement_pending = False
+        measurement = state.handoff_measurements.pop(track_id, None)
+        if measurement is None:
+            _observe_identity_handoff_attach(None, attached_at)
+            return
+        _observe_identity_handoff_attach(
+            measurement.entry_observed_at,
+            attached_at,
+        )
 
     def _try_match(self, state: _RouteState) -> None:
         active_student_ids = {
@@ -609,6 +709,11 @@ class IdentityHandoverResultHandler:
             identity.student_id,
             identity.confidence,
             classroom_track.last_seen_at,
+            True,
+        )
+        state.handoff_measurements[classroom_track.track_id] = _HandoffMeasurement(
+            identity.observed_at,
+            max(identity.observed_at, classroom_track.last_seen_at),
         )
         # 같은 학생이 여러 얼굴 track으로 관측됐더라도 하나의 CCTV track에 인계한
         # 순간 같은 학생 후보를 모두 소비한다.
