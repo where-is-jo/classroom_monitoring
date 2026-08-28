@@ -44,6 +44,69 @@ def _iou(left: np.ndarray, right: np.ndarray) -> float:
     return 0.0 if union <= 0.0 else intersection / union
 
 
+def _area(bbox: np.ndarray) -> float:
+    return max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+
+
+def _ios(left: np.ndarray, right: np.ndarray) -> float:
+    """교집합을 더 작은 bbox 면적으로 나눈 포함 비율을 반환한다."""
+
+    intersection_left = max(left[0], right[0])
+    intersection_top = max(left[1], right[1])
+    intersection_right = min(left[2], right[2])
+    intersection_bottom = min(left[3], right[3])
+    intersection = max(0.0, intersection_right - intersection_left) * max(
+        0.0, intersection_bottom - intersection_top
+    )
+    smaller_area = min(_area(left), _area(right))
+    return 0.0 if smaller_area <= 0.0 else intersection / smaller_area
+
+
+def _suppress_duplicate_people(
+    people: Sequence[tuple[int, Detection]],
+    *,
+    iou_threshold: float,
+    ios_threshold: float,
+) -> tuple[tuple[int, Detection], ...]:
+    """사람 클래스에만 포함 관계 우선 NMS를 적용한다.
+
+    IoS가 임계값 이상이면 더 큰 bbox를 남긴다. 그 외 중복은 confidence가 높은
+    탐지를 우선하고, 완전히 같으면 모델 입력 순서를 유지한다.
+    """
+
+    boxes = [_bbox_array(detection.bbox) for _, detection in people]
+    suppressed: set[int] = set()
+
+    # 포함 관계에서는 작은 bbox의 confidence가 더 높아도 큰 bbox를 남긴다.
+    for left_index, left_box in enumerate(boxes):
+        for right_index in range(left_index + 1, len(boxes)):
+            right_box = boxes[right_index]
+            if _ios(left_box, right_box) < ios_threshold:
+                continue
+            left_area = _area(left_box)
+            right_area = _area(right_box)
+            if left_area < right_area:
+                suppressed.add(left_index)
+            elif right_area < left_area:
+                suppressed.add(right_index)
+
+    candidates = [
+        index for index in range(len(people)) if index not in suppressed
+    ]
+    candidates.sort(key=lambda index: (-people[index][1].confidence, index))
+    kept: list[int] = []
+    for candidate in candidates:
+        if any(
+            _iou(boxes[candidate], boxes[existing]) >= iou_threshold
+            or _ios(boxes[candidate], boxes[existing]) >= ios_threshold
+            for existing in kept
+        ):
+            continue
+        kept.append(candidate)
+    kept.sort()
+    return tuple(people[index] for index in kept)
+
+
 def _minimum_cost_assignment(costs: np.ndarray) -> tuple[tuple[int, int], ...]:
     """직사각 비용 행렬의 최소 일대일 배정을 Hungarian 알고리즘으로 구한다."""
     if costs.ndim != 2:
@@ -148,6 +211,9 @@ class ByteTrackConfig:
     first_match_iou_threshold: float = 0.3
     second_match_iou_threshold: float = 0.2
     track_buffer_frames: int = 30
+    person_detection_postprocess_enabled: bool = False
+    duplicate_iou_threshold: float = 0.5
+    duplicate_ios_threshold: float = 0.85
 
     def __post_init__(self) -> None:
         thresholds = (
@@ -156,6 +222,8 @@ class ByteTrackConfig:
             self.new_track_threshold,
             self.first_match_iou_threshold,
             self.second_match_iou_threshold,
+            self.duplicate_iou_threshold,
+            self.duplicate_ios_threshold,
         )
         if any(not 0.0 <= value <= 1.0 for value in thresholds):
             raise ValueError("ByteTrack 임계값은 0과 1 사이여야 합니다.")
@@ -242,11 +310,17 @@ class CameraByteTracker:
         self.expired_track_ids_last_update = ()
         for track in self._tracks.values():
             track.age_frames += 1
-        people = [
+        people: Sequence[tuple[int, Detection]] = [
             (index, detection)
             for index, detection in enumerate(result.detections)
             if detection.class_name.casefold() == "person"
         ]
+        if self._config.person_detection_postprocess_enabled:
+            people = _suppress_duplicate_people(
+                people,
+                iou_threshold=self._config.duplicate_iou_threshold,
+                ios_threshold=self._config.duplicate_ios_threshold,
+            )
         high = [
             item
             for item in people
@@ -322,12 +396,24 @@ class CameraByteTracker:
             del self._tracks[track_id]
         self.expired_last_update = len(expired)
 
-        enriched = [
-            replace(detection, track_id=f"person-{assignments[index]}")
-            if index in assignments
-            else detection
-            for index, detection in enumerate(result.detections)
-        ]
+        retained_person_indices = {index for index, _ in people}
+        enriched: list[Detection] = []
+        for index, detection in enumerate(result.detections):
+            is_person = detection.class_name.casefold() == "person"
+            if self._config.person_detection_postprocess_enabled and is_person:
+                if index not in retained_person_indices:
+                    continue
+                if (
+                    detection.confidence
+                    < self._config.high_confidence_threshold
+                    and index not in assignments
+                ):
+                    continue
+            enriched.append(
+                replace(detection, track_id=f"person-{assignments[index]}")
+                if index in assignments
+                else detection
+            )
         return InferenceResult(result.frame_shape, tuple(enriched))
 
 

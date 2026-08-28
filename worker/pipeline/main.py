@@ -547,6 +547,15 @@ def build_runner(
                 pipeline_settings.bytetrack_second_match_iou_threshold
             ),
             track_buffer_frames=pipeline_settings.bytetrack_buffer_frames,
+            person_detection_postprocess_enabled=(
+                pipeline_settings.person_detection_postprocess_enabled
+            ),
+            duplicate_iou_threshold=(
+                pipeline_settings.person_detection_duplicate_iou_threshold
+            ),
+            duplicate_ios_threshold=(
+                pipeline_settings.person_detection_duplicate_ios_threshold
+            ),
         )
         if pipeline_settings.person_tracking_enabled
         else None

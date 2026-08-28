@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -87,6 +89,150 @@ def test_낮은_신뢰도_탐지만으로_새_track을_만들지_않는다() -> 
 
     assert tracked.detections[0].track_id is None
     assert tracker.active_track_count == 0
+
+
+def test_후처리는_겹친_사람_bbox에서_높은_confidence만_남긴다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+
+    tracked = tracker.update(
+        result(
+            person(0.72, (10, 10, 80, 180)),
+            person(0.91, (12, 10, 82, 180)),
+        )
+    )
+
+    assert len(tracked.detections) == 1
+    assert tracked.detections[0].confidence == 0.91
+    assert tracked.detections[0].track_id == "person-1"
+
+
+def test_후처리는_포함_관계에서_confidence보다_큰_bbox를_남긴다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+    large = person(0.65, (10, 10, 110, 190))
+    small = person(0.95, (20, 20, 100, 180))
+
+    tracked = tracker.update(result(small, large))
+
+    assert tuple(item.bbox for item in tracked.detections) == (large.bbox,)
+
+
+def test_후처리_완전_동률은_입력_순서를_유지한다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+    first = person(0.9, (10, 10, 80, 180))
+    second = person(0.9, (12, 10, 82, 180))
+
+    tracked = tracker.update(result(first, second))
+
+    assert tuple(item.bbox for item in tracked.detections) == (first.bbox,)
+
+
+def test_후처리는_기존_track과_미매칭한_저신뢰_사람을_제거한다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+
+    tracked = tracker.update(result(person(0.3, (10, 10, 80, 180))))
+
+    assert tracked.detections == ()
+    assert tracker.active_track_count == 0
+
+
+def test_후처리는_기존_track과_매칭한_저신뢰_사람을_유지한다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    tracked = tracker.update(result(person(0.3, (13, 10, 83, 180))))
+
+    assert len(tracked.detections) == 1
+    assert tracked.detections[0].track_id == "person-1"
+
+
+def test_후처리는_미매칭이어도_confidence_0_50_이상이면_유지한다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+
+    tracked = tracker.update(result(person(0.55, (10, 10, 80, 180))))
+
+    assert len(tracked.detections) == 1
+    assert tracked.detections[0].track_id is None
+
+
+def test_후처리는_다른_클래스를_변경하지_않는다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+    phone = Detection(67, "cell phone", 0.2, (10, 10, 80, 180))
+
+    tracked = tracker.update(
+        result(phone, person(0.3, (10, 10, 80, 180)))
+    )
+
+    assert tracked.detections == (phone,)
+
+
+def test_후처리를_끄면_기존_중복과_저신뢰_출력을_유지한다() -> None:
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=False))
+
+    tracked = tracker.update(
+        result(
+            person(0.3, (10, 10, 80, 180)),
+            person(0.3, (12, 10, 82, 180)),
+        )
+    )
+
+    assert len(tracked.detections) == 2
+
+
+def test_후처리_결과를_오버레이와_이벤트_분기에_동일하게_전달한다() -> None:
+    overlay: list[InferenceResult] = []
+    event: list[InferenceResult] = []
+
+    def fanout(_frame: CapturedFrame, value: InferenceResult) -> None:
+        overlay.append(value)
+        event.append(value)
+
+    handler = ByteTrackResultHandler(
+        config(person_detection_postprocess_enabled=True), inner=fanout
+    )
+    handler(
+        captured("classroom-cctv", 0),
+        result(
+            person(0.9, (10, 10, 80, 180)),
+            person(0.7, (12, 10, 82, 180)),
+            person(0.3, (150, 10, 220, 180)),
+        ),
+    )
+
+    assert overlay[0] == event[0]
+    assert len(overlay[0].detections) == 1
+
+
+def test_익명_trace_fixture의_중복은_제거하고_정상_recall은_유지한다() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "person_detection_trace.jsonl"
+    )
+    records = [
+        json.loads(line)
+        for line in fixture.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    tracker = CameraByteTracker(config(person_detection_postprocess_enabled=True))
+    processed_counts: list[int] = []
+    for record in records:
+        if record["record_type"] != "frame":
+            continue
+        detections = tuple(
+            person(item["confidence"], tuple(item["bbox"]))
+            for item in record["person_detections"]
+        )
+        processed = tracker.update(
+            InferenceResult(tuple(record["frame_shape"]), detections),
+            observed_at=record["elapsed_ms"] / 1000.0,
+        )
+        processed_counts.append(len(processed.detections))
+
+    # fixture의 첫 프레임은 duplicate-1 두 건이 한 사람이고 둘째는 정상 한 건이다.
+    expected_unique_detections = 2
+    assert processed_counts == [1, 1]
+    recall_decrease = 1.0 - sum(processed_counts) / expected_unique_detections
+    assert recall_decrease <= 0.05
 
 
 def test_짧은_미탐_뒤에도_이동_예측으로_track을_회복한다() -> None:

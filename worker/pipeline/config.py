@@ -126,6 +126,14 @@ class PipelineSettings(BaseSettings):
     bytetrack_first_match_iou_threshold: float = Field(default=0.3, ge=0, le=1)
     bytetrack_second_match_iou_threshold: float = Field(default=0.2, ge=0, le=1)
     bytetrack_buffer_frames: int = Field(default=30, ge=1, le=600)
+    # 기존 동작이 기본값이다. develop compose에서만 켜 단계별 롤백을 보장한다.
+    person_detection_postprocess_enabled: bool = False
+    person_detection_duplicate_iou_threshold: float = Field(
+        default=0.5, ge=0, le=1
+    )
+    person_detection_duplicate_ios_threshold: float = Field(
+        default=0.85, ge=0, le=1
+    )
 
     # --- 입구 신원 → 교실 CCTV track 인계 ---
     # 카메라 ID와 CCTV 문 영역은 배치마다 달라 .env에서 JSON으로 주입한다.

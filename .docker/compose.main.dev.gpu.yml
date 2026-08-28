@@ -149,6 +149,9 @@ services:
       - ./env/worker.dev.env
     environment:
       APP_ENV: dev
+      # PR 2: 사람 중복·미매칭 저신뢰 탐지를 ByteTrack 앞뒤에서 제거한다.
+      # false로 override하고 force recreate하면 이전 출력으로 즉시 돌아간다.
+      PERSON_DETECTION_POSTPROCESS_ENABLED: "true"
     volumes:
       # 모델 가중치는 이미지에도 저장소에도 넣지 않는다(.docker/models/는 .gitignore).
       # env/worker.dev.env의 MODEL_PATH가 이 안의 파일을 가리켜야 한다.
