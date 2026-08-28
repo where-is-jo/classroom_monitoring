@@ -4,12 +4,12 @@
 
 {% block content %}
   <header class="page-header">
-    <div><p class="eyebrow">{{ classroom.code }}</p><h1>{% if seat %}{{ seat.label }} 수정{% else %}좌석 추가{% endif %}</h1><p class="summary">{{ classroom.name }} · 배치 위치는 좌석 관리 화면의 격자에서 클릭으로 지정합니다.</p></div>
+    <div class="title-wrap"><p class="page-eyebrow">{{ classroom.code }}</p><h1 class="page-title">{% if seat %}{{ seat.label }} 수정{% else %}좌석 추가{% endif %}</h1><p class="page-summary">{{ classroom.name }} · 배치 위치는 좌석 관리 화면의 격자에서 클릭으로 지정합니다.</p></div>
     <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seats">좌석 목록</a>
   </header>
 
   <section class="panel" aria-labelledby="seat-form-title">
-    <h2 id="seat-form-title">좌석 정보</h2>
+    <h2 id="seat-form-title" class="section-title">좌석 정보</h2>
     {% if seat %}
       <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}" data-api-method="PUT" data-success-url="/classrooms/{{ classroom.id }}/seats">
     {% else %}

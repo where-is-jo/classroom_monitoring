@@ -4,10 +4,10 @@
 
 {% block content %}
   <header class="page-header">
-    <div>
-      <p class="eyebrow">{{ classroom.code }}</p>
-      <h1>{{ classroom.name }} 학생 상태</h1>
-      <p class="summary">학생별 재석·잘못된 자리·확인 필요 상태를 확인합니다.</p>
+    <div class="title-wrap">
+      <p class="page-eyebrow">{{ classroom.code }}</p>
+      <h1 class="page-title">{{ classroom.name }} 학생 상태</h1>
+      <p class="page-summary">학생별 재석·잘못된 자리·확인 필요 상태를 확인합니다.</p>
     </div>
     <div class="page-actions">
       <a class="button-link secondary" href="/classrooms">목록</a>
@@ -17,7 +17,7 @@
 
   {% if classrooms %}
     <section class="panel" aria-labelledby="classroom-selector-title">
-      <h2 id="classroom-selector-title">강의실 선택</h2>
+      <h2 id="classroom-selector-title" class="section-title">강의실 선택</h2>
       {# 강의실이 URL 경로 파라미터로 전달되므로 폼 제출 대신 onchange로 해당 강의실 페이지로 이동한다. #}
       <label>강의실
         <select name="classroom_id" aria-label="강의실 선택"
@@ -32,7 +32,7 @@
 
   {% if states %}
     <section class="panel" aria-labelledby="student-state-table-title" data-student-state-dashboard data-classroom-id="{{ classroom.id }}">
-      <h2 id="student-state-table-title">학생 상태 목록</h2>
+      <h2 id="student-state-table-title" class="section-title">학생 상태 목록</h2>
       <ul class="student-state-legend" aria-label="학생 상태 범례">
         <li><span class="legend-swatch legend-swatch--occupied" aria-hidden="true"></span>재석 (PRESENT)</li>
         <li><span class="legend-swatch legend-swatch--wrong-seat" aria-hidden="true"></span>잘못된 자리 (WRONG_SEAT)</li>

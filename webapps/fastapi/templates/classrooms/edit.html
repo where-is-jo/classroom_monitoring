@@ -4,12 +4,12 @@
 
 {% block content %}
   <header class="page-header">
-    <div><p class="eyebrow">Classroom</p><h1>강의실 수정</h1><p class="summary">{{ classroom.code }} {{ classroom.name }}의 정보를 수정합니다. 코드는 강의실마다 달라야 합니다.</p></div>
+    <div class="title-wrap"><p class="page-eyebrow">Classroom</p><h1 class="page-title">강의실 수정</h1><p class="page-summary">{{ classroom.code }} {{ classroom.name }}의 정보를 수정합니다. 코드는 강의실마다 달라야 합니다.</p></div>
     <a class="button-link secondary" href="/classrooms">목록으로</a>
   </header>
 
   <section class="panel" aria-labelledby="classroom-edit-title">
-    <h2 id="classroom-edit-title">강의실 정보</h2>
+    <h2 id="classroom-edit-title" class="section-title">강의실 정보</h2>
     <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}" data-api-method="PUT" data-success-url="/classrooms?classroom_id={{ classroom.id|urlencode }}">
       <p class="form-error" role="alert" data-form-error hidden></p>
       <div class="form-grid">

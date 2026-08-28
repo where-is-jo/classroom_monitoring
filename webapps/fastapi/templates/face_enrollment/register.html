@@ -3,10 +3,10 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', path='/face-enrollment.css') }}">{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">Face enrollment</p><h1>능동형 얼굴 등록</h1><p class="summary">타원 안에서 고개를 천천히 자유롭게 움직이면 현재 자세에 맞는 유효 데이터가 자동으로 수집됩니다.</p></div>
+  <div class="title-wrap"><p class="page-eyebrow">Face enrollment</p><h1 class="page-title">능동형 얼굴 등록</h1><p class="page-summary">타원 안에서 고개를 천천히 자유롭게 움직이면 현재 자세에 맞는 유효 데이터가 자동으로 수집됩니다.</p></div>
 </header>
 <section id="enrollment-setup" class="panel" aria-labelledby="setup-title">
-  <h2 id="setup-title">등록 준비</h2>
+  <h2 id="setup-title" class="section-title">등록 준비</h2>
   <div class="simulation-notice" role="note">
     <strong>현재는 SCRFD 얼굴 검출과 MediaPipe 자세 분석 단계입니다.</strong>
     타원 바깥 영역은 분석 프레임에서 제거하고, 타원 안의 얼굴만 SCRFD로 검출합니다. MediaPipe 자세에 맞는 실제 유효본 120장을 수집하고, local 저장을 켠 경우 교실 카메라 환경을 모사한 증강본 180장을 생성합니다. 심한 흔들림·흐림·과다/저조도·특징점 불안정·동일 연속 프레임은 실시간으로 제외합니다.
@@ -46,7 +46,7 @@
     <button id="cancel-enrollment" class="secondary" type="button">등록 취소</button>
   </div>
   <aside class="progress-panel panel" aria-labelledby="progress-title">
-    <h2 id="progress-title">등록 완료율</h2>
+    <h2 id="progress-title" class="section-title">등록 완료율</h2>
     <p class="progress-description">방향별 수집 상태를 확인하면서 안내에 따라 천천히 움직여 주세요.</p>
     <ul id="pose-progress" class="pose-progress" aria-label="얼굴 방향별 진행률"></ul>
     <p id="connection-status" class="connection-status">연결 준비 중</p>

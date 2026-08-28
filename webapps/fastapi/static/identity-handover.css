@@ -23,7 +23,8 @@
 .handover-status { min-height: 24px; margin: 0; color: var(--muted); }
 .handover-details { display: grid; gap: 14px; }
 .detail-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
-.detail-card h2 { margin: 2px 0 10px; font-size: 1.05rem; }
+/* 신원 인계 ROI 페이지 전용: 설명 카드 제목 */
+.detail-card .card-title { margin: 2px 0 10px; font-size: 1.05rem; }
 .detail-card p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
 .handover-coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0 8px; }
 .handover-coordinates div { padding: 9px 10px; background: var(--background, #f2f5f4); border-radius: 9px; }

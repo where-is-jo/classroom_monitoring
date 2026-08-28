@@ -87,7 +87,7 @@ def test_product_navigation_shows_current_product_sections(minimal_client: TestC
     for path, heading in (
         ("/classrooms", "강의실 좌석 현황"),
         ("/monitoring", "실시간 모니터링"),
-        ("/llm-search", "자연어 탐지 검색"),
+        ("/llm-search", "CCTV 기록 검색"),
     ):
         response = minimal_client.get(path)
         assert response.status_code == 200
@@ -97,7 +97,7 @@ def test_product_navigation_shows_current_product_sections(minimal_client: TestC
         for label in (
             "강의실 좌석 현황",
             "실시간 모니터링",
-            "자연어 탐지 검색",
+            "CCTV 기록 검색",
             "학생 관리",
             "ROI 연결",
             "좌석 관리",

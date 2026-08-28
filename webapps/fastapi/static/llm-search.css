@@ -12,12 +12,13 @@
 .filter-bar.filter-bar--query { display: grid; gap: 12px; }
 .filter-bar__row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
 }
 .filter-bar__row > label { flex: 0 0 auto; margin: 0; font-weight: 700; }
 .filter-bar__row > input { flex: 1 1 320px; min-width: 0; }
+.filter-bar__row > select { width: auto; min-width: 140px; }
 .filter-bar__row > select,
 .filter-bar__row > button { flex: 0 0 auto; }
 
@@ -51,7 +52,8 @@
   gap: 8px 16px;
   margin-bottom: 16px;
 }
-.results__heading h2 { margin: 0; font-size: 1.15rem; }
+/* 자연어 검색 페이지 전용: 탐지 결과 영역 소제목 */
+.results__heading .section-title { margin: 0; font-size: 1.15rem; }
 .results__heading .result-count { margin: 0; }
 
 /* ── 결과 격자 ─────────────────────────────────────────────

@@ -6,10 +6,10 @@
 {% endblock %}
 {% block content %}
 <header class="page-header">
-  <div>
-    <p class="eyebrow">Student registration</p>
-    <h1>학생 등록</h1>
-    <p class="summary">학원에 새로 등록한 학생의 기본 인적사항과 얼굴 정보를 등록해 주세요.</p>
+  <div class="title-wrap">
+    <p class="page-eyebrow">Student registration</p>
+    <h1 class="page-title">학생 등록</h1>
+    <p class="page-summary">학원에 새로 등록한 학생의 기본 인적사항과 얼굴 정보를 등록해 주세요.</p>
   </div>
 </header>
 
@@ -20,7 +20,7 @@
 
 <section class="panel student-form-panel" aria-labelledby="student-form-title">
   <div class="student-form-heading">
-    <div><h2 id="student-form-title">기본 정보</h2><p>필수 항목을 입력한 후 저장해 주세요.</p></div>
+    <div><h2 id="student-form-title" class="section-title">기본 정보</h2><p class="student-form-summary">필수 항목을 입력한 후 저장해 주세요.</p></div>
     <span><strong aria-hidden="true">*</strong> 필수 항목</span>
   </div>
   <form id="student-registration-form" class="student-registration-form">
@@ -62,9 +62,9 @@
     <section id="enrollment-setup" class="face-dialog-step face-consent-step" aria-labelledby="face-dialog-title">
       <div class="face-dialog-heading">
         <p class="eyebrow">Face enrollment</p>
-        <h2 id="face-dialog-title">얼굴 등록 및 수집 동의</h2>
-        <p><strong id="face-student-name"></strong> 학생의 얼굴 이미지를 여러 방향에서 촬영합니다. 수집한 이미지는 학생 식별 모델 학습 목적으로 사용되므로, 시작 전에 학생과 보호자에게 목적과 이용 범위를 설명하고 동의를 확인해 주세요.</p>
-        <p class="face-dialog-student">학생 번호: <strong id="student-id"></strong></p>
+        <h2 id="face-dialog-title" class="dialog-title">얼굴 등록 및 수집 동의</h2>
+        <p class="dialog-copy"><strong id="face-student-name"></strong> 학생의 얼굴 이미지를 여러 방향에서 촬영합니다. 수집한 이미지는 학생 식별 모델 학습 목적으로 사용되므로, 시작 전에 학생과 보호자에게 목적과 이용 범위를 설명하고 동의를 확인해 주세요.</p>
+        <p class="face-dialog-student dialog-copy">학생 번호: <strong id="student-id"></strong></p>
       </div>
       <label class="face-consent-check"><input id="consent-confirmed" type="checkbox"> 학생의 얼굴 데이터 수집 및 학습 목적 이용 동의를 확인했습니다.</label>
       <input id="confirmed-by" type="hidden" value="admin">
@@ -104,7 +104,7 @@
     </section>
 
     <section id="face-enrollment-complete" class="face-dialog-step face-complete-step" role="status" aria-live="polite" hidden>
-      <span aria-hidden="true">✓</span><h2>얼굴 등록이 완료되었습니다.</h2><p>촬영 창이 잠시 후 자동으로 닫힙니다.</p>
+      <span aria-hidden="true">✓</span><h2 class="completion-title">얼굴 등록이 완료되었습니다.</h2><p>촬영 창이 잠시 후 자동으로 닫힙니다.</p>
     </section>
   </div>
 </dialog>
