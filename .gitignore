@@ -82,6 +82,8 @@ deeplearning/.models/
 # RPAs/README.md의 개인정보 규칙에 따라 저장소에 남기지 않는다.
 # 검증용 샘플 하나만 예외다 — 합성 이벤트로 만든 것이라 실제 학생이 없다.
 RPAs/study-status-report/reports/*.xlsx
+# 같은 산출물의 HTML 판. **학생 실명과 좌석이 들어 있다** — .xlsx와 같은 등급이다.
+RPAs/study-status-report/reports/*.html
 !RPAs/study-status-report/reports/study_status_management_sample.xlsx
 
 # 실행 이력 — 개인정보는 빼고 남기지만, 실행 로그는 저장소에 커밋하지 않는다

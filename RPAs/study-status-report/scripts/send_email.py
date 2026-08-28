@@ -48,7 +48,7 @@ def split_recipients(value: str) -> list[str]:
 
 
 def build_message(
-    sender: str, recipients: list[str], subject: str, body: str, attachment: Path | None
+    sender: str, recipients: list[str], subject: str, body: str, attachments: list[Path]
 ) -> EmailMessage:
     message = EmailMessage()
     message["From"] = sender
@@ -56,12 +56,12 @@ def build_message(
     message["Subject"] = subject
     message.set_content(body)
 
-    if attachment is not None:
+    total = 0
+    for attachment in attachments:
         payload = attachment.read_bytes()
-        if len(payload) > MAX_ATTACHMENT_BYTES:
-            raise SystemExit(
-                f"첨부가 너무 큽니다: {len(payload)} bytes (상한 {MAX_ATTACHMENT_BYTES})"
-            )
+        total += len(payload)
+        if total > MAX_ATTACHMENT_BYTES:
+            raise SystemExit(f"첨부 합계가 너무 큽니다: {total} bytes (상한 {MAX_ATTACHMENT_BYTES})")
         guessed = mimetypes.guess_type(attachment.name)[0] or "application/octet-stream"
         maintype, _, subtype = guessed.partition("/")
         message.add_attachment(
@@ -99,7 +99,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subject", required=True)
     parser.add_argument("--body", required=True)
-    parser.add_argument("--file", type=Path, help="첨부할 보고서. 없으면 본문만 보낸다")
+    # 여러 번 줄 수 있다. 관리 문서와 같은 내용의 HTML을 함께 붙일 때 쓴다.
+    parser.add_argument(
+        "--file", type=Path, action="append", dest="files", help="첨부할 보고서. 없으면 본문만 보낸다"
+    )
     parser.add_argument("--to", default=os.environ.get("REPORT_EMAIL_TO", ""))
     parser.add_argument("--host", default=os.environ.get("SMTP_HOST", ""))
     parser.add_argument("--port", type=int, default=int(os.environ.get("SMTP_PORT", "587")))
@@ -124,10 +127,12 @@ def main() -> None:
     sender = args.sender or args.username
     if not sender:
         raise SystemExit("SMTP_FROM 또는 SMTP_USERNAME이 필요합니다(.env).")
-    if args.file is not None and not args.file.is_file():
-        raise SystemExit(f"첨부할 파일이 없습니다: {args.file}")
+    attachments = args.files or []
+    for attachment in attachments:
+        if not attachment.is_file():
+            raise SystemExit(f"첨부할 파일이 없습니다: {attachment}")
 
-    message = build_message(sender, recipients, args.subject, args.body, args.file)
+    message = build_message(sender, recipients, args.subject, args.body, attachments)
     try:
         send(message, args.host, args.port, args.username, args.password, not args.no_starttls)
     except smtplib.SMTPAuthenticationError as error:
@@ -136,7 +141,7 @@ def main() -> None:
     except (smtplib.SMTPException, OSError) as error:
         raise SystemExit(f"메일 전송에 실패했습니다: {error}") from None
 
-    attached = args.file.name if args.file is not None else "없음"
+    attached = ", ".join(item.name for item in attachments) or "없음"
     print(f"OK: 메일 전송 완료 (수신 {len(recipients)}명, 첨부 {attached})")
 
 

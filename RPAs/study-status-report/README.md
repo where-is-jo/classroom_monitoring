@@ -154,6 +154,19 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 (`events_<날짜>_<강의실>.json`), 주간은 그 파일들만 읽는다. 이탈률 식도
 `create_management_workbook.py`에서 그대로 가져와 일일과 어긋나지 않게 했다.
 
+### 워크북 서식
+
+색·글꼴·표 서식은 `scripts/xlsx_style.py` 한곳에서 정한다. 일일과 주간이 각자 정하면
+**같은 '학생 상태'가 두 보고서에서 다른 색으로 나오고, 받는 사람은 그 차이를 의미로
+읽는다.**
+
+학생 상태는 심각도 한 줄로 칠한다 — 미착석(적) → 오착석(주황) → 좌석 외 위치(황) →
+착석(녹). **'판단 보류'만 그 줄에서 빼내 무채색으로 둔다.** 판단하지 못한 것은 경고가
+아니라 정보가 없는 것이라, 경고색을 주면 관리자가 대응할 일이 있는 줄로 읽는다.
+
+표에는 틀 고정과 자동 필터를 건다. 관측시각은 **UTC 원본을 KST로 바꿔** 적는다 —
+그대로 두면 09시 수업이 00시로 보여서 시간표와 맞춰 볼 때마다 9를 더해야 한다.
+
 | 디렉터리 | 담는 것 | 학생 이름 |
 | --- | --- | --- |
 | `reports/` | 사람이 받는 `.xlsx` | **있다** |
@@ -171,6 +184,26 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 통제할 수 없다. 첨부에 실명과 좌석이 들어 있으므로 `REPORT_EMAIL_TO`를 늘릴 때
 그 점을 함께 판단한다. SMTP 자격 증명은 Slack 토큰과 같이 `.env`에서 스크립트가
 직접 읽는다.
+
+## 엑셀 옆에 HTML을 함께 보낸다
+
+교시·일간·주간 보고 모두 관리 문서(`.xlsx`)와 **같은 내용의 HTML을 한 메시지로 함께**
+올린다. 메일에도 둘 다 첨부된다.
+
+엑셀만 있으면 관리자가 파일을 열고 필터를 걸어야 "누가 몇 번 비웠나"를 본다. HTML은
+브라우저로 열어 이름을 치면 바로 나온다. 엑셀은 그대로 둔다 — 가공해 다시 쓰는
+사람이 있다.
+
+**파일 하나로 완결된다.** CSS와 스크립트를 안에 넣고 데이터도 함께 묻어서, 서버 없이
+받은 파일만으로 열린다. 실행기에 pip이 없어 템플릿 라이브러리를 못 쓰는 제약과도 맞다.
+담긴 것은 요약 카드, 학생별 표(이탈률 높은 순), 상태 변화 기록, 이름·좌석 검색,
+상태별 필터다.
+
+**HTML 생성이 실패해도 보고는 나간다.** 관리 문서가 주 산출물이고 HTML은 보기 편하라고
+더한 것이라, 실패하면 경고만 남기고 `.xlsx`만 보낸다.
+
+**학생 실명과 좌석이 들어간다.** `.xlsx`와 같은 등급이라 `reports/*.html`도
+`.gitignore` 대상이다.
 
 ## 노드 이름 참조를 늘리지 않는다
 
@@ -195,6 +228,7 @@ HTTP Request 노드의 응답은 항목의 `json`을 통째로 덮어써서, 원
 - `scripts/slack_upload_file.py`: Slack 외부 업로드 API 기반 `.xlsx` 전송 스크립트
 - `scripts/validate_workflow_artifacts.py`: 워크플로우 JSON과 `.xlsx` 산출물 검증 스크립트
 - `scripts/create_weekly_workbook.py`: 주간 보고서 `.xlsx` 생성 스크립트
+- `scripts/create_report_page.py`: 검색·필터가 되는 자체완결 HTML 생성 스크립트
 - `scripts/send_email.py`: 보고서 메일 전송 스크립트(표준 라이브러리 `smtplib`)
 - `scripts/deploy_workflow.py`: 워크플로를 n8n에 반영 (**비활성화 → 갱신 → 활성화**)
 - `scripts/run_workflow_tests.py`: `tests/`의 Code 노드 테스트를 n8n 컨테이너의 Node로 실행
@@ -205,6 +239,7 @@ HTTP Request 노드의 응답은 항목의 `json`을 통째로 덮어써서, 원
 - `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
 - `scripts/toggle_workflow.py`: 워크플로 on/off 스크립트
+- `scripts/xlsx_style.py`: 워크북 서식(색·글꼴·표) 정의. 일일과 주간이 함께 쓴다
 - `templates/schedule-sample.md`: 시간표 문서 형식과 예시
 - `.env.example`: n8n/스크립트 환경변수 예시
 
@@ -231,6 +266,9 @@ n8n (스케줄·판정)  --HTTP-->  rpa-runner (파이썬)  -->  scripts/*.py  -
 | `POST /weekly-workbook` | `create_weekly_workbook.py` 실행. 이벤트를 본문으로 받지 않고 `data/`를 읽는다 |
 | `POST /slack-upload` | `slack_upload_file.py`로 관리 문서 전송 |
 | `POST /email` | `send_email.py`로 보고서 메일 전송. 첨부는 `reports/` 안으로 제한한다 |
+
+`/slack-upload`와 `/email`은 `file` 하나 대신 **`files` 배열**을 받아 여러 개를 한 번에
+보낸다. 따로 올리면 채널에 메시지가 두 번 쌓이고 둘이 짝이라는 것도 드러나지 않는다.
 | `POST /slack-message` | 첨부 없이 텍스트만 전송. 시간표를 읽지 못했을 때의 오류 알림용 |
 
 오류 알림은 Incoming Webhook 대신 Bot token의 `chat:write`로 보낸다. 파일 업로드에
