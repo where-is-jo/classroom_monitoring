@@ -37,7 +37,7 @@ from .shared.dependencies import (
 from .shared.errors import DomainError, ErrorDetail, ErrorResponse
 from .shared.metrics import render_metrics
 from .shared.schemas import HealthResponse, ReadinessResponse
-from .shared.templating import DEMO_ASSET_DIR, STATIC_DIR, templates
+from .shared.templating import STATIC_DIR, templates
 from .snapshots.router import api_router as snapshot_api_router
 from .snapshots.router import page_router as snapshot_page_router
 from .student_monitoring.router import api_router as student_api_router
@@ -91,8 +91,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-if get_settings().demo_mode_enabled:
-    app.mount("/demo-assets", StaticFiles(directory=str(DEMO_ASSET_DIR)), name="demo-assets")
 app.include_router(classroom_page_router, include_in_schema=False)
 app.include_router(monitoring_page_router, include_in_schema=False)
 app.include_router(face_enrollment_page_router, include_in_schema=False)
@@ -222,7 +220,6 @@ if get_settings().metrics_enabled:
 
         **끄면 라우트 자체를 만들지 않는다.** 500이나 404를 돌려주는 경로를 남기면
         "지표가 있는데 지금 실패한 것"과 "이 배포에는 없는 것"이 구분되지 않는다.
-        위의 demo-assets 마운트가 같은 방식이다.
 
         OpenAPI 문서에는 넣지 않는다. 제품 API가 아니라 운영용 경로다.
         """

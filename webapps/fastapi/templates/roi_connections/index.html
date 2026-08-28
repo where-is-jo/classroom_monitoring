@@ -13,8 +13,6 @@
       <button id="roi-detect-save" type="button" hidden>찾은 자리 저장</button>
       <button id="roi-auto-confirm" type="button" class="secondary" hidden>자동 생성 확정</button>
       <button id="roi-capture" type="button"{% if not classroom or not cameras %} disabled{% endif %}>현재 화면 캡처</button>
-      <button id="roi-auto" type="button" disabled>격자로 생성</button>
-      <button id="roi-auto-save" type="button" hidden>미리보기 저장</button>
       <button id="roi-start" type="button" disabled>등록 시작</button>
       <button id="roi-finish" type="button" disabled>선택 완료</button>
       <button id="roi-reset" type="button" class="secondary" disabled>초기화</button>
@@ -63,6 +61,17 @@
     </div>
     <p class="summary">좌석은 찾은 순서대로 미리 붙여 두었습니다. <strong>카메라는 자리를 알지만 그 자리가 몇 번 좌석인지는 알지 못하므로 추측입니다</strong> — 화면과 대조해 다른 자리는 바꿔 주세요. 비워 둔 자리는 저장하지 않습니다. 저장한 뒤에도 ‘자동 생성 확정’ 전까지는 좌석 판정에 쓰이지 않습니다.</p>
     <ul id="roi-detect-list" class="roi-detect-list"></ul>
+  </section>
+
+  {# 탐지는 사람이 앉았던 자리만 찾는다. 아무도 앉지 않은 좌석은 표본이 없어 영영 나오지
+     않으므로, 남은 좌석을 여기 모아 사람이 직접 그려 채우게 한다. #}
+  <section id="roi-missing-panel" class="roi-missing-panel" hidden aria-labelledby="roi-missing-title">
+    <div class="roi-detect-heading">
+      <h2 id="roi-missing-title">ROI가 없는 좌석</h2>
+      <p id="roi-missing-summary" class="summary"></p>
+    </div>
+    <p class="summary">탐지는 사람이 앉았던 자리만 찾습니다. 아무도 앉지 않은 좌석은 탐지로 채울 수 없으므로 직접 그려 주세요. ‘직접 그리기’를 누른 뒤 화면에서 좌석 구역의 꼭짓점을 3개 이상 찍고 ‘선택 완료’를 누르면 그 좌석에 저장됩니다.</p>
+    <ul id="roi-missing-list" class="roi-missing-list"></ul>
   </section>
 
   {% if not classrooms %}<div class="empty" role="status"><strong>등록된 강의실이 없습니다.</strong></div>{% endif %}
