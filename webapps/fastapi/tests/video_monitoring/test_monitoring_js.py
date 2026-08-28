@@ -159,15 +159,17 @@ class TestMonitoringJsStatic:
         assert "EventSource" in source
         assert "RTCPeerConnection" in source
 
-    def test_bbox_label_uses_server_verified_display_label(self) -> None:
-        """모델 class_name을 이름처럼 표시하지 않고 서버 보강 라벨만 사용한다."""
+    def test_bbox_label_uses_student_id_or_unknown(self) -> None:
+        """등록자는 UUID를, 미등록자는 unknown을 표시한다."""
         source = MONITORING_JS.read_text(encoding="utf-8")
-        assert 'det.display_label || "사람"' in source
+        assert 'label.textContent = det.student_id || "unknown"' in source
+        assert "det.display_label" not in source
         assert "det.class_name +" not in source
 
-    def test_bbox_label_includes_track_id_when_available(self) -> None:
+    def test_bbox_label_hides_track_id_and_confidence(self) -> None:
         source = MONITORING_JS.read_text(encoding="utf-8")
-        assert 'det.track_id ? " #" + det.track_id : ""' in source
+        assert 'det.track_id ? " #" + det.track_id : ""' not in source
+        assert "Math.round((det.confidence || 0) * 100)" not in source
 
     def test_bundle_implements_fullscreen_toggle(self) -> None:
         """전체화면 토글은 Fullscreen API로 main 영역만 확대/복원한다 (MON-008)."""
