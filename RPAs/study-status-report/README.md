@@ -154,6 +154,19 @@ n8n 워크플로우 전역 static data에 `date|classroom_id|period|student_id|s
 (`events_<날짜>_<강의실>.json`), 주간은 그 파일들만 읽는다. 이탈률 식도
 `create_management_workbook.py`에서 그대로 가져와 일일과 어긋나지 않게 했다.
 
+### 워크북 서식
+
+색·글꼴·표 서식은 `scripts/xlsx_style.py` 한곳에서 정한다. 일일과 주간이 각자 정하면
+**같은 '학생 상태'가 두 보고서에서 다른 색으로 나오고, 받는 사람은 그 차이를 의미로
+읽는다.**
+
+학생 상태는 심각도 한 줄로 칠한다 — 미착석(적) → 오착석(주황) → 좌석 외 위치(황) →
+착석(녹). **'판단 보류'만 그 줄에서 빼내 무채색으로 둔다.** 판단하지 못한 것은 경고가
+아니라 정보가 없는 것이라, 경고색을 주면 관리자가 대응할 일이 있는 줄로 읽는다.
+
+표에는 틀 고정과 자동 필터를 건다. 관측시각은 **UTC 원본을 KST로 바꿔** 적는다 —
+그대로 두면 09시 수업이 00시로 보여서 시간표와 맞춰 볼 때마다 9를 더해야 한다.
+
 | 디렉터리 | 담는 것 | 학생 이름 |
 | --- | --- | --- |
 | `reports/` | 사람이 받는 `.xlsx` | **있다** |
@@ -226,6 +239,7 @@ HTTP Request 노드의 응답은 항목의 `json`을 통째로 덮어써서, 원
 - `runner/Dockerfile`: 실행기 컨테이너 이미지
 - `templates/sample_events.json`: 검증용 상태 변화 샘플
 - `scripts/toggle_workflow.py`: 워크플로 on/off 스크립트
+- `scripts/xlsx_style.py`: 워크북 서식(색·글꼴·표) 정의. 일일과 주간이 함께 쓴다
 - `templates/schedule-sample.md`: 시간표 문서 형식과 예시
 - `.env.example`: n8n/스크립트 환경변수 예시
 
