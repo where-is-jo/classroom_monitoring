@@ -1,8 +1,8 @@
 name: GPU 서버 배포
 
-# 서버에 올라가는 docker compose·수집 설정과 서버 로컬 추론 이미지를 저장소 상태로
-# 맞춘다. 설정만 옮기고 worker·deeplearning을 다시 빌드하지 않으면 같은 :latest 태그가
-# 오래된 image ID를 계속 가리키므로 두 이미지를 현재 커밋으로 함께 갱신한다.
+# 서버에 올라가는 docker compose·수집·Grafana 설정과 서버 로컬 추론 이미지를 저장소
+# 상태로 맞춘다. 설정만 옮기고 worker·deeplearning을 다시 빌드하지 않으면 같은 :latest
+# 태그가 오래된 image ID를 계속 가리키므로 두 이미지를 현재 커밋으로 함께 갱신한다.
 #
 # 배포 대상은 커밋되는 파일뿐이다. .docker/env/(비밀값)와 .docker/models/(가중치)는
 # 저장소에 없고 서버 로컬에만 있으므로 전송하거나 삭제하지 않는다(결정 0018).
@@ -29,6 +29,9 @@ on:
       - '.docker/prometheus/**'
       - '.docker/minio/**'
       - '.docker/scripts/**'
+      # monitoring compose가 이 경로를 read-only mount하므로 대시보드와 provisioning도
+      # 같은 배포에서 서버 checkout에 전달해야 한다.
+      - 'monitoring/internal/grafana/**'
       # 배포 검증 스크립트의 테스트는 CI 러너에서만 돈다. 서버 동작을 바꾸지 않는다.
       - '!.docker/scripts/tests/**'
       # 서버에서 이미지로 빌드되는 소스. .dockerignore가 빼는 것은 여기서도 뺀다 —
@@ -228,7 +231,8 @@ jobs:
           backup_dir="$REMOTE_PATH/.deploy-backups"
           mkdir -p "$backup_dir"
           tar czf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH" \
-            --exclude='.docker/models' --exclude='.docker/env' .docker
+            --exclude='.docker/models' --exclude='.docker/env' \
+            .docker monitoring/internal/grafana
           deep_id=$(docker image inspect --format '{{.Id}}' ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest 2>/dev/null || :)
           worker_id=$(docker image inspect --format '{{.Id}}' ghcr.io/where-is-jo/classroom-monitoring-worker:latest 2>/dev/null || :)
           printf 'deeplearning=%s\nworker=%s\n' "$deep_id" "$worker_id" \
@@ -277,10 +281,11 @@ jobs:
             exit 1
           fi
 
-      # git이 추적하는 파일만 목록으로 넘긴다. --delete를 쓰지 않는 이유가 여기 있다 —
+      # git이 추적하는 GPU 설정 파일만 목록으로 넘긴다. --delete를 쓰지 않는 이유가
+      # 여기 있다 —
       # 서버에만 있는 env/·models/·data/를 지울 위험을 아예 만들지 않는다.
       # 저장소에서 파일을 지웠을 때 서버에서도 지우는 일은 사람이 판단해서 한다.
-      - name: 커밋된 .docker 파일 전송
+      - name: 커밋된 GPU 서버 설정 파일 전송
         run: |
           set -euo pipefail
           rollback_transfer() {
@@ -291,7 +296,7 @@ jobs:
           docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
           REMOTE
           }
-          if ! git ls-files -z .docker \
+          if ! git ls-files -z .docker monitoring/internal/grafana \
               | rsync -rlt --no-owner --no-group --from0 --files-from=- \
                   --itemize-changes \
                   -e "ssh $SSH_OPTS" \
