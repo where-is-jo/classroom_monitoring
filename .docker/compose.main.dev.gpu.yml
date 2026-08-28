@@ -161,6 +161,10 @@ services:
       # PR 5: lost 신원을 전역 유일한 새 track으로만 원자 이동한다.
       # false로 override하고 force recreate하면 기존 문 영역 인계만 사용한다.
       IDENTITY_TRACK_RECOVERY_ENABLED: "true"
+      # PR 7: CCTV 추적을 약 5 FPS에서 10 FPS로 올리되 lost 복구의 약 6초
+      # 벽시계 창은 유지한다. 4/30으로 override하고 force recreate하면 되돌아간다.
+      PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES: "2"
+      BYTETRACK_BUFFER_FRAMES: "60"
     volumes:
       # 모델 가중치는 이미지에도 저장소에도 넣지 않는다(.docker/models/는 .gitignore).
       # env/worker.dev.env의 MODEL_PATH가 이 안의 파일을 가리켜야 한다.

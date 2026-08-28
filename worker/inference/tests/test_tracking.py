@@ -153,6 +153,43 @@ def test_tracked는_31번째_누락에서_removed되고_새_ID를_만든다() ->
     assert recreated_tracked.detections[0].track_id == "person-2"
 
 
+@pytest.mark.parametrize("missing_frames", (1, 15, 30, 60))
+def test_샘플_간격을_절반으로_줄이면_60프레임까지_같은_ID로_복구한다(
+    missing_frames: int,
+) -> None:
+    tracker = CameraByteTracker(
+        config(track_buffer_frames=60, track_lifecycle_enabled=True)
+    )
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    for _ in range(missing_frames):
+        tracker.update(result())
+
+    recovered = tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    assert recovered.detections[0].track_id == "person-1"
+
+
+def test_샘플_간격을_절반으로_줄이면_61번째_누락에서_새_ID를_만든다() -> None:
+    tracker = CameraByteTracker(
+        config(track_buffer_frames=60, track_lifecycle_enabled=True)
+    )
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    for _ in range(61):
+        tracker.update(result())
+
+    recreated_tentative = tracker.update(
+        result(person(0.9, (10, 10, 80, 180)))
+    )
+    recreated_tracked = tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    assert recreated_tentative.detections == ()
+    assert recreated_tracked.detections[0].track_id == "person-2"
+
+
 def test_tentative는_외부에서_숨기고_내부_handler에는_전달한다() -> None:
     external: list[InferenceResult] = []
     internal: list[InferenceResult] = []
