@@ -208,6 +208,13 @@ sum(rate(classroom_monitoring_identity_handoff_total{outcome="accepted"}[30m]))
 
 # 카메라별 만료 track 증가율 — 급증하면 가림·매칭 임계값을 점검한다
 sum by (camera_id) (rate(classroom_monitoring_person_tracks_expired_total[10m]))
+
+# 30분 동안 person 탐지 1,000건당 생성·만료 track 수 — 추적 변경 전후 공식 비교값
+1000 * sum(increase(classroom_monitoring_person_tracks_created_total[30m]))
+  / clamp_min(sum(increase(classroom_monitoring_detections_total{class_name="person"}[30m])), 1)
+
+1000 * sum(increase(classroom_monitoring_person_tracks_expired_total[30m]))
+  / clamp_min(sum(increase(classroom_monitoring_detections_total{class_name="person"}[30m])), 1)
 ```
 
 ### 지금 노출하는 지표 — fastapi

@@ -40,6 +40,9 @@ x-logging: &default-logging
 
 volumes:
   minio-data:
+  # 익명 bbox·confidence JSONL만 담는다. worker가 24시간 보존 정책으로 지우며,
+  # 모델 이미지 재빌드·컨테이너 교체 중에도 통제 실험 trace를 유지한다.
+  inference-traces:
 
 # 포트 방침
 #
@@ -150,6 +153,8 @@ services:
       # 모델 가중치는 이미지에도 저장소에도 넣지 않는다(.docker/models/는 .gitignore).
       # env/worker.dev.env의 MODEL_PATH가 이 안의 파일을 가리켜야 한다.
       - ./models:/models:ro
+      # 이미지·얼굴은 쓰지 않고 익명 bbox·confidence trace만 최대 24시간 보존한다.
+      - inference-traces:/worker/inference/data/traces
     networks:
       - backend
     depends_on:
