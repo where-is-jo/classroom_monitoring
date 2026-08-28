@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -36,6 +37,17 @@ FACE_MODEL_CONFIGS = {
         },
         "collection": "face_embeddings_adaface",
         "model_path": "adaface/adaface_ir50_webface4m.onnx",
+        # **경로 이름만으로는 부족하다.** 이름을 맞춰 놓고 다른 ONNX를 두면 그대로
+        # 통과하는데, 런타임에도 해시 검사가 없어(deeplearning/face_recognizer.py)
+        # 어떤 가중치든 위 model_version으로 라벨링돼 갤러리에 들어간다.
+        # 값은 현재 운영 갤러리와 thresholds.json을 만든 바로 그 ONNX다.
+        # training/prepare_adaface_model.py가 만드는 ONNX와는 다른 바이트열이다 —
+        # 같은 AdaFace IR-50 WebFace4M이지만 배포 경로(공식 저장소 Google Drive
+        # checkpoint)와 export opset이 달라서다. 그쪽으로 바꾸려면 벡터가 달라지므로
+        # 갤러리 재등록과 임계값 재검증을 함께 해야 하고, 이 값도 같이 갱신한다.
+        "model_sha256": (
+            "46718f7629b90d95a204a1a30b268f40bd59c814ebe51caaf6589bac9ad86665"
+        ),
     },
 }
 COMMON_FACE_MODEL_PATHS = (
@@ -66,6 +78,14 @@ def read_env(path: Path) -> dict[str, str]:
             raise ValueError(f"{path.name}:{line_number}: 변수 이름이 비어 있습니다.")
         values[key] = value
     return values
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def host_model_path(docker_root: Path, container_path: str) -> Path:
@@ -262,6 +282,16 @@ def validate(docker_root: Path) -> list[str]:
                     errors.append(
                         f"얼굴 인식 모델 파일이 없습니다: {host_recognition_path}"
                     )
+                else:
+                    expected_hash = face_model_config.get("model_sha256")
+                    if isinstance(expected_hash, str) and expected_hash:
+                        actual = sha256_file(host_recognition_path)
+                        if actual != expected_hash:
+                            errors.append(
+                                f"얼굴 인식 모델 가중치가 {face_recognizer} 기준과 "
+                                "다릅니다. 갤러리와 임계값이 다른 모델로 만들어져 "
+                                "조용히 오인식이 늘 수 있습니다."
+                            )
 
         threshold_path = deep_env.get("FACE_IDENTITY_THRESHOLD_FILE", "").strip()
         if threshold_path:

@@ -401,6 +401,21 @@ FACE_RECOGNITION_MODEL_VERSION=cvlface-adaface-ir50-webface4m-fe7718c6
 FACE_EMBEDDING_COLLECTION=face_embeddings_adaface
 ```
 
+**ONNX 파일은 `training/prepare_adaface_model.py`의 산출물이 아니다.** 현재 갤러리와
+`thresholds.json`을 만든 것은 그 스크립트의 이전 판(공식 저장소
+[mk-minchul/AdaFace](https://github.com/mk-minchul/AdaFace) README의 Google Drive
+`ir50_webface4m` checkpoint를 받아 변환)이 만든 파일이고, SHA-256은 다음과 같다.
+
+```text
+46718f7629b90d95a204a1a30b268f40bd59c814ebe51caaf6589bac9ad86665
+```
+
+같은 AdaFace IR-50 WebFace4M이지만 배포 경로와 export opset이 달라 지금 스크립트가
+만드는 ONNX와 바이트열이 다르다. 배포 사전점검이 위 해시를 대조하므로
+(`FACE_MODEL_CONFIGS["adaface"]["model_sha256"]`), **다른 ONNX로 바꾸면 배포가
+막힌다.** 바꾸려면 벡터가 달라지므로 갤러리 재등록과 임계값 재검증을 함께 하고
+그 해시도 같이 갱신한다.
+
 `.docker/env/worker.dev.env`에는 입구와 교실 CCTV가 모두 있어야 한다. 아래 camera ID는
 FastAPI 카메라 설정 및 인계 ROI 설정의 ID와 정확히 같아야 한다.
 

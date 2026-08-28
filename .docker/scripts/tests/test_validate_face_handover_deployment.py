@@ -13,8 +13,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from validate_face_handover_deployment import (
     EXPECTED_THRESHOLD_METADATA,
+    FACE_MODEL_CONFIGS,
     validate,
 )
+
+# 테스트는 실제 174MB ONNX를 둘 수 없다. 더미 바이트를 쓰되 기대 해시를 그 더미의
+# 것으로 바꿔, 해시를 "대조한다"는 동작 자체는 그대로 검증한다.
+_DUMMY_ADAFACE = b"adaface-model"
+
+
+@pytest.fixture
+def adaface_hash_matches_dummy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        FACE_MODEL_CONFIGS["adaface"],
+        "model_sha256",
+        hashlib.sha256(_DUMMY_ADAFACE).hexdigest(),
+    )
 
 
 def build_deployment(tmp_path: Path) -> Path:
@@ -225,11 +239,12 @@ def test_track_임계값이_누락되면_실패한다(tmp_path: Path) -> None:
 
 def test_AdaFace_모델_컬렉션_임계값을_같이_전환하면_통과한다(
     tmp_path: Path,
+    adaface_hash_matches_dummy: None,
 ) -> None:
     docker_root = build_deployment(tmp_path)
     model_path = docker_root / "models" / "face" / "adaface"
     model_path.mkdir()
-    (model_path / "adaface_ir50_webface4m.onnx").write_bytes(b"adaface-model")
+    (model_path / "adaface_ir50_webface4m.onnx").write_bytes(_DUMMY_ADAFACE)
     deep_env_path = docker_root / "env" / "deeplearning.dev.env"
     deep_env = deep_env_path.read_text(encoding="utf-8")
     deep_env = deep_env.replace("FACE_RECOGNIZER=arcface", "FACE_RECOGNIZER=adaface")
@@ -376,6 +391,40 @@ def test_gpu_server_passes_without_fastapi_env(tmp_path: Path) -> None:
     (docker_root / "env" / "fastapi.dev.env").unlink()
 
     assert validate(docker_root) == []
+
+
+def test_이름만_맞춘_다른_가중치는_실패한다(
+    tmp_path: Path,
+    adaface_hash_matches_dummy: None,
+) -> None:
+    """경로 이름이 맞아도 내용이 다르면 막는다.
+
+    이름을 맞춰 두면 경로 대조는 통과한다. 런타임에도 해시 검사가 없어
+    (deeplearning/face_recognizer.py) 어떤 가중치든 선언된 model_version으로
+    라벨링돼 갤러리에 들어간다. 실제로 운영 서버가 이 상태였다.
+    """
+    docker_root = build_deployment(tmp_path)
+    model_path = docker_root / "models" / "face" / "adaface"
+    model_path.mkdir()
+    # 이름은 정본과 같지만 바이트열이 다르다.
+    (model_path / "adaface_ir50_webface4m.onnx").write_bytes(b"another-adaface")
+    deep_env_path = docker_root / "env" / "deeplearning.dev.env"
+    deep_env = deep_env_path.read_text(encoding="utf-8")
+    deep_env = deep_env.replace("FACE_RECOGNIZER=arcface", "FACE_RECOGNIZER=adaface")
+    deep_env = deep_env.replace(
+        "/models/face/buffalo_l/w600k_r50.onnx",
+        "/models/face/adaface/adaface_ir50_webface4m.onnx",
+    )
+    deep_env = deep_env.replace(
+        "insightface-buffalo_l-w600k_r50-v0.7",
+        "cvlface-adaface-ir50-webface4m-fe7718c6",
+    )
+    deep_env = deep_env.replace("face_embeddings_arcface", "face_embeddings_adaface")
+    deep_env_path.write_text(deep_env, encoding="utf-8")
+
+    errors = validate(docker_root)
+
+    assert any("가중치가" in error for error in errors), errors
 
 
 def test_adaface_rejects_arcface_weights(tmp_path: Path) -> None:
