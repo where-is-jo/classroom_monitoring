@@ -348,7 +348,7 @@ class StudentMonitoringService:
             or detection.identity_confidence is None
             or detection.identity_confidence < self._identity_confidence_threshold
         ):
-            return "사람"
+            return "인식 불가"
         try:
             student = self._student_lookup.find_by_id(detection.student_id)
         except Exception:
@@ -356,8 +356,8 @@ class StudentMonitoringService:
                 "student_id=%s 탐지 라벨 보강 중 학생 조회에 실패했습니다.",
                 detection.student_id,
             )
-            return "사람"
-        return student.name if student is not None and student.is_active else "사람"
+            return "인식 불가"
+        return student.name if student is not None and student.is_active else "인식 불가"
 
     def _publish_occupancy_events(
         self,

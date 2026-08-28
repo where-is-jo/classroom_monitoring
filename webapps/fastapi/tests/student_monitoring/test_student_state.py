@@ -504,7 +504,11 @@ def test_new_event_publishes_safe_detection_labels_and_student_state_once() -> N
     assert len(student_events) == 1
     detections = detection_events[0]["detections"]
     assert isinstance(detections, list)
-    assert [item["display_label"] for item in detections] == ["김로운", "사람", "사람"]
+    assert [item["display_label"] for item in detections] == [
+        "김로운",
+        "인식 불가",
+        "인식 불가",
+    ]
     assert all("identity_confidence" not in item for item in detections)
     assert all("face_bbox" not in item for item in detections)
     assert student_events[0] == {
