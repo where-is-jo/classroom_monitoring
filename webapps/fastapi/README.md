@@ -99,7 +99,6 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `/identity-handover` | 입구 얼굴 신원을 CCTV 사람 track에 넘길 **CCTV 문 사각형 ROI** 관리. 현재 CCTV 화면을 캡처해 저장 영역을 겹쳐 보고 다시 그리며, 저장값은 worker가 주기적으로 읽어 재시작 없이 반영한다 |
 | `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
 | `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
-| `/video-search` | **데모 영상 검색.** 규칙 기반 한국어 토큰 매칭이며 대상은 합성 catalog다. LLM을 쓰지 않는다. demo가 꺼져 있으면 빈 결과 |
 | `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다. **`LLM_SEARCH_MODE=disabled`(기본값)에서는 검색 폼 없이 안내만 나온다** — GPU가 있는 환경에서만 동작한다 |
 
 `/classrooms/{id}` 상세 페이지는 없다. `/classrooms?classroom_id={id}`에서 같은
@@ -151,7 +150,6 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 | `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events` | 입구 얼굴 관측 이벤트 조회. 상태·학생·시간·limit·cursor 필터, 기본 최신 50건 |
 | `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events/stream` | 활성 `IDENTITY_ONLY` 입구 카메라의 얼굴 관측 SSE 구독. `entry-identity` 이벤트로 bbox·화면용 이름·분석 상태를 전달 |
 | `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
-| `POST` | `/api/v1/video-searches` | 부작용 없는 데모 catalog 검색 실행 (규칙 기반) |
 | `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
 | `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
 | `POST` | `/internal/entry-identity-events` | worker 입구 얼굴 관측 이벤트 수신. 신규 201, 동일 재전송 200, 충돌 409 |
@@ -190,13 +188,15 @@ Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
 
 ### 합성 데모
 
-`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 합성 영상 source와
-고정 검색 catalog를 제공하고 `/demo-assets/*`를 mount한다. demo 응답은 `is_demo=true`를
-유지한다.
+`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 강의실·좌석 seed를
+넣는다(`app/demo_seed.py`). 개인정보가 없는 고정 fixture다.
 
-이 기능은 카메라·스트림·추론·영상 저장을 구현하지 않는다. 외부 미디어, 사용자 업로드,
-운영 데이터도 사용하지 않는다. demo가 꺼져 있으면 `/monitoring`과 `/video-search`는
-404가 아니라 빈 상태를 반환한다.
+**데모 영상 검색(`/video-search`)과 합성 영상 catalog는 걷어냈다.** 실제 카메라가
+붙은 뒤로는 쓰이지 않았고, `/api/v1/video-streams`가 합성 source를 실제 source와 섞어
+돌려주고 있었다. 지금은 등록된 실제 카메라만 나온다.
+
+영상 원본은 저장하지 않는다. 등록된 카메라가 없으면 `/monitoring`은 404가 아니라
+빈 상태를 반환한다.
 
 ## 핵심 도메인 규칙
 
@@ -234,7 +234,6 @@ app/
 
 templates/              기능별 Jinja2 화면
 static/                 CSS와 화면 보조 JavaScript
-demo_assets/            합성 데모 SVG 자산
 api-spec/               구현 전 API 설계 명세 JSON
 tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스트
 ```

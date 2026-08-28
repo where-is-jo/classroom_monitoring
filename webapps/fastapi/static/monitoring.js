@@ -3,7 +3,7 @@
  * 각 real card에 대해:
  *   1. FastAPI playback session 생성 (POST /api/v1/video-streams/{stream_id}/playback-sessions)
  *   2. 생성 응답의 FastAPI signaling URL로만 WebRTC(WHEP) offer 전송 (결정 0014)
- *   3. 역할별 탐지 SSE 구독 → bbox overlay·탐지 수·마지막 탐지 갱신
+ *   3. 역할별 탐지 SSE 구독 → bbox overlay·마지막 탐지 갱신
  *   4. unload에서 EventSource·RTCPeerConnection·playback session을 모두 정리
  *
  * 브라우저는 MediaMTX 주소·포트·RTSP URL·credential을 구성하거나
@@ -164,13 +164,7 @@
       label.className = "bbox-label";
       label.style.cssText =
         "position:absolute;top:-20px;left:0;padding:2px 6px;background:#00ff88;color:#000;font-size:11px;font-weight:700;border-radius:3px;white-space:nowrap;";
-      const trackLabel = det.track_id ? " #" + det.track_id : "";
-      label.textContent =
-        (det.display_label || "사람") +
-        trackLabel +
-        " " +
-        Math.round((det.confidence || 0) * 100) +
-        "%";
+      label.textContent = det.student_id || "unknown";
       box.appendChild(label);
 
       overlay.appendChild(box);
@@ -236,7 +230,7 @@
         bbox: observation.face_bbox,
         confidence: observation.detection_confidence,
         track_id: observation.face_track_id,
-        display_label: observation.display_label,
+        student_id: observation.student_id,
       };
     });
     if (data.frame) {
@@ -249,8 +243,6 @@
     }
     updateDetectionInfo(ctx, {
       captured_at: data.captured_at,
-      detections_count:
-        data.observations_count != null ? data.observations_count : detections.length,
     });
     markSourceConnected(ctx, "얼굴 탐지 수신 중");
     updateAnalysisStatus(ctx, data.processing_status);
@@ -284,17 +276,6 @@
   }
 
   function updateDetectionInfo(ctx, data) {
-    const countEl = ctx.card.querySelector("[data-detection-count]");
-    if (countEl) {
-      const count =
-        data.detections_count != null
-          ? data.detections_count
-          : data.detections
-            ? data.detections.length
-            : 0;
-      countEl.textContent = String(count);
-    }
-
     const timeEl = ctx.card.querySelector("[data-last-detection]");
     if (timeEl && data.captured_at) {
       const d = new Date(data.captured_at);

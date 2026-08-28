@@ -77,7 +77,7 @@ img, video { display: block; max-width: 100%; }
 .form-section { margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border); }
 .form-section h3 { margin-bottom: 4px; }
 
-.panel, .summary-card, .demo-video-card, .empty, .empty-state {
+.panel, .summary-card, .empty, .empty-state {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -185,6 +185,29 @@ input[type="checkbox"] { width: 20px; min-height: 20px; }
 }
 .seat-map__empty:hover { background: #e4efec; border-color: var(--primary); }
 
+/* 출입문 표시: 격자 오른쪽 벽의 아래쪽에 문 개구부를 그린다.
+   실제 강의실이 우측 하단에 문을 두고 있어 배치도와 CCTV 화면을 같은 방향으로 읽게 한다.
+   stage는 격자가 스크롤 영역보다 넓어져도 문이 좌석 위로 겹치지 않도록 내용 폭을 따라간다. */
+.seat-map-stage { position: relative; width: max-content; min-width: 100%; padding-right: 46px; }
+.seat-map__door {
+  position: absolute;
+  right: 0;
+  bottom: 16px;
+  display: grid;
+  place-content: center;
+  width: 38px;
+  height: 86px;
+  margin: 0;
+  color: var(--primary-dark);
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  background: var(--primary-soft);
+  border: 2px solid var(--primary);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+}
+
 /* 좌석 편집 패널: 지도 옆 고정 폭(280px)으로 표시하고 320px에서 축소한다. */
 .seat-edit-panel { flex: 0 1 340px; min-width: 280px; }
 .seat-map-hint { margin-bottom: 8px; }
@@ -243,23 +266,11 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .state--absent { color: #dc2626; }
 .state--unknown { color: #6b7280; }
 
-.camera-monitoring-refresh-time { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }
-.camera-monitoring-refresh-time span, .camera-monitoring-refresh-time strong { display: block; }
-.camera-monitoring-refresh-time span { font-size: .75rem; }
 .page-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .fullscreen-toggle { color: var(--primary-dark); background: var(--surface); border-color: var(--border); }
 .fullscreen-toggle:hover { background: var(--primary-soft); }
 .fullscreen-toggle[hidden] { display: none; }
 .fullscreen-toggle-icon { margin-right: 7px; font-size: 16px; line-height: 1; }
-.demo-video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
-.demo-video-card { overflow: hidden; }
-.demo-video-frame { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #142220; }
-.demo-video-frame video, .demo-video-frame img { width: 100%; height: 100%; object-fit: cover; }
-.demo-video-error, .demo-video-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; color: #fff; background: rgb(20 34 32 / 88%); text-align: center; }
-.demo-video-error[hidden] { display: none; }
-.demo-ribbon { position: absolute; top: 12px; left: 12px; padding: 4px 9px; color: #173b36; background: #b7e4dc; border-radius: 999px; font-size: .72rem; font-weight: 800; }
-.demo-video-copy { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 18px 8px; }
-.demo-video-copy p:last-child { margin-bottom: 0; }
 .status-label { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; white-space: nowrap; font-size: .78rem; font-weight: 800; }
 .status-label--active { color: #004f3d; background: #c8ede2; }
 .status-label--stale { color: #674300; background: #fff3cd; }
@@ -275,7 +286,7 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .example-list { display: grid; gap: 10px; margin-bottom: 0; }
 
 /* 연결 카메라 중심 실시간 모니터링 (TASK-003)
-   demo/search 화면의 demo-video-* grid와 분리된 페이지 전용 클래스다. */
+   페이지 전용 클래스다. */
 /* **한 번에 한 카메라만 본다.** 예전에는 2열 grid로 전부 늘어놓았는데, 카메라마다
    비율이 달라(어안 CCTV는 세로 1280x1944, 입구 카메라는 가로) 나란히 두면 둘 다
    작아진다. 관제는 "지금 무엇이 보이는가"가 중요하므로 하나를 크게 본다. */
@@ -322,9 +333,8 @@ main:fullscreen {
   padding: 24px clamp(16px, 3vw, 40px);
 }
 
-/* 자연어 탐지 검색·탐지 스냅샷 (llm_search, snapshots)
-   두 화면이 쓰던 클래스에 규칙이 하나도 없어 브라우저 기본 스타일로 나왔다.
-   그래서 결과가 문단처럼 이어지고 한 건이 어디서 끝나는지 보이지 않았다. */
+/* 자연어 탐지 검색·탐지 스냅샷이 함께 쓰는 것만 여기 둔다.
+   자연어 검색 화면만 쓰는 격자·모달은 static/llm-search.css에 있다. */
 .page-lead { max-width: 68ch; margin-bottom: 0; color: var(--muted); }
 
 /* 질문 한 줄 + 버튼. filter-form(4열 격자)과 다른 형태라 클래스를 나눈다. */
@@ -360,55 +370,7 @@ main:fullscreen {
 .state-error { border-left-color: var(--danger); }
 .state-error h2 { color: var(--danger); }
 
-/* "이렇게 이해했어요": 문장 한 줄이 먼저, 대조용 값이 그 아래다. */
-.briefing {
-  margin-bottom: 22px;
-  padding: clamp(18px, 3vw, 26px);
-  background: var(--primary-soft);
-  border: 1px solid #b3ddd5;
-  border-radius: 14px;
-}
-.briefing__heading { margin-bottom: 8px; color: #10453f; font-size: .8rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.briefing__sentence { margin-bottom: 14px; color: #10312e; font-size: 1.05rem; font-weight: 700; line-height: 1.6; }
-.briefing__facts { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0; }
-.briefing__facts > div { display: grid; gap: 2px; }
-.briefing__facts dt { color: #35625c; font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.briefing__facts dd { margin: 0; color: #10312e; font-variant-numeric: tabular-nums; }
-/* 걸지 못한 조건임을 색이 아니라 글자로 말한다. */
-.briefing__badge { display: inline-block; margin-left: 4px; padding: 2px 8px; color: #674300; background: #fff3cd; border: 1px solid #e6cf8f; border-radius: 999px; font-size: .72rem; font-weight: 800; }
-.briefing__notes { display: grid; gap: 6px; margin: 14px 0 0; padding-left: 18px; color: #2b4f4a; font-size: .9rem; }
-
 .result-count { margin-bottom: 12px; color: var(--muted); font-weight: 700; }
-.result-count--warning { color: var(--danger); }
-
-/* 탐지 한 건 = 카드 하나. 좁은 화면에서는 이미지가 위로 접힌다. */
-.detection-list { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
-.detection-card {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 260px) minmax(0, 1fr);
-  align-items: start;
-  gap: 18px;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-}
-.detection-card__index { margin: 0; padding-top: 2px; color: var(--muted); font-size: .85rem; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
-/* 비율을 고정해 이미지가 있든 없든 카드 높이가 흔들리지 않게 한다. 어안 CCTV는
-   세로로 길어 cover로 자르면 뒷줄이 사라지므로 contain으로 전체를 남긴다. */
-.detection-card__figure { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #142220; border-radius: 10px; }
-.detection-card__image { width: 100%; height: 100%; object-fit: contain; }
-.detection-card__no-image { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 12px; color: #d7e5e2; font-size: .85rem; text-align: center; }
-.detection-card__body { display: grid; gap: 8px; min-width: 0; }
-.detection-card__time { margin: 0; font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.detection-card__place { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
-.detection-card__camera { padding: 3px 9px; color: #33413f; background: var(--surface-low); border: 1px solid var(--border); border-radius: 999px; font-size: .75rem; font-weight: 700; }
-.detection-card__facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 4px 0 0; }
-.detection-card__facts > div { display: grid; gap: 2px; }
-.detection-card__facts dt { color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.detection-card__facts dd { margin: 0; font-weight: 700; }
-.detection-card__muted { color: var(--muted); font-weight: 400; }
 
 /* 탐지 스냅샷 화면의 격자. 검색 결과와 달리 이미지 자체가 주인공이다. */
 .snapshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
@@ -429,18 +391,12 @@ main:fullscreen {
   .nav-enhanced.nav-open .side-nav { display: block; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-form, .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .detection-card { grid-template-columns: 28px minmax(0, 200px) minmax(0, 1fr); gap: 14px; }
 }
 
 @media (max-width: 560px) {
   .content { padding: 28px 16px; }
   .page-header, .section-heading { display: grid; gap: 14px; }
   .metric-grid, .filter-form, .form-grid { grid-template-columns: 1fr; }
-  .demo-video-grid { grid-template-columns: 1fr; }
-  .camera-monitoring-refresh-time { white-space: normal; }
-  /* 좁은 화면에서는 3열이 다 뭉개진다. 순번을 감추고 이미지를 위로 올린다. */
-  .detection-card { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .detection-card__index { display: none; }
   .filter-bar > label, .filter-bar > button { flex: 1 1 100%; }
 }
 

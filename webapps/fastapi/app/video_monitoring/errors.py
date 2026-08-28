@@ -1,16 +1,8 @@
-"""Domain errors for demo video queries."""
+"""Domain errors for camera sources and playback."""
 
 from __future__ import annotations
 
 from ..shared.errors import DomainError
-
-
-class DemoStreamNotFoundError(DomainError):
-    code = "DEMO_STREAM_NOT_FOUND"
-    status_code = 404
-
-    def __init__(self) -> None:
-        super().__init__("요청한 데모 피드를 찾을 수 없습니다.")
 
 
 class VideoStreamNotFoundError(DomainError):
@@ -41,14 +33,6 @@ class VideoStreamAlreadyExistsError(DomainError):
         super().__init__("이미 등록된 카메라 식별자입니다.")
 
 
-class VideoSearchInputError(DomainError):
-    code = "VIDEO_SEARCH_INPUT_INVALID"
-    status_code = 422
-
-    def __init__(self, message: str = "영상 검색 조건이 올바르지 않습니다.") -> None:
-        super().__init__(message)
-
-
 class PlaybackStreamNotFoundError(DomainError):
     """재생 세션 대상 stream이 존재하지 않음."""
 
@@ -60,7 +44,7 @@ class PlaybackStreamNotFoundError(DomainError):
 
 
 class PlaybackSourceUnavailableError(DomainError):
-    """재생 불가 source (demo·비활성·비WebRTC)."""
+    """재생 불가 source (비활성·비WebRTC)."""
 
     code = "PLAYBACK_SOURCE_UNAVAILABLE"
     status_code = 409

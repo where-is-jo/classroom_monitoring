@@ -1,9 +1,6 @@
-"""Router for monitoring queries and rule-based search without authentication."""
+"""Router for camera source queries and playback sessions without authentication."""
 
 from __future__ import annotations
-
-from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
@@ -11,22 +8,17 @@ from ..shared.config import Settings
 from ..shared.dependencies import (
     get_playback_session_service,
     get_settings,
-    get_video_demo_service,
     get_video_stream_service,
 )
 from ..shared.templating import templates
-from .errors import DemoStreamNotFoundError, PlaybackSessionInputError, VideoSearchInputError
-from .models import DemoStreamStatus
+from .errors import PlaybackSessionInputError
 from .schemas import (
-    DemoStreamResponse,
     PlaybackSessionCreateResponse,
     RealStreamResponse,
     StreamListResponse,
-    VideoSearchRequest,
-    VideoSearchResponse,
     VideoStreamCreateRequest,
 )
-from .service import PlaybackSessionService, VideoDemoService, VideoStreamService
+from .service import PlaybackSessionService, VideoStreamService
 
 api_router = APIRouter(prefix="/api/v1", tags=["monitoring"])
 page_router = APIRouter(tags=["monitoring-pages"])
@@ -39,23 +31,12 @@ _PLAYBACK_OWNER_COOKIE_PREFIX = "playback_owner_"
 
 @api_router.get("/video-streams", response_model=StreamListResponse)
 def list_video_streams(
-    q: str | None = Query(default=None, max_length=100),
     classroom_id: str | None = Query(default=None, max_length=128),
-    stream_status: DemoStreamStatus | None = Query(default=None, alias="status"),
-    demo_service: VideoDemoService = Depends(get_video_demo_service),
     stream_service: VideoStreamService = Depends(get_video_stream_service),
 ) -> StreamListResponse:
-    items: list[DemoStreamResponse | RealStreamResponse] = []
-
-    # Add demo streams
-    demo_streams = demo_service.list_streams(
-        search=q, classroom_id=classroom_id, status=stream_status
-    )
-    items.extend(DemoStreamResponse.from_domain(item) for item in demo_streams)
-
-    # Add real streams
-    real_streams = stream_service.list_streams()
-    for stream in real_streams:
+    """등록된 실제 카메라 source를 돌려준다."""
+    items: list[RealStreamResponse] = []
+    for stream in stream_service.list_streams():
         if classroom_id and stream.classroom_id != classroom_id:
             continue
         status = stream_service.get_source_status(stream)
@@ -85,41 +66,14 @@ def create_video_stream(
     return RealStreamResponse.from_domain(stream, stream_service.get_source_status(stream))
 
 
-@api_router.get(
-    "/video-streams/{stream_id}", response_model=DemoStreamResponse | RealStreamResponse
-)
+@api_router.get("/video-streams/{stream_id}", response_model=RealStreamResponse)
 def get_video_stream(
     stream_id: str,
-    demo_service: VideoDemoService = Depends(get_video_demo_service),
     stream_service: VideoStreamService = Depends(get_video_stream_service),
-) -> DemoStreamResponse | RealStreamResponse:
-    # demo catalog를 먼저 본다. 없으면 실제 source에서 찾는다.
-    # 여기서 삼키는 것은 "demo에 없다"는 사실 하나뿐이다. 실제 source 조회의
-    # 실패는 그대로 올라가야 하므로 넓은 except로 감싸지 않는다.
-    try:
-        return DemoStreamResponse.from_domain(demo_service.get_stream(stream_id))
-    except DemoStreamNotFoundError:
-        pass
-
+) -> RealStreamResponse:
     stream = stream_service.get_stream(stream_id)
     status = stream_service.get_source_status(stream)
     return RealStreamResponse.from_domain(stream, status)
-
-
-@api_router.post("/video-searches", response_model=VideoSearchResponse)
-def search_videos(
-    payload: VideoSearchRequest,
-    service: VideoDemoService = Depends(get_video_demo_service),
-) -> VideoSearchResponse:
-    return VideoSearchResponse.from_domain(
-        service.search_videos(
-            payload.query,
-            classroom_id=payload.classroom_id,
-            from_at=payload.from_at,
-            to_at=payload.to_at,
-            limit=payload.limit,
-        )
-    )
 
 
 @page_router.get("/monitoring")
@@ -135,59 +89,8 @@ def monitoring_page(
         context={
             "real_streams": real_streams,
             "stream_service": stream_service,
-            "current_time": datetime.now(UTC),
         },
     )
-
-
-@page_router.get("/video-search")
-def video_search_page(
-    request: Request,
-    query: str | None = Query(default=None, min_length=1, max_length=200),
-    classroom_id: str | None = Query(default=None, max_length=128),
-    from_at: str | None = Query(default=None, alias="from", max_length=40),
-    to_at: str | None = Query(default=None, alias="to", max_length=40),
-    limit: int = Query(default=20, ge=1, le=50),
-    service: VideoDemoService = Depends(get_video_demo_service),
-) -> Response:
-    parsed_from = _page_datetime(from_at)
-    parsed_to = _page_datetime(to_at)
-    results = None
-    if query is not None:
-        results = service.search_videos(
-            query,
-            classroom_id=classroom_id,
-            from_at=parsed_from,
-            to_at=parsed_to,
-            limit=limit,
-        )
-    options = service.classroom_options()
-    return templates.TemplateResponse(
-        request=request,
-        name="video_monitoring/search.html",
-        context={
-            "results": results,
-            "classroom_options": options,
-            "selected_query": query or "",
-            "selected_classroom_id": classroom_id or "",
-            "selected_from": parsed_from,
-            "selected_to": parsed_to,
-            "selected_limit": limit,
-            "demo_enabled": bool(options),
-        },
-    )
-
-
-def _page_datetime(value: str | None) -> datetime | None:
-    if value is None or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        raise VideoSearchInputError("Invalid datetime format.") from None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=ZoneInfo("Asia/Seoul"))
-    return parsed
 
 
 # ── playback session (결정 0014) ──────────────────────────────────────────────

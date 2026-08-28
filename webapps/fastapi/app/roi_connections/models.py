@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 
 
 @dataclass(frozen=True)
@@ -81,22 +80,6 @@ class SaveLiveRoiConnectionCommand:
 
 
 @dataclass(frozen=True)
-class GenerateAutoRoiCommand:
-    """좌석 구역 네 모서리에서 좌석 ROI를 만들어 달라는 요청.
-
-    `dry_run`이면 계산만 하고 저장하지 않는다. 관리자가 화면에서 먼저 확인하게 하려는
-    것이다 — 격자가 실제 배치와 어긋났는지는 겹쳐 보기 전에는 알 수 없다.
-    """
-
-    classroom_id: str
-    camera_id: str
-    corners: tuple[Point, ...]
-    reference_image_revision: int
-    seat_fill_ratio: float
-    dry_run: bool
-
-
-@dataclass(frozen=True)
 class ConfirmAutoRoiCommand:
     """자동 생성분을 좌석 판정에 쓰겠다고 확정한다.
 
@@ -106,55 +89,6 @@ class ConfirmAutoRoiCommand:
     classroom_id: str
     camera_id: str
     seat_ids: tuple[str, ...] | None
-
-
-class AutoRoiOutcome(StrEnum):
-    """좌석 하나에 대한 자동 생성 결과."""
-
-    GENERATED = "GENERATED"
-    """격자 좌표를 사영해 ROI를 만들었다."""
-
-    EXISTING_KEPT = "EXISTING_KEPT"
-    """이미 ROI가 있어 건드리지 않았다."""
-
-    NO_GRID_POSITION = "NO_GRID_POSITION"
-    """좌석에 행·열 좌표가 없어 격자 위 자리를 알 수 없다."""
-
-    TOO_SMALL = "TOO_SMALL"
-    """사영한 넓이가 너무 작아 관리자가 확인할 수 없다."""
-
-    INVALID_POLYGON = "INVALID_POLYGON"
-    """만든 좌표가 ROI 규칙을 통과하지 못했다. 저장하지 않는다."""
-
-
-@dataclass(frozen=True)
-class AutoRoiSeatResult:
-    """좌석 하나의 자동 생성 결과. 건너뛴 좌석도 이유와 함께 남긴다."""
-
-    seat_id: str
-    seat_label: str
-    outcome: AutoRoiOutcome
-    polygon: tuple[Point, ...] | None
-
-
-@dataclass(frozen=True)
-class AutoRoiResult:
-    classroom_id: str
-    camera_id: str
-    dry_run: bool
-    grid_rows: int
-    grid_columns: int
-    seat_fill_ratio: float
-    reference_image_revision: int
-    seats: tuple[AutoRoiSeatResult, ...]
-
-    @property
-    def generated_count(self) -> int:
-        return sum(1 for seat in self.seats if seat.outcome is AutoRoiOutcome.GENERATED)
-
-    @property
-    def skipped_count(self) -> int:
-        return len(self.seats) - self.generated_count
 
 
 @dataclass(frozen=True)

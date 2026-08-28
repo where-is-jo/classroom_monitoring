@@ -309,15 +309,21 @@ class TestDeleteBetweenClaimAndApply:
         assert again is not None
         assert again.status is ObservationBatchStatus.PROCESSING
 
-    def test_history_committed_before_delete_is_kept(self) -> None:
-        """batch 중간 delete여도 이미 커밋된 다른 좌석 history는 보존된다."""
+    def test_batch_중간_delete면_같은_batch의_다른_좌석도_쓰이지_않는다(self) -> None:
+        """batch 하나가 통째로 성립하거나 아무것도 쓰지 않는다.
+
+        **예전에는 좌석마다 transaction을 열어 앞쪽 좌석이 이미 커밋됐다.** 그러면
+        batch record는 processed_count=0인데 일부 좌석 history만 남아, 저장된 것과
+        batch 상태가 어긋난다. 좌석 관측을 한 transaction으로 묶으면서(결정 0046)
+        실패 단위도 batch가 됐다.
+        """
         store = _build_store()
         uow = InMemorySeatMutationUnitOfWork(store, clock=_fixed_now)
 
         outcome = _observe_with_delete_at(
             store,
             uow,
-            pause_at_call=3,  # seat-002 history 커밋 후, seat-001 기록 직전
+            pause_at_call=2,
             event_id="evt-1",
             seat_ids=("seat-002", "seat-001"),
             deleted_seat_id="seat-001",
@@ -326,11 +332,11 @@ class TestDeleteBetweenClaimAndApply:
         assert isinstance(outcome, ClassroomInputError)
         assert store.get_seat("seat-001") is None
         assert store.get_history_by_event_and_seat("evt-1", "seat-001") is None
-        # 삭제 전에 커밋된 좌석의 history와 current는 그대로 남는다.
-        assert store.get_history_by_event_and_seat("evt-1", "seat-002") is not None
+        # 같은 batch의 다른 좌석도 쓰이지 않는다.
+        assert store.get_history_by_event_and_seat("evt-1", "seat-002") is None
         survivor = store.get_seat("seat-002")
         assert survivor is not None
-        assert survivor.current_occupancy.state is SeatOccupancy.OCCUPIED
+        assert survivor.current_occupancy.state is SeatOccupancy.UNKNOWN
 
 
 # ============================================================

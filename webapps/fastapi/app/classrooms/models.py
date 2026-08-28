@@ -125,6 +125,19 @@ class SeatOccupancyHistory:
 
 
 @dataclass(frozen=True)
+class SeatOccupancyApplication:
+    """좌석 하나에 적용할 관측. 여러 개를 한 transaction에서 함께 쓰기 위한 묶음이다.
+
+    좌석마다 transaction을 따로 열면 원격 저장소 왕복이 좌석 수만큼 곱해진다.
+    ``expected_version``은 좌석별로 다르므로 값마다 함께 들고 다녀야 한다.
+    """
+
+    history: SeatOccupancyHistory
+    expected_version: int
+    occupancy: SeatCurrentOccupancy | None
+
+
+@dataclass(frozen=True)
 class SeatObservationBatchResult:
     event_id: str
     processed_count: int

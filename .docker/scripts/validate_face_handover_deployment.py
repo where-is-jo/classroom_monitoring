@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from deployment_person_model_contract import verify_person_model_contract
+
 EXPECTED_THRESHOLD_METADATA = {
     "model_name": "arcface",
     "model_version": "insightface-buffalo_l-w600k_r50-v0.7",
@@ -73,6 +75,24 @@ def parse_camera_ids(stream_sources: str) -> set[str]:
     if not camera_ids:
         raise ValueError("STREAM_SOURCES에 카메라가 없습니다.")
     return camera_ids
+
+
+def parse_target_class_ids(raw_value: str) -> dict[int, str]:
+    try:
+        value = json.loads(raw_value)
+        if not isinstance(value, dict) or not value:
+            raise ValueError
+        result = {int(key): name for key, name in value.items()}
+        if any(
+            key < 0 or not isinstance(name, str) or not name.strip()
+            for key, name in result.items()
+        ):
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "INFERENCE_TARGET_CLASS_IDS가 올바른 JSON 객체가 아닙니다."
+        ) from error
+    return result
 
 
 def validate_thresholds(path: Path) -> list[str]:
@@ -155,7 +175,10 @@ def validate(docker_root: Path) -> list[str]:
     required_worker_keys = (
         "STREAM_SOURCES",
         "MODEL_PATH",
+        "MODEL_CONTRACT_PATH",
         "INFERENCE_DEVICE",
+        "INFERENCE_IMAGE_SIZE",
+        "INFERENCE_TARGET_CLASS_IDS",
         "FASTAPI_URL",
         "FACE_IDENTITY_URL",
         "FACE_IDENTITY_CAMERA_IDS",
@@ -266,14 +289,25 @@ def validate(docker_root: Path) -> list[str]:
     errors.extend(validate_thresholds(host_model_path(docker_root, THRESHOLD_PATH)))
 
     worker_model = worker_env.get("MODEL_PATH", "").strip()
-    if worker_model:
+    worker_contract = worker_env.get("MODEL_CONTRACT_PATH", "").strip()
+    raw_target_classes = worker_env.get("INFERENCE_TARGET_CLASS_IDS", "").strip()
+    raw_image_size = worker_env.get("INFERENCE_IMAGE_SIZE", "").strip()
+    if worker_model and worker_contract and raw_target_classes and raw_image_size:
         try:
-            path = host_model_path(docker_root, worker_model)
-        except ValueError as error:
+            model_path = host_model_path(docker_root, worker_model)
+            contract_path = host_model_path(docker_root, worker_contract)
+            target_classes = parse_target_class_ids(raw_target_classes)
+            image_size = int(raw_image_size)
+            if not 320 <= image_size <= 4096:
+                raise ValueError("INFERENCE_IMAGE_SIZE는 320~4096이어야 합니다.")
+            verify_person_model_contract(
+                str(model_path),
+                str(contract_path),
+                target_classes,
+                image_size,
+            )
+        except (OSError, ValueError) as error:
             errors.append(str(error))
-        else:
-            if not path.is_file() or path.stat().st_size == 0:
-                errors.append(f"객체 탐지 모델 파일이 없습니다: {path}")
     return errors
 
 

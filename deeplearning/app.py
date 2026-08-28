@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -15,7 +16,13 @@ from typing import Any, Literal
 import cv2
 import mediapipe as mp
 import numpy as np
+import onnxruntime
 from dotenv import load_dotenv
+from execution_provider import (
+    active_provider,
+    requested_providers,
+    verify_execution_provider,
+)
 from face_identification import (
     FaceGalleryUnavailable,
     FaceIdentificationConfig,
@@ -130,6 +137,9 @@ def _active_session_count() -> int:
 # DELETE가 오지 않아 위 두 딕셔너리에 항목이 남는다. 스크랩 시점에만 세므로 요청
 # 경로에는 아무것도 추가되지 않는다.
 install_session_gauge(_active_session_count)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _model_path() -> Path:
@@ -265,14 +275,22 @@ def _build_face_identification_runtime(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     recognizer_config = load_face_recognizer_config()
-    detector = get_model(str(_model_path()), providers=["CPUExecutionProvider"])
+
+    choice, providers = requested_providers()
+    detector = get_model(str(_model_path()), providers=providers)
+    ctx_id = verify_execution_provider(detector, choice)
+    app.state.execution_provider = active_provider(detector)
+    
     detector.prepare(
-        ctx_id=-1,
+        ctx_id=ctx_id,
         input_size=(640, 640),
         det_thresh=_face_detection_threshold(),
     )
     app.state.detector = detector
-    recognizer = build_face_recognizer(recognizer_config)
+    recognizer = build_face_recognizer(
+        recognizer_config,
+        providers=providers,
+    )
     app.state.recognizer = recognizer
     app.state.face_recognizer_config = recognizer_config
     app.state.face_model_metadata = recognizer_config.metadata

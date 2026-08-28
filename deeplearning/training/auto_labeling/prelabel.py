@@ -36,6 +36,7 @@ class ModelInfo:
     model_runtime: str
     model_runtime_version: str
     device: str
+    image_size: int | None = None
     input_preprocessing: dict[str, object] | None = None
 
 
@@ -50,6 +51,7 @@ class UltralyticsPredictor:
         *,
         confidence_threshold: float,
         device: str,
+        image_size: int | None = None,
         input_preprocessing: dict[str, object] | None = None,
     ) -> None:
         try:
@@ -62,6 +64,9 @@ class UltralyticsPredictor:
             raise AutoLabelingError("모델 가중치를 로드할 수 없습니다.") from exc
         self._confidence_threshold = confidence_threshold
         self._device = device
+        if image_size is not None and (image_size < 32 or image_size % 32 != 0):
+            raise AutoLabelingError("자동 라벨링 imgsz는 32 이상의 32 배수여야 합니다.")
+        self._image_size = image_size
         self._input_preprocessing = input_preprocessing
         self._person_class_id = _find_person_class_id(self._model.names)
 
@@ -76,11 +81,16 @@ class UltralyticsPredictor:
                 self._input_preprocessing,
             )
         try:
+            predict_options: dict[str, object] = {
+                "source": source,
+                "conf": self._confidence_threshold,
+                "device": self._device,
+                "verbose": False,
+            }
+            if self._image_size is not None:
+                predict_options["imgsz"] = self._image_size
             results = self._model.predict(
-                source=source,
-                conf=self._confidence_threshold,
-                device=self._device,
-                verbose=False,
+                **predict_options,
             )
         except Exception as exc:  # 외부 추론 런타임 오류를 도구 계약으로 변환한다.
             raise AutoLabelingError("후보 bbox 추론에 실패했습니다.") from exc
@@ -172,6 +182,7 @@ def run_prelabel(
     *,
     device: str,
     expected_model_sha256: str | None = None,
+    image_size: int | None = None,
     input_preprocessing: dict[str, object] | None = None,
 ) -> Path:
     try:
@@ -203,12 +214,14 @@ def run_prelabel(
         model_runtime="ultralytics",
         model_runtime_version=ultralytics.__version__,
         device=device,
+        image_size=image_size,
         input_preprocessing=input_preprocessing,
     )
     predictor = UltralyticsPredictor(
         resolved_model_path,
         confidence_threshold=settings.candidate_confidence_threshold,
         device=device,
+        image_size=image_size,
         input_preprocessing=input_preprocessing,
     )
     return generate_candidate_labels(run_dir, predictor, model_info, settings)
@@ -302,9 +315,13 @@ def _verify_existing_prelabel(
     if not isinstance(manifest, dict):
         raise AutoLabelingError("prelabel.json 형식이 올바르지 않습니다.")
     recorded_model = manifest.get("model")
-    if isinstance(recorded_model, dict) and "input_preprocessing" not in recorded_model:
-        # 구 모델 영수증은 전처리를 기록하지 않았으며 이는 전처리 없음과 같다.
-        recorded_model = {**recorded_model, "input_preprocessing": None}
+    if isinstance(recorded_model, dict):
+        if "input_preprocessing" not in recorded_model:
+            # 구 모델 영수증은 전처리를 기록하지 않았으며 이는 전처리 없음과 같다.
+            recorded_model = {**recorded_model, "input_preprocessing": None}
+        if "image_size" not in recorded_model:
+            # imgsz를 기록하기 전 영수증은 Ultralytics 기본값을 사용했다.
+            recorded_model = {**recorded_model, "image_size": None}
     if recorded_model != asdict(model_info):
         raise AutoLabelingError("같은 run에 다른 모델 후보 라벨이 이미 있습니다.")
     if (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -11,6 +12,17 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "workflows" / "study-status-report.n8n.json"
 WORKBOOK = ROOT / "reports" / "study_status_management_sample.xlsx"
 SLACK_UPLOAD_SCRIPT = ROOT / "scripts" / "slack_upload_file.py"
+
+# n8n 표현식에서 다른 노드를 부르는 형태. 이름 문자열이라 편집기에서 노드 이름을
+# 바꾸면 조용히 깨진다 — 그래서 여기서 검사한다.
+NODE_REFERENCE = re.compile(r"\$\('([^']+)'\)")
+
+# **노드 이름 참조는 여기 적힌 것만 허용한다.** HTTP 응답이 항목의 json을 통째로
+# 덮어쓰기 때문에 뒤 노드가 앞 노드 값을 쓰려면 이름으로 거슬러 올라가야 하는데,
+# 그 참조는 이름을 바꾸는 순간 말없이 끊긴다. 그래서 워크플로는 필요한 값을
+# 실행기에 context로 실어 보내고 응답으로 돌려받아 쓴다. 이름 참조는 실행기를
+# 거치지 않는 Build Change Events 한 곳만 남겨 뒀다. 새로 늘리지 않는다.
+ALLOWED_NODE_REFERENCES = {"Parse Schedule"}
 
 
 def validate_workflow() -> None:
@@ -24,6 +36,14 @@ def validate_workflow() -> None:
         "Create Workbook",
         "Upload Workbook to Slack",
         "Build Daily Report",
+        "Create Daily Workbook",
+        "Upload Daily Report to Slack",
+        "Schedule OK?",
+        "Notify Schedule Failure",
+        # 교시 보고를 놓치지 않기 위한 노드들.
+        "Mark Period Reported",
+        "Missed Period?",
+        "Notify Missed Period",
     }
     missing = required - node_names
     if missing:
@@ -47,6 +67,53 @@ def validate_workflow() -> None:
         raise AssertionError(f"Workflow still depends on removed event fields: {present_event_fields}")
     if not SLACK_UPLOAD_SCRIPT.exists():
         raise AssertionError(f"Slack upload script does not exist: {SLACK_UPLOAD_SCRIPT}")
+    validate_node_references(workflow_text, node_names)
+    validate_period_report_ledger(data, workflow_text)
+
+
+def validate_node_references(workflow_text: str, node_names: set[str]) -> None:
+    """``$('노드 이름')`` 참조가 실제 노드를 가리키는지 확인한다.
+
+    편집기에서 노드 이름을 바꿔도 n8n은 경고하지 않는다. 참조는 undefined가 되어
+    빈 값이 아래로 흐르고, 보고서가 빈 채로 올라가거나 조건이 늘 거짓이 된다.
+    실행해 보기 전에 여기서 잡는다.
+    """
+    referenced = set(NODE_REFERENCE.findall(workflow_text))
+    unresolved = sorted(referenced - node_names)
+    if unresolved:
+        raise AssertionError(
+            f"Workflow references nodes that do not exist: {unresolved}. "
+            "노드 이름을 바꿨다면 그 이름을 쓰는 Code 노드도 함께 고쳐야 한다."
+        )
+    extra = sorted(referenced - ALLOWED_NODE_REFERENCES)
+    if extra:
+        raise AssertionError(
+            f"New node-name references added: {extra}. "
+            "값이 필요하면 실행기에 context로 실어 보내고 응답에서 되받아 쓴다 "
+            "(runner/server.py의 _echo_context). 이름 참조는 늘리지 않는다."
+        )
+
+
+def validate_period_report_ledger(data: dict, workflow_text: str) -> None:
+    """교시 보고가 '전송 성공 뒤에 원장에 적힌다'는 구조를 지키는지 확인한다.
+
+    예전에는 '종료 후 5분 안'이라는 시간 창으로 판정해서, 트리거 주기와 창이 같은
+    탓에 틱이 한 번만 밀려도 그 교시 보고가 조용히 사라졌다. 지금은 아직 보고하지
+    않은 교시를 원장으로 찾고 Slack 전송이 끝난 뒤에 표시한다. 이 연결이 끊기면
+    같은 교시를 5분마다 다시 올리게 되므로 구조를 못으로 박아 둔다.
+    """
+    if "reportedPeriods" not in workflow_text:
+        raise AssertionError("Workflow no longer keeps a reported-period ledger (reportedPeriods)")
+    downstream = [
+        target["node"]
+        for branch in data["connections"].get("Upload Workbook to Slack", {}).get("main", [])
+        for target in branch
+    ]
+    if "Mark Period Reported" not in downstream:
+        raise AssertionError(
+            "'Mark Period Reported' must run after 'Upload Workbook to Slack'; "
+            f"found downstream nodes: {downstream}"
+        )
 
 
 def validate_workbook() -> None:

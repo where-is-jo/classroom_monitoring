@@ -36,11 +36,13 @@ def prepare_run(
     *,
     output_root: Path | None = None,
     allow_approved_student_data: bool = False,
+    require_approval_metadata: bool = True,
 ) -> Path:
     manifest_path = manifest_path.resolve(strict=True)
     manifest = load_input_manifest(
         manifest_path,
         allow_approved_student_data=allow_approved_student_data,
+        require_approval_metadata=require_approval_metadata,
     )
     manifest_sha256 = sha256_file(manifest_path)
     runs_root = (output_root or default_runs_root()).resolve()
@@ -165,6 +167,7 @@ def _extract_source(
             raise AutoLabelingError(
                 f"source_id={source.source_id}: FPS를 확인할 수 없습니다."
             )
+        reported_frame_count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         interval_frames = max(1, round(fps * settings.sampling_interval_seconds))
         records: list[FrameRecord] = []
         frame_index = 0
@@ -211,6 +214,13 @@ def _extract_source(
             raise AutoLabelingError(
                 f"source_id={source.source_id}: 영상 프레임이 없습니다."
             )
+        if reported_frame_count > 0:
+            tolerance = max(1, round(reported_frame_count * 0.001))
+            if frame_index + tolerance < round(reported_frame_count):
+                raise AutoLabelingError(
+                    f"source_id={source.source_id}: 영상 디코딩이 끝까지 도달하지 "
+                    f"못했습니다({frame_index}/{round(reported_frame_count)} frames)."
+                )
         return records
     finally:
         capture.release()

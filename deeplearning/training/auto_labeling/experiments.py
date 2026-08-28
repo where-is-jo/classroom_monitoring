@@ -51,8 +51,10 @@ def train_person_detector(
     active = config or TrainingConfig()
     _validate_training_config(active)
     model_file_name = Path(model_name).name
-    if model_file_name not in {"yolov8n.pt", "yolo11n.pt"}:
-        raise AutoLabelingError("비교 모델은 yolov8n.pt 또는 yolo11n.pt만 허용합니다.")
+    if model_file_name not in {"yolov8n.pt", "yolo11n.pt", "yolo26n.pt"}:
+        raise AutoLabelingError(
+            "비교 모델은 yolov8n.pt, yolo11n.pt 또는 yolo26n.pt만 허용합니다."
+        )
     model_source = Path(model_name)
     source_model_sha256: str | None = None
     if model_name != model_file_name:
@@ -154,9 +156,11 @@ def train_person_detector(
             "experiment_name": experiment_name,
             "model_name": model_name,
             "model_file_name": model_file_name,
-            "model_role": (
-                "baseline" if model_file_name == "yolov8n.pt" else "comparison"
-            ),
+            "model_role": {
+                "yolov8n.pt": "baseline",
+                "yolo11n.pt": "comparison",
+                "yolo26n.pt": "candidate",
+            }[model_file_name],
             "source_model_sha256": source_model_sha256,
             "runtime": _training_runtime_metadata(),
             "config": asdict(active),

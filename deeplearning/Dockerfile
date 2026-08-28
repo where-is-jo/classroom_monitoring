@@ -1,8 +1,9 @@
 # 얼굴 검출·식별·자세·품질 분석 내부 HTTP 서비스(app.py)를 담는 이미지.
 #
-# **worker 이미지와 달리 torch가 없다.** 추론은 onnxruntime으로 돌고 app.py가
-# providers=["CPUExecutionProvider"]를 고정하고 있다. CUDA 휠(3.6GB)을 끌어올
-# 이유가 없어 베이스도 slim 하나로 끝난다. GPU 예약도 필요 없다(결정 0022).
+# **worker 이미지와 달리 torch가 없다.** 추론은 onnxruntime으로 돌고, CUDA는 pip로만
+# 가져온다. `nvidia/cuda` 베이스 이미지가 필요 없다는 것을 GPU 서버에서 확인했다 —
+# python:3.12-slim에 onnxruntime-gpu와 CUDA 의존만 넣어도 CUDAExecutionProvider가
+# 실제로 동작했다(SCRFD 10g 기준 33.6ms → 2.3ms).
 
 FROM python:3.12-slim AS builder
 
@@ -19,8 +20,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
+# **CPU판 onnxruntime을 반드시 걷어낸다.** insightface가 그것을 의존성으로 끌어오는데,
+# 두 패키지가 같은 `onnxruntime` 모듈을 제공해서 나중에 설치된 쪽이 이긴다. 실제로
+# 그대로 두었더니 GPU판을 함께 넣었는데도 provider 목록이
+# ['AzureExecutionProvider', 'CPUExecutionProvider']가 되어 CUDA가 사라졌고, 배포가
+# 기동 단계에서 멈췄다(FACE_EXECUTION_PROVIDER=cuda가 막았다).
+#
+# uninstall을 install 뒤에 두는 이유는 순서 때문이다. requirements.txt가 GPU판을 먼저
+# 적어도 pip가 insightface를 처리하며 CPU판을 나중에 넣을 수 있다. 다 끝난 뒤에
+# 지우고 GPU판만 다시 확정하는 편이 순서에 기대지 않는다.
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /opt/venv/bin/pip uninstall -y onnxruntime \
+    && /opt/venv/bin/pip install --no-cache-dir --force-reinstall --no-deps \
+        onnxruntime-gpu==1.28.0 \
+    && /opt/venv/bin/python -c "import onnxruntime; assert 'CUDAExecutionProvider' in onnxruntime.get_available_providers(), onnxruntime.get_available_providers()" \
     && find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
     && find /opt/venv -name '*.pyc' -delete
 
@@ -31,6 +45,15 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH
+
+# **pip로 받은 CUDA 라이브러리를 찾게 한다.** 이 경로가 없으면 onnxruntime이
+# libcublasLt.so.13을 못 찾아 CUDA provider 로드에 실패하고, `get_available_providers()`
+# 목록에는 CUDA가 남은 채 세션만 조용히 CPU로 내려간다. 지표에는 "느리다"로만 보이는
+# 실패라 app.py가 실제 provider를 세션에 물어 확인한다.
+# CUDA 13 휠은 라이브러리를 `nvidia/cu13/lib` 하나로 합쳐 두었다. 12.x 시절처럼
+# cublas·cufft·curand가 각각의 디렉터리를 갖지 않는다 — 서버에서 실제 경로를 확인한 값이다.
+ENV NVIDIA_LIB=/opt/venv/lib/python3.12/site-packages/nvidia
+ENV LD_LIBRARY_PATH=$NVIDIA_LIB/cu13/lib:$NVIDIA_LIB/cudnn/lib
 
 # requirements는 opencv-python-headless를 적지만, **insightface가 non-headless
 # opencv-python과 opencv-contrib-python을 함께 끌어온다.** 실제로 import되는 cv2는
@@ -49,7 +72,10 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /deeplearning
 COPY app.py ./app.py
+# adaface 추가
 COPY adaface_recognizer.py ./adaface_recognizer.py
+# 실행 provider 판단. app.py가 `import execution_provider`로 찾는다.
+COPY execution_provider.py ./execution_provider.py
 COPY face_identity.py ./face_identity.py
 COPY face_identification.py ./face_identification.py
 COPY face_recognizer.py ./face_recognizer.py

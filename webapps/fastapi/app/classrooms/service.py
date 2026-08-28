@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from math import isfinite
@@ -43,6 +43,7 @@ from .models import (
     SeatObservationBatchRecord,
     SeatObservationBatchResult,
     SeatOccupancy,
+    SeatOccupancyApplication,
     SeatOccupancyHistory,
     SeatPage,
 )
@@ -583,9 +584,13 @@ class ClassroomService:
             if existing.status == ObservationBatchStatus.COMPLETED:
                 return self._batch_result(existing)
 
+        # **좌석마다 따로 묻지 않는다.** 이 저장소는 원격 Atlas라 왕복 1회가 약 42ms고,
+        # 한 이벤트가 좌석 7개를 관측하면 그것만으로 0.3초가 든다. 조회 한 번으로 모아
+        # 읽고 검증은 그대로 좌석마다 한다.
+        found = self._repository.get_seats([item.seat_id for item in observations])
         seats: dict[str, Seat] = {}
         for observation in observations:
-            seat = self._repository.get_seat(observation.seat_id)
+            seat = found.get(observation.seat_id)
             if seat is None or not seat.is_active or seat.classroom_id != classroom.id:
                 raise ClassroomInputError(_OBSERVATION_SEAT_REQUIREMENT)
             seats[seat.id] = seat
@@ -610,18 +615,35 @@ class ClassroomService:
         if claimed.status == ObservationBatchStatus.COMPLETED:
             return self._batch_result(claimed)
 
+        # 재수신 판정도 좌석마다 묻지 않는다. 같은 event_id의 이력은 관측 좌석 수를
+        # 넘지 않으므로 한 번에 읽어 두고 메모리에서 찾는다.
+        known_histories = self._repository.get_histories_by_event(event_id)
         try:
-            histories = [
-                self._apply_observation(
-                    observation,
+            if self._uow is not None:
+                histories = self._apply_observations_together(
+                    observations,
                     classroom_id=classroom.id,
                     event_id=event_id,
                     source=command.source,
                     observed_at=observed_at,
                     received_at=claimed.received_at,
+                    known_histories=known_histories,
+                    seats=seats,
                 )
-                for observation in observations
-            ]
+            else:
+                histories = [
+                    self._apply_observation(
+                        observation,
+                        classroom_id=classroom.id,
+                        event_id=event_id,
+                        source=command.source,
+                        observed_at=observed_at,
+                        received_at=claimed.received_at,
+                        known_histories=known_histories,
+                        known_seat=seats.get(observation.seat_id),
+                    )
+                    for observation in observations
+                ]
         except SeatNotFoundError as exc:
             # 사전 검증을 통과한 직후 좌석이 hard delete되는 경쟁(claim 이후 delete-first).
             # UoW가 좌석 부재를 확인하고 history·current를 하나도 쓰지 않으므로,
@@ -638,6 +660,106 @@ class ClassroomService:
         )
         return self._batch_result(self._repository.complete_observation_batch(completed))
 
+    def _apply_observations_together(
+        self,
+        observations: Sequence[SeatObservation],
+        *,
+        classroom_id: str,
+        event_id: str,
+        source: OccupancySource,
+        observed_at: datetime,
+        received_at: datetime,
+        known_histories: Mapping[str, SeatOccupancyHistory],
+        seats: Mapping[str, Seat],
+    ) -> list[SeatOccupancyHistory]:
+        """관측 여러 개를 한 transaction/lock에서 함께 적용한다.
+
+        **좌석마다 따로 열지 않는 이유는 왕복 때문이다.** 원격 저장소에서는
+        transaction 하나가 여러 번 왕복하므로, 좌석 수만큼 곱하면 그것만으로
+        이벤트 처리 시간의 대부분을 차지한다(결정 0045의 남은 일).
+
+        재시도는 batch 단위다. version이 어긋나면 UoW가 아무것도 쓰지 않고
+        ``None``을 돌려주므로, **좌석을 다시 읽어 history를 새로 만들어** 전체를
+        다시 시도한다. 이미 반영된 좌석은 (event_id, seat_id) 이력이 남아 있어
+        재시도에서 그대로 돌아온다.
+
+        이미 이력이 있는 좌석은 UoW에 넘기지 않고 current 보정만 한다. 넘겨도
+        같은 값이 돌아오지만, 쓸 필요가 없는 것을 transaction에 담지 않는다.
+        """
+        assert self._uow is not None
+        replayed: list[tuple[int, SeatOccupancyHistory]] = []
+        pending: list[tuple[int, SeatObservation]] = []
+        for index, observation in enumerate(observations):
+            existing = known_histories.get(observation.seat_id)
+            if existing is not None:
+                self._repair_current_from_history(existing)
+                replayed.append((index, existing))
+            else:
+                pending.append((index, observation))
+
+        applied: list[tuple[int, SeatOccupancyHistory]] = []
+        if pending:
+            applied = self._commit_observations(
+                pending,
+                classroom_id=classroom_id,
+                event_id=event_id,
+                source=source,
+                observed_at=observed_at,
+                received_at=received_at,
+                seats=seats,
+            )
+
+        ordered = dict(replayed)
+        ordered.update(dict(applied))
+        return [ordered[index] for index in range(len(observations))]
+
+    def _commit_observations(
+        self,
+        pending: Sequence[tuple[int, SeatObservation]],
+        *,
+        classroom_id: str,
+        event_id: str,
+        source: OccupancySource,
+        observed_at: datetime,
+        received_at: datetime,
+        seats: Mapping[str, Seat],
+    ) -> list[tuple[int, SeatOccupancyHistory]]:
+        """batch를 만들어 넘기고, version이 어긋나면 전체를 다시 만든다."""
+        assert self._uow is not None
+        current: Mapping[str, Seat] = seats
+        for attempt in range(_OCCUPANCY_RETRY_LIMIT):
+            applications = []
+            for _, observation in pending:
+                # 첫 시도는 미리 읽어 둔 좌석을, 재시도는 방금 다시 읽은 좌석을 쓴다.
+                seat = current.get(observation.seat_id) or self._required_seat(observation.seat_id)
+                history = self._build_history(
+                    seat,
+                    observation,
+                    classroom_id=classroom_id,
+                    event_id=event_id,
+                    source=source,
+                    observed_at=observed_at,
+                    received_at=received_at,
+                )
+                applications.append(
+                    SeatOccupancyApplication(
+                        history=history,
+                        expected_version=seat.version,
+                        occupancy=self._occupancy_update(seat, history),
+                    )
+                )
+            stored = self._uow.append_histories_and_apply_occupancies(
+                applications, updated_at=self._aware_datetime(self._clock())
+            )
+            if stored is not None:
+                return [(index, item) for (index, _), item in zip(pending, stored, strict=True)]
+            if attempt + 1 < _OCCUPANCY_RETRY_LIMIT:
+                # 어느 좌석이 어긋났는지 모르므로 batch에 담긴 좌석을 모두 다시 읽는다.
+                current = self._repository.get_seats(
+                    [observation.seat_id for _, observation in pending]
+                )
+        raise ClassroomConcurrentUpdateError()
+
     def _apply_observation(
         self,
         observation: SeatObservation,
@@ -647,14 +769,21 @@ class ClassroomService:
         source: OccupancySource,
         observed_at: datetime,
         received_at: datetime,
+        known_histories: Mapping[str, SeatOccupancyHistory] | None = None,
+        known_seat: Seat | None = None,
     ) -> SeatOccupancyHistory:
-        existing = self._repository.get_history_by_event_and_seat(event_id, observation.seat_id)
+        # **매핑 자체를 받는다.** 값 하나만 받으면 `None`이 "이력 없음"인지 "미제공"인지
+        # 구분되지 않아, 이미 batch로 확인한 좌석까지 다시 묻게 된다.
+        if known_histories is not None:
+            existing = known_histories.get(observation.seat_id)
+        else:
+            existing = self._repository.get_history_by_event_and_seat(event_id, observation.seat_id)
         if existing is not None:
             self._repair_current_from_history(existing)
             return existing
         if self._uow is None:
             # UoW 미주입(레거시 경로): history append와 current 반영이 분리된다.
-            seat = self._required_seat(observation.seat_id)
+            seat = known_seat or self._required_seat(observation.seat_id)
             history = self._build_history(
                 seat,
                 observation,
@@ -671,8 +800,15 @@ class ClassroomService:
         # session/lock에서 원자적으로 수행한다. 좌석이 사라졌으면 아무것도 쓰지
         # 않고 SeatNotFoundError가 올라오고, version이 어긋나면 최신 좌석으로
         # history를 다시 만들어 재시도한다.
-        for _ in range(_OCCUPANCY_RETRY_LIMIT):
-            seat = self._required_seat(observation.seat_id)
+        for attempt in range(_OCCUPANCY_RETRY_LIMIT):
+            # **첫 시도만 미리 읽어 둔 좌석을 쓴다.** 재시도는 version이 어긋났다는
+            # 뜻이므로 반드시 최신 좌석을 다시 읽어야 한다 — 그러지 않으면 같은
+            # version으로 무한히 실패한다.
+            seat = (
+                known_seat
+                if attempt == 0 and known_seat is not None
+                else self._required_seat(observation.seat_id)
+            )
             history = self._build_history(
                 seat,
                 observation,

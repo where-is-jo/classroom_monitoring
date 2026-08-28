@@ -333,7 +333,7 @@ POST /internal/inference/events
 | --- | --- | --- |
 | 강의실 현황 | `/classrooms` | 강의실 선택, 좌석 지도, 좌석별 지정 학생과 상태, 재석·잘못된 자리·부재·확인 필요 집계, 마지막 관측 시각 |
 | 실시간 모니터링 | `/monitoring` | 카메라별 영상 영역, 연결 상태, 마지막 상태 시각, demo 여부 |
-| 검색 | `/video-search` | 검색 문장과 기간·강의실 조건, 결과와 일치 이유 |
+| ~~검색~~ | ~~`/video-search`~~ | **걷어냈다(2026-08-27).** 합성 catalog 대상이라 실제 카메라가 붙은 뒤로는 쓰이지 않았다. 자연어 검색은 `/llm-search`가 맡는다 |
 | 학생 관리 | `/students` | 학생 목록·등록, 얼굴 등록 여부 |
 | 좌석 지정 | `/classrooms/seat-assignments` | 좌석에 학생 지정·해제 |
 | 얼굴 등록 | `/students/{student_id}/face-enrollment` | 샘플 수집, 품질 판정 결과, 등록 완료 |

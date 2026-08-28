@@ -35,7 +35,7 @@
 핵심 실행 코드는 `webapps/fastapi`, `worker`, `deeplearning` 세 곳에 있다.
 
 - **`webapps/fastapi`** — 강의실 좌석 현황, 실시간 모니터링, 탐지 스냅샷, 자연어
-  탐지 검색, 데모 영상 검색 화면과 그 API. worker가 식별한 학생을 카메라별 좌석 ROI와
+  탐지 검색 화면과 그 API. worker가 식별한 학생을 카메라별 좌석 ROI와
   좌석 지정에 대조해 `PRESENT`·`WRONG_SEAT`·`UNKNOWN`을 계산하고 REST와 SSE로 제공한다.
   좌석 점유 상태는 여전히 "자리가 찼는지"이고 학생 상태와는 별도다. 자연어 탐지
   검색은 LLM이 질문을 검색 조건으로 바꾸고 fastapi가 검증·조회한다

@@ -192,9 +192,15 @@ def test_신규_얼굴_이벤트는_이름을_보강하고_안전한_본문만_�
         "미등록 얼굴",
         "판정 보류",
     ]
+    assert [item["student_id"] for item in event["observations"]] == [
+        "active-student",
+        "inactive-student",
+        "missing-student",
+        None,
+        None,
+    ]
     serialized = json.dumps(event, ensure_ascii=False)
     for forbidden in (
-        "student_id",
         "student_no",
         "similarity",
         "margin",
@@ -317,3 +323,56 @@ def test_얼굴_SSE는_활성_입구_카메라에서만_열린다() -> None:
         service.resolve_realtime_camera_id("inactive-entry")
     with pytest.raises(VideoStreamNotFoundError):
         service.resolve_realtime_camera_id("missing-stream")
+
+
+def test_오버레이는_저장하지_않고_발행만_한다() -> None:
+    """화면에 얼굴 상자를 그리는 데 저장소가 필요 없다.
+
+    저장을 끼우면 저장 주기가 곧 화면 갱신 주기가 된다 — CCTV에서 같은 문제를 겪고
+    갈랐다(결정 0047).
+    """
+    service, broadcaster, streams = make_service()
+    queue = broadcaster.subscribe()
+    captured_at = NOW + timedelta(seconds=1)
+
+    service.publish_overlay(
+        event_id=f"entry-camera-{int(captured_at.timestamp() * 1000)}-1-entry-face",
+        camera_id="entry-camera",
+        captured_at=captured_at,
+        sequence=1,
+        frame=EntryFrameInfo(width_pixels=640, height_pixels=480),
+        processing_status=EntryIdentityProcessingStatus.SUCCEEDED,
+        observations=(observation("face-1", EntryIdentityStatus.UNKNOWN),),
+    )
+
+    event = queue.get_nowait()
+    assert event["type"] == "entry-identity"
+    assert event["camera_id"] == "entry-camera"
+    assert event["observations"][0]["face_bbox"] == [10, 20, 110, 160]
+    # 저장하지 않으므로 마지막 탐지 시각도 건드리지 않는다. save_event였다면 남는다.
+    assert streams.detection_updates == []
+    assert queue.empty()
+
+
+def test_오버레이는_stream_확인_없이도_발행한다() -> None:
+    """구독자가 camera_id로 걸러 받으므로 등록되지 않은 카메라는 아무에게도 닿지 않는다.
+
+    확인하려면 저장소 왕복이 생겨 이 경로를 만든 이유가 없어진다.
+    """
+    service, broadcaster, streams = make_service()
+    queue = broadcaster.subscribe()
+    captured_at = NOW + timedelta(seconds=1)
+
+    service.publish_overlay(
+        event_id="아무-id",
+        camera_id="등록되지-않은-카메라",
+        captured_at=captured_at,
+        sequence=1,
+        frame=EntryFrameInfo(width_pixels=640, height_pixels=480),
+        processing_status=EntryIdentityProcessingStatus.SUCCEEDED,
+        observations=(observation("face-1", EntryIdentityStatus.UNKNOWN),),
+    )
+
+    # save_event였다면 VideoStreamNotFoundError로 막혔을 카메라다.
+    assert queue.get_nowait()["camera_id"] == "등록되지-않은-카메라"
+    assert streams.detection_updates == []

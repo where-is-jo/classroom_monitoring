@@ -55,6 +55,70 @@ def test_load_local_config_uses_n1_contract_and_training_relative_paths(
     assert config.force_full_review is True
 
 
+def test_load_local_config_supports_original_yolo26_fixed_500_profile(
+    tmp_path: Path,
+) -> None:
+    model = tmp_path / "yolo26n.pt"
+    model.write_bytes(b"yolo26n")
+    config_path = tmp_path / "local.yml"
+    config_path.write_text(
+        "\n".join(
+            (
+                "schema_version: 1",
+                "pipeline_id: person-original-500-v001",
+                f"video_dir: {(tmp_path / 'raw').as_posix()}",
+                f"workspace_dir: {(tmp_path / 'workflow').as_posix()}",
+                "camera_id: camera-01",
+                f"prelabel_model_path: {model.as_posix()}",
+                f"prelabel_model_sha256: {sha256_file(model)}",
+                "prelabel_image_size: 1280",
+                "prelabel_preprocessing_method: original-frame-v1",
+                "training_export_preprocessing_method: original-frame-v1",
+                "target_train_frames: 350",
+                "target_val_frames: 75",
+                "target_test_frames: 75",
+                "require_session_approval_metadata: false",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_local_pipeline_config(config_path)
+
+    assert config.prelabel_model_path == model
+    assert config.prelabel_image_size == 1280
+    assert (
+        config.target_train_frames,
+        config.target_val_frames,
+        config.target_test_frames,
+    ) == (350, 75, 75)
+    assert config.training_export_preprocessing_method == "original-frame-v1"
+    assert config.require_session_approval_metadata is False
+
+
+def test_load_training_config_accepts_managed_yolo26n(tmp_path: Path) -> None:
+    config_path = tmp_path / "training.yml"
+    config_path.write_text(
+        "\n".join(
+            (
+                "schema_version: 1",
+                f"dataset_dir: {(tmp_path / 'dataset').as_posix()}",
+                "dataset_archive: null",
+                f"output_root: {(tmp_path / 'runs').as_posix()}",
+                "experiment_name: person-yolo26n-v001",
+                "base_model: yolo26n.pt",
+                "image_size: 1280",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_training_pipeline_config(config_path)
+
+    assert config.base_model == "yolo26n.pt"
+    assert config.image_size == 1280
+
+
 def test_local_pipeline_stops_at_explicit_assignment_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -118,6 +182,7 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
     review_dir = tmp_path / "run" / "review" / "review-main"
     dataset_dir = tmp_path / "dataset"
     export_dir = workspace / "06-colab-export"
+    evaluation_dir = workspace / "05-fixed-test"
     video_dir.mkdir()
     scan_dir.mkdir(parents=True)
     (scan_dir / "session_assignments.csv").write_text(
@@ -127,13 +192,18 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
     write_json(review_dir / "review-batch.json", {"frame_ids": ["frame-001"]})
     write_json(review_dir / "review-completed.json", {"status": "complete"})
     dataset_dir.mkdir()
+    evaluation_dir.mkdir()
+    write_json(evaluation_dir / "evaluation_frozen.json", {"schema_version": 1})
     prelabel_calls: list[dict[str, object]] = []
     review_calls: list[dict[str, object]] = []
+    completion_order: list[str] = []
     config = LocalPipelineConfig(
         pipeline_id="classroom-v009",
         video_dir=video_dir,
         workspace_dir=workspace,
         camera_id="camera-01",
+        target_test_frames=1,
+        reviewer_id="reviewer-001",
     )
 
     monkeypatch.setattr(pipeline, "_verify_scan_contract", lambda *_args: None)
@@ -151,6 +221,21 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         pipeline,
         "_verify_partition_contract",
         lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_verify_fixed_evaluation_set",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "prelabel_evaluation_set",
+        lambda *_args, **_kwargs: pytest.fail("동결 Test를 다시 prelabel했습니다."),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "verify_frozen_evaluation_set",
+        lambda *_args: completion_order.append("isolation") or {"frame_count": 1},
     )
     monkeypatch.setattr(
         pipeline,
@@ -190,14 +275,22 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
             "status": "valid",
             "training_compatible": True,
             "split_counts": {"train": 20, "val": 5},
+            "preprocessing_contract": {
+                "schema_version": 1,
+                "method": "original-frame-v1",
+                "label_derived": False,
+                "training_compatible": True,
+                "inference_preprocessing_required": False,
+            },
         },
     )
     monkeypatch.setattr(pipeline, "_verify_export_source", lambda *_args: None)
-    monkeypatch.setattr(
-        pipeline,
-        "create_dataset_archive",
-        lambda _dataset, archive: archive.with_suffix(".zip.receipt.json"),
-    )
+
+    def fake_archive(_dataset: Path, archive: Path) -> Path:
+        completion_order.append("archive")
+        return archive.with_suffix(".zip.receipt.json")
+
+    monkeypatch.setattr(pipeline, "create_dataset_archive", fake_archive)
 
     state = advance_local_pipeline(config)
 
@@ -206,6 +299,7 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         {
             "device": "cpu",
             "expected_model_sha256": pipeline.N1_MODEL_SHA256,
+            "image_size": None,
             "input_preprocessing": {
                 "schema_version": 1,
                 "method": "uniform-full-frame-pixelation-v1",
@@ -217,6 +311,7 @@ def test_local_pipeline_uses_verified_n1_and_reaches_training_ready(
         }
     ]
     assert review_calls == [{"batch_id": "review-main", "force_full": True}]
+    assert completion_order == ["isolation", "archive"]
 
 
 def test_dataset_archive_is_deterministic_and_safely_materialized(
@@ -315,6 +410,13 @@ def test_training_pipeline_runs_smoke_then_full_and_bundles_results(
             "status": "valid",
             "training_compatible": True,
             "split_counts": {"train": 20, "val": 5},
+            "preprocessing_contract": {
+                "schema_version": 1,
+                "method": "original-frame-v1",
+                "label_derived": False,
+                "training_compatible": True,
+                "inference_preprocessing_required": False,
+            },
         },
     )
 
@@ -384,6 +486,17 @@ def test_training_pipeline_runs_smoke_then_full_and_bundles_results(
     ]
     assert result["status"] == "training-complete"
     assert Path(str(result["best_weight"])).is_file()
+    model_contract = json.loads(
+        Path(str(result["model_contract"])).read_text(encoding="utf-8")
+    )
+    assert model_contract["model_sha256"] == sha256_file(
+        Path(str(result["best_weight"]))
+    )
+    assert model_contract["image_size"] == config.image_size
+    assert (
+        model_contract["preprocessing_contract"]["inference_preprocessing_required"]
+        is False
+    )
     assert Path(str(result["result_bundle"])).is_file()
 
 
