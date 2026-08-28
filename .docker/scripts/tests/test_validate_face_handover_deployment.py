@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -86,6 +88,34 @@ def test_필수_환경과_모델이_모두_있으면_통과한다(tmp_path: Path
     docker_root = build_deployment(tmp_path)
 
     assert validate(docker_root) == []
+
+
+def test_검증기는_worker_소스가_없는_배포_경계에서도_실행된다(
+    tmp_path: Path,
+) -> None:
+    docker_root = build_deployment(tmp_path)
+    source_scripts = Path(__file__).resolve().parents[1]
+    target_scripts = docker_root / "scripts"
+    target_scripts.mkdir()
+    for name in (
+        "validate_face_handover_deployment.py",
+        "deployment_person_model_contract.py",
+    ):
+        shutil.copy2(source_scripts / name, target_scripts / name)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(target_scripts / "validate_face_handover_deployment.py"),
+            "--docker-root",
+            str(docker_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_thresholds_json이_없으면_실패한다(tmp_path: Path) -> None:

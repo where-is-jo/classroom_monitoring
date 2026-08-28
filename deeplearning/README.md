@@ -189,27 +189,30 @@ python -m uvicorn app:app --port 8100
 | --- | --- | --- |
 | `MODEL_PATH` | 사람 탐지 모델 가중치 경로 | 코드에 하드코딩 금지 |
 | `FACE_DETECTION_MODEL_PATH` | 얼굴 탐지 모델 경로 | 모델 확정 후 |
-| `FACE_RECOGNITION_MODEL_PATH` | 얼굴 인식 모델 경로 | 모델 확정 후 |
-| `MODEL_VERSION` | 모델 버전 식별자 | 결과 추적과 embedding 호환성 판단용 |
+| `FACE_RECOGNIZER` | 활성 얼굴 인식 모델 | `arcface`(기본) / `adaface` |
+| `FACE_RECOGNITION_MODEL_PATH`, `_VERSION` | 얼굴 인식 모델 경로·버전 | 모델·threshold·갤러리 호환성 판단용 |
+| `FACE_EMBEDDING_COLLECTION` | 활성 모델 갤러리 | 모델별 고정 컬렉션만 허용 |
 | `DEVICE` | 실행 장치 | `cpu` / `cuda` |
 | `CONFIDENCE_THRESHOLD` | 탐지 신뢰도 임계값 | 기본값 허용, 환경별 조정 가능 |
 | `MAX_BATCH_SIZE` | 배치 크기 | 배치 처리 도입 시 |
 | `FACE_IDENTIFICATION_ENABLED` | 실시간 갤러리 식별 활성화 | 기본 `false` |
 | `FACE_GALLERY_DATABASE_URL`, `_NAME` | FastAPI 대표 embedding 갤러리 조회 | 읽기 전용 MongoDB 자격 증명 권장 |
-| `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 갤러리 유사도·margin·track 유사도 임계값 | 식별을 켤 때 파일 또는 아래 세 값이 필수 |
-| `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD`, `_TRACK_SIMILARITY_THRESHOLD` | 임계값 파일을 쓰지 않을 때의 값 | 근거 없는 기본값 없음 |
+| `FACE_IDENTITY_THRESHOLD_FILE` | 평가 하네스가 만든 갤러리 유사도·margin·track 유사도 임계값 | dev/prod 배포는 metadata 포함 파일 필수 |
+| `FACE_IDENTITY_SIMILARITY_THRESHOLD`, `_MARGIN_THRESHOLD`, `_TRACK_SIMILARITY_THRESHOLD` | 로컬 호환용 직접 값 | 근거 없는 기본값 없음 |
 
 `GET /health`는 프로세스 liveness만 확인한다. Docker와 배포 검증은
 `GET /health/ready`를 사용한다. 식별이 켜진 배포에서는 이 경로가 MongoDB 갤러리를 실제로
-읽고, 활성·얼굴 등록 학생의 현재 ArcFace metadata와 맞는 embedding만 사용한다. 유효
-갤러리가 비어 있으면 503을 반환하며, 성공 응답에는 `gallery_entries`와
-`excluded_gallery_entries`가 포함된다. 제외된 고아·비활성·미등록 embedding은 삭제하지
-않고 후보에서만 뺀다.
+읽고, 활성·얼굴 등록 학생의 현재 활성 모델 metadata와 맞는 embedding만 사용한다. 한
+학생이라도 활성 모델 embedding이 없거나 갤러리가 비면 503을 반환한다. 성공 응답에는
+활성 모델 metadata와 `gallery_entries`, `active_registered_students`, 누락·제외 건수가
+포함된다. 제외된 고아·비활성·미등록 embedding은 삭제하지 않고 후보에서만 뺀다.
 식별이 꺼진 배포에서는 `face_identification=disabled`로 200을 반환한다.
 
 갤러리의 누구인지 결정하는 유사도·margin 임계값은 `deeplearning` 설정이다. 식별된
-결과를 학생 상태 근거로 받아들일지 정하는 `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`는
-`webapps/fastapi` 설정이다. 목적이 다르므로 하나로 합치지 않는다.
+결과를 학생 상태 근거로 받아들일지 정하는 FastAPI 임계값은 ArcFace의 기존
+`STUDENT_IDENTITY_CONFIDENCE_THRESHOLD`와 평가값을 넣는
+`STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE`로 분리된다. 목적이 다르므로 margin과
+합치지 않되, 활성 모델의 similarity 기준과 서로 어긋나지 않게 배포 사전점검에서 확인한다.
 
 ## 지표 노출
 
@@ -221,7 +224,7 @@ python -m uvicorn app:app --port 8100
 curl -s http://127.0.0.1:8100/metrics | grep classroom_monitoring_
 ```
 
-재는 것은 세 가지다.
+재는 것은 등록 분석, embedding 생성, 실시간 식별을 포함한 다섯 가지다.
 
 - **구간별 지연**(`detect`·`pose`·`quality`·`total`) — `/internal/face-analysis`는 등록
   중 프레임마다 불리는 실시간 경로다. 느려지면 사용자는 가이드가 반응하지 않는다고
@@ -230,6 +233,8 @@ curl -s http://127.0.0.1:8100/metrics | grep classroom_monitoring_
   실패가 아니라 정상적인 결과라 나머지와 섞지 않는다.
 - **남아 있는 세션 수** — 등록 세션 이력은 `DELETE .../sessions/{id}`가 와야 비워진다.
   브라우저가 화면을 그냥 닫으면 항목이 남고, 이 값이 단조 증가하면 그 상태다.
+- **식별 지연과 종료 사유** — `face_identification_*` 지표는 `arcface`/`adaface` 두 모델
+  label과 제한된 결과값만 사용한다. 학생 ID와 카메라 ID는 label로 쓰지 않는다.
 
 **`enrollment_id`와 얼굴에서 나온 수치(신뢰도·blur·yaw)는 지표로 내보내지 않는다.**
 앞은 값이 무한히 늘어나면서 개인을 가리키고, 뒤는 개인의 촬영 상태가 집계 밖으로
@@ -286,7 +291,7 @@ bbox 기반 크기 비율, 검출 신뢰도, 안내 타원 포함 여부, MediaP
 `POST /internal/face-identifications`는 입구 카메라의 JPEG 바이트와 `X-Camera-ID`만
 받는다. 사람 bbox나 사람 track은 입력 계약에 없다. 기능이 켜져 있으면 FastAPI의
 `face_embeddings` 컬렉션을
-주기적으로 읽고 `students`의 활성·얼굴 등록 상태와 조인해 현재 ArcFace 메타데이터와
+주기적으로 읽고 `students`의 활성·얼굴 등록 상태와 조인해 현재 활성 모델 메타데이터와
 정확히 맞는 대표 벡터만 갤러리에 넣는다.
 응답의 `observations`에는 얼굴 track ID·bbox·검출 신뢰도, `REGISTERED`/`UNKNOWN`/
 `UNCERTAIN`, 기준을 통과한 `student_id`, ArcFace 유사도·margin, 품질·관측 수·거절 사유가

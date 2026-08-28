@@ -3,7 +3,7 @@
  * 각 real card에 대해:
  *   1. FastAPI playback session 생성 (POST /api/v1/video-streams/{stream_id}/playback-sessions)
  *   2. 생성 응답의 FastAPI signaling URL로만 WebRTC(WHEP) offer 전송 (결정 0014)
- *   3. 역할별 탐지 SSE 구독 → bbox overlay·탐지 수·마지막 탐지 갱신
+ *   3. 역할별 탐지 SSE 구독 → bbox overlay·마지막 탐지 갱신
  *   4. unload에서 EventSource·RTCPeerConnection·playback session을 모두 정리
  *
  * 브라우저는 MediaMTX 주소·포트·RTSP URL·credential을 구성하거나
@@ -249,8 +249,6 @@
     }
     updateDetectionInfo(ctx, {
       captured_at: data.captured_at,
-      detections_count:
-        data.observations_count != null ? data.observations_count : detections.length,
     });
     markSourceConnected(ctx, "얼굴 탐지 수신 중");
     updateAnalysisStatus(ctx, data.processing_status);
@@ -284,17 +282,6 @@
   }
 
   function updateDetectionInfo(ctx, data) {
-    const countEl = ctx.card.querySelector("[data-detection-count]");
-    if (countEl) {
-      const count =
-        data.detections_count != null
-          ? data.detections_count
-          : data.detections
-            ? data.detections.length
-            : 0;
-      countEl.textContent = String(count);
-    }
-
     const timeEl = ctx.card.querySelector("[data-last-detection]");
     if (timeEl && data.captured_at) {
       const d = new Date(data.captured_at);

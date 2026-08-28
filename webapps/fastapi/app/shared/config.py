@@ -132,7 +132,11 @@ class Settings(BaseSettings):
     # 두되, 좌석 판정 이력(`seat_occupancy_history`)은 이 값과 무관하게 남는다 —
     # 지워지는 것은 프레임 단위 원시 탐지뿐이다.
     detection_event_retention_days: int = Field(default=7, ge=1, le=90)
+    # AI 서버의 FACE_RECOGNIZER와 반드시 같은 값이어야 한다. ArcFace의 기존 판정값은
+    # 아래 공통 필드가 유지하고, AdaFace는 평가로 선택한 값을 별도로 주입해야 한다.
+    face_recognizer: Literal["arcface", "adaface"] = "arcface"
     student_identity_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
+    student_identity_confidence_threshold_adaface: float | None = Field(default=None, ge=0, le=1)
     # --- 학생 상태 판정 시간 정책 (결정 0008) ---
     # 마지막으로 학생을 식별한 뒤 이 시간 동안은 직전 판정을 이어받는다. 앉은 사람도
     # 프레임마다 잡히지는 않으므로, 한 프레임 놓쳤다고 상태가 튀면 안 된다. 좌석이
@@ -271,4 +275,19 @@ class Settings(BaseSettings):
                 )
         if self.llm_search_mode == "llama" and not self.llm_search_url.strip():
             raise ValueError("LLM_SEARCH_MODE=llama에는 LLM_SEARCH_URL이 필요합니다.")
+        if (
+            self.face_recognizer == "adaface"
+            and self.student_identity_confidence_threshold_adaface is None
+        ):
+            raise ValueError(
+                "FACE_RECOGNIZER=adaface에는 "
+                "STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE가 필요합니다."
+            )
         return self
+
+    @property
+    def active_student_identity_confidence_threshold(self) -> float:
+        if self.face_recognizer == "arcface":
+            return self.student_identity_confidence_threshold
+        assert self.student_identity_confidence_threshold_adaface is not None
+        return self.student_identity_confidence_threshold_adaface

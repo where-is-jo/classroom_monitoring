@@ -91,6 +91,7 @@ def client() -> Iterator[TestClient]:
     app_module._frame_history.clear()
     app_module._fingerprint_history.clear()
     app_module.app.state.face_identification_runtime = None
+    app_module.app.state.face_model_metadata = app_module.DEFAULT_FACE_MODEL_METADATA
     # 세션 Gauge는 프로세스에 하나뿐이라 다른 테스트가 바꿔 놓았을 수 있다.
     metrics.install_session_gauge(app_module._active_session_count)
     app_module.app.state.landmarker = FakeLandmarker()
@@ -203,6 +204,9 @@ def test_readiness는_얼굴_식별이_꺼져_있으면_기본_분석만_ready�
     assert response.json() == {
         "status": "ready",
         "face_identification": "disabled",
+        "active_face_model": "arcface",
+        "face_model_version": "insightface-buffalo_l-w600k_r50-v0.7",
+        "face_preprocessing_version": "insightface-norm-crop-112-v1",
     }
 
 
@@ -213,7 +217,12 @@ def test_readiness는_활성_갤러리를_실제로_확인한다(client: TestCli
 
         def ensure_ready(self) -> FaceGalleryReadiness:
             self.ready_calls += 1
-            return FaceGalleryReadiness(gallery_entries=2, excluded_gallery_entries=1)
+            return FaceGalleryReadiness(
+                gallery_entries=2,
+                excluded_gallery_entries=1,
+                active_registered_students=2,
+                missing_gallery_entries=0,
+            )
 
     runtime = Runtime()
     app_module.app.state.face_identification_runtime = runtime
@@ -224,8 +233,13 @@ def test_readiness는_활성_갤러리를_실제로_확인한다(client: TestCli
     assert response.json() == {
         "status": "ready",
         "face_identification": "ready",
+        "active_face_model": "arcface",
+        "face_model_version": "insightface-buffalo_l-w600k_r50-v0.7",
+        "face_preprocessing_version": "insightface-norm-crop-112-v1",
         "gallery_entries": "2",
         "excluded_gallery_entries": "1",
+        "active_registered_students": "2",
+        "missing_gallery_entries": "0",
     }
     assert runtime.ready_calls == 1
 
@@ -310,6 +324,18 @@ def test_얼굴_식별_API는_embedding_없이_얼굴_관측만_돌려준다(
 
     app_module.app.state.face_identification_runtime = Runtime()
 
+    request_before = value(
+        "face_identification_requests_total", model="arcface", result="ok"
+    )
+    observation_before = value(
+        "face_identification_observations_total",
+        model="arcface",
+        result="registered",
+    )
+    duration_before = value(
+        "face_identification_duration_seconds_count", model="arcface"
+    )
+
     response = client.post(
         "/internal/face-identifications",
         content=jpeg(160, 120),
@@ -334,3 +360,45 @@ def test_얼굴_식별_API는_embedding_없이_얼굴_관측만_돌려준다(
         ]
     }
     assert "vector" not in response.text
+    assert (
+        value("face_identification_requests_total", model="arcface", result="ok")
+        == request_before + 1
+    )
+    assert (
+        value(
+            "face_identification_observations_total",
+            model="arcface",
+            result="registered",
+        )
+        == observation_before + 1
+    )
+    assert (
+        value("face_identification_duration_seconds_count", model="arcface")
+        == duration_before + 1
+    )
+
+
+def test_얼굴_식별_모델의_예상하지_못한_오류를_모델별로_센다(
+    client: TestClient,
+) -> None:
+    class Runtime:
+        def identify(self, **kwargs: Any) -> tuple[TrackedIdentity, ...]:
+            del kwargs
+            raise RuntimeError("ONNX session failure")
+
+    app_module.app.state.face_identification_runtime = Runtime()
+    before = value(
+        "face_identification_requests_total", model="arcface", result="error"
+    )
+
+    response = client.post(
+        "/internal/face-identifications",
+        content=jpeg(160, 120),
+        headers={"X-Camera-ID": "entry-camera"},
+    )
+
+    assert response.status_code == 500
+    assert (
+        value("face_identification_requests_total", model="arcface", result="error")
+        == before + 1
+    )

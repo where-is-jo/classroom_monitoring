@@ -266,9 +266,6 @@ button.link-button:hover { color: #7f0d0d; background: none; }
 .state--absent { color: #dc2626; }
 .state--unknown { color: #6b7280; }
 
-.camera-monitoring-refresh-time { padding: 10px 14px; color: var(--muted); background: #e8f1ef; border-radius: 10px; white-space: nowrap; }
-.camera-monitoring-refresh-time span, .camera-monitoring-refresh-time strong { display: block; }
-.camera-monitoring-refresh-time span { font-size: .75rem; }
 .page-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .fullscreen-toggle { color: var(--primary-dark); background: var(--surface); border-color: var(--border); }
 .fullscreen-toggle:hover { background: var(--primary-soft); }
@@ -400,7 +397,6 @@ main:fullscreen {
   .content { padding: 28px 16px; }
   .page-header, .section-heading { display: grid; gap: 14px; }
   .metric-grid, .filter-form, .form-grid { grid-template-columns: 1fr; }
-  .camera-monitoring-refresh-time { white-space: normal; }
   .filter-bar > label, .filter-bar > button { flex: 1 1 100%; }
 }
 

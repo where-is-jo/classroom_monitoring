@@ -451,12 +451,17 @@ def get_student_service(
 
 def get_face_embedding_service() -> FaceEmbeddingService:
     settings = get_settings()
+    dataset_reader = (
+        _face_dataset_reader(str(settings.face_local_sample_storage_dir))
+        if settings.face_local_sample_storage_enabled
+        else _memory_face_object_storage()
+    )
     return FaceEmbeddingService(
         get_face_embedding_repository(),
         _face_embedding_analyzer(
             settings.face_analyzer_url, settings.face_analyzer_timeout_seconds
         ),
-        _face_dataset_reader(str(settings.face_local_sample_storage_dir)),
+        dataset_reader,
         get_student_service(get_student_repository(settings)),
         clock=utc_now,
     )
@@ -873,7 +878,7 @@ def get_student_monitoring_service(
         roi_service=roi_service,
         occupancy_confidence_threshold=settings.seat_occupancy_confidence_threshold,
         occupancy_hold_seconds=settings.seat_occupancy_hold_seconds,
-        identity_confidence_threshold=settings.student_identity_confidence_threshold,
+        identity_confidence_threshold=(settings.active_student_identity_confidence_threshold),
         identity_hold_seconds=settings.student_identity_hold_seconds,
         absent_grace_seconds=settings.student_absent_grace_seconds,
         stale_seconds=settings.detection_event_stale_seconds,

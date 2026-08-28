@@ -7,6 +7,7 @@
   const capture = document.querySelector("#capture-panel");
   const complete = document.querySelector("#face-enrollment-complete");
   let activeStudentId = null;
+  let activeModelLabel = null;
   let registrationBusy = false;
 
   const setModalState = () => {
@@ -125,9 +126,13 @@
   document.querySelectorAll(".open-face-enrollment").forEach((button) => {
     button.addEventListener("click", () => {
       activeStudentId = button.dataset.studentId;
+      activeModelLabel = button.dataset.modelLabel;
       document.querySelector("#student-id").textContent = activeStudentId;
       document.querySelector("#face-student-name").textContent = button.dataset.studentName;
       document.querySelector("#face-student-number").textContent = button.dataset.studentNumber;
+      document.querySelector("#face-model-label").textContent = activeModelLabel;
+      document.querySelector("#face-model-description").textContent = activeModelLabel;
+      document.querySelector("#face-complete-model-label").textContent = activeModelLabel;
       document.querySelector("#consent-confirmed").checked = false;
       document.querySelector("#setup-error").hidden = true;
       document.querySelector("#capture-error").hidden = true;
@@ -163,7 +168,15 @@
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({enrollment_id: enrollmentId}),
       });
-      if (!response.ok) throw new Error("얼굴 등록 상태를 저장하지 못했습니다.");
+      let body = null;
+      try {
+        body = await response.json();
+      } catch {
+        // JSON이 아니면 아래의 안전한 기본 메시지를 사용한다.
+      }
+      if (!response.ok) {
+        throw new Error(body?.error?.message || "얼굴 등록 상태를 저장하지 못했습니다.");
+      }
       window.setTimeout(() => location.reload(), 1200);
     } catch (reason) {
       const error = document.querySelector("#setup-error");

@@ -72,10 +72,13 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /deeplearning
 COPY app.py ./app.py
+# adaface 추가
+COPY adaface_recognizer.py ./adaface_recognizer.py
 # 실행 provider 판단. app.py가 `import execution_provider`로 찾는다.
 COPY execution_provider.py ./execution_provider.py
 COPY face_identity.py ./face_identity.py
 COPY face_identification.py ./face_identification.py
+COPY face_recognizer.py ./face_recognizer.py
 # 지표 정의. app.py가 `import metrics`로 찾는다.
 COPY metrics.py ./metrics.py
 

@@ -1,8 +1,6 @@
-"""Router for monitoring queries and rule-based search without authentication."""
+"""Router for camera source queries and playback sessions without authentication."""
 
 from __future__ import annotations
-
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
@@ -91,7 +89,6 @@ def monitoring_page(
         context={
             "real_streams": real_streams,
             "stream_service": stream_service,
-            "current_time": datetime.now(UTC),
         },
     )
 

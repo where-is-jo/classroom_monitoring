@@ -211,6 +211,10 @@ validation과 test 이미지가 네 디렉터리에 모두 있어야 한다. 로
 `FACE_EVAL_*_DIR`와 모델 경로도 Windows 절대경로여야 하며, `/home/...` 경로는 GPU 서버에서
 실행할 때만 유효하다.
 
+FAR 0.1%를 평가할 수 있도록 unknown validation과 test는 각각 얼굴 검출에 성공한 probe를
+최소 1,000개 요구한다. track false association 0.1% 기준에는 서로 다른 사람의 유효 얼굴
+쌍이 최소 1,000쌍 필요하다. 어느 하나라도 부족하면 CSV와 threshold 산출물을 쓰지 않는다.
+
 생성된 임계값 파일에는 모델명·모델 버전·전처리 버전이 함께 들어간다. 실시간 서비스의
 `FACE_IDENTITY_THRESHOLD_FILE`로 연결하며, 현재 런타임 메타데이터와 하나라도 다르면
 기동을 거부한다. `similarity_threshold`, `margin_threshold`,
@@ -218,9 +222,40 @@ validation과 test 이미지가 네 디렉터리에 모두 있어야 한다. 로
 느슨하면 배포 검증도 실패한다. 실측 데이터가 없으면 임의 임계값으로 학생 이름을 붙이지
 않는다.
 
-AdaFace ONNX는 `prepare_adaface_model.py`, person re-ID 가중치는
-`prepare_person_reid.py`로 준비한다. `cross_camera_demo.py`와 tracking 노트북은 카메라 간
-인계 실험용이며 운영 파이프라인에는 연결돼 있지 않다.
+각 모델 실행은 CSV·threshold 외에 학생 식별정보가 없는 `summary.json`을 만든다. 같은 네
+split으로 ArcFace와 AdaFace를 각각 실행한 후 아래 게이트로 비교한다. 양쪽 test FAR과 track
+실제 오연결률이 목표 이하여야 하고, AdaFace known 성공률이 ArcFace보다 낮으면 실패한다.
+
+```bash
+python -m deeplearning.training.verify_face_model_comparison \
+  --arcface-summary <ArcFace summary.json 절대경로> \
+  --adaface-summary <AdaFace summary.json 절대경로>
+```
+
+AdaFace ONNX는 `prepare_adaface_model.py`로 준비한다. 이 스크립트는 저자 계정의 공식
+CVLFace AdaFace IR50 WebFace4M revision을 고정하고 `model.pt`와
+`model.safetensors` SHA-256을 확인한 뒤 CPU ONNX Runtime에서 동적 batch `(N, 512)`를
+검증한다. 산출물은 RGB/mean=std=0.5 입력 계약이다.
+
+```bash
+python -m deeplearning.training.prepare_adaface_model \
+  --output .docker/models/face/adaface/adaface_ir50_webface4m.onnx
+```
+
+AdaFace 갤러리와 임계값을 적용해 readiness가 성공한 뒤에는 동의된 실제 입구 JPEG 한 장으로
+worker와 같은 5초 제한을 검증한다. 이 명령은 활성 모델 불일치, 식별 비활성, 갤러리 누락,
+응답 형식 오류, 5초 초과 중 하나라도 있으면 실패한다.
+
+```bash
+python -m deeplearning.training.verify_face_cutover \
+  --url http://127.0.0.1:18100 \
+  --image <동의된 실제 입구 JPEG 절대경로> \
+  --expected-model adaface \
+  --maximum-seconds 5
+```
+
+person re-ID 가중치는 `prepare_person_reid.py`로 준비한다. `cross_camera_demo.py`와 tracking
+노트북은 카메라 간 인계 실험용이며 운영 파이프라인에는 연결돼 있지 않다.
 
 ## Jupyter 사용법
 
@@ -306,6 +341,7 @@ training/
 ├── .env.example         설정값 이름(값은 비움)
 ├── face_identification_eval.py   고정 split 얼굴 식별 평가·임계값 생성
 ├── adaface_recognizer.py         AdaFace ONNX 런타임 어댑터
+├── prepare_adaface_model.py       고정 revision·checksum AdaFace ONNX 준비
 ├── cross_camera_demo.py          카메라 간 인계 실험 진입점
 └── notebooks/
     ├── 01_person_detection_training*.ipynb   사람 탐지 모델 학습·평가

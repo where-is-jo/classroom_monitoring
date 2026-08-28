@@ -89,21 +89,19 @@ services:
     image: ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
     pull_policy: never
     env_file:
-      # MongoDB URL·DB 이름만 서버에서 주입한다. 변수 기준은 deeplearning/.env.example.
+      # MongoDB 비밀값과 ArcFace/AdaFace 선택 계약을 서버에서 주입한다.
+      # 변수 기준은 deeplearning/.env.example이다.
       - ./env/deeplearning.dev.env
     environment:
       # 가중치는 이미지에도 저장소에도 없다. .docker/models/face에 미리 올려 둔다.
       # 셋 다 실제 파일이어야 하며, 없으면 기동 시점에 죽는다(app.py의 lifespan).
       FACE_DETECTION_MODEL_PATH: /models/face/scrfd/scrfd_10g_bnkps.onnx
       FACE_LANDMARKER_MODEL_PATH: /models/face/mediapipe/face_landmarker.task
-      FACE_RECOGNITION_MODEL_PATH: /models/face/buffalo_l/w600k_r50.onnx
-      # 식별을 켜면 readiness가 MongoDB 갤러리와 metadata까지 실제로 읽는다.
+      # 식별 기능 활성화
       FACE_IDENTIFICATION_ENABLED: "true"
-      # cuda면 CUDAExecutionProvider가 없을 때 기동에 실패한다. **여기서는 그게 맞다** —
-      # GPU를 주기로 해 놓고 조용히 CPU로 도는 것이 이번에 고친 문제다.
+
+      # GPU 사용 강제
       FACE_EXECUTION_PROVIDER: cuda
-      FACE_IDENTITY_THRESHOLD_FILE: /models/face/config/thresholds.json
-      FACE_EMBEDDING_COLLECTION: face_embeddings
     volumes:
       - ./models:/models:ro
     # **호스트 분할로 새로 열게 된 포트다.** 전에는 fastapi가 같은 network 안에서
