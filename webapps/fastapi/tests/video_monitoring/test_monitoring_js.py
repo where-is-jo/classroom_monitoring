@@ -159,11 +159,11 @@ class TestMonitoringJsStatic:
         assert "EventSource" in source
         assert "RTCPeerConnection" in source
 
-    def test_bbox_label_uses_student_id_or_unknown(self) -> None:
-        """등록자는 UUID를, 미등록자는 unknown을 표시한다."""
+    def test_bbox_label_uses_server_verified_display_label(self) -> None:
+        """등록자는 이름을, 미식별자는 명시적인 인식 불가 라벨을 표시한다."""
         source = MONITORING_JS.read_text(encoding="utf-8")
-        assert 'label.textContent = det.student_id || "unknown"' in source
-        assert "det.display_label" not in source
+        assert 'label.textContent = det.display_label || "인식 불가"' in source
+        assert "det.student_id" not in source
         assert "det.class_name +" not in source
 
     def test_bbox_label_hides_track_id_and_confidence(self) -> None:
