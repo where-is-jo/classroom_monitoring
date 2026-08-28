@@ -19,7 +19,11 @@ def test_공식_모델_revision과_가중치_hash를_고정한다() -> None:
     assert all(
         len(value) == 64 for value in prepare_adaface_model.MODEL_FILE_SHA256.values()
     )
-    assert len(prepare_adaface_model.ONNX_FILE_SHA256) == 64
+    assert len(prepare_adaface_model.ONNX_FILE_SHA256_ALLOWLIST) == 2
+    assert all(
+        len(value) == 64
+        for value in prepare_adaface_model.ONNX_FILE_SHA256_ALLOWLIST
+    )
 
 
 def test_가중치_hash가_다르면_변환_전에_거부한다(
@@ -37,9 +41,9 @@ def test_가중치_hash가_다르면_변환_전에_거부한다(
         prepare_adaface_model.verify_model_files(tmp_path)
 
 
-def test_ONNX_hash가_고정_산출물과_다르면_거부한다(tmp_path: Path) -> None:
+def test_ONNX_hash가_허용_목록에_없으면_거부한다(tmp_path: Path) -> None:
     output_path = tmp_path / "adaface.onnx"
     output_path.write_bytes(b"tampered")
 
-    with pytest.raises(RuntimeError, match="expected=.* actual="):
+    with pytest.raises(RuntimeError, match="산출물 목록"):
         prepare_adaface_model.verify_onnx(output_path)

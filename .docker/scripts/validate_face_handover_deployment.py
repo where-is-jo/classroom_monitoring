@@ -37,15 +37,11 @@ FACE_MODEL_CONFIGS = {
         },
         "collection": "face_embeddings_adaface",
         "model_path": "adaface/adaface_ir50_webface4m.onnx",
-        # **경로 이름만으로는 부족하다.** 이름을 맞춰 놓고 다른 ONNX를 두면 경로
-        # 대조는 통과하는데, 런타임에도 해시 검사가 없어
-        # (deeplearning/face_recognizer.py는 존재와 크기만 본다) 어떤 가중치든 위
-        # model_version으로 라벨링돼 갤러리에 들어간다. 실제로 운영 서버가 이
-        # 상태였다. 값은 provision-adaface-model.yml이 고정 revision에서 만들어
-        # 배치하는 ONNX의 해시이며, training/prepare_adaface_model.py의
-        # ONNX_FILE_SHA256과 같은 값이다. 셋 중 하나만 바꾸면 배포가 막힌다.
-        "model_sha256": (
-            "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc"
+        # 동일한 공식 source·고정 의존성에서 재현되고 CPU 실행 검증을 통과한
+        # 두 ONNX 직렬화만 허용한다. 파일명만 맞춘 제3의 가중치는 계속 차단한다.
+        "model_sha256_allowlist": (
+            "7baabf47c06391ab52e312134c6255846a5e55aa5a641f0553a89092fe2429d8",
+            "7cb549232dd13071d9a12cd74cb9fa9741c9087021c1e6f1ae5ed994b5af7cfc",
         ),
     },
 }
@@ -282,11 +278,11 @@ def validate(docker_root: Path) -> list[str]:
                         f"얼굴 인식 모델 파일이 없습니다: {host_recognition_path}"
                     )
                 else:
-                    expected_hash = face_model_config.get("model_sha256")
+                    expected_hashes = face_model_config.get("model_sha256_allowlist")
                     if (
-                        isinstance(expected_hash, str)
-                        and expected_hash
-                        and sha256_file(host_recognition_path) != expected_hash
+                        isinstance(expected_hashes, tuple)
+                        and expected_hashes
+                        and sha256_file(host_recognition_path) not in expected_hashes
                     ):
                         errors.append(
                             f"얼굴 인식 모델 가중치가 {face_recognizer} 기준과 "

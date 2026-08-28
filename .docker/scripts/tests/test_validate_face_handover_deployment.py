@@ -26,8 +26,8 @@ _DUMMY_ADAFACE = b"adaface-model"
 def adaface_hash_matches_dummy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(
         FACE_MODEL_CONFIGS["adaface"],
-        "model_sha256",
-        hashlib.sha256(_DUMMY_ADAFACE).hexdigest(),
+        "model_sha256_allowlist",
+        (hashlib.sha256(_DUMMY_ADAFACE).hexdigest(),),
     )
 
 
