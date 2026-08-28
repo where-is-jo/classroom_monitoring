@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from enum import Enum
 
 import numpy as np
 from shared.types import CapturedFrame
@@ -24,6 +26,9 @@ from .metrics import (
     PERSON_TRACKS_EXPIRED_TOTAL,
 )
 from .types import BBox, Detection, InferenceResult
+
+
+logger = logging.getLogger(__name__)
 
 
 def _bbox_array(bbox: BBox) -> np.ndarray:
@@ -308,6 +313,23 @@ class _KalmanBBoxFilter:
         self.covariance = (self.covariance + self.covariance.T) / 2.0
 
 
+class PersonTrackState(str, Enum):
+    TENTATIVE = "tentative"
+    TRACKED = "tracked"
+    LOST = "lost"
+    REMOVED = "removed"
+
+
+@dataclass(frozen=True)
+class PersonTrackTransition:
+    track_id: str
+    previous_state: PersonTrackState | None
+    next_state: PersonTrackState
+    last_bbox: tuple[float, float, float, float]
+    velocity: tuple[float, float, float, float]
+    last_observed_at: float
+
+
 @dataclass
 class _Track:
     track_id: int
@@ -320,6 +342,8 @@ class _Track:
     hits: int = 1
     missed_frames: int = 0
     age_frames: int = 1
+    state: PersonTrackState = PersonTrackState.TRACKED
+    confirmed: bool = True
 
     @classmethod
     def create(
@@ -329,6 +353,7 @@ class _Track:
         *,
         observed_at: float,
         kalman_enabled: bool,
+        lifecycle_enabled: bool,
     ) -> _Track:
         return cls(
             track_id=track_id,
@@ -339,7 +364,19 @@ class _Track:
                 _KalmanBBoxFilter.initiate(bbox) if kalman_enabled else None
             ),
             prediction_observed_at=observed_at if kalman_enabled else None,
+            state=(
+                PersonTrackState.TENTATIVE
+                if lifecycle_enabled
+                else PersonTrackState.TRACKED
+            ),
+            confirmed=not lifecycle_enabled,
         )
+
+    @property
+    def current_velocity(self) -> np.ndarray:
+        if self.kalman_filter is not None:
+            return self.kalman_filter.mean[4:].copy()
+        return self.velocity.copy()
 
     def predict(self, observed_at: float) -> None:
         if self.kalman_filter is None:
@@ -389,6 +426,7 @@ class _Track:
                 # 짧은 bbox 흔들림보다 최근 이동 방향을 더 오래 유지한다.
                 self.velocity = self.velocity * 0.7 + observed_velocity * 0.3
         self.bbox = bbox
+        self.last_observed_bbox = bbox.copy()
         self.last_observed_at = max(self.last_observed_at, observed_at)
         self.hits += 1
         self.missed_frames = 0
@@ -403,6 +441,7 @@ class ByteTrackConfig:
     second_match_iou_threshold: float = 0.2
     track_buffer_frames: int = 30
     kalman_enabled: bool = False
+    track_lifecycle_enabled: bool = False
     person_detection_postprocess_enabled: bool = False
     duplicate_iou_threshold: float = 0.5
     duplicate_ios_threshold: float = 0.85
@@ -438,11 +477,64 @@ class CameraByteTracker:
         self.expired_last_update = 0
         self.expired_lifetimes_last_update: tuple[int, ...] = ()
         self.expired_track_ids_last_update: tuple[str, ...] = ()
+        self.removed_track_ids_last_update: tuple[str, ...] = ()
+        self.transitions_last_update: tuple[PersonTrackTransition, ...] = ()
+        self.internal_result_last_update: InferenceResult | None = None
         self._update_index = 0
 
     @property
     def active_track_count(self) -> int:
+        if self._config.track_lifecycle_enabled:
+            return sum(track.confirmed for track in self._tracks.values())
         return len(self._tracks)
+
+    def _transition(
+        self,
+        track: _Track,
+        next_state: PersonTrackState,
+        transitions: list[PersonTrackTransition],
+        *,
+        is_creation: bool = False,
+    ) -> None:
+        previous = None if is_creation else track.state
+        if previous == next_state:
+            return
+        track.state = next_state
+        if next_state is PersonTrackState.TRACKED:
+            track.confirmed = True
+        observed_bbox = (
+            track.last_observed_bbox
+            if track.last_observed_bbox is not None
+            else track.bbox
+        )
+        transitions.append(
+            PersonTrackTransition(
+                track_id=f"person-{track.track_id}",
+                previous_state=previous,
+                next_state=next_state,
+                last_bbox=tuple(float(value) for value in observed_bbox),
+                velocity=tuple(float(value) for value in track.current_velocity),
+                last_observed_at=track.last_observed_at,
+            )
+        )
+
+    def _update_matched_track(
+        self,
+        track_id: int,
+        bbox: np.ndarray,
+        observed_at: float,
+        transitions: list[PersonTrackTransition],
+    ) -> None:
+        track = self._tracks[track_id]
+        previous_state = track.state
+        track.update(bbox, observed_at)
+        if not self._config.track_lifecycle_enabled:
+            return
+        if previous_state is PersonTrackState.TENTATIVE:
+            self._transition(track, PersonTrackState.TRACKED, transitions)
+            self.created_last_update += 1
+        elif previous_state is PersonTrackState.LOST:
+            self._transition(track, PersonTrackState.TRACKED, transitions)
 
     def _match(
         self,
@@ -500,6 +592,10 @@ class CameraByteTracker:
         self.expired_last_update = 0
         self.expired_lifetimes_last_update = ()
         self.expired_track_ids_last_update = ()
+        self.removed_track_ids_last_update = ()
+        self.transitions_last_update = ()
+        self.internal_result_last_update = None
+        transitions: list[PersonTrackTransition] = []
         for track in self._tracks.values():
             track.age_frames += 1
             track.predict(current_observed_at)
@@ -538,8 +634,11 @@ class CameraByteTracker:
         for track_row, detection_column in first_matches:
             track_id = track_ids[track_row]
             detection_index, detection = high[detection_column]
-            self._tracks[track_id].update(
-                _bbox_array(detection.bbox), current_observed_at
+            self._update_matched_track(
+                track_id,
+                _bbox_array(detection.bbox),
+                current_observed_at,
+                transitions,
             )
             assignments[detection_index] = track_id
 
@@ -552,13 +651,22 @@ class CameraByteTracker:
         for track_row, detection_column in second_matches:
             track_id = unmatched_track_ids[track_row]
             detection_index, detection = low[detection_column]
-            self._tracks[track_id].update(
-                _bbox_array(detection.bbox), current_observed_at
+            self._update_matched_track(
+                track_id,
+                _bbox_array(detection.bbox),
+                current_observed_at,
+                transitions,
             )
             assignments[detection_index] = track_id
 
         for track_id in still_unmatched_track_ids:
-            self._tracks[track_id].missed_frames += 1
+            track = self._tracks[track_id]
+            track.missed_frames += 1
+            if self._config.track_lifecycle_enabled:
+                if track.state is PersonTrackState.TENTATIVE:
+                    self._transition(track, PersonTrackState.REMOVED, transitions)
+                elif track.state is PersonTrackState.TRACKED:
+                    self._transition(track, PersonTrackState.LOST, transitions)
 
         for column in unmatched_high_columns:
             detection_index, detection = high[column]
@@ -571,14 +679,33 @@ class CameraByteTracker:
                 _bbox_array(detection.bbox),
                 observed_at=current_observed_at,
                 kalman_enabled=self._config.kalman_enabled,
+                lifecycle_enabled=self._config.track_lifecycle_enabled,
             )
             assignments[detection_index] = track_id
-            self.created_last_update += 1
+            track = self._tracks[track_id]
+            if self._config.track_lifecycle_enabled:
+                self._transition(
+                    track,
+                    PersonTrackState.TENTATIVE,
+                    transitions,
+                    is_creation=True,
+                )
+            else:
+                self.created_last_update += 1
 
-        expired = [
+        removed = [
             track_id
             for track_id, track in self._tracks.items()
-            if track.missed_frames > self._config.track_buffer_frames
+            if track.state is PersonTrackState.REMOVED
+            or track.missed_frames > self._config.track_buffer_frames
+        ]
+        if self._config.track_lifecycle_enabled:
+            for track_id in removed:
+                track = self._tracks[track_id]
+                if track.state is not PersonTrackState.REMOVED:
+                    self._transition(track, PersonTrackState.REMOVED, transitions)
+        expired = [
+            track_id for track_id in removed if self._tracks[track_id].confirmed
         ]
         self.expired_lifetimes_last_update = tuple(
             self._tracks[track_id].age_frames for track_id in expired
@@ -586,12 +713,17 @@ class CameraByteTracker:
         self.expired_track_ids_last_update = tuple(
             f"person-{track_id}" for track_id in expired
         )
-        for track_id in expired:
+        self.removed_track_ids_last_update = tuple(
+            f"person-{track_id}" for track_id in removed
+        )
+        for track_id in removed:
             del self._tracks[track_id]
         self.expired_last_update = len(expired)
+        self.transitions_last_update = tuple(transitions)
 
         retained_person_indices = {index for index, _ in people}
-        enriched: list[Detection] = []
+        internal_enriched: list[Detection] = []
+        external_enriched: list[Detection] = []
         for index, detection in enumerate(result.detections):
             is_person = detection.class_name.casefold() == "person"
             if self._config.person_detection_postprocess_enabled and is_person:
@@ -603,12 +735,24 @@ class CameraByteTracker:
                     and index not in assignments
                 ):
                     continue
-            enriched.append(
+            enriched_detection = (
                 replace(detection, track_id=f"person-{assignments[index]}")
                 if index in assignments
                 else detection
             )
-        return InferenceResult(result.frame_shape, tuple(enriched))
+            internal_enriched.append(enriched_detection)
+            if (
+                self._config.track_lifecycle_enabled
+                and index in assignments
+                and self._tracks[assignments[index]].state
+                is PersonTrackState.TENTATIVE
+            ):
+                continue
+            external_enriched.append(enriched_detection)
+        self.internal_result_last_update = InferenceResult(
+            result.frame_shape, tuple(internal_enriched)
+        )
+        return InferenceResult(result.frame_shape, tuple(external_enriched))
 
 
 class ByteTrackResultHandler:
@@ -624,12 +768,14 @@ class ByteTrackResultHandler:
             [ByteTrackConfig], CameraByteTracker
         ] = CameraByteTracker,
         expired_track_handler: Callable[[str, tuple[str, ...]], None] | None = None,
+        internal_track_handler: ResultHandler | None = None,
     ) -> None:
         self._config = config
         self._inner = inner
         self._camera_ids = camera_ids
         self._tracker_factory = tracker_factory
         self._expired_track_handler = expired_track_handler
+        self._internal_track_handler = internal_track_handler
         self._trackers: dict[str, CameraByteTracker] = {}
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
@@ -641,6 +787,23 @@ class ByteTrackResultHandler:
             tracker = self._tracker_factory(self._config)
             self._trackers[captured.camera_id] = tracker
         tracked = tracker.update(result, observed_at=captured.captured_at.timestamp())
+        for transition in tracker.transitions_last_update:
+            logger.info(
+                "사람 track 상태 전환 camera_id=%s track_id=%s "
+                "previous_state=%s next_state=%s last_bbox=%s velocity=%s "
+                "last_observed_at=%.6f",
+                captured.camera_id,
+                transition.track_id,
+                (
+                    transition.previous_state.value
+                    if transition.previous_state is not None
+                    else "none"
+                ),
+                transition.next_state.value,
+                transition.last_bbox,
+                transition.velocity,
+                transition.last_observed_at,
+            )
         if tracker.created_last_update:
             PERSON_TRACKS_CREATED_TOTAL.labels(camera_id=captured.camera_id).inc(
                 tracker.created_last_update
@@ -653,13 +816,23 @@ class ByteTrackResultHandler:
                 PERSON_TRACK_LIFETIME_FRAMES.labels(
                     camera_id=captured.camera_id
                 ).observe(lifetime)
-            if self._expired_track_handler is not None:
-                self._expired_track_handler(
-                    captured.camera_id, tracker.expired_track_ids_last_update
-                )
+        if (
+            tracker.removed_track_ids_last_update
+            and self._expired_track_handler is not None
+        ):
+            self._expired_track_handler(
+                captured.camera_id, tracker.removed_track_ids_last_update
+            )
         PERSON_TRACKS_ACTIVE.labels(camera_id=captured.camera_id).set(
             tracker.active_track_count
         )
+        if (
+            self._internal_track_handler is not None
+            and tracker.internal_result_last_update is not None
+        ):
+            self._internal_track_handler(
+                captured, tracker.internal_result_last_update
+            )
         self._inner(captured, tracked)
 
 
@@ -667,4 +840,6 @@ __all__ = [
     "ByteTrackConfig",
     "ByteTrackResultHandler",
     "CameraByteTracker",
+    "PersonTrackState",
+    "PersonTrackTransition",
 ]

@@ -74,6 +74,22 @@ def test_Kalman_예측기는_환경변수로_활성화할_수_있다(
     assert settings.bytetrack_kalman_enabled is True
 
 
+def test_track_상태전환은_기존_외부_출력이_기본이다() -> None:
+    settings = build_settings()
+
+    assert settings.person_track_lifecycle_enabled is False
+
+
+def test_track_상태전환은_환경변수로_활성화할_수_있다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PERSON_TRACK_LIFECYCLE_ENABLED", "true")
+
+    settings = build_settings()
+
+    assert settings.person_track_lifecycle_enabled is True
+
+
 def test_사람_후처리는_환경변수로_활성화할_수_있다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

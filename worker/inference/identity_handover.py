@@ -208,6 +208,17 @@ class RefreshingIdentityHandoverResultHandler:
                 return result
             return self._active.enrich_classroom(captured, result)
 
+    def observe_classroom_tracking(
+        self,
+        captured: CapturedFrame,
+        result: InferenceResult,
+    ) -> None:
+        """외부에서 숨긴 tentative track도 문 영역 bookkeeping에는 반영한다."""
+        with self._lock:
+            self._refresh_if_due()
+            if self._active is not None:
+                self._active.observe_classroom_tracking(captured, result)
+
     def expire_classroom_tracks(
         self, camera_id: str, track_ids: tuple[str, ...]
     ) -> None:
@@ -436,6 +447,22 @@ class IdentityHandoverResultHandler:
                 captured.captured_at.timestamp(),
             )
 
+    def observe_classroom_tracking(
+        self,
+        captured: CapturedFrame,
+        result: InferenceResult,
+    ) -> None:
+        """tentative를 외부에 내보내지 않고 진입 상태만 먼저 기록한다."""
+        route = self._classroom_routes.get(captured.camera_id)
+        if route is None:
+            return
+        with self._route_locks[route]:
+            self._observe_classroom_tracks(
+                route,
+                result,
+                captured.captured_at.timestamp(),
+            )
+
     def expire_classroom_tracks(
         self, camera_id: str, track_ids: tuple[str, ...]
     ) -> None:
@@ -590,6 +617,38 @@ class IdentityHandoverResultHandler:
         result: InferenceResult,
         observed_at: float,
     ) -> InferenceResult:
+        state, people = self._observe_classroom_tracks(
+            route, result, observed_at
+        )
+
+        enriched = list(result.detections)
+        for index, detection in people:
+            assert detection.track_id is not None
+            identity = state.active_identities.get(detection.track_id)
+            if identity is None:
+                continue
+            if identity.attach_measurement_pending:
+                self._record_handoff_attachment(
+                    state,
+                    detection.track_id,
+                    identity,
+                    observed_at,
+                )
+            enriched[index] = replace(
+                detection,
+                student_id=identity.student_id,
+                identity_confidence=identity.confidence,
+                # CCTV는 얼굴을 인식한 카메라가 아니므로 얼굴 bbox를 넘기지 않는다.
+                face_bbox=None,
+            )
+        return InferenceResult(result.frame_shape, tuple(enriched))
+
+    def _observe_classroom_tracks(
+        self,
+        route: IdentityHandoverRoute,
+        result: InferenceResult,
+        observed_at: float,
+    ) -> tuple[_RouteState, list[tuple[int, Detection]]]:
         state = self._states[route]
         match_inputs_expired = self._expire(state, observed_at)
         people = _person_detections(result)
@@ -627,28 +686,7 @@ class IdentityHandoverResultHandler:
 
         if entered_entry_zone or match_inputs_expired:
             self._try_match(state)
-
-        enriched = list(result.detections)
-        for index, detection in people:
-            assert detection.track_id is not None
-            identity = state.active_identities.get(detection.track_id)
-            if identity is None:
-                continue
-            if identity.attach_measurement_pending:
-                self._record_handoff_attachment(
-                    state,
-                    detection.track_id,
-                    identity,
-                    observed_at,
-                )
-            enriched[index] = replace(
-                detection,
-                student_id=identity.student_id,
-                identity_confidence=identity.confidence,
-                # CCTV는 얼굴을 인식한 카메라가 아니므로 얼굴 bbox를 넘기지 않는다.
-                face_bbox=None,
-            )
-        return InferenceResult(result.frame_shape, tuple(enriched))
+        return state, people
 
     @staticmethod
     def _record_handoff_attachment(

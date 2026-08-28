@@ -12,6 +12,7 @@ from ..tracking import (
     ByteTrackConfig,
     ByteTrackResultHandler,
     CameraByteTracker,
+    PersonTrackState,
     _KalmanBBoxFilter,
 )
 from ..types import Detection, InferenceResult
@@ -55,6 +56,119 @@ def test_연속된_사람_bbox에_같은_track_id를_붙인다() -> None:
 
     assert first.detections[0].track_id == "person-1"
     assert second.detections[0].track_id == "person-1"
+
+
+def test_상태전환은_tentative를_숨기고_2회_연속_관측에서_승격한다() -> None:
+    tracker = CameraByteTracker(config(track_lifecycle_enabled=True))
+
+    tentative = tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    assert tentative.detections == ()
+    assert tracker.internal_result_last_update is not None
+    assert tracker.internal_result_last_update.detections[0].track_id == "person-1"
+    assert tracker.created_last_update == 0
+    assert tracker.active_track_count == 0
+    creation = tracker.transitions_last_update[0]
+    assert creation.track_id == "person-1"
+    assert creation.previous_state is None
+    assert creation.next_state is PersonTrackState.TENTATIVE
+    assert creation.last_bbox == (10.0, 10.0, 80.0, 180.0)
+    assert creation.velocity == (0.0, 0.0, 0.0, 0.0)
+    assert creation.last_observed_at == 1.0
+
+    tracked = tracker.update(result(person(0.9, (12, 10, 82, 180))))
+
+    assert tracked.detections[0].track_id == "person-1"
+    assert tracker.created_last_update == 1
+    assert tracker.active_track_count == 1
+    assert (
+        tracker.transitions_last_update[0].previous_state
+        is PersonTrackState.TENTATIVE
+    )
+    assert tracker.transitions_last_update[0].next_state is PersonTrackState.TRACKED
+
+
+def test_tentative가_다음_관측을_놓치면_즉시_제거한다() -> None:
+    tracker = CameraByteTracker(config(track_lifecycle_enabled=True))
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    tracker.update(result())
+
+    assert tracker.active_track_count == 0
+    assert tracker.created_last_update == 0
+    assert tracker.expired_last_update == 0
+    assert tracker.removed_track_ids_last_update == ("person-1",)
+    assert (
+        tracker.transitions_last_update[0].previous_state
+        is PersonTrackState.TENTATIVE
+    )
+    assert tracker.transitions_last_update[0].next_state is PersonTrackState.REMOVED
+
+
+@pytest.mark.parametrize("missing_frames", (1, 5, 15, 30))
+def test_tracked는_30프레임_누락까지_lost에서_같은_ID로_복구한다(
+    missing_frames: int,
+) -> None:
+    tracker = CameraByteTracker(
+        config(track_buffer_frames=30, track_lifecycle_enabled=True)
+    )
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+    confirmed = tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    for _ in range(missing_frames):
+        tracker.update(result())
+    assert tracker._tracks[1].state is PersonTrackState.LOST
+    recovered = tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    assert confirmed.detections[0].track_id == "person-1"
+    assert recovered.detections[0].track_id == "person-1"
+    assert tracker._tracks[1].state is PersonTrackState.TRACKED
+    assert (
+        tracker.transitions_last_update[0].previous_state
+        is PersonTrackState.LOST
+    )
+    assert tracker.transitions_last_update[0].next_state is PersonTrackState.TRACKED
+
+
+def test_tracked는_31번째_누락에서_removed되고_새_ID를_만든다() -> None:
+    tracker = CameraByteTracker(
+        config(track_buffer_frames=30, track_lifecycle_enabled=True)
+    )
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+    tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    for _ in range(31):
+        tracker.update(result())
+
+    assert tracker.expired_track_ids_last_update == ("person-1",)
+    assert tracker.transitions_last_update[0].previous_state is PersonTrackState.LOST
+    assert tracker.transitions_last_update[0].next_state is PersonTrackState.REMOVED
+
+    recreated_tentative = tracker.update(
+        result(person(0.9, (10, 10, 80, 180)))
+    )
+    recreated_tracked = tracker.update(result(person(0.9, (10, 10, 80, 180))))
+
+    assert recreated_tentative.detections == ()
+    assert recreated_tracked.detections[0].track_id == "person-2"
+
+
+def test_tentative는_외부에서_숨기고_내부_handler에는_전달한다() -> None:
+    external: list[InferenceResult] = []
+    internal: list[InferenceResult] = []
+    handler = ByteTrackResultHandler(
+        config(track_lifecycle_enabled=True),
+        inner=lambda _frame, value: external.append(value),
+        internal_track_handler=lambda _frame, value: internal.append(value),
+    )
+
+    handler(
+        captured("classroom-cctv", 0),
+        result(person(0.9, (10, 10, 80, 180))),
+    )
+
+    assert external[0].detections == ()
+    assert internal[0].detections[0].track_id == "person-1"
 
 
 def test_실제_촬영_간격으로_빠르게_이동한_bbox를_예측한다() -> None:
