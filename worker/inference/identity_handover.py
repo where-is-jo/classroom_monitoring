@@ -25,7 +25,9 @@ from .metrics import (
     IDENTITY_HANDOFF_ATTACH_SECONDS,
     IDENTITY_HANDOFF_TIMESTAMP_ISSUES_TOTAL,
     IDENTITY_HANDOFF_TOTAL,
+    IDENTITY_TRACK_RECOVERY_TOTAL,
 )
+from .tracking import PersonTrackState, PersonTrackTransition
 from .types import (
     Detection,
     EntryFaceObservationBatch,
@@ -38,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 HANDOVER_ROUTES_PATH = "/internal/identity-handover-routes"
 HANDOFF_MEASUREMENT_RETENTION_SECONDS = 30.0
+IDENTITY_TRACK_RECOVERY_RETENTION_SECONDS = 3.0
+IDENTITY_TRACK_RECOVERY_MAX_NORMALIZED_DISTANCE = 0.08
+IDENTITY_TRACK_RECOVERY_MIN_AREA_RATIO = 0.5
+IDENTITY_TRACK_RECOVERY_MAX_AREA_RATIO = 2.0
 
 
 @dataclass(frozen=True)
@@ -161,6 +167,7 @@ class RefreshingIdentityHandoverResultHandler:
         clock_skew_seconds: float = 0.5,
         track_stale_seconds: float = 30.0,
         minimum_identity_confidence: float = 0.0,
+        identity_track_recovery_enabled: bool = False,
         available_camera_ids: frozenset[str] | None = None,
         entry_camera_ids: frozenset[str] = frozenset(),
         classroom_camera_ids: frozenset[str] = frozenset(),
@@ -176,6 +183,7 @@ class RefreshingIdentityHandoverResultHandler:
         self._clock_skew_seconds = clock_skew_seconds
         self._track_stale_seconds = track_stale_seconds
         self._minimum_identity_confidence = minimum_identity_confidence
+        self._identity_track_recovery_enabled = identity_track_recovery_enabled
         self._available_camera_ids = available_camera_ids
         self._entry_camera_ids = entry_camera_ids
         self._classroom_camera_ids = classroom_camera_ids
@@ -218,6 +226,20 @@ class RefreshingIdentityHandoverResultHandler:
             self._refresh_if_due()
             if self._active is not None:
                 self._active.observe_classroom_tracking(captured, result)
+
+    def handle_track_transitions(
+        self,
+        camera_id: str,
+        frame_shape: tuple[int, int, int],
+        observed_at: float,
+        transitions: tuple[PersonTrackTransition, ...],
+    ) -> None:
+        with self._lock:
+            self._refresh_if_due()
+            if self._active is not None:
+                self._active.handle_track_transitions(
+                    camera_id, frame_shape, observed_at, transitions
+                )
 
     def expire_classroom_tracks(
         self, camera_id: str, track_ids: tuple[str, ...]
@@ -290,6 +312,9 @@ class RefreshingIdentityHandoverResultHandler:
             clock_skew_seconds=self._clock_skew_seconds,
             track_stale_seconds=self._track_stale_seconds,
             minimum_identity_confidence=self._minimum_identity_confidence,
+            identity_track_recovery_enabled=(
+                self._identity_track_recovery_enabled
+            ),
         )
 
 
@@ -322,6 +347,15 @@ class _HandoffMeasurement:
     started_at: float
 
 
+@dataclass(frozen=True)
+class _LostIdentityRecovery:
+    track_id: str
+    student_id: str
+    confidence: float
+    last_bbox: tuple[float, float, float, float]
+    last_observed_at: float
+
+
 @dataclass
 class _RouteState:
     pending: dict[str, _PendingIdentity] = field(default_factory=dict)
@@ -333,6 +367,9 @@ class _RouteState:
     )
     active_identities: dict[str, _ActiveIdentity] = field(default_factory=dict)
     handoff_measurements: dict[str, _HandoffMeasurement] = field(
+        default_factory=dict
+    )
+    lost_identity_recoveries: dict[str, _LostIdentityRecovery] = field(
         default_factory=dict
     )
     watermark: float = float("-inf")
@@ -382,6 +419,14 @@ def _foot_in_zone(
     return left <= foot_x <= right and top <= foot_y <= bottom
 
 
+def _bbox_area(bbox: tuple[float, float, float, float]) -> float:
+    return max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+
+
+def _bottom_center(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
+    return ((bbox[0] + bbox[2]) / 2.0, bbox[3])
+
+
 class IdentityHandoverResultHandler:
     """입구 신원을 교실 track에 잠그고 같은 track의 이후 프레임에 유지한다."""
 
@@ -394,6 +439,7 @@ class IdentityHandoverResultHandler:
         clock_skew_seconds: float = 0.5,
         track_stale_seconds: float = 30.0,
         minimum_identity_confidence: float = 0.0,
+        identity_track_recovery_enabled: bool = False,
     ) -> None:
         if not routes:
             raise ValueError("신원 인계 route가 하나 이상 필요합니다.")
@@ -411,6 +457,7 @@ class IdentityHandoverResultHandler:
         self._clock_skew_seconds = clock_skew_seconds
         self._track_stale_seconds = track_stale_seconds
         self._minimum_identity_confidence = minimum_identity_confidence
+        self._identity_track_recovery_enabled = identity_track_recovery_enabled
         self._states = {route: _RouteState() for route in routes}
         self._route_locks = {route: RLock() for route in routes}
         self._entry_routes: dict[str, list[IdentityHandoverRoute]] = {}
@@ -463,6 +510,57 @@ class IdentityHandoverResultHandler:
                 captured.captured_at.timestamp(),
             )
 
+    def handle_track_transitions(
+        self,
+        camera_id: str,
+        frame_shape: tuple[int, int, int],
+        observed_at: float,
+        transitions: tuple[PersonTrackTransition, ...],
+    ) -> None:
+        """lost 신원을 전역 유일한 새 track으로만 원자 이동한다."""
+        if not self._identity_track_recovery_enabled or not transitions:
+            return
+        route = self._classroom_routes.get(camera_id)
+        if route is None:
+            return
+        with self._route_locks[route]:
+            state = self._states[route]
+            self._expire_lost_identity_recoveries(state, observed_at)
+            for transition in transitions:
+                if transition.next_state is PersonTrackState.LOST:
+                    identity = state.active_identities.get(transition.track_id)
+                    if identity is not None:
+                        state.lost_identity_recoveries[transition.track_id] = (
+                            _LostIdentityRecovery(
+                                track_id=transition.track_id,
+                                student_id=identity.student_id,
+                                confidence=identity.confidence,
+                                last_bbox=transition.last_bbox,
+                                last_observed_at=transition.last_observed_at,
+                            )
+                        )
+                elif (
+                    transition.previous_state is PersonTrackState.LOST
+                    and transition.next_state is PersonTrackState.TRACKED
+                ):
+                    state.lost_identity_recoveries.pop(transition.track_id, None)
+                elif transition.next_state is PersonTrackState.REMOVED:
+                    if state.lost_identity_recoveries.pop(
+                        transition.track_id, None
+                    ) is not None:
+                        IDENTITY_TRACK_RECOVERY_TOTAL.labels(
+                            outcome="expired"
+                        ).inc()
+
+            new_tracks = tuple(
+                transition
+                for transition in transitions
+                if transition.previous_state is None
+                and transition.next_state is PersonTrackState.TENTATIVE
+            )
+            if new_tracks:
+                self._recover_lost_identities(state, frame_shape, new_tracks)
+
     def expire_classroom_tracks(
         self, camera_id: str, track_ids: tuple[str, ...]
     ) -> None:
@@ -476,6 +574,8 @@ class IdentityHandoverResultHandler:
                 state.known_classroom_tracks.pop(track_id, None)
                 state.classroom_tracks_in_entry_zone.pop(track_id, None)
                 state.unmatched_classroom_tracks.pop(track_id, None)
+                if state.lost_identity_recoveries.pop(track_id, None) is not None:
+                    IDENTITY_TRACK_RECOVERY_TOTAL.labels(outcome="expired").inc()
                 state.active_identities.pop(track_id, None)
                 measurement = state.handoff_measurements.pop(track_id, None)
                 if measurement is not None:
@@ -511,6 +611,7 @@ class IdentityHandoverResultHandler:
         state.watermark = max(state.watermark, observed_at)
         now = state.watermark
         self._expire_handoff_measurements(state, now)
+        self._expire_lost_identity_recoveries(state, now)
         pending_count = len(state.pending)
         unmatched_count = len(state.unmatched_classroom_tracks)
         state.pending = {
@@ -642,6 +743,128 @@ class IdentityHandoverResultHandler:
                 face_bbox=None,
             )
         return InferenceResult(result.frame_shape, tuple(enriched))
+
+    @staticmethod
+    def _expire_lost_identity_recoveries(
+        state: _RouteState,
+        observed_at: float,
+    ) -> None:
+        expired = [
+            track_id
+            for track_id, recovery in state.lost_identity_recoveries.items()
+            if observed_at - recovery.last_observed_at
+            > IDENTITY_TRACK_RECOVERY_RETENTION_SECONDS
+        ]
+        for track_id in expired:
+            del state.lost_identity_recoveries[track_id]
+        if expired:
+            IDENTITY_TRACK_RECOVERY_TOTAL.labels(outcome="expired").inc(
+                len(expired)
+            )
+
+    @staticmethod
+    def _recover_lost_identities(
+        state: _RouteState,
+        frame_shape: tuple[int, int, int],
+        new_tracks: tuple[PersonTrackTransition, ...],
+    ) -> None:
+        height, width = frame_shape[:2]
+        diagonal = math.hypot(width, height)
+        if diagonal <= 0:
+            return
+
+        candidates: list[tuple[str, str]] = []
+        for lost_track_id, recovery in state.lost_identity_recoveries.items():
+            lost_area = _bbox_area(recovery.last_bbox)
+            if lost_area <= 0:
+                continue
+            lost_x, lost_y = _bottom_center(recovery.last_bbox)
+            for new_track in new_tracks:
+                if (
+                    abs(new_track.last_observed_at - recovery.last_observed_at)
+                    > IDENTITY_TRACK_RECOVERY_RETENTION_SECONDS
+                ):
+                    continue
+                new_area = _bbox_area(new_track.last_bbox)
+                area_ratio = new_area / lost_area
+                if not (
+                    IDENTITY_TRACK_RECOVERY_MIN_AREA_RATIO
+                    <= area_ratio
+                    <= IDENTITY_TRACK_RECOVERY_MAX_AREA_RATIO
+                ):
+                    continue
+                new_x, new_y = _bottom_center(new_track.last_bbox)
+                normalized_distance = math.hypot(
+                    new_x - lost_x, new_y - lost_y
+                ) / diagonal
+                if (
+                    normalized_distance
+                    <= IDENTITY_TRACK_RECOVERY_MAX_NORMALIZED_DISTANCE
+                ):
+                    candidates.append((lost_track_id, new_track.track_id))
+
+        lost_candidate_counts: dict[str, int] = {}
+        new_candidate_counts: dict[str, int] = {}
+        for lost_track_id, new_track_id in candidates:
+            lost_candidate_counts[lost_track_id] = (
+                lost_candidate_counts.get(lost_track_id, 0) + 1
+            )
+            new_candidate_counts[new_track_id] = (
+                new_candidate_counts.get(new_track_id, 0) + 1
+            )
+        unique_pairs = [
+            (lost_track_id, new_track_id)
+            for lost_track_id, new_track_id in candidates
+            if lost_candidate_counts[lost_track_id] == 1
+            and new_candidate_counts[new_track_id] == 1
+        ]
+        deferred_new_track_ids = {
+            new_track_id for _, new_track_id in candidates
+        } - {new_track_id for _, new_track_id in unique_pairs}
+        if deferred_new_track_ids:
+            IDENTITY_TRACK_RECOVERY_TOTAL.labels(outcome="deferred").inc(
+                len(deferred_new_track_ids)
+            )
+
+        for lost_track_id, new_track_id in unique_pairs:
+            recovery = state.lost_identity_recoveries.get(lost_track_id)
+            identity = state.active_identities.get(lost_track_id)
+            if (
+                recovery is None
+                or identity is None
+                or identity.student_id != recovery.student_id
+                or new_track_id in state.active_identities
+                or any(
+                    track_id != lost_track_id
+                    and active.student_id == recovery.student_id
+                    for track_id, active in state.active_identities.items()
+                )
+            ):
+                IDENTITY_TRACK_RECOVERY_TOTAL.labels(outcome="deferred").inc()
+                continue
+
+            # 동일 route lock 안에서 source를 지운 뒤 destination에 넣는다. 복사가
+            # 아니므로 옛 track이 다시 tracked가 되어도 같은 신원이 부활하지 않는다.
+            identity = state.active_identities.pop(lost_track_id)
+            identity.last_seen_at = max(
+                identity.last_seen_at,
+                next(
+                    track.last_observed_at
+                    for track in new_tracks
+                    if track.track_id == new_track_id
+                ),
+            )
+            state.active_identities[new_track_id] = identity
+            measurement = state.handoff_measurements.pop(lost_track_id, None)
+            if measurement is not None:
+                state.handoff_measurements[new_track_id] = measurement
+            del state.lost_identity_recoveries[lost_track_id]
+            IDENTITY_TRACK_RECOVERY_TOTAL.labels(outcome="recovered").inc()
+            logger.info(
+                "lost track 신원을 새 track으로 이동했습니다. old_track=%s new_track=%s",
+                lost_track_id,
+                new_track_id,
+            )
 
     def _observe_classroom_tracks(
         self,

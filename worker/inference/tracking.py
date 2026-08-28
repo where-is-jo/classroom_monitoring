@@ -769,6 +769,16 @@ class ByteTrackResultHandler:
         ] = CameraByteTracker,
         expired_track_handler: Callable[[str, tuple[str, ...]], None] | None = None,
         internal_track_handler: ResultHandler | None = None,
+        transition_handler: Callable[
+            [
+                str,
+                tuple[int, int, int],
+                float,
+                tuple[PersonTrackTransition, ...],
+            ],
+            None,
+        ]
+        | None = None,
     ) -> None:
         self._config = config
         self._inner = inner
@@ -776,6 +786,7 @@ class ByteTrackResultHandler:
         self._tracker_factory = tracker_factory
         self._expired_track_handler = expired_track_handler
         self._internal_track_handler = internal_track_handler
+        self._transition_handler = transition_handler
         self._trackers: dict[str, CameraByteTracker] = {}
 
     def __call__(self, captured: CapturedFrame, result: InferenceResult) -> None:
@@ -803,6 +814,13 @@ class ByteTrackResultHandler:
                 transition.last_bbox,
                 transition.velocity,
                 transition.last_observed_at,
+            )
+        if tracker.transitions_last_update and self._transition_handler is not None:
+            self._transition_handler(
+                captured.camera_id,
+                result.frame_shape,
+                captured.captured_at.timestamp(),
+                tracker.transitions_last_update,
             )
         if tracker.created_last_update:
             PERSON_TRACKS_CREATED_TOTAL.labels(camera_id=captured.camera_id).inc(

@@ -78,6 +78,7 @@ pipeline 자신의 값은 전부 환경과 무관해 [`config/settings.yml`](./c
 | `person_track_lifecycle_enabled` | tentative → tracked → lost → removed 상태 전환 | 기본 꺼짐. develop에서는 tentative를 외부 payload에서만 숨김 |
 | `person_detection_postprocess_*` | 사람 전용 IoU/IoS 중복 제거와 미매칭 저신뢰 제거 | 기본 꺼짐. develop compose에서만 활성화 |
 | `identity_handover_*` | 인계 시간 창·clock skew·stale·신뢰도와 동적 설정 on/off·갱신 주기·timeout | `config/settings.yml` |
+| `identity_track_recovery_enabled` | lost 신원을 3초 안의 전역 유일한 새 track으로 이동 | 기본 꺼짐. develop compose에서만 활성화 |
 | `face_identity_timeout_seconds` | 얼굴 식별 HTTP timeout | 기본 5초 |
 | `face_identity_jpeg_quality` | 얼굴 식별 요청 JPEG 품질 | 기본 95 |
 | `metrics_enabled` | 지표 노출 여부 | 기본 `true` |

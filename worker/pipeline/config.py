@@ -150,6 +150,8 @@ class PipelineSettings(BaseSettings):
     identity_handover_max_delay_seconds: float = Field(default=8.0, gt=0, le=120)
     identity_handover_clock_skew_seconds: float = Field(default=0.5, ge=0, le=10)
     identity_handover_track_stale_seconds: float = Field(default=30.0, gt=0, le=3600)
+    # lost 신원을 새 track으로 이동하는 경로는 develop compose에서 단계별로 켠다.
+    identity_track_recovery_enabled: bool = False
     # deeplearning이 similarity + margin threshold를 모두 통과시킨 경우에만 student_id를
     # 돌려준다. 여기서 임의의 cosine 임계값을 다시 적용하면 정상 식별을 버리므로 기본은
     # 추가 필터 없음이다. 운영에서 별도 정책이 필요할 때만 0보다 크게 올린다.
