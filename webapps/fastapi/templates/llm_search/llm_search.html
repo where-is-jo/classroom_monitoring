@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}자연어 탐지 검색 · 학습 모니터링{% endblock %}
+{% block title %}CCTV 기록 검색 · 학습 모니터링{% endblock %}
 
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('static', path='/llm-search.css') }}">
@@ -8,10 +8,13 @@
 
 {% block content %}
 <header class="page-header">
-  <h1>자연어 탐지 검색</h1>
-  <p class="page-lead">
-    질문을 검색 조건으로 바꾼 뒤 탐지 기록을 찾습니다. 탐지 인원이 바뀐 시점만 보여줍니다.
-  </p>
+  <div class="title-wrap">
+    <p class="page-eyebrow">AI 자연어 검색</p>
+    <h1 class="page-title">CCTV 기록 검색</h1>
+    <p class="page-summary">
+      자연어 탐지 검색으로 질문을 검색 조건으로 바꾼 뒤 기록을 찾습니다. 탐지 인원이 바뀐 시점만 보여줍니다.
+    </p>
+  </div>
 </header>
 
 {# 상태를 여섯으로 나눈다. 묶어서 보여주면 사용자가 질문을 고쳐야 하는지
@@ -21,7 +24,7 @@
      문구가 "로컬 환경"이라고 단정하는 것은 결정 0021이 disabled를 로컬에서만 쓰기로
      정했기 때문이다. GPU 서버를 disabled로 두면 이 안내가 틀린 말이 된다. #}
   <div class="state-panel state-empty">
-    <h2>로컬 환경에서는 사용할 수 없습니다</h2>
+    <h2 class="state-title">로컬 환경에서는 사용할 수 없습니다</h2>
     <p>
       자연어 검색은 <strong>GPU 서버 환경에서 정상 작동합니다.</strong>
       지금 접속하신 곳은 로컬 환경이라 검색을 실행할 수 없습니다.
@@ -61,7 +64,7 @@
 
 {% if planner_error %}
   <div class="state-panel state-error" role="alert">
-    <h2>검색 서버에 닿지 못했습니다</h2>
+    <h2 class="state-title">검색 서버에 닿지 못했습니다</h2>
     <p>
       질문을 해석하는 서버에 연결하지 못했습니다.
       <strong>질문을 고쳐도 해결되지 않습니다.</strong> 서버 상태를 확인한 뒤 다시 시도하세요.
@@ -69,7 +72,7 @@
   </div>
 {% elif plan_error %}
   <div class="state-panel state-error" role="alert">
-    <h2>질문을 검색 조건으로 바꾸지 못했습니다</h2>
+    <h2 class="state-title">질문을 검색 조건으로 바꾸지 못했습니다</h2>
     <p>
       기간과 대상을 더 분명하게 적어 주세요.
       예) <em>어제 오후 2시부터 4시까지 A101</em>
@@ -77,7 +80,7 @@
   </div>
 {% elif not asked %}
   <div class="state-panel state-empty">
-    <h2>질문을 입력하세요</h2>
+    <h2 class="state-title">질문을 입력하세요</h2>
     <p>
       기간과 강의실을 말하면 그 시간대의 탐지 기록을 찾습니다.
       찾을 수 있는 것은 <strong>몇 명이 언제 어느 카메라에 잡혔는지</strong>입니다.
@@ -85,7 +88,7 @@
   </div>
 {% else %}
   <section class="briefing" aria-labelledby="plan-heading">
-    <h2 id="plan-heading" class="briefing__heading">질문 해석</h2>
+    <h2 id="plan-heading" class="section-title briefing__heading">질문 해석</h2>
     {# 문장 조립은 service.py의 build_briefing이 끝냈다. 기간 표기 규칙(같은 날이면
        날짜를 한 번만, 초는 0이 아닐 때만)을 템플릿이 다시 판단하면 화면마다 복사된다. #}
     <p class="briefing__sentence">{{ outcome.briefing }}</p>
@@ -138,7 +141,7 @@
   {% if outcome.snapshot_lookup_failed %}
     {# "이미지 없음"과 "이미지 확인 실패"는 다르다. 아래 결과는 유효하다. #}
     <div class="state-panel state-error" role="alert">
-      <h2>스냅샷 저장소를 조회하지 못했습니다</h2>
+      <h2 class="state-title">스냅샷 저장소를 조회하지 못했습니다</h2>
       <p>
         아래 기록은 정상 조회된 것입니다.
         <strong>이미지가 없다는 뜻이 아니라 있는지 확인하지 못했다는 뜻입니다.</strong>
@@ -150,7 +153,7 @@
 
   <section class="results" aria-labelledby="results-heading">
     <div class="results__heading">
-      <h2 id="results-heading">탐지 결과</h2>
+      <h2 id="results-heading" class="section-title">탐지 결과</h2>
       {% if outcome.hits %}
         {# 정렬 방향을 적는다. 칸에 시:분:초만 있어 격자만 보고는 위가 최신인지
            오래된 쪽인지 한눈에 갈리지 않는다.
@@ -167,7 +170,7 @@
 
     {% if not outcome.hits %}
       <div class="state-panel state-empty">
-        <h2>해당 기간에 탐지 기록이 없습니다</h2>
+        <h2 class="state-title">해당 기간에 탐지 기록이 없습니다</h2>
         <p>
           조회는 성공했고 결과가 없습니다.
           <strong>위 "질문 해석"의 기간이 물어보신 시각과 같은지 먼저 확인해 주세요.</strong>

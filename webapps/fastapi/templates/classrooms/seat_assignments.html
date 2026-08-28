@@ -4,10 +4,10 @@
 
 {% block content %}
   <header class="page-header">
-    <div>
-      <p class="eyebrow">{{ classroom.code }}</p>
-      <h1>{{ classroom.name }} 좌석-학생 지정</h1>
-      <p class="summary">{{ classroom.location }} · 좌석별 학생을 지정하거나 해제합니다.</p>
+    <div class="title-wrap">
+      <p class="page-eyebrow">{{ classroom.code }}</p>
+      <h1 class="page-title">{{ classroom.name }} 좌석-학생 지정</h1>
+      <p class="page-summary">{{ classroom.location }} · 좌석별 학생을 지정하거나 해제합니다.</p>
     </div>
     <div class="page-actions">
       <a class="button-link secondary" href="/classrooms">목록</a>
@@ -17,7 +17,7 @@
 
   {% if seats %}
     <section class="panel" aria-labelledby="assignment-table-title">
-      <h2 id="assignment-table-title">좌석-학생 지정 목록</h2>
+      <h2 id="assignment-table-title" class="section-title">좌석-학생 지정 목록</h2>
       <div class="table-scroll" tabindex="0" role="region" aria-label="좌석-학생 지정 스크롤 영역">
         <table>
           <thead>

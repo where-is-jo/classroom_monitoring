@@ -5,9 +5,7 @@
 .student-save-icon { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; color: #fff; background: var(--primary); border-radius: 50%; font-weight: 900; }
 .student-form-panel { max-width: 900px; }
 .student-list-panel { overflow: hidden; }
-.student-list-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 18px; }
-.student-list-heading p { margin: 4px 0 0; color: var(--muted); }
-.student-list-heading .active-face-model { padding: 8px 12px; color: #064e3f; background: #dff7ef; border: 1px solid #80cbbd; border-radius: 999px; white-space: nowrap; }
+.student-list-heading .active-face-model { margin: 0; padding: 8px 12px; color: #064e3f; background: #dff7ef; border: 1px solid #80cbbd; border-radius: 999px; white-space: nowrap; }
 .face-model-help { margin: -8px 0 14px; color: var(--muted); font-size: .86rem; }
 .student-table-wrap { overflow-x: auto; }
 .student-table { width: 100%; border-collapse: collapse; }
@@ -28,7 +26,7 @@ button.face-status-reregister { color: #075985; background: #e0f2fe; border: 1px
 .student-registration-dialog { width: min(92vw, 900px); max-width: none; padding: 26px; color: var(--text); background: var(--surface); border: 0; border-radius: 20px; box-shadow: 0 28px 80px rgba(0, 0, 0, .42); }
 .student-registration-dialog::backdrop { background: rgba(0, 0, 0, .72); backdrop-filter: blur(2px); }
 .student-form-heading { display: flex; justify-content: space-between; gap: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
-.student-form-heading p { margin-bottom: 0; color: var(--muted); }
+.student-form-heading .student-form-summary { margin-bottom: 0; color: var(--muted); }
 .student-form-heading > span { color: var(--muted); white-space: nowrap; font-size: .82rem; }
 .student-form-heading > span strong, .required-mark { color: var(--danger); }
 .student-registration-form { margin-top: 22px; }
@@ -47,8 +45,9 @@ body.student-modal-open { overflow: hidden; }
 .face-dialog-step { box-sizing: border-box; width: 100%; height: 100%; animation: face-step-enter .25s ease-out; overflow: hidden; }
 .face-dialog-step[hidden] { display: none; }
 .face-consent-step { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; }
-.face-dialog-heading h2 { margin-bottom: 14px; font-size: clamp(1.6rem, 3vw, 2.25rem); }
-.face-dialog-heading > p:not(.eyebrow) { color: var(--muted); line-height: 1.7; }
+/* 학생 등록 페이지 전용: 얼굴 등록 dialog 제목 */
+.face-dialog-heading .dialog-title { margin-bottom: 14px; font-size: clamp(1.6rem, 3vw, 2.25rem); }
+.face-dialog-heading .dialog-copy { color: var(--muted); line-height: 1.7; }
 .face-dialog-student { padding: 12px 14px; background: var(--surface-low); border-radius: 10px; }
 .face-consent-check { display: flex; gap: 11px; align-items: flex-start; margin: 22px 0; padding: 17px; border: 1px solid var(--border); border-radius: 12px; font-weight: 700; }
 .face-consent-check input { width: 19px; height: 19px; margin-top: 2px; flex: 0 0 auto; }
@@ -69,4 +68,4 @@ body.student-modal-open { overflow: hidden; }
 @keyframes face-step-enter { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) { .face-dialog-step { animation: none; } }
 @media (max-width: 650px) { .student-form-grid { grid-template-columns: 1fr; } .student-form-heading { display: grid; } .student-form-actions { display: grid; grid-template-columns: 1fr 1fr; } }
-@media (max-width: 650px) { .student-list-heading { align-items: flex-start; flex-direction: column; } .face-registration-row { display: grid; } .face-registration-row button { width: 100%; } .student-face-dialog { width: 96vw; height: 94vh; max-height: 94vh; } .student-face-dialog-shell { padding: 16px; } .face-dialog-heading > p:not(.eyebrow) { line-height: 1.45; font-size: .9rem; } .face-consent-check { margin: 12px 0; padding: 12px; font-size: .9rem; } .face-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; } }
+@media (max-width: 650px) { .student-list-heading { align-items: flex-start; flex-direction: column; } .face-registration-row { display: grid; } .face-registration-row button { width: 100%; } .student-face-dialog { width: 96vw; height: 94vh; max-height: 94vh; } .student-face-dialog-shell { padding: 16px; } .face-dialog-heading .dialog-copy { line-height: 1.45; font-size: .9rem; } .face-consent-check { margin: 12px 0; padding: 12px; font-size: .9rem; } .face-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; } }

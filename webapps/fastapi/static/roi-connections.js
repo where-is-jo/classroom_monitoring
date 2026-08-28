@@ -11,6 +11,7 @@
   const savedLabels = document.querySelector("#roi-saved-labels");
   const savedSummary = document.querySelector("#roi-saved-summary");
   const captureButton = document.querySelector("#roi-capture");
+  const captureProgress = document.querySelector("#roi-capture-progress");
   const startButton = document.querySelector("#roi-start");
   const finishButton = document.querySelector("#roi-finish");
   const resetButton = document.querySelector("#roi-reset");
@@ -376,7 +377,7 @@
     }
     captureButton.disabled = true;
     captureButton.textContent = "캡처 중";
-    status.textContent = "카메라에서 현재 화면을 가져오는 중입니다. 몇 초 걸립니다.";
+    captureProgress.hidden = false;
     try {
       const response = await fetch(
         `/api/v1/classrooms/${encodeURIComponent(classroomId)}/roi-reference-image/capture?camera_id=${encodeURIComponent(cameraId)}`,
@@ -393,7 +394,12 @@
       finishRegistration();
       clearPreview();
       await loadConnections();
-      status.textContent = `${selectedCameraLabel()}의 현재 화면을 캡처했습니다. ‘등록 시작’을 눌러 ROI를 그리세요.`;
+      const registrationGuide = document.createElement("strong");
+      registrationGuide.textContent = "‘등록 시작’을 눌러 ROI를 그리세요.";
+      status.replaceChildren(
+        document.createTextNode(`${selectedCameraLabel()}의 현재 화면을 캡처했습니다. `),
+        registrationGuide,
+      );
     } catch (reason) {
       console.error("ROI 기준 화면 캡처 실패", reason);
       discardReference(
@@ -404,6 +410,7 @@
     } finally {
       captureButton.disabled = false;
       captureButton.textContent = "현재 화면 캡처";
+      captureProgress.hidden = true;
     }
   };
 
@@ -558,7 +565,6 @@
       // 찾은 자리를 얹어 볼 바탕이 없으면 먼저 잡는다. 관리자가 캡처를 따로 누르지
       // 않아도 "찾기 → 보기 → 저장"으로 끝나게 하려는 것이다.
       if (referenceRevision === null && captureAvailable()) {
-        status.textContent = `${selectedCameraLabel()}의 현재 화면을 가져오는 중입니다. 몇 초 걸립니다.`;
         await captureFrame({quiet: true});
       }
       status.textContent = "탐지 기록에서 사람이 앉았던 자리를 찾는 중입니다. 몇 초 걸립니다.";

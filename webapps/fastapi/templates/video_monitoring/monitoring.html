@@ -7,9 +7,9 @@
 
 {% block content %}
   <header class="page-header">
-    <div>
-      <p class="eyebrow">연결된 카메라</p>
-      <h1>실시간 모니터링</h1>
+    <div class="title-wrap">
+      <p class="page-eyebrow">연결된 카메라</p>
+      <h1 class="page-title">실시간 모니터링</h1>
     </div>
     <div class="page-header-actions">
       <button class="fullscreen-toggle" type="button" data-fullscreen-toggle aria-pressed="false">
@@ -21,26 +21,28 @@
 
   {% if real_streams %}
     <section aria-labelledby="monitoring-streams-title">
-      <div class="section-heading">
-        <h2 id="monitoring-streams-title">연결된 카메라 영상</h2>
-      </div>
-      {% if real_streams|length > 1 %}
-        {# 한 번에 한 화면만 본다. 카메라마다 화각과 비율이 다르고(어안 CCTV는 세로,
-           입구 카메라는 가로) 나란히 놓으면 둘 다 작아진다. #}
-        <div class="camera-switcher" role="tablist" aria-label="카메라 선택">
-          {% for stream in real_streams %}
-            <button class="camera-switcher-tab" type="button" role="tab"
-                    id="camera-tab-{{ stream.camera_id }}"
-                    data-camera-tab="{{ stream.camera_id }}"
-                    aria-controls="camera-panel-{{ stream.camera_id }}"
-                    aria-selected="{{ 'true' if loop.first else 'false' }}"
-                    tabindex="{{ '0' if loop.first else '-1' }}">
-              <span class="camera-switcher-label">{{ stream.camera_label }}</span>
-              <span class="camera-switcher-id">{{ stream.camera_id }}</span>
-            </button>
-          {% endfor %}
+      <header class="page-header">
+        <div class="title-wrap">
+          <h2 id="monitoring-streams-title" class="page-subtitle">연결된 카메라 영상</h2>
         </div>
-      {% endif %}
+        {% if real_streams|length > 1 %}
+          {# 한 번에 한 화면만 본다. 카메라마다 화각과 비율이 다르고(어안 CCTV는 세로,
+             입구 카메라는 가로) 나란히 놓으면 둘 다 작아진다. #}
+          <div class="camera-switcher" role="tablist" aria-label="카메라 선택">
+            {% for stream in real_streams %}
+              <button class="camera-switcher-tab" type="button" role="tab"
+                      id="camera-tab-{{ stream.camera_id }}"
+                      data-camera-tab="{{ stream.camera_id }}"
+                      aria-controls="camera-panel-{{ stream.camera_id }}"
+                      aria-selected="{{ 'true' if loop.first else 'false' }}"
+                      tabindex="{{ '0' if loop.first else '-1' }}">
+                <span class="camera-switcher-label">{{ stream.camera_label }}</span>
+                <span class="camera-switcher-id">{{ stream.camera_id }}</span>
+              </button>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </header>
       <div class="camera-monitoring-stage">
         {% for stream in real_streams %}
           {% set source_status = stream_service.get_source_status(stream) %}
