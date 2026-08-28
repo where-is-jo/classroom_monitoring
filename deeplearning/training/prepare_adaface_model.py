@@ -130,11 +130,16 @@ def export_onnx(model, output_path: Path) -> None:
 
 
 def verify_onnx(output_path: Path) -> None:
+    actual_sha256 = sha256_file(output_path)
+    if actual_sha256 != ONNX_FILE_SHA256:
+        raise RuntimeError(
+            "AdaFace ONNX SHA-256이 고정 산출물과 다릅니다. "
+            f"expected={ONNX_FILE_SHA256} actual={actual_sha256}"
+        )
+
     import numpy as np
     import onnxruntime as ort
 
-    if sha256_file(output_path) != ONNX_FILE_SHA256:
-        raise RuntimeError("AdaFace ONNX SHA-256이 고정 산출물과 다릅니다.")
     session = ort.InferenceSession(str(output_path), providers=["CPUExecutionProvider"])
     inputs = session.get_inputs()
     outputs = session.get_outputs()
