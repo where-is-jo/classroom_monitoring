@@ -86,7 +86,7 @@ monitoring/internal/grafana/
 | row | 무엇을 보는가 |
 | --- | --- |
 | (맨 위) | `up` 세 job. **패널이 비어 있을 때 여기부터 본다** — 타겟이 죽은 것과 지표가 없는 것은 다르다 |
-| 추론 파이프라인 (worker) | 연속 실패, 추론 지연 p50/95/99, 처리량, 탐지 신뢰도, 버려진 프레임, 실패율·드롭률, 탐지 건수 |
+| 추론 파이프라인 (worker) | 연속 실패, 추론·얼굴 HTTP·신원 부착 지연, 처리량, 탐지 신뢰도, 버려진 프레임, 실패율·드롭률, track과 신원 인계 결과 |
 | 자연어 검색 (fastapi) | 첫 시도 규격 위반율, `json_schema` 폴백, 조회 상한 도달, 계획 지연, 결과 사유, 검색 지연과 LLM 구간의 차 |
 | 얼굴 분석 (deeplearning) | 남아 있는 등록 세션, 구간별 지연, 분석·embedding 결과, embedding 지연 |
 | GPU를 나눠 쓰는 두 경로 | 추론 지연과 LLM 계획 지연을 겹쳐 본다. **경합을 증명할 수 있는 유일한 패널** |
@@ -96,8 +96,8 @@ monitoring/internal/grafana/
 
 **패널을 만들지 않은 지표가 있다.** `frame_buffer_depth`는 카메라별 최신 프레임 수라
 등록 카메라 대수 안에서만 움직이고, `frames_consumed_total`은
-`frames_processed_total`과 거의 같다. 새 ByteTrack·신원 인계 지표도 아직 실제 카메라
-기준선이 없어 대시보드 임계값을 정하지 않았다. 현장 측정 뒤 패널과 경보를 추가한다.
+`frames_processed_total`과 거의 같다. ByteTrack·신원 인계 패널은 비교를 위해 먼저
+추가했지만 실제 카메라 기준선이 없으므로 경보 임계값은 정하지 않았다.
 
 **임계값의 근거는 셋이 서로 다르다.**
 
@@ -172,10 +172,13 @@ export해서 `grafana/dashboards/` 아래 파일을 갱신해야 한다.
 | `classroom_monitoring_face_identification_requests_total` | Counter | `outcome` | worker가 deeplearning 얼굴 식별을 호출한 성공·실패 수 |
 | `classroom_monitoring_face_identification_duration_seconds` | Histogram | 없음 | 얼굴 식별 HTTP 호출과 응답 검증 지연 |
 | `classroom_monitoring_identity_handoff_total` | Counter | `outcome` | 입구 신원이 CCTV track에 인계·보류된 이유 |
+| `classroom_monitoring_identity_handoff_attach_seconds` | Histogram | 없음 | 입구 얼굴 관측부터 CCTV track 첫 신원 부착까지의 지연 |
+| `classroom_monitoring_identity_handoff_timestamp_issues_total` | Counter | `reason` | 음수·만료·누락 시각 때문에 인계 지연을 측정하지 못한 횟수 |
 
 label 값 종류 수는 `camera_id`가 등록 카메라 대수, `result`가 2(`ok`·`failed`),
 `class_name`이 2(`person`·`cell phone`), `reason`이 2(`dropped`·`skipped`),
-`outcome`이 4(`accepted`·`no_candidate`·`ambiguous_candidates`·`ambiguous_tracks`)다.
+`outcome`이 4(`accepted`·`no_candidate`·`ambiguous_candidates`·`ambiguous_tracks`),
+인계 시각 `reason`이 3(`negative`·`expired`·`missing`)이다.
 학생 ID와 track ID는 label에 넣지 않는다.
 
 **신뢰도 분포를 재는 이유**는 지연과 처리량이 시스템이 도는지만 알려주기 때문이다.
@@ -205,6 +208,17 @@ classroom_monitoring_inference_consecutive_failures >= 3
 # 최근 인계가 성공한 비율 — 실제 기준선 확보 전에는 경보 임계값으로 쓰지 않는다
 sum(rate(classroom_monitoring_identity_handoff_total{outcome="accepted"}[30m]))
   / sum(rate(classroom_monitoring_identity_handoff_total[30m]))
+
+# 입구 얼굴 관측부터 CCTV track 첫 신원 부착까지의 p95
+histogram_quantile(
+  0.95,
+  rate(classroom_monitoring_identity_handoff_attach_seconds_bucket[30m])
+)
+
+# 두 카메라 clock skew 또는 측정 상태 이상
+sum by (reason) (
+  increase(classroom_monitoring_identity_handoff_timestamp_issues_total[30m])
+)
 
 # 카메라별 만료 track 증가율 — 급증하면 가림·매칭 임계값을 점검한다
 sum by (camera_id) (rate(classroom_monitoring_person_tracks_expired_total[10m]))

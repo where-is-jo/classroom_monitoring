@@ -4,14 +4,17 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
+from prometheus_client import REGISTRY
 from shared.types import CapturedFrame
 
 from ..identity_handover import (
     IdentityHandoverResultHandler,
     IdentityHandoverRoute,
     RefreshingIdentityHandoverResultHandler,
+    _observe_identity_handoff_attach,
     parse_identity_handover_routes,
 )
+from ..metrics import METRIC_PREFIX
 from ..types import (
     Detection,
     EntryFaceObservation,
@@ -23,6 +26,11 @@ from ..types import (
 
 STARTED_AT = datetime(2026, 8, 22, 9, 0, tzinfo=UTC)
 ROUTE = IdentityHandoverRoute("entry-camera", "classroom-cctv", (0.0, 0.0, 0.3, 1.0))
+
+
+def metric_value(name: str, **labels: str) -> float:
+    sampled = REGISTRY.get_sample_value(f"{METRIC_PREFIX}{name}", labels or None)
+    return 0.0 if sampled is None else float(sampled)
 
 
 def captured(camera_id: str, seconds: float, sequence: int = 0) -> CapturedFrame:
@@ -106,6 +114,94 @@ def test_등록_얼굴을_CCTV_문_ROI의_신규_track에_인계한다() -> None
     assert detection.identity_confidence == 0.91
     assert detection.track_id == "person-12"
     assert detection.face_bbox is None
+
+
+def test_입구_관측부터_CCTV_track_첫_신원_부착까지의_지연을_기록한다() -> None:
+    active, _ = handler()
+    before_count = metric_value("identity_handoff_attach_seconds_count")
+    before_sum = metric_value("identity_handoff_attach_seconds_sum")
+    active.observe_entry(captured("entry-camera", 1), batch(face()))
+
+    active(
+        captured("classroom-cctv", 2.25),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+
+    assert metric_value("identity_handoff_attach_seconds_count") == before_count + 1
+    assert metric_value("identity_handoff_attach_seconds_sum") == pytest.approx(
+        before_sum + 1.25
+    )
+
+
+def test_같은_CCTV_track의_신원_부착_지연은_한번만_기록한다() -> None:
+    active, _ = handler()
+    active.observe_entry(captured("entry-camera", 1), batch(face()))
+    active(
+        captured("classroom-cctv", 2),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+    after_first = metric_value("identity_handoff_attach_seconds_count")
+
+    active(
+        captured("classroom-cctv", 3),
+        result(person("person-12", (20, 5, 70, 95))),
+    )
+
+    assert metric_value("identity_handoff_attach_seconds_count") == after_first
+
+
+def test_음수_신원_부착_지연은_histogram에서_빼고_counter로_센다() -> None:
+    active, _ = handler()
+    before_histogram = metric_value("identity_handoff_attach_seconds_count")
+    before_negative = metric_value(
+        "identity_handoff_timestamp_issues_total", reason="negative"
+    )
+    active.observe_entry(captured("entry-camera", 2), batch(face()))
+
+    active(
+        captured("classroom-cctv", 1.75),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+
+    assert metric_value("identity_handoff_attach_seconds_count") == before_histogram
+    assert metric_value(
+        "identity_handoff_timestamp_issues_total", reason="negative"
+    ) == before_negative + 1
+
+
+def test_신원_부착을_보지_못한_측정_상태는_30초_후_만료한다() -> None:
+    active, _ = handler()
+    before = metric_value(
+        "identity_handoff_timestamp_issues_total", reason="expired"
+    )
+    active(
+        captured("classroom-cctv", 1),
+        result(person("person-12", (0, 5, 50, 95))),
+    )
+    # 이미 출력한 CCTV track에 뒤늦게 입구 관측이 도착하면 인계는 성립하지만,
+    # 실제 신원 부착은 다음 CCTV 출력에서 처음 관측된다.
+    active.observe_entry(captured("entry-camera", 1.2), batch(face()))
+
+    active.observe_entry(
+        captured("entry-camera", 31.2),
+        batch(processing_status=EntryIdentityProcessingStatus.ANALYZER_UNAVAILABLE),
+    )
+
+    assert metric_value(
+        "identity_handoff_timestamp_issues_total", reason="expired"
+    ) == before + 1
+
+
+def test_누락된_신원_인계_timestamp는_counter로_센다() -> None:
+    before = metric_value(
+        "identity_handoff_timestamp_issues_total", reason="missing"
+    )
+
+    _observe_identity_handoff_attach(None, STARTED_AT.timestamp())
+
+    assert metric_value(
+        "identity_handoff_timestamp_issues_total", reason="missing"
+    ) == before + 1
 
 
 def test_인계한_신원은_문_ROI를_벗어나도_같은_track에_유지한다() -> None:

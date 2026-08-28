@@ -306,6 +306,9 @@ Ultralytics 버전, confidence·image size 설정을 결과에 함께 남긴다.
 | `classroom_monitoring_detection_confidence` | Histogram | `class_name` |
 | `classroom_monitoring_face_identification_requests_total` | Counter | `outcome` (`ok`, `error`) |
 | `classroom_monitoring_face_identification_duration_seconds` | Histogram | 없음 |
+| `classroom_monitoring_identity_handoff_total` | Counter | `outcome` (`accepted`, `no_candidate`, `ambiguous_candidates`, `ambiguous_tracks`) |
+| `classroom_monitoring_identity_handoff_attach_seconds` | Histogram | 없음 |
+| `classroom_monitoring_identity_handoff_timestamp_issues_total` | Counter | `reason` (`negative`, `expired`, `missing`) |
 
 **실패한 추론의 시간은 지연 분포에 넣지 않는다.** 즉시 터진 호출이 "아주 빠른 추론"
 으로 섞이면 분포가 거짓말을 한다. 실패는 `frames_processed_total{result="failed"}`가
