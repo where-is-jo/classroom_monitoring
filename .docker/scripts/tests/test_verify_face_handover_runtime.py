@@ -312,6 +312,22 @@ def test_GPU_배포_workflow가_현재_소스로_latest_두_개를_함께_갱신
     assert worker_build < config_validation < worker_latest < force_recreate
 
 
+def test_GPU_배포_workflow가_Grafana_설정을_백업하고_전송한다() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    workflow = (
+        repository_root / ".github" / "workflows" / "deploy-gpu-server.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "- 'monitoring/internal/grafana/**'" in workflow
+    assert "git ls-files -z .docker monitoring/internal/grafana" in workflow
+    backup_position = workflow.index('tar czf "$backup_dir/$STAMP.tar.gz"')
+    transfer_position = workflow.index("git ls-files -z")
+    dashboard_backup_position = workflow.index(
+        ".docker monitoring/internal/grafana", backup_position
+    )
+    assert dashboard_backup_position < transfer_position
+
+
 def test_GPU_배포_workflow가_대용량_image_빌드_중_SSH_연결을_유지한다() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     workflow = (
