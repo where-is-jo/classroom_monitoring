@@ -32,6 +32,8 @@ def validate_workflow() -> None:
         "Read Schedule File",
         "Parse Schedule",
         "Get Student States",
+        # 주 FastAPI 호스트가 죽었을 때 도는 대체 경로. 배선은 아래에서 따로 본다.
+        "Get Student States (Fallback)",
         "Build Change Events",
         "Create Workbook",
         "Upload Workbook to Slack",
@@ -68,6 +70,7 @@ def validate_workflow() -> None:
     if not SLACK_UPLOAD_SCRIPT.exists():
         raise AssertionError(f"Slack upload script does not exist: {SLACK_UPLOAD_SCRIPT}")
     validate_node_references(workflow_text, node_names)
+    validate_fastapi_fallback(data)
     validate_period_report_ledger(data, workflow_text)
 
 
@@ -91,6 +94,47 @@ def validate_node_references(workflow_text: str, node_names: set[str]) -> None:
             f"New node-name references added: {extra}. "
             "값이 필요하면 실행기에 context로 실어 보내고 응답에서 되받아 쓴다 "
             "(runner/server.py의 _echo_context). 이름 참조는 늘리지 않는다."
+        )
+
+
+def validate_fastapi_fallback(data: dict) -> None:
+    """주 FastAPI 호출의 **오류 분기**가 대체 노드로 이어져 있는지 확인한다.
+
+    FastAPI가 도는 기계가 사람에 따라 오간다. 예전에는 n8n의 ``FASTAPI_BASE_URL``을
+    바꿔 컨테이너를 다시 만들어야 했고, 되돌리는 것을 잊어 하루치 관측을 통째로 잃은 적이
+    있다. 지금은 주 호스트가 실패하면 오류 분기가 대체 호스트로 넘긴다.
+
+    **이 배선은 평소에 돌지 않는다.** 주 호스트가 살아 있으면 오류 분기는 비어 있어서,
+    끊어져도 그날은 아무 일도 일어나지 않는다. 다음에 주 호스트가 죽는 날 그때서야
+    드러난다 - 그래서 실행이 아니라 배선을 검사한다.
+    """
+    primary, fallback = "Get Student States", "Get Student States (Fallback)"
+    nodes = {node["name"]: node for node in data["nodes"]}
+
+    on_error = nodes[primary].get("onError")
+    if on_error != "continueErrorOutput":
+        raise AssertionError(
+            f"'{primary}'의 onError가 {on_error!r}다. 'continueErrorOutput'이어야 "
+            "오류 분기가 생기고 대체 호스트로 넘어간다."
+        )
+
+    outputs = data["connections"].get(primary, {}).get("main", [])
+    if len(outputs) < 2:
+        raise AssertionError(
+            f"'{primary}'에 오류 분기가 없다(출력 {len(outputs)}개). "
+            f"두 번째 출력이 '{fallback}'으로 이어져야 한다."
+        )
+    error_targets = {item["node"] for item in outputs[1]}
+    if fallback not in error_targets:
+        raise AssertionError(f"'{primary}'의 오류 분기가 {sorted(error_targets)}로 간다. '{fallback}'이어야 한다.")
+
+    # 두 경로가 같은 곳으로 합쳐지지 않으면 대체 경로로 받은 상태가 버려진다.
+    normal = {item["node"] for item in outputs[0]}
+    merged = {item["node"] for branch in data["connections"].get(fallback, {}).get("main", []) for item in branch}
+    if normal != merged:
+        raise AssertionError(
+            f"정상 경로는 {sorted(normal)}로, 대체 경로는 {sorted(merged)}로 간다. "
+            "두 경로는 같은 노드로 합쳐져야 한다."
         )
 
 

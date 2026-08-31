@@ -125,7 +125,10 @@
       "position": [
         120,
         -20
-      ]
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "FastAPI가 도는 기계가 사람에 따라 오간다. 이 노드가 실패하면 오류 분기가 'Get Student States (Fallback)'으로 넘긴다.",
+      "notesInFlow": true
     },
     {
       "parameters": {
@@ -499,6 +502,24 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.FASTAPI_FALLBACK_URL || 'http://100.103.0.94:8076') + '/api/v1/classrooms/' + $('Parse Schedule').first().json.classroomId + '/student-states' }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fallback-student-states-0001",
+      "name": "Get Student States (Fallback)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        180
+      ],
+      "notes": "주 호스트가 죽었을 때만 돈다. 여기까지 실패하면 실행을 실패로 남긴다 - FastAPI가 전부 내려간 것은 보이게 해야 한다.",
+      "notesInFlow": true
     }
   ],
   "connections": {
@@ -579,6 +600,13 @@
         [
           {
             "node": "Build Change Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Student States (Fallback)",
             "type": "main",
             "index": 0
           }
@@ -731,6 +759,17 @@
         [
           {
             "node": "Send Weekly Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Student States (Fallback)": {
+      "main": [
+        [
+          {
+            "node": "Build Change Events",
             "type": "main",
             "index": 0
           }
