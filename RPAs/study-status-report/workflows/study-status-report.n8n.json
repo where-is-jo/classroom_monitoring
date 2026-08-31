@@ -55,7 +55,7 @@
     {
       "parameters": {
         "operation": "read",
-        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/individual_tasks/시간표.md'}}"
+        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/RPAs/study-status-report/schedule/시간표.md'}}"
       },
       "id": "66a2e33a-aa9d-4d94-9df3-c70d5df1b601",
       "name": "Read Schedule File",
@@ -215,7 +215,7 @@
     {
       "parameters": {
         "operation": "read",
-        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/individual_tasks/시간표.md'}}"
+        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/RPAs/study-status-report/schedule/시간표.md'}}"
       },
       "id": "fcf9c81b-d29a-4eaa-bebd-1bce276f5d01",
       "name": "Read Schedule For Daily Report",

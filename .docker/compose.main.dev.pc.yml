@@ -158,8 +158,9 @@ services:
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       # **파일 노드는 기본으로 모든 경로가 막혀 있다.** 시간표를 읽으려다
       # `Access to the file is not allowed.`로 실패한다. 읽어야 하는 디렉터리만
-      # 허용 목록에 넣는다 — 저장소 전체를 열지 않는다.
-      N8N_RESTRICT_FILE_ACCESS_TO: /repo/individual_tasks
+      # 허용 목록에 넣는다 — 저장소 전체도, RPA 디렉터리 전체도 열지 않는다.
+      # (RPA 루트를 열면 Slack 토큰이 든 .env까지 편집기에서 읽을 수 있다.)
+      N8N_RESTRICT_FILE_ACCESS_TO: /repo/RPAs/study-status-report/schedule
       # **기본값(filesystem)에서는 Code 노드가 파일 내용을 볼 수 없다.** 항목에는
       # 13바이트짜리 참조만 실려 오고 실제 내용은 디스크에 남아, 시간표를 읽어도
       # 파싱할 것이 없다. 여기서 다루는 바이너리는 시간표 문서 한 개(1.5KB)뿐이라
@@ -173,9 +174,10 @@ services:
       # 컨테이너끼리는 같은 network 안에서 서비스 이름으로 부른다. 호스트 포트(8076)를
       # 쓰면 Tailscale이 내려갈 때 같이 끊긴다.
       FASTAPI_BASE_URL: http://fastapi:8001
-      # 시간표 문서는 gitignore 대상이라 저장소에 없다. 이 노트북에 직접 두어야 한다 —
-      # 읽지 못하면 Slack에 알리고 기록을 중단한다(RPA README의 실패 조건).
-      SCHEDULE_FILE_PATH: /repo/individual_tasks/시간표.md
+      # **시간표 문서는 저장소가 관리한다.** RPA 디렉터리 안에 있어 다른 호스트에
+      # 배포해도 따라온다. 읽지 못하면 Slack에 알리고 기록을 중단한다
+      # (RPA README의 실패 조건).
+      SCHEDULE_FILE_PATH: /repo/RPAs/study-status-report/schedule/시간표.md
       # 파이썬 스크립트를 대신 실행하는 사이드카. 아래 rpa-runner 서비스다.
       RPA_RUNNER_URL: http://rpa-runner:8099
       # **교시 종료 보고를 늦게라도 따라잡는 창.** 교시가 끝난 뒤 이 시간 안이면
@@ -189,8 +191,9 @@ services:
       # classroom-monitoring-dev-pc_n8n-data). 옮기려면 편집기에서 워크플로와
       # 자격 증명을 export/import 하거나, 서버의 볼륨을 tar로 떠서 옮긴다.
       - n8n-data:/home/node/.n8n
-      # 시간표 문서만 읽는다. 쓰기는 rpa-runner가 하므로 여기서는 읽기 전용이다.
-      - ../individual_tasks:/repo/individual_tasks:ro
+      # 시간표 문서만 읽는다. 쓰기는 rpa-runner가 하므로 여기서는 읽기 전용이고,
+      # RPA 디렉터리 전체가 아니라 시간표가 든 폴더 하나만 붙인다.
+      - ../RPAs/study-status-report/schedule:/repo/RPAs/study-status-report/schedule:ro
     depends_on:
       - rpa-runner
     ports:
