@@ -1,20 +1,24 @@
-"""Repository port for classroom and seat persistence."""
+"""강의실과 좌석 metadata 저장소 포트."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from .models import (
-    AfterHoursAlert,
-    AfterHoursAlertPage,
-    AfterHoursAlertStatus,
     Classroom,
     ClassroomPage,
+    RepairApproval,
     Seat,
+    SeatAssignment,
+    SeatCurrentOccupancy,
+    SeatMigrationRecord,
+    SeatMigrationSnapshot,
+    SeatMigrationSnapshotPayload,
     SeatObservationBatchRecord,
+    SeatOccupancyApplication,
     SeatOccupancyHistory,
-    SeatOccupancyHistoryPage,
     SeatPage,
 )
 
@@ -23,42 +27,223 @@ class ClassroomRepository(Protocol):
     def create_classroom(self, classroom: Classroom) -> Classroom: ...
     def get_classroom(self, classroom_id: str) -> Classroom | None: ...
     def get_classroom_by_code(self, code: str) -> Classroom | None: ...
-    def get_classroom_by_operation_id(self, operation_id: str) -> Classroom | None: ...
-    def list_classrooms(self, *, include_inactive: bool, limit: int, offset: int) -> ClassroomPage: ...
-    def replace_classroom(self, classroom: Classroom, *, expected_version: int) -> Classroom | None: ...
+    def list_classrooms(self, *, limit: int, offset: int) -> ClassroomPage: ...
+    def update_classroom(self, classroom: Classroom) -> Classroom: ...
+    def delete_classroom(self, classroom_id: str) -> None: ...
 
     def create_seat(self, seat: Seat) -> Seat: ...
     def get_seat(self, seat_id: str) -> Seat | None: ...
-    def get_seat_by_operation_id(self, operation_id: str) -> Seat | None: ...
-    def list_seats(self, classroom_id: str, *, include_inactive: bool, limit: int, offset: int) -> SeatPage: ...
+    def get_seats(self, seat_ids: Sequence[str]) -> dict[str, Seat]:
+        """좌석 여러 개를 한 번에 읽는다. 없는 좌석은 결과에서 빠진다.
+
+        **좌석마다 `get_seat`을 부르면 저장소 왕복이 좌석 수만큼 늘어난다.** 관측
+        batch는 한 이벤트에서 좌석 여러 개를 함께 검증하므로 그 자리에서만 쓴다.
+        """
+        ...
+
+    def list_seats(self, classroom_id: str, *, limit: int, offset: int) -> SeatPage: ...
+    def list_all_seats_for_allocation(self, classroom_id: str) -> list[Seat]:
+        """allocator용: 비활성 포함 강의실의 모든 좌석을 돌려준다."""
+        ...
+
+    def update_seat(self, seat: Seat, *, unset_fields: list[str] | None = None) -> Seat: ...
+    def delete_seat(self, seat_id: str) -> None:
+        """좌석 레코드를 물리적으로 삭제한다 (hard delete).
+
+        레코드가 사라지므로 code와 (row, column)이 즉시 해제된다.
+        history·observation batch는 별도 컬렉션이라 보존된다.
+        """
+        ...
+
     def replace_seat(self, seat: Seat, *, expected_version: int) -> Seat | None: ...
 
-    def claim_observation_batch(self, record: SeatObservationBatchRecord) -> SeatObservationBatchRecord: ...
+    def claim_observation_batch(
+        self, record: SeatObservationBatchRecord
+    ) -> SeatObservationBatchRecord: ...
     def get_observation_batch(self, event_id: str) -> SeatObservationBatchRecord | None: ...
-    def complete_observation_batch(self, record: SeatObservationBatchRecord) -> SeatObservationBatchRecord: ...
-    def get_history_by_event_and_seat(self, event_id: str, seat_id: str) -> SeatOccupancyHistory | None: ...
-    def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory: ...
-    def list_occupancy_history(
-        self,
-        classroom_id: str,
-        *,
-        seat_id: str | None,
-        from_time: datetime | None,
-        to_time: datetime | None,
-        limit: int,
-        offset: int,
-    ) -> SeatOccupancyHistoryPage: ...
+    def complete_observation_batch(
+        self, record: SeatObservationBatchRecord
+    ) -> SeatObservationBatchRecord: ...
+    def get_history_by_event_and_seat(
+        self, event_id: str, seat_id: str
+    ) -> SeatOccupancyHistory | None: ...
+    def get_histories_by_event(self, event_id: str) -> dict[str, SeatOccupancyHistory]:
+        """한 이벤트의 좌석별 이력을 좌석 id로 묶어 한 번에 읽는다.
 
-    def create_alert(self, alert: AfterHoursAlert) -> tuple[AfterHoursAlert, bool]: ...
-    def get_alert(self, alert_id: str) -> AfterHoursAlert | None: ...
-    def get_alert_by_operation_id(self, operation_id: str) -> AfterHoursAlert | None: ...
-    def list_alerts(
+        재수신 판정을 좌석마다 따로 물으면 왕복이 좌석 수만큼 늘어난다. 같은
+        event_id의 이력은 한 번에 다 가져와도 양이 좌석 수를 넘지 않는다.
+        """
+        ...
+
+    def append_occupancy_history(self, history: SeatOccupancyHistory) -> SeatOccupancyHistory: ...
+
+
+class SeatAssignmentRepository(Protocol):
+    """좌석-학생 지정 저장소 추상화."""
+
+    def assign(self, assignment: SeatAssignment) -> SeatAssignment:
+        """학생을 좌석에 지정한다."""
+        ...
+
+    def unassign(self, seat_id: str) -> None:
+        """좌석-학생 지정을 해제한다."""
+        ...
+
+    def get_by_seat(self, seat_id: str) -> SeatAssignment | None:
+        """좌석 ID로 지정을 조회한다."""
+        ...
+
+    def get_by_student(self, student_id: str, classroom_id: str) -> SeatAssignment | None:
+        """학생 ID와 강의실 ID로 지정을 조회한다."""
+        ...
+
+    def list_by_classroom(self, classroom_id: str) -> list[SeatAssignment]:
+        """강의실의 모든 지정을 조회한다."""
+        ...
+
+    def unassign_by_student(self, student_id: str) -> int:
+        """학생의 모든 좌석 지정을 해제한다. 해제된 지정 수를 반환한다."""
+        ...
+
+
+class SeatMutationUnitOfWork(Protocol):
+    """좌석 mutation을 원자적으로 수행하는 단위 작업.
+
+    서비스는 이 UoW만으로 좌석·지정을 mutation하고, assignment 저장소를
+    직접 mutation하지 않는다. 각 연산은 저장소 경계에서 원자적이어야 한다.
+    관측 적용도 같은 session/lock을 쓰므로 hard delete와 선형화된다.
+    """
+
+    def assign_or_move_if_active(
+        self, seat_id: str, student_id: str, classroom_id: str
+    ) -> SeatAssignment:
+        """학생을 좌석에 지정한다.
+
+        같은 강의실의 다른 좌석에 이미 지정된 학생이면 기존 지정을 해제하고
+        새 좌석에 지정한다. 좌석이 없으면 ``SeatNotFoundError``, 비활성이면
+        ``SeatInactiveForAssignmentError``를 던진다.
+        """
+        ...
+
+    def delete_seat_and_unassign(self, seat_id: str) -> None:
+        """좌석과 현재 지정을 같은 transaction/lock에서 물리 삭제한다 (hard delete).
+
+        ``is_active``에 false를 기록하지 않고 레코드 자체를 지우므로 code와
+        (row, column)이 즉시 해제된다. ``seat_occupancy_history``와
+        ``seat_observation_batches``는 보존하며 cascade 삭제하지 않는다.
+        좌석이 없으면 ``SeatNotFoundError``를 던진다.
+        """
+        ...
+
+    def unassign_if_active(self, seat_id: str) -> None:
+        """활성 좌석의 지정만 해제한다. 비활성·미존재 좌석은 무시한다."""
+        ...
+
+    def append_history_and_apply_occupancy(
         self,
+        history: SeatOccupancyHistory,
         *,
-        status: AfterHoursAlertStatus | None,
-        classroom_id: str | None,
-        business_date: date | None,
-        limit: int,
-        offset: int,
-    ) -> AfterHoursAlertPage: ...
-    def replace_alert(self, alert: AfterHoursAlert, *, expected_version: int) -> AfterHoursAlert | None: ...
+        expected_version: int,
+        occupancy: SeatCurrentOccupancy | None,
+        updated_at: datetime,
+    ) -> SeatOccupancyHistory | None:
+        """관측 history 기록과 current 반영을 원자적으로 수행한다.
+
+        hard delete와 같은 session/lock을 쓰므로 두 연산은 좌석 단위로
+        선형화된다.
+
+        - 좌석이 없거나 비활성이면 **아무것도 쓰지 않고** ``SeatNotFoundError``를
+          던진다 (동시 delete가 이긴다).
+        - 좌석 version이 ``expected_version``과 다르면 아무것도 쓰지 않고
+          ``None``을 돌려준다 (호출자가 최신 상태로 재시도한다).
+        - ``occupancy``가 ``None``이면 history만 기록한다 (과거 관측 재생).
+        - 같은 (event_id, seat_id) history가 이미 있으면 기존 값을 돌려주고,
+          내용이 다르면 ``SeatBatchConflictError``를 던진다.
+        """
+        ...
+
+    def append_histories_and_apply_occupancies(
+        self,
+        applications: Sequence[SeatOccupancyApplication],
+        *,
+        updated_at: datetime,
+    ) -> tuple[SeatOccupancyHistory, ...] | None:
+        """여러 좌석의 관측을 **한 transaction/lock에서** 함께 적용한다.
+
+        좌석마다 따로 열면 원격 저장소 왕복이 좌석 수만큼 곱해진다. 실측에서
+        이벤트 하나가 좌석 7개를 관측할 때 이 구간이 전체 처리 시간의 대부분이었다
+        (결정 0045의 남은 일).
+
+        단건 계약과 다른 점은 **실패 단위가 batch 전체**라는 것이다.
+
+        - 좌석이 하나라도 없거나 비활성이면 아무것도 쓰지 않고
+          ``SeatNotFoundError``를 던진다.
+        - 좌석 version이 하나라도 어긋나면 아무것도 쓰지 않고 ``None``을 돌려준다.
+          호출자는 **전체를** 최신 상태로 다시 만들어 재시도한다.
+        - 이미 있는 (event_id, seat_id) history는 기존 값을 그대로 돌려주고,
+          내용이 다르면 ``SeatBatchConflictError``를 던진다.
+        - 돌려주는 순서는 ``applications``와 같다.
+        """
+        ...
+
+
+class SeatMigrationRepository(Protocol):
+    """오프라인 migration snapshot·record·approval 저장소.
+
+    snapshot manifest(비민감)와 복원용 payload(민감 데이터)를 분리해 보관하고,
+    좌석별 감사 기록과 수동 repair 승인 기록을 저장한다.
+    """
+
+    def save_snapshot(
+        self,
+        snapshot: SeatMigrationSnapshot,
+        *,
+        seats: tuple[Seat, ...],
+        assignments: tuple[SeatAssignment, ...],
+    ) -> SeatMigrationSnapshot:
+        """snapshot manifest와 payload를 저장한다."""
+        ...
+
+    def get_snapshot(self, snapshot_id: str) -> SeatMigrationSnapshot | None:
+        """snapshot manifest를 조회한다."""
+        ...
+
+    def get_snapshot_payload(self, snapshot_id: str) -> SeatMigrationSnapshotPayload | None:
+        """snapshot의 좌석·지정 payload를 조회한다."""
+        ...
+
+    def latest_snapshot(self, classroom_id: str) -> SeatMigrationSnapshot | None:
+        """강의실의 가장 최근 snapshot을 조회한다."""
+        ...
+
+    def mark_snapshot_restored(self, snapshot_id: str, restored_at: datetime) -> None:
+        """snapshot에 복원 시각을 기록한다."""
+        ...
+
+    def save_record(self, record: SeatMigrationRecord) -> SeatMigrationRecord:
+        """좌석별 migration 감사 기록을 저장한다."""
+        ...
+
+    def list_records(
+        self, classroom_id: str, *, snapshot_id: str | None = None
+    ) -> list[SeatMigrationRecord]:
+        """강의실의 감사 기록을 조회한다."""
+        ...
+
+    def save_approval(self, approval: RepairApproval) -> RepairApproval:
+        """수동 repair 승인 기록을 저장한다."""
+        ...
+
+    def get_approval(self, approval_id: str) -> RepairApproval | None:
+        """승인 기록을 조회한다."""
+        ...
+
+    def list_approvals(
+        self, classroom_id: str, *, seat_id: str | None = None
+    ) -> list[RepairApproval]:
+        """강의실(또는 좌석)의 승인 기록을 조회한다."""
+        ...
+
+    def approved_approval_for_seat(self, classroom_id: str, seat_id: str) -> RepairApproval | None:
+        """좌석의 승인된 repair 요청을 조회한다."""
+        ...

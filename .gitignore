@@ -1,12 +1,43 @@
-# 로컬 환경변수 — 실제 값이 들어가므로 커밋하지 않는다.
-# 변수 이름과 설명은 각 서비스의 .env.example에 둔다.
+# 실제 값이 든 환경 파일 — 이름이 무엇이든 커밋하지 않는다.
+# 환경(local/dev/prod)을 늘릴 때 이 목록을 같이 고치는 것을 잊어 비밀값이 새는 일이
+# 없도록 와일드카드로 막고, 커밋해야 하는 .env.example만 예외로 둔다.
+#
+# 변수 이름과 설명은 <서비스>/.env.example에, 환경 무관 공용값과 판정 기준값은
+# 이 패턴에 걸리지 않는 <서비스>/config/settings.yml에 두고 둘 다 커밋한다.
 .env
+.env.*
+!.env.example
+# 접미사가 .env인 이름은 위 패턴에 걸리지 않으므로 따로 막는다.
+atlas-credentials.env
+
+# TODO(제거 예정): 구 최상위 env/ 디렉터리. 값은 .docker/env/로 이관했다.
+# 디렉터리를 지우고 나면 이 두 줄도 함께 지운다 — 최상위에 env/를 두는 것은
+# docs/agents/AGENTS.md의 최상위 구조 제약에 없다.
+env/
 
 # 프로젝트 생성 지시 프롬프트 — 저장소 산출물이 아닌 작업 입력물.
 initial_prompt.md
 
 # 개별 작업 폴더 - 로컬에서 개별적으로 관리합니다.
-individual_tasks/*
+# 개인 작업 노트는 올리지 않는다. **디렉터리 통째로 무시한다.**
+# RPA가 읽는 시간표는 개인 노트가 아니라 운영 설정이라 예외로 남겨 뒀었으나,
+# 저장소가 관리해야 하는 파일은 여기가 아니라 그 RPA 안에 둔다
+# (RPAs/study-status-report/schedule/).
+individual_tasks/
+
+# docker compose 구성(결정 0018) — 팀 공식 실행 수단으로 확정해 커밋한다.
+# **디렉터리 전체를 커밋하는 것이 아니다.** 아래 셋은 계속 제외한다.
+
+# 1) 컨테이너에 주입하는 실제 값. 접미사가 .env인 이름은 위쪽 `.env`/`.env.*` 패턴에
+#    걸리지 않으므로(파일명이 정확히 .env인 것만 막는다) 디렉터리째 막는다.
+#    변수 이름과 설명은 커밋되는 <서비스>/.env.example이 갖는다.
+.docker/env/
+
+# 2) 모델 가중치. gemma.gguf 하나가 5.4GB다. 경로는 compose가 마운트로 주입한다.
+.docker/models/
+
+# 3) 실행하며 생기는 로컬 산출물.
+.docker/**/data/
 
 # Claude Code 설정·스킬·지침 - 팀원과는 저장소 밖에서 공유한다.
 .claude/
@@ -16,9 +47,70 @@ CLAUDE.md
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 .venv/
+.venv-*/
 venv/
 
 # VSCode 설정
 .vscode/
 
+# Codex, Cursor 설정 지침
+.codex/
+.agents/
+.cursor/
+
+# Codex tools
+.codex-tools/
+.codex-temp/
+
+# 캠 영상 및 프레임 이미지 저장 경로 — 얼굴이 담기므로 어떤 경우에도 커밋하지 않는다.
+# worker 하위 어느 워커가 쓰든 걸리도록 디렉터리 이름 기준으로 막는다.
+# 저장 경로를 설정으로 바꿀 수 있으므로 특정 경로만 나열하지 않는다.
+worker/data/
+worker/**/data/
+
+# FastAPI 얼굴 등록 local 검증 원본 — 실제 얼굴이므로 절대 커밋하지 않는다.
+webapps/fastapi/local_face_data/
+deeplearning/.models/
+
+# study-status-report 실행 산출물 — 관리 문서에 학생 실명이 들어간다.
+# RPAs/README.md의 개인정보 규칙에 따라 저장소에 남기지 않는다.
+# 검증용 샘플 하나만 예외다 — 합성 이벤트로 만든 것이라 실제 학생이 없다.
+RPAs/study-status-report/reports/*.xlsx
+# 같은 산출물의 HTML 판. **학생 실명과 좌석이 들어 있다** — .xlsx와 같은 등급이다.
+RPAs/study-status-report/reports/*.html
+!RPAs/study-status-report/reports/study_status_management_sample.xlsx
+
+# 실행 이력 — 개인정보는 빼고 남기지만, 실행 로그는 저장소에 커밋하지 않는다
+# (docs/agents/rpa-agent.md "실행 로그를 저장소에 커밋하지 않는다").
+RPAs/study-status-report/logs/
+# 주간 집계가 읽는 일일 이벤트 원본. **학생 실명이 들어 있다** — reports/의 .xlsx와
+# 같은 등급이라 저장소에 올리지 않는다. 이름이 없는 실행 이력(logs/)과 구분해 둔다.
+RPAs/study-status-report/data/
+
+# 모델 가중치 — 대용량이고 저장소가 아니라 실행 환경에서 관리한다.
+# ultralytics는 MODEL_PATH의 이름을 보고 실행 위치에 자동으로 내려받으므로
+# 확장자 기준으로 막는다. 경로는 MODEL_PATH 환경변수로 주입한다.
+*.pt
+*.pth
+*.onnx
+*.engine
+# llama.cpp가 쓰는 양자화 가중치. 단일 파일이 수 GB다.
+*.gguf
+
+# 모델 학습 데이터셋과 산출물(결정 0012) — 대용량이고 공용 서버 로컬에만 둔다.
+# 자동 라벨링의 촬영 영상, 추출 프레임, 검수 라벨, 모델과 발행 데이터셋도
+# deeplearning/training/data/ 아래에 있으므로 이 규칙으로 함께 제외한다.
+# deeplearning/training/README.md 참고.
+deeplearning/**/data/
+deeplearning/**/runs/
+deeplearning/**/weights/
+
+# 주간 집계가 읽는 일일 이벤트 원본. **학생 실명이 들어 있다** — reports/의 .xlsx와
+# 같은 등급이라 저장소에 올리지 않는다.
+RPAs/study-status-report/data/

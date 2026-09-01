@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+
+{% block title %}CCTV 기록 검색 · 학습 모니터링{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', path='/llm-search.css') }}">
+{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div class="title-wrap">
+    <p class="page-eyebrow">AI 자연어 검색</p>
+    <h1 class="page-title">CCTV 기록 검색</h1>
+    <p class="page-summary">
+      자연어 탐지 검색으로 질문을 검색 조건으로 바꾼 뒤 기록을 찾습니다. 탐지 인원이 바뀐 시점만 보여줍니다.
+    </p>
+  </div>
+</header>
+
+{# 상태를 여섯으로 나눈다. 묶어서 보여주면 사용자가 질문을 고쳐야 하는지
+   관리자를 불러야 하는지, 여기서는 아예 안 되는 일인지 알 수 없다. #}
+{% if not search_enabled %}
+  {# 검색 폼 자체를 렌더링하지 않는다. 눌러 볼 수 있게 두면 "고장"으로 읽힌다.
+     문구가 "로컬 환경"이라고 단정하는 것은 결정 0021이 disabled를 로컬에서만 쓰기로
+     정했기 때문이다. GPU 서버를 disabled로 두면 이 안내가 틀린 말이 된다. #}
+  <div class="state-panel state-empty">
+    <h2 class="state-title">로컬 환경에서는 사용할 수 없습니다</h2>
+    <p>
+      자연어 검색은 <strong>GPU 서버 환경에서 정상 작동합니다.</strong>
+      지금 접속하신 곳은 로컬 환경이라 검색을 실행할 수 없습니다.
+    </p>
+    <p>
+      탐지 기록은 <a href="/snapshots">탐지 스냅샷</a> 화면에서 카메라별로 확인하실 수 있습니다.
+    </p>
+  </div>
+{% else %}
+{# **POST로 보낸다.** GET이면 질문이 주소창에 남아 방문 기록·북마크·접근 로그에
+   그대로 쌓인다. 이 기능의 질문에는 사람 이름과 찾는 시각이 담긴다(router.py). #}
+<form class="filter-bar filter-bar--query" method="post" action="/llm-search">
+  {# 질문과 정렬을 **줄로 나눈다.** 한 줄에 두면 질문 입력이 좁아지는 데다,
+     정렬이 질문의 일부처럼 붙어 읽힌다. #}
+  <div class="filter-bar__row">
+    <label for="question">질문</label>
+    <input
+      id="question"
+      name="question"
+      type="text"
+      maxlength="200"
+      value="{{ question }}"
+      placeholder="예) 어제 16시 30분부터 17시 사이에 A101에 누가 있었어?">
+    <button type="submit">검색</button>
+  </div>
+  {# 정렬은 화면에서 뒤집는 것이 아니라 **조회에 함께 들어간다.** 상한이 있어서
+     최신순은 가장 최근 건을, 오래된순은 가장 오래된 건을 골라 온다. 받아 온 뒤에
+     뒤집기만 하면 "오래된 순"을 골라도 최근 것들만 뒤집힌 목록이 나온다. #}
+  <div class="filter-bar__row">
+    <label for="sort">정렬</label>
+    <select id="sort" name="sort">
+      <option value="time_desc"{% if sort == 'time_desc' %} selected{% endif %}>최신순</option>
+      <option value="time_asc"{% if sort == 'time_asc' %} selected{% endif %}>오래된순</option>
+    </select>
+  </div>
+</form>
+
+{% if planner_error %}
+  <div class="state-panel state-error" role="alert">
+    <h2 class="state-title">검색 서버에 닿지 못했습니다</h2>
+    <p>
+      질문을 해석하는 서버에 연결하지 못했습니다.
+      <strong>질문을 고쳐도 해결되지 않습니다.</strong> 서버 상태를 확인한 뒤 다시 시도하세요.
+    </p>
+  </div>
+{% elif plan_error %}
+  <div class="state-panel state-error" role="alert">
+    <h2 class="state-title">질문을 검색 조건으로 바꾸지 못했습니다</h2>
+    <p>
+      기간과 대상을 더 분명하게 적어 주세요.
+      예) <em>어제 오후 2시부터 4시까지 A101</em>
+    </p>
+  </div>
+{% elif not asked %}
+  <div class="state-panel state-empty">
+    <h2 class="state-title">질문을 입력하세요</h2>
+    <p>
+      기간과 강의실을 말하면 그 시간대의 탐지 기록을 찾습니다.
+      찾을 수 있는 것은 <strong>몇 명이 언제 어느 카메라에 잡혔는지</strong>입니다.
+    </p>
+  </div>
+{% else %}
+  <section class="briefing" aria-labelledby="plan-heading">
+    <h2 id="plan-heading" class="section-title briefing__heading">질문 해석</h2>
+    {# 문장 조립은 service.py의 build_briefing이 끝냈다. 기간 표기 규칙(같은 날이면
+       날짜를 한 번만, 초는 0이 아닐 때만)을 템플릿이 다시 판단하면 화면마다 복사된다. #}
+    <p class="briefing__sentence">{{ outcome.briefing }}</p>
+
+    {# 문장은 읽고 넘기는 것이고, 아래 값은 대조하는 것이다. 사용자가 "내가 물은
+       시각이 맞나"를 확인하는 자리라 값을 그대로 늘어놓는다. #}
+    <dl class="briefing__facts">
+      <div>
+        <dt>기간</dt>
+        <dd>
+          <time datetime="{{ outcome.query.from_at.isoformat() }}">
+            {{ outcome.query.from_at|kst_datetime_plain }}
+          </time>
+          <span aria-hidden="true">~</span>
+          <time datetime="{{ outcome.query.to_at.isoformat() }}">
+            {{ outcome.query.to_at|kst_datetime_plain }}
+          </time>
+        </dd>
+      </div>
+      <div>
+        <dt>대상</dt>
+        {# 카메라인지 강의실인지 전체인지의 판정과 UUID를 이름으로 바꾸는 일은
+           service.py의 _resolve_targets가 끝냈다. #}
+        <dd>{{ outcome.target_label }}</dd>
+      </div>
+      {% if outcome.person %}
+        <div>
+          <dt>인물</dt>
+          <dd>
+            {{ outcome.person.name }}
+            {% if outcome.person.presence == 'absent' %}없음{% else %}있음{% endif %}
+            {# 조건을 걸지 못했는데 이름만 보여주면 아래 목록이 걸러진 것으로 읽힌다. #}
+            {% if not outcome.person.applied %}
+              <span class="briefing__badge">조건 적용 안 됨</span>
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
+    </dl>
+
+    {% if outcome.query.notes %}
+      <ul class="briefing__notes">
+        {% for note in outcome.query.notes %}
+          <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  {% if outcome.snapshot_lookup_failed %}
+    {# "이미지 없음"과 "이미지 확인 실패"는 다르다. 아래 결과는 유효하다. #}
+    <div class="state-panel state-error" role="alert">
+      <h2 class="state-title">스냅샷 저장소를 조회하지 못했습니다</h2>
+      <p>
+        아래 기록은 정상 조회된 것입니다.
+        <strong>이미지가 없다는 뜻이 아니라 있는지 확인하지 못했다는 뜻입니다.</strong>
+      </p>
+    </div>
+  {% endif %}
+
+  <hr class="section-rule">
+
+  <section class="results" aria-labelledby="results-heading">
+    <div class="results__heading">
+      <h2 id="results-heading" class="section-title">탐지 결과</h2>
+      {% if outcome.hits %}
+        {# 정렬 방향을 적는다. 칸에 시:분:초만 있어 격자만 보고는 위가 최신인지
+           오래된 쪽인지 한눈에 갈리지 않는다.
+
+           **잘렸다는 경고를 여기 두지 않는다.** 바로 위 브리핑 문장이 이미
+           "상한에 걸려 N건까지만 보여드려요. 이게 전부는 아니에요."라고 말한다.
+           같은 말을 제목 옆에 한 번 더 두면 긴 붉은 문장이 정렬 표시를 덮는다. #}
+        <p class="result-count">
+          {% if outcome.sort == 'time_asc' %}오래된순{% else %}최신순{% endif %}
+          {% if not outcome.truncated %}· 총 {{ outcome.hits|length }}건{% endif %}
+        </p>
+      {% endif %}
+    </div>
+
+    {% if not outcome.hits %}
+      <div class="state-panel state-empty">
+        <h2 class="state-title">해당 기간에 탐지 기록이 없습니다</h2>
+        <p>
+          조회는 성공했고 결과가 없습니다.
+          <strong>위 "질문 해석"의 기간이 물어보신 시각과 같은지 먼저 확인해 주세요.</strong>
+          {# 오전·오후를 밝히지 않은 질문은 오후로 읽는다(prompts.py). 사용자가 오전을
+             뜻했다면 여기서 기간을 보고 알아채는 것이 유일한 방법이다. #}
+          오전을 물으셨다면 "오전 3시"처럼 밝혀 주세요.
+        </p>
+        <p>
+          기간이 맞다면 그 시간대에 탐지 이벤트가 저장되지 않은 것입니다. 기간을 넓혀 보세요.
+        </p>
+      </div>
+    {% else %}
+      {# 탐지 한 건이 격자 칸 하나다. 칸에는 그림과 시각만 두고 나머지는 모달로
+         미룬다. 100건을 늘어놓는 화면이라 칸마다 설명을 붙이면 다시 줄글이 된다.
+
+         쪽 나누기는 llm-search.js가 한다. 서버가 20건씩 잘라 보내지 않는 이유는
+         쪽을 넘길 때마다 질문을 다시 LLM에 보내게 되기 때문이다 — 같은 질문에
+         다른 해석이 나올 수 있고, 요금과 지연도 쪽 수만큼 늘어난다. #}
+      <ol id="shot-grid" class="shot-grid" data-page-size="20">
+        {% for hit in outcome.hits %}
+          <li class="shot-grid__item">
+            <button class="shot" type="button" data-shot-open aria-haspopup="dialog">
+              <span class="shot__figure">
+                {% if hit.snapshot_key %}
+                  <img
+                    class="shot__image"
+                    src="/api/v1/snapshots/image/{{ hit.snapshot_key }}"
+                    alt="{{ hit.camera_id }} 카메라의 {{ hit.captured_at|kst_datetime_plain }} 스냅샷"
+                    loading="lazy">
+                {% else %}
+                  {# "없다"와 "못 봤다"를 칸 안에서도 구분한다. 같은 회색 상자로 두면
+                     저장소 장애가 데이터 없음으로 읽힌다. #}
+                  <span class="shot__blank">
+                    {% if outcome.snapshot_lookup_failed %}이미지 확인 실패{% else %}스냅샷 없음{% endif %}
+                  </span>
+                {% endif %}
+              </span>
+              <span class="shot__caption">
+                <span class="shot__time">{{ hit.captured_at|kst_time_plain }}</span>
+                <span class="shot__count">{{ hit.detection_count }}명</span>
+              </span>
+            </button>
+
+            {# 모달에 넣을 내용을 서버가 미리 그려 둔다. **JS가 문장을 만들지 않는다** —
+               만들게 두면 식별·강의실 표기가 Jinja2와 JS 두 벌이 된다.
+               `template`이라 이 안의 큰 이미지는 칸을 열기 전까지 내려받지 않는다. #}
+            <template data-shot-detail>
+              <div class="shot-modal__figure">
+                {% if hit.snapshot_key %}
+                  <img
+                    class="shot-modal__image"
+                    src="/api/v1/snapshots/image/{{ hit.snapshot_key }}"
+                    alt="{{ hit.camera_id }} 카메라의 {{ hit.captured_at|kst_datetime_plain }} 스냅샷">
+                {% else %}
+                  <p class="shot-modal__blank">
+                    {% if outcome.snapshot_lookup_failed %}
+                      이미지를 확인하지 못했습니다. 없다는 뜻이 아닙니다.
+                    {% else %}
+                      이 시각의 스냅샷이 저장되어 있지 않습니다.
+                    {% endif %}
+                  </p>
+                {% endif %}
+              </div>
+              <div class="shot-modal__info">
+                <h3>상세 정보</h3>
+                <dl>
+                  <div>
+                    <dt>시간</dt>
+                    <dd>
+                      <time datetime="{{ hit.captured_at.isoformat() }}">
+                        {{ hit.captured_at|kst_datetime_plain }}
+                      </time>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>강의실</dt>
+                    <dd>
+                      {% if hit.resolved_classroom_label %}{{ hit.resolved_classroom_label }}{% endif %}
+                      <span class="shot-modal__camera">{{ hit.camera_id }}</span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>탐지 인원</dt>
+                    <dd>{{ hit.detection_count }}명</dd>
+                  </div>
+                  <div>
+                    <dt>식별 대상</dt>
+                    {# 식별된 학생을 먼저 보여준다. 얼굴 인식이 붙으면 같은 자리에 이름이
+                       뜬다. 지금은 채우는 생산자가 없어 항상 미연동이다. 숨기지 않는다. #}
+                    <dd>
+                      {% if hit.identified %}
+                        {{ hit.identified | map(attribute='student_id') | join(', ') }}
+                        {% if hit.unidentified_count %}
+                          <span class="shot-modal__muted">· 미식별 {{ hit.unidentified_count }}명</span>
+                        {% endif %}
+                      {% else %}
+                        <span class="shot-modal__muted">미연동</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </template>
+          </li>
+        {% endfor %}
+      </ol>
+
+      {# 쪽 번호는 JS가 채운다. 여기서 자리만 만들어 두는 이유는 **문구를 JS에
+         두지 않기 위해서다.** 스크립트가 꺼져 있으면 hidden인 채로 남고, 격자는
+         받아 온 건수가 그대로 이어져 스크롤로 다 읽을 수 있다. #}
+      <nav id="shot-pager" class="pager" aria-label="탐지 결과 쪽 이동" hidden>
+        <button class="pager__button" type="button" data-pager="prev">이전</button>
+        <p class="pager__status" role="status" aria-live="polite">
+          <span data-pager="current">1</span> / <span data-pager="total">1</span>
+        </p>
+        <button class="pager__button" type="button" data-pager="next">다음</button>
+      </nav>
+    {% endif %}
+  </section>
+
+  {% if outcome.hits %}
+    <dialog id="shot-modal" class="shot-modal" aria-label="탐지 상세 정보">
+      <button class="shot-modal__close" type="button" data-shot-close aria-label="닫기">×</button>
+      <div class="shot-modal__body" data-shot-body></div>
+    </dialog>
+  {% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='/llm-search.js') }}" defer></script>
+{% endblock %}

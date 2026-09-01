@@ -1,0 +1,21 @@
+fastapi
+uvicorn[standard]
+insightface==1.0.1
+# **GPU판을 쓴다.** CPU판으로 두면 CUDAExecutionProvider가 아예 없어 CPU로 돈다.
+# GPU가 없는 곳에서도 이 패키지는 CPUExecutionProvider를 제공하므로 기동은 된다
+# (FACE_EXECUTION_PROVIDER=auto).
+#
+# extras가 CUDA 런타임·cuDNN을 끌어온다. **그런데 cuBLAS는 extras에 없다** —
+# 넣지 않으면 provider 로드가 libcublasLt.so.13에서 실패하고, 목록에는 CUDA가 그대로
+# 남은 채 세션만 조용히 CPU로 내려간다. GPU 서버에서 직접 확인한 것이다.
+onnxruntime-gpu[cuda,cudnn]==1.28.0
+nvidia-cublas~=13.0
+opencv-python-headless
+numpy
+mediapipe==1.0.0
+pymongo>=4.8
+python-dotenv>=1.0
+
+# Prometheus 지표를 노출한다(/metrics). 순수 파이썬이라 가볍고, 없으면 app.py가
+# import 단계에서 죽으므로 선택 의존이 아니다.
+prometheus-client>=0.20

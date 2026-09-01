@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}{% if seat %}좌석 수정 · {% else %}좌석 추가 · {% endif %}{{ classroom.code }} · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div class="title-wrap"><p class="page-eyebrow">{{ classroom.code }}</p><h1 class="page-title">{% if seat %}{{ seat.label }} 수정{% else %}좌석 추가{% endif %}</h1><p class="page-summary">{{ classroom.name }} · 배치 위치는 좌석 관리 화면의 격자에서 클릭으로 지정합니다.</p></div>
+    <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seats">좌석 목록</a>
+  </header>
+
+  <section class="panel" aria-labelledby="seat-form-title">
+    <h2 id="seat-form-title" class="section-title">좌석 정보</h2>
+    {% if seat %}
+      <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}" data-api-method="PUT" data-success-url="/classrooms/{{ classroom.id }}/seats">
+    {% else %}
+      <form class="stack" data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats" data-api-method="POST" data-success-url="/classrooms/{{ classroom.id }}/seats">
+    {% endif %}
+      <p class="form-error" role="alert" data-form-error hidden></p>
+      <div class="form-grid">
+        <label>코드<input name="code" type="text" value="{% if seat %}{{ seat.code }}{% endif %}" maxlength="64" required autocomplete="off" placeholder="S01"></label>
+        <label>이름<input name="label" type="text" value="{% if seat %}{{ seat.label }}{% endif %}" maxlength="200" required placeholder="좌석 1"></label>
+        {% if seat %}<label>활성화<input name="is_active" type="checkbox"{% if seat.is_active %} checked{% endif %}></label>{% endif %}
+      </div>
+      <div>
+        <button type="submit">{% if seat %}저장{% else %}등록{% endif %}</button>
+        <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seats">취소</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

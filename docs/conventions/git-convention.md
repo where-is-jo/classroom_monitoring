@@ -3,12 +3,21 @@
 **목적**: 브랜치와 커밋을 다루는 최소한의 공통 규칙을 정한다.
 **대상 독자**: 이 저장소에 커밋하는 모든 사람과 AI 에이전트.
 
-복잡한 Git Flow는 쓰지 않는다. `main`에서 브랜치를 따고, 작업이 끝나면
+복잡한 Git Flow는 쓰지 않는다. `develop`에서 브랜치를 따고, 작업이 끝나면
 Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 
 ## 브랜치
 
-`main`이 기준 브랜치다. `main`에 직접 커밋하지 않는다.
+**`develop`이 기준 브랜치다.** 작업 브랜치는 `develop`에서 따고, Pull Request도
+`develop`으로 연다. `main`에는 배포하는 시점에만 `develop`을 병합한다.
+
+`main`과 `develop` 어느 쪽에도 직접 커밋하지 않는다.
+
+| 브랜치 | 역할 |
+| --- | --- |
+| `main` | 배포된 상태. `develop`에서만 병합해 들어온다 |
+| `develop` | 통합 기준. 작업 브랜치의 분기점이자 PR 대상 |
+| `<타입>/<간단한-설명>` | 실제 작업 |
 
 ```text
 <타입>/<간단한-설명>
@@ -46,10 +55,10 @@ Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 | `refactor` | 동작 변경 없는 구조 개선 |
 | `test` | 테스트 추가·수정 |
 | `chore` | 설정, 의존성, 저장소 관리 |
+| `ci` | CI 워크플로우(`.github/workflows/`) 추가·수정 |
 
-**목록에 없는 타입을 쓰지 않는다.** `perf`, `ci`, `style`, `build`, `revert`는
+**목록에 없는 타입을 쓰지 않는다.** `perf`, `style`, `build`, `revert`는
 쓰지 않는다. 성능 개선은 `fix` 또는 `refactor`로, 의존성 변경은 `chore`로 쓴다.
-포매터와 CI를 도입하면 그때 이 표에 추가한다.
 
 커밋 타입 `feat`와 브랜치 타입 `feature`가 다른 것은 의도된 차이다. 관례를 따랐다.
 
@@ -61,8 +70,9 @@ Pull Request로 돌아온다. 그 이상은 필요해질 때 도입한다.
 | 구분 | 값 |
 | --- | --- |
 | 서비스 | `fastapi`, `deeplearning`, `worker`, `monitoring`, `rpa` |
-| fastapi 기능 | `events`, `cameras`, `auth` |
-| 문서 영역 | `docs`, `agents`, `adr` |
+| fastapi 기능 | `students`, `classrooms`, `face-enrollment`, `student-monitoring`, `video-monitoring` |
+| worker 단계 | `stream`, `inference`, `recorder` |
+| 문서 영역 | `docs`, `agents` |
 | 저장소 설정 | `config` |
 
 목록에 없는 스코프가 필요하면 억지로 만들지 말고 생략한다.
@@ -124,8 +134,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 
 - 계정, 비밀번호, API 키, 토큰, 인증서
 - 실제 값이 담긴 `.env`
+- **학생 얼굴이 담긴 영상·이미지·화면 캡처**, 얼굴 embedding 파일
 - 개인정보가 포함된 데이터·영상·스크린샷
 - 실행 로그, 대용량 모델 가중치, 빌드 산출물
+
+수집한 영상과 프레임은 `worker/**/data/` 아래에 쌓이며 `.gitignore` 대상이다.
+얼굴이 담기므로 어떤 경우에도 커밋하지 않는다.
 
 `.env.example`에는 변수 이름과 설명만 넣는다.
 자세한 내용은 [환경변수 규칙](./environment-convention.md)에 있다.

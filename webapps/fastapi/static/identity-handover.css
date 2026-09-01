@@ -1,0 +1,36 @@
+.handover-editor { display: grid; gap: 20px; }
+.handover-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.handover-live-badge { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 8px 12px; color: #096755; font-size: .84rem; font-weight: 700; background: #e6f7f2; border: 1px solid #9ed8ca; border-radius: 999px; }
+.handover-live-badge span { width: 8px; height: 8px; background: #0a9a7d; border-radius: 50%; box-shadow: 0 0 0 4px rgba(10,154,125,.13); }
+.handover-toolbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 17px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+.handover-toolbar label { display: grid; gap: 7px; color: var(--muted); font-size: .82rem; font-weight: 700; }
+.handover-toolbar select { width: 100%; }
+.handover-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; align-items: start; }
+.handover-canvas-card { display: grid; gap: 12px; min-width: 0; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow); }
+.handover-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.handover-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.handover-stage { position: relative; width: 100%; min-height: 390px; overflow: hidden; background: #111817; border-radius: 13px; user-select: none; }
+#handover-reference-image { display: block; width: 100%; height: auto; }
+.handover-stage [hidden] { display: none !important; }
+.handover-placeholder { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 30px; color: #bed0cc; text-align: center; background: radial-gradient(circle at 50% 42%, #273c38, #111817 70%); }
+.handover-placeholder strong { color: #fff; font-size: 1.1rem; }
+#handover-overlay { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; }
+.handover-stage.is-drawing #handover-overlay { pointer-events: auto; cursor: crosshair; touch-action: none; }
+.handover-zone { vector-effect: non-scaling-stroke; }
+.handover-zone.saved { fill: rgba(255, 184, 0, .2); stroke: #ffbd2e; stroke-width: 3; stroke-dasharray: 10 5; }
+.handover-zone.draft { fill: rgba(0, 212, 170, .26); stroke: #00d4aa; stroke-width: 3; }
+#handover-zone-label { fill: #101816; font-size: .035px; font-weight: 800; paint-order: stroke; stroke: rgba(255,255,255,.92); stroke-width: .012px; pointer-events: none; }
+.handover-status { min-height: 24px; margin: 0; color: var(--muted); }
+.handover-details { display: grid; gap: 14px; }
+.detail-card { padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+/* 신원 인계 ROI 페이지 전용: 설명 카드 제목 */
+.detail-card .card-title { margin: 2px 0 10px; font-size: 1.05rem; }
+.detail-card p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
+.handover-coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0 8px; }
+.handover-coordinates div { padding: 9px 10px; background: var(--background, #f2f5f4); border-radius: 9px; }
+.handover-coordinates dt { color: var(--muted); font-size: .72rem; }
+.handover-coordinates dd { margin: 3px 0 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+.handover-worker-value { display: block; max-height: 150px; margin-top: 12px; padding: 12px; overflow: auto; color: #d8fff6; font-size: .75rem; line-height: 1.45; overflow-wrap: anywhere; background: #10221e; border-radius: 9px; }
+button.danger:not(:disabled) { color: #fff; background: #a33d3d; border-color: #a33d3d; }
+@media (max-width: 980px) { .handover-layout { grid-template-columns: 1fr; } .handover-details { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 720px) { .handover-heading { display: grid; } .handover-toolbar, .handover-details { grid-template-columns: 1fr; } .handover-stage { min-height: 260px; } }

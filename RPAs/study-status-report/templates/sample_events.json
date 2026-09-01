@@ -1,0 +1,34 @@
+[
+  {
+    "period": "아침 자습",
+    "observed_at": "2026-08-22T08:12:00+09:00",
+    "seat_number": "A-01",
+    "student_id": "student-001",
+    "student_name": "김민준",
+    "student_state": "ABSENT"
+  },
+  {
+    "period": "1교시",
+    "observed_at": "2026-08-22T09:03:00+09:00",
+    "seat_number": "A-03",
+    "student_id": "student-003",
+    "student_name": "이서연",
+    "student_state": "WRONG_SEAT"
+  },
+  {
+    "period": "4교시",
+    "observed_at": "2026-08-22T15:10:00+09:00",
+    "seat_number": "A-05",
+    "student_id": "student-005",
+    "student_name": "박지호",
+    "student_state": "UNKNOWN"
+  },
+  {
+    "period": "야간 2교시",
+    "observed_at": "2026-08-22T21:12:00+09:00",
+    "seat_number": "A-01",
+    "student_id": "student-001",
+    "student_name": "김민준",
+    "student_state": "PRESENT"
+  }
+]

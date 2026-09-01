@@ -1,0 +1,228 @@
+/* 자연어 탐지 검색 화면 전용 규칙.
+   style.css에 두지 않는 이유는 이 화면에서만 쓰는 격자·모달이기 때문이다. 다른
+   화면과 함께 쓰는 것(.page-lead, .filter-bar, .state-panel, .result-count)은
+   style.css에 그대로 둔다 — 탐지 스냅샷 화면이 같은 것을 쓴다. */
+
+/* ── 질문 줄 ───────────────────────────────────────────
+   질문과 정렬을 줄로 나눈다. 한 줄에 두면 정렬이 질문 입력 오른쪽에 붙어
+   질문의 일부처럼 읽히고, 그만큼 입력이 좁아진다.
+
+   공용 .filter-bar는 자식이 label·input이라고 보고 flex를 걸어 두었다. 여기서는
+   자식이 줄(div)이라 그 규칙이 닿지 않으므로 세로 격자로 다시 잡는다. */
+.filter-bar.filter-bar--query { display: grid; gap: 12px; }
+.filter-bar__row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+}
+.filter-bar__row > label { flex: 0 0 auto; margin: 0; font-weight: 700; }
+.filter-bar__row > input { flex: 1 1 320px; min-width: 0; }
+.filter-bar__row > select { width: auto; min-width: 140px; }
+.filter-bar__row > select,
+.filter-bar__row > button { flex: 0 0 auto; }
+
+/* ── 질문 해석 ─────────────────────────────────────────────
+   문장 한 줄이 먼저, 대조용 값이 그 아래다. */
+.briefing {
+  margin-bottom: 22px;
+  padding: clamp(18px, 3vw, 26px);
+  background: var(--primary-soft);
+  border: 1px solid #b3ddd5;
+  border-radius: 14px;
+}
+.briefing__heading { margin-bottom: 8px; color: #10453f; font-size: .8rem; font-weight: 800; letter-spacing: .08em; }
+.briefing__sentence { margin-bottom: 14px; color: #10312e; font-size: 1.05rem; font-weight: 700; line-height: 1.6; }
+.briefing__facts { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0; }
+.briefing__facts > div { display: grid; gap: 2px; }
+.briefing__facts dt { color: #35625c; font-size: .72rem; font-weight: 800; letter-spacing: .06em; }
+.briefing__facts dd { margin: 0; color: #10312e; font-variant-numeric: tabular-nums; }
+/* 걸지 못한 조건임을 색이 아니라 글자로 말한다. */
+.briefing__badge { display: inline-block; margin-left: 4px; padding: 2px 8px; color: #674300; background: #fff3cd; border: 1px solid #e6cf8f; border-radius: 999px; font-size: .72rem; font-weight: 800; }
+.briefing__notes { display: grid; gap: 6px; margin: 14px 0 0; padding-left: 18px; color: #2b4f4a; font-size: .9rem; }
+
+/* ── 해석과 결과 사이의 가로선 ───────────────────────────── */
+.section-rule { margin: 26px 0 18px; border: 0; border-top: 1px solid var(--border); }
+
+.results__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+/* 자연어 검색 페이지 전용: 탐지 결과 영역 소제목 */
+.results__heading .section-title { margin: 0; font-size: 1.15rem; }
+.results__heading .result-count { margin: 0; }
+
+/* ── 결과 격자 ─────────────────────────────────────────────
+   한 칸이 탐지 한 건이다. 한 화면에 5×4로 놓고 나머지는 쪽으로 넘긴다. */
+.shot-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* 한 줄의 높이를 그 줄에서 가장 높은 칸에 맞춘다. 칸 안의 내용이 조금 달라도
+     줄이 들쭉날쭉해지지 않는다. */
+  grid-auto-rows: 1fr;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* 쪽에 없는 칸은 JS가 hidden을 붙인다. 격자 항목은 display를 따로 주고 있어
+   브라우저 기본 [hidden] 규칙만으로는 사라지지 않을 수 있다. */
+.shot-grid__item[hidden] { display: none; }
+
+.shot {
+  /* 버튼을 격자 컨테이너로 쓰지 않는다. 브라우저가 버튼 안쪽을 익명 상자 하나로
+     감싸는 경우가 있어 display: grid가 조용히 무시된다. 여기서는 위아래로 쌓기만
+     하면 되므로 block이면 충분하다. */
+  display: block;
+  width: 100%;
+  /* 같은 줄의 칸들이 모두 같은 높이가 되게 한다(.shot-grid의 grid-auto-rows: 1fr). */
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.shot:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0, 0, 0, .14); }
+.shot:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+
+/* 비율을 고정해 이미지가 있든 없든 칸 높이가 흔들리지 않게 한다. 어안 CCTV는
+   세로로 길어 cover로 자르면 뒷줄이 사라지므로 contain으로 전체를 남긴다. */
+.shot__figure {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #142220;
+}
+/* **그림과 "스냅샷 없음" 문구를 똑같이 띄워 둔다.** 예전에는 이미지만 흐름 안에
+   있었는데, height: 100%가 비율로 정해진 부모 높이를 못 읽는 경우가 있어 이미지가
+   제 크기대로 펴지면서 사진 있는 칸만 커졌다. 둘 다 흐름에서 빼면 칸 높이는
+   aspect-ratio 하나로만 정해진다. */
+.shot__image,
+.shot__blank { position: absolute; inset: 0; width: 100%; height: 100%; }
+.shot__image { object-fit: contain; }
+.shot__blank {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  color: #d7e5e2;
+  font-size: .78rem;
+  text-align: center;
+}
+
+/* 칸에는 시각과 인원만 둔다. 나머지는 열었을 때 모달이 말한다. */
+.shot__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+}
+.shot__time { font-size: .92rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shot__count { color: var(--muted); font-size: .78rem; font-weight: 700; white-space: nowrap; }
+
+/* ── 쪽 이동 ───────────────────────────────────────────── */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 20px;
+}
+.pager[hidden] { display: none; }
+.pager__button {
+  min-width: 84px;
+  padding: 8px 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pager__button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+/* 끝 쪽에서 버튼을 감추지 않고 비활성으로 남긴다. 사라지면 나머지 버튼이 옆으로
+   밀려 같은 자리를 연달아 누르던 손이 엉뚱한 버튼을 누른다. */
+.pager__button:disabled { opacity: .45; cursor: default; }
+.pager__status { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ── 상세 모달 ─────────────────────────────────────────── */
+.shot-modal {
+  position: relative;
+  width: min(92vw, 940px);
+  max-width: none;
+  padding: 22px;
+  color: var(--text);
+  background: var(--surface);
+  border: 0;
+  border-radius: 18px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .42);
+}
+.shot-modal::backdrop { background: rgba(0, 0, 0, .72); backdrop-filter: blur(2px); }
+.shot-modal__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface-low);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.shot-modal__close:hover { color: var(--danger); border-color: var(--danger); }
+.shot-modal__body { display: grid; gap: 18px; }
+.shot-modal__figure {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  max-height: 62vh;
+  overflow: hidden;
+  background: #142220;
+  border-radius: 12px;
+}
+.shot-modal__image { display: block; max-width: 100%; max-height: 62vh; object-fit: contain; }
+.shot-modal__blank { margin: 0; padding: 40px 20px; color: #d7e5e2; text-align: center; }
+.shot-modal__info h3 { margin-bottom: 10px; font-size: .8rem; font-weight: 800; letter-spacing: .08em; color: var(--muted); }
+.shot-modal__info dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 24px; margin: 0; }
+.shot-modal__info dl > div { display: grid; gap: 3px; }
+.shot-modal__info dt { color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .06em; }
+.shot-modal__info dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.shot-modal__camera { display: inline-block; padding: 2px 9px; color: #33413f; background: var(--surface-low); border: 1px solid var(--border); border-radius: 999px; font-size: .74rem; font-weight: 700; }
+.shot-modal__muted { color: var(--muted); font-weight: 400; }
+
+@media (max-width: 1200px) {
+  .shot-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .shot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .shot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .shot-modal { width: 96vw; padding: 16px; }
+  .shot-modal__figure, .shot-modal__image { max-height: 46vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shot { transition: none; }
+  .shot:hover { transform: none; }
+}

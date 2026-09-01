@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}{{ classroom.code }} 좌석 관리 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div class="title-wrap"><p class="page-eyebrow">{{ classroom.code }}</p><h1 class="page-title">{{ classroom.name }} 좌석 관리</h1><p class="page-summary">{{ classroom.location }} · 전체 {{ total }}좌석</p></div>
+    <div class="page-actions">
+      <a class="button-link secondary" href="/classrooms">목록</a>
+    </div>
+  </header>
+
+  <section class="panel" aria-labelledby="seat-map-title">
+    <header class="page-header">
+      <div class="title-wrap">
+        <h2 id="seat-map-title" class="page-subtitle">좌석 배치</h2>
+      </div>
+      <div class="grid-toolbar" aria-label="격자 크기 조절">
+        <button type="button" id="add-row" class="secondary">행 추가</button>
+        <button type="button" id="add-column" class="secondary">열 추가</button>
+      </div>
+    </header>
+    <p class="summary seat-map-hint">빈 칸을 클릭하면 좌석이 자동 생성됩니다. 좌석을 클릭하면 편집할 수 있습니다.</p>
+    <p id="seat-grid-status" class="grid-status" aria-live="polite"></p>
+    <p id="seat-grid-alert" class="grid-alert" role="alert" hidden></p>
+    <div class="seat-workbench" style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+      <div class="seat-workbench__map" style="flex: 1 1 480px; min-width: 0;">
+        <div class="table-scroll" tabindex="0" role="region" aria-label="좌석 배치 스크롤 영역">
+          <div class="seat-map-stage">
+            <div id="seat-grid" class="seat-map seat-map--grid" data-classroom-id="{{ classroom.id }}" data-max-row="{{ max_row }}" data-max-column="{{ max_column }}" style="grid-template-columns: repeat({{ max_column }}, minmax(100px, 1fr)); grid-template-rows: repeat({{ max_row }}, minmax(76px, 1fr));" aria-label="좌석 배치">
+              {% for r in range(1, max_row + 1) %}
+                {% for c in range(1, max_column + 1) %}
+                  {% set seat = seat_map.get((r, c)) %}
+                  {% if seat %}
+                    {% set assignment = assignments.get(seat.id) %}
+                    <button type="button" id="seat-cell-{{ seat.id }}" class="seat-map__cell seat-card--admin" data-seat-id="{{ seat.id }}" data-row="{{ r }}" data-column="{{ c }}"{% if assignment %} data-assignment-student-id="{{ assignment.student_id }}" data-assignment-student-name="{{ assignment.student_name }}"{% endif %} style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · {{ seat.label }}">
+                      <strong>{{ seat.label }}</strong>
+                      <small>{{ seat.code }}</small>
+                      {% if assignment %}<small class="assigned-student">{{ assignment.student_name }}</small>{% endif %}
+                    </button>
+                  {% else %}
+                    <button type="button" id="seat-cell-{{ r }}-{{ c }}" class="seat-map__empty" data-row="{{ r }}" data-column="{{ c }}" style="grid-row: {{ r }}; grid-column: {{ c }};" aria-label="{{ r }}행 {{ c }}열 · 빈 칸"></button>
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            </div>
+            {# 실제 강의실 구조대로 우측 하단 벽에 출입문을 표시한다. 강의실별 문 위치를
+               아직 모델이 갖고 있지 않아 A111 기준 위치를 그대로 그린다. #}
+            <p class="seat-map__door" role="img" aria-label="출입문. 강의실 우측 하단에 있다."><span aria-hidden="true">문</span></p>
+          </div>
+        </div>
+      </div>
+
+      <aside id="seat-edit-panel" class="seat-edit-panel panel" data-seat-id="" hidden>
+        <h2 class="section-title">좌석 편집</h2>
+        <form id="seat-edit-form" class="stack">
+          <p class="form-error" role="alert" data-form-error hidden></p>
+          <label>이름<input name="label" type="text" maxlength="200" required autocomplete="off"></label>
+          <div class="assignment-section">
+            <label>학생 지정
+              <select name="student_id" aria-label="학생 선택">
+                <option value="">학생 선택</option>
+                {% for student in students %}
+                  <option value="{{ student.id }}">{{ student.student_no }} {{ student.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <div class="assignment-actions">
+              <button type="button" id="btn-unassign" class="danger">해제</button>
+            </div>
+          </div>
+          <div class="edit-actions">
+            <button type="submit">저장</button>
+            <button type="button" id="btn-delete" class="danger">삭제</button>
+          </div>
+        </form>
+      </aside>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

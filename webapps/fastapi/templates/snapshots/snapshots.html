@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}탐지 스냅샷 · 학습 모니터링{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div class="title-wrap">
+    <h1 class="page-title">탐지 스냅샷</h1>
+    <p class="page-summary page-lead">
+      탐지 인원 수가 바뀐 시점의 정지 이미지입니다. 영상 원본은 저장하지 않습니다.
+    </p>
+  </div>
+</header>
+
+<form class="filter-bar" method="get" action="/snapshots">
+  <label for="camera-id">카메라</label>
+  <select id="camera-id" name="camera_id">
+    <option value="">전체</option>
+    {% for option in camera_options %}
+      <option value="{{ option }}"{% if option == selected_camera_id %} selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">조회</button>
+</form>
+
+{# "스냅샷 없음"과 "저장소 조회 실패"를 구분한다. 같은 빈 화면으로 보이면
+   카메라 문제인지 저장소 문제인지 운영자가 알 수 없다. #}
+{% if storage_error %}
+  <div class="state-panel state-error" role="alert">
+    <h2 class="state-title">스냅샷 저장소를 조회하지 못했습니다</h2>
+    <p>
+      저장소에 닿지 못했습니다. <strong>스냅샷이 없다는 뜻이 아닙니다.</strong>
+      저장소 상태를 확인한 뒤 다시 시도하세요.
+    </p>
+  </div>
+{% elif not snapshots %}
+  <div class="state-panel state-empty">
+    <h2 class="state-title">스냅샷이 없습니다</h2>
+    <p>
+      {% if selected_camera_id %}
+        <strong>{{ selected_camera_id }}</strong> 카메라에 적재된 스냅샷이 없습니다.
+      {% else %}
+        아직 적재된 스냅샷이 없습니다. 워커의 스냅샷 적재가 켜져 있는지 확인하세요.
+      {% endif %}
+    </p>
+  </div>
+{% else %}
+  <p class="result-count">총 {{ total }}건</p>
+  <ul class="snapshot-grid">
+    {% for item in snapshots %}
+      <li class="snapshot-card">
+        <img
+          class="snapshot-image"
+          src="/api/v1/snapshots/image/{{ item.key }}"
+          alt="{{ item.camera_id }} 카메라의 {{ item.captured_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC 스냅샷"
+          loading="lazy">
+        <div class="snapshot-meta">
+          <p class="snapshot-camera">{{ item.camera_id }}</p>
+          <p class="snapshot-time">
+            <time datetime="{{ item.captured_at.isoformat() }}">
+              {{ item.captured_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+            </time>
+          </p>
+          <p class="snapshot-size">{{ (item.size_bytes / 1024) | round(1) }} KB</p>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
+{% endblock %}

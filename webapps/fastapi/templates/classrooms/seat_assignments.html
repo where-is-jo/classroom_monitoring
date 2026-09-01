@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}{{ classroom.code }} 좌석-학생 지정 · 학습 모니터링{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div class="title-wrap">
+      <p class="page-eyebrow">{{ classroom.code }}</p>
+      <h1 class="page-title">{{ classroom.name }} 좌석-학생 지정</h1>
+      <p class="page-summary">{{ classroom.location }} · 좌석별 학생을 지정하거나 해제합니다.</p>
+    </div>
+    <div class="page-actions">
+      <a class="button-link secondary" href="/classrooms">목록</a>
+      <a class="button-link secondary" href="/classrooms/{{ classroom.id }}/seats">좌석 관리</a>
+    </div>
+  </header>
+
+  {% if seats %}
+    <section class="panel" aria-labelledby="assignment-table-title">
+      <h2 id="assignment-table-title" class="section-title">좌석-학생 지정 목록</h2>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="좌석-학생 지정 스크롤 영역">
+        <table>
+          <thead>
+            <tr>
+              <th>좌석 코드</th>
+              <th>좌석 이름</th>
+              <th>지정 학생</th>
+              <th>지정일시</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for seat in seats %}
+              <tr>
+                <td>{{ seat.code }}</td>
+                <td>{{ seat.label }}</td>
+                <td>
+                  {% if seat.id in assignments %}
+                    {{ assignments[seat.id].student_name }}
+                    {% if assignments[seat.id].student_no %}
+                      <small>({{ assignments[seat.id].student_no }})</small>
+                    {% endif %}
+                  {% else %}
+                    <span class="state-inactive">미지정</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if seat.id in assignments %}
+                    {{ assignments[seat.id].assigned_at|kst_datetime }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if seat.is_active %}
+                    <div class="assignment-controls">
+                      <!-- 지정 폼: 에러 메시지는 form 내부의 data-form-error에 표시한다 -->
+                      <form id="assign-form-{{ seat.id }}" class="inline-form"
+                        data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}/assignment"
+                        data-api-method="PUT"
+                        data-success-url="/classrooms/{{ classroom.id }}/seat-assignments">
+                        <select name="student_id" aria-label="학생 선택" required>
+                          <option value="">학생 선택</option>
+                          {% for student in students %}
+                            <option value="{{ student.id }}"
+                              {% if seat.id in assignments and assignments[seat.id].student_id == student.id %}selected{% endif %}>
+                              {{ student.student_no }} {{ student.name }}
+                            </option>
+                          {% endfor %}
+                        </select>
+                        <button type="submit" class="secondary">지정</button>
+                        <p class="form-error" role="alert" data-form-error hidden></p>
+                      </form>
+                      <!-- 해제 폼: 에러 메시지는 form 내부의 data-form-error에 표시한다 -->
+                      {% if seat.id in assignments %}
+                        <form class="inline-form"
+                          data-api-url="/api/v1/classrooms/{{ classroom.id }}/seats/{{ seat.id }}/assignment"
+                          data-api-method="DELETE"
+                          data-confirm="지정을 해제할까요?"
+                          data-success-url="/classrooms/{{ classroom.id }}/seat-assignments">
+                          <button type="submit" class="link-button">해제</button>
+                          <p class="form-error" role="alert" data-form-error hidden></p>
+                        </form>
+                      {% endif %}
+                    </div>
+                  {% else %}
+                    <small>비활성 좌석</small>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <div class="empty" role="status">
+      <strong>등록된 좌석이 없습니다.</strong>
+      <p><a href="/classrooms/{{ classroom.id }}/seats/create">좌석 추가</a>에서 좌석을 등록하세요.</p>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/classroom-admin.js') }}" defer></script>{% endblock %}

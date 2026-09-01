@@ -1,15 +1,32 @@
 fastapi
+python-multipart
 uvicorn[standard]
 jinja2
-pydantic-settings
+pydantic-settings>=2.3
+# config/settings.yml(환경과 무관한 일반 설정·판정 기준값)을 읽는 데 필요하다.
+pyyaml
+Pillow>=11,<13
 pymongo>=4.17,<5
-PyJWT>=2.10,<3
-pwdlib[argon2]>=0.3,<1
-python-multipart>=0.0.20,<1
+
+# 탐지 스냅샷 조회용 객체 저장소 어댑터(결정 0011).
+# SNAPSHOT_STORAGE_BACKEND=memory만 쓴다면 없어도 된다.
+minio>=7.2
+tzdata
+
+# 외부 HTTP 호출(중앙 얼굴 분석 서비스, llama.cpp 계획 생성)에 쓴다.
+# 런타임 의존성이다 — 테스트에서만 쓰는 것으로 분류되어 있었으나 app/ 코드가 이미
+# import하고 있어 바로잡았다.
+httpx
+
+# Prometheus 지표를 노출한다(/metrics). 순수 파이썬이라 가볍고, 없으면 앱이
+# import 단계에서 죽으므로 선택 의존이 아니다.
+prometheus-client>=0.20
 
 # 테스트
 pytest
-httpx
+# worker ByteTrack과 이벤트 payload부터 FastAPI 학생 상태까지 잇는 합성 통합 테스트.
+numpy>=1.26
+requests>=2.31
 
 # 린트·타입 검사
 ruff

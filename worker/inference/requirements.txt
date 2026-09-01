@@ -1,0 +1,22 @@
+opencv-python>=4.10
+numpy>=1.26
+pydantic>=2.7
+pydantic-settings>=2.3
+# config/settings.yml(환경과 무관한 일반 설정·판정 기준값)을 읽는 데 필요하다.
+pyyaml
+# 학습 서버에서 검증한 버전과 맞춰 NMS·결과 변환 편차를 없앤다.
+ultralytics==8.4.123
+
+# 탐지 스냅샷을 객체 저장소에 올린다(결정 0011).
+# OBJECT_STORAGE_BACKEND=local만 쓴다면 없어도 된다.
+minio>=7.2
+
+# 탐지 결과를 FastAPI 내부 API로 전송한다(결정 0011).
+requests>=2.31
+
+# Prometheus 지표를 노출한다. shared/metrics.py도 이 패키지를 쓴다.
+# 순수 파이썬이라 가볍고, 없으면 워커가 import 단계에서 죽으므로 선택 의존이 아니다.
+prometheus-client>=0.20
+
+# 테스트
+pytest>=8.0

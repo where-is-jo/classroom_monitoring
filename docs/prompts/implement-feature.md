@@ -14,7 +14,7 @@
 | 변수 | 설명 | 예 |
 | --- | --- | --- |
 | `{{TARGET_SERVICE}}` | 대상 서비스 디렉터리 | `webapps/fastapi` |
-| `{{FEATURE_NAME}}` | 기능 이름 | `탐지 이벤트 목록 조회` |
+| `{{FEATURE_NAME}}` | 기능 이름 | `학생 목록 조회` |
 | `{{REQUIREMENT}}` | 무엇이 필요한지 | |
 | `{{ACCEPTANCE_CRITERIA}}` | 무엇이 되면 완료인지 | |
 | `{{CONSTRAINTS}}` | 지켜야 할 제약 | `기존 응답 형식 유지` |

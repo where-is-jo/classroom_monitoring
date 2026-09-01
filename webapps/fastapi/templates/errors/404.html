@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}찾을 수 없음 · 캠퍼스 운영 포털{% endblock %}
+{% block title %}찾을 수 없음 · 학습 모니터링{% endblock %}
 
 {% block content %}
   <section class="empty-state">
-    <p class="eyebrow">404</p><h1>찾을 수 없습니다</h1><p>{{ message }}</p><p><a class="button" href="/events">탐지 이벤트 목록으로 이동</a></p>
+    <p class="eyebrow">404</p><h1 class="error-title">찾을 수 없습니다</h1><p>{{ message }}</p><p><a class="button" href="/classrooms">좌석 현황으로 이동</a></p>
   </section>
 {% endblock %}

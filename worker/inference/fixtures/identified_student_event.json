@@ -1,0 +1,23 @@
+{
+  "event_id": "synthetic-camera-001-20260815T030000000Z-42",
+  "camera_id": "synthetic-camera-001",
+  "captured_at": "2026-08-15T03:00:00+00:00",
+  "sequence": 42,
+  "frame": {
+    "width_pixels": 1000,
+    "height_pixels": 1000
+  },
+  "detections": [
+    {
+      "detection_id": "synthetic-camera-001-20260815T030000000Z-42-det-0",
+      "class_id": 0,
+      "class_name": "person",
+      "confidence": 0.91,
+      "bbox": [100, 100, 300, 700],
+      "student_id": "synthetic-student-001",
+      "identity_confidence": 0.88,
+      "face_bbox": [150, 130, 220, 230],
+      "track_id": "person-17"
+    }
+  ]
+}

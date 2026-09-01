@@ -1,0 +1,40 @@
+# inference worker의 일반 설정·판정 기준값. 환경(local/dev/prod)과 무관하게 같은 값을 쓴다.
+# 환경마다 달라야 하는 값과 비밀값은 .env.{local,dev,prod}에 둔다.
+# 규칙: docs/conventions/environment-convention.md
+
+# 탐지 신뢰도 임계값. 이 값 미만은 결과에서 제외한다.
+# 좌석 점유로 인정할지는 fastapi가 다시 판단한다(SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD).
+inference_confidence_threshold: 0.25
+
+# 추론 입력 크기. 지정하지 않으면 ultralytics가 640으로 줄인다.
+# 실측(3A컴퓨터실 CCTV 1280x1944): 640은 신뢰도 0.6 이상이 프레임당 4.4명,
+# 1280은 7.6명이었다. 1920까지 올려도 탐지 수는 늘지 않고 처리 시간만 배가 됐다.
+# **가까운 사람은 오히려 640이 유리하다** — 전체 재현율을 기준으로 1280을 골랐다.
+inference_image_size: 1280
+
+# --- 익명 사람 탐지 trace ---
+# 실제 카메라 ID·촬영 시각·영상·얼굴·학생 식별자를 쓰지 않는다. 현장 기준선을 잡는
+# 동안만 PERSON_DETECTION_TRACE_ENABLED=true로 켜고, 아래 상한에 도달하면 멈춘다.
+person_detection_trace_enabled: false
+person_detection_trace_max_seconds: 600
+person_detection_trace_max_frames: 3000
+person_detection_trace_retention_hours: 24
+
+# --- 탐지 스냅샷 (결정 0011) ---
+# 영상 원본은 저장하지 않는다. 탐지 개수가 직전 적재와 달라질 때만 정지 이미지를 남긴다.
+# 저장은 명시적으로 켠다.
+snapshot_enabled: false
+# 720p. 긴 변이 이 값을 넘을 때만 줄이고 확대하지 않는다.
+snapshot_max_long_side_px: 1280
+snapshot_jpeg_quality: 80
+# 카메라당 최소 적재 간격(초). 탐지가 경계에서 떨릴 때 적재가 폭주하는 것을 막는다.
+# 용량 계산이 이 값에 기대고 있으므로 함부로 낮추지 않는다.
+snapshot_min_interval_seconds: 60
+
+# --- 객체 저장소 (SNAPSHOT_ENABLED=true일 때만 유효) ---
+object_storage_bucket: classroom-snapshots
+# 비우면 inference/data/snapshots를 쓴다. 여기서는 적지 않는다(코드 기본값 사용).
+# TLS 사용 여부는 여기 없다 — MinIO가 같은 network 안이냐 밖이냐에 따라 환경마다
+# 달라지므로 .env.{local,dev,prod} 쪽이 소유한다(OBJECT_STORAGE_SECURE).
+# 적재는 추론 소비자 스레드를 막는다. 저장소가 죽었을 때 오래 붙잡지 않도록 짧게 끊는다.
+object_storage_timeout_seconds: 5

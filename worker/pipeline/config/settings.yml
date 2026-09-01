@@ -1,0 +1,89 @@
+# pipeline 조립 실행의 일반 설정. 환경(local/dev/prod)과 무관하게 같은 값을 쓴다.
+# 규칙: docs/conventions/environment-convention.md
+
+# 버퍼에 담아둘 최대 프레임 수. 실시간이라 최신 한 장이면 충분하다.
+# 키울수록 오래된 프레임을 들고 있게 되어 지연이 커진다.
+frame_buffer_maxsize: 1
+
+# 버퍼가 비어 있을 때 소비자가 종료 신호를 확인하는 주기(초)
+inference_poll_timeout_seconds: 0.5
+
+# 연속으로 이만큼 추론에 실패하면 파이프라인을 멈춘다
+inference_max_consecutive_failures: 5
+
+# 입구 얼굴 HTTP와 CCTV YOLO는 독립 처리 경로다. 20 FPS 입력 기준 각각 약 1 FPS와 5 FPS다.
+# 얼굴 모델을 GPU로 옮긴 뒤 올렸다(#181·#183). 입구 카메라 15fps 기준 초당 3.75장이며,
+# 얼굴 분석이 p95 24.9ms라 GPU 점유는 10% 안쪽이다. 예전 20은 CPU 시절 값으로
+# 초당 0.74장이었고, 그것이 입구 화면 갱신 주기의 상한이었다.
+face_identity_sample_interval_frames: 4
+person_tracking_sample_interval_frames: 4
+
+# --- 결과 전송 분리 ---
+# 탐지 결과를 FastAPI로 보내는 일을 추론 소비자 스레드에서 떼어낸다.
+# 실측(2026-08-25): 추론은 16ms인데 FastAPI 내부 API 한 번이 199ms였고(MongoDB
+# Atlas 왕복 5~6회), 그 대기 때문에 들어온 프레임의 73%를 버렸다. 근거는
+# worker/inference/dispatch.py의 모듈 주석에 있다.
+result_dispatch_enabled: true
+# 전송이 밀렸을 때 들고 있을 최대 건수. 카메라마다 최신 하나만 들고 있는다.
+result_dispatch_queue_maxsize: 32
+# 카메라 하나를 이 간격보다 자주 보내지 않는다. 추론 주기(5FPS)와 전송 주기를 나눈다.
+result_dispatch_min_interval_seconds: 1.0
+
+# --- bbox overlay 전용 경로 ---
+# 저장을 하지 않는 endpoint로 따로 보내 화면 갱신을 추론 주기에 맞춘다.
+overlay_dispatch_enabled: true
+# 0 = 제한 없음. 추론이 만든 만큼(CCTV 초당 5장) 그대로 보낸다.
+overlay_dispatch_min_interval_seconds: 0.0
+overlay_timeout_seconds: 2.0
+result_dispatch_close_timeout_seconds: 5.0
+
+# 입구 얼굴 관측 서비스 호출. 주소는 환경마다 달라 pipeline/.env.*의
+# FACE_IDENTITY_URL이 소유하고, 비워 두면 기능을 끈다. 실패해도 CCTV 사람 탐지는
+# 독립적으로 계속한다.
+face_identity_timeout_seconds: 5.0
+face_identity_jpeg_quality: 95
+
+# 사람 탐지와 ByteTrack은 CCTV 역할 카메라에만 붙인다. camera ID 선택과 인계 route는
+# 배치마다 달라 .env.*가 소유하고, 아래 값은 모든 환경에서 같은 판정 기준이다.
+person_tracking_enabled: true
+bytetrack_high_confidence_threshold: 0.5
+bytetrack_low_confidence_threshold: 0.1
+bytetrack_new_track_threshold: 0.6
+bytetrack_first_match_iou_threshold: 0.3
+bytetrack_second_match_iou_threshold: 0.2
+bytetrack_buffer_frames: 30
+# 기존 속도 예측을 기본으로 유지하고 develop compose에서 명시적으로 켠다.
+bytetrack_kalman_enabled: false
+# 기존 외부 출력이 기본이며 develop compose에서 명시적으로 켠다.
+person_track_lifecycle_enabled: false
+# 기존 결과를 기본으로 유지하고 develop compose에서 명시적으로 켠다.
+person_detection_postprocess_enabled: false
+person_detection_duplicate_iou_threshold: 0.5
+person_detection_duplicate_ios_threshold: 0.85
+
+# 입구에서 식별된 시각과 CCTV 문 영역에서 새 track이 생긴 시각의 허용 범위.
+# FastAPI의 인계 ROI 관리 화면을 설정 정본으로 사용하고 5초마다 갱신한다. 조회 실패 시
+# 마지막 정상 설정을 유지하므로 일시적인 웹앱 장애가 기존 track을 바꾸지 않는다.
+identity_handover_dynamic_config_enabled: true
+identity_handover_config_refresh_seconds: 5.0
+identity_handover_config_timeout_seconds: 2.0
+identity_handover_max_delay_seconds: 8.0
+identity_handover_clock_skew_seconds: 0.5
+# 신원이 붙은 CCTV track이 잠시 가려져도 이 시간 안에는 같은 신원을 유지한다.
+identity_handover_track_stale_seconds: 30.0
+# 기존 문 영역 인계만 기본으로 사용하고 develop compose에서 명시적으로 켠다.
+identity_track_recovery_enabled: false
+# 얼굴 서비스가 thresholds.json의 similarity + margin을 이미 통과시킨 student_id만
+# 반환한다. 인계에서 임의의 cosine 기준을 중복 적용하지 않는다.
+identity_handover_min_confidence: 0.0
+
+# 지표 노출(Prometheus). 워커는 웹 서버가 아니라서 켜면 전용 포트에 /metrics만 연다.
+# 나가는 값은 처리량·지연 같은 집계 숫자뿐이며 개인을 식별하는 값은 담기지 않는다.
+metrics_enabled: true
+
+# 컨테이너 밖(다른 컨테이너의 Prometheus)에서 붙어야 해서 0.0.0.0이다.
+# 호스트에서 직접 돌리며 사설망에 열고 싶지 않으면 127.0.0.1로 낮춘다.
+metrics_host: "0.0.0.0"
+
+# 9090(Prometheus)·9100(node_exporter)과 겹치지 않는 값
+metrics_port: 9101

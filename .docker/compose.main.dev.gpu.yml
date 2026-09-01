@@ -1,0 +1,296 @@
+name: classroom-monitoring-dev
+
+# 공용 GPU 서버(dev)의 메인 스택. **개인 PC용은 compose.main.dev.pc.yml이다.**
+#
+# 실행 (저장소 루트에서):
+#   docker compose -f .docker/compose.main.dev.gpu.yml up -d
+#   docker compose -f .docker/compose.main.dev.gpu.yml config    # 문법 검증
+#
+# **이 파일은 compose.main.dev.yml을 호스트 축으로 쪼갠 절반이다**
+# (결정 0026의 4번). fastapi와 n8n은 여기서 빠져 compose.main.dev.pc.yml로 갔다.
+# 남은 것은 GPU가 필요한 셋(inference-worker·deeplearning·llama-server)과,
+# 그 셋이 쓰는 영상·저장소(mediamtx·minio)다.
+#
+# **project name(classroom-monitoring-dev)과 network 이름을 그대로 뒀다.**
+# 바꾸면 minio-data 볼륨 이름(classroom-monitoring-dev_minio-data)이 달라져
+# 지금까지 쌓인 스냅샷을 잃고, compose.llm.dev.yml과 compose.monitoring.dev.yml이
+# external로 참조하는 network도 함께 고쳐야 한다.
+#
+# **--env-file을 주지 않는다**(결정 0018). 이 파일이 커밋되므로 실행에 필요한 값을
+# 파일 안에 직접 적었다. 비밀값만 env_file로 주입하고 그 파일들은 커밋하지 않는다
+# (.docker/env/*.env는 .gitignore 대상, 변수 목록은 각 서비스의 .env.example).
+#
+# 이 파일이 backend network를 만든다. compose.llm.dev.yml과 compose.monitoring.dev.yml은
+# 그 network를 external로 참조하므로 **이 스택을 먼저 올려야 한다.**
+#
+# worker/recorder는 이 스택에 넣지 않는다. **영상 원본을 저장하지 않기로 했다**
+# (결정 0028). 탐지 시점 스냅샷은 inference-worker가 MinIO에 올린다.
+
+networks:
+  backend:
+    name: classroom-monitoring-dev-backend
+
+# 컨테이너 로그 회전. Docker json-file 드라이버는 기본이 무제한이라 48GB 환경에서
+# 조용히 디스크를 채운다. worker가 프레임 샘플마다 로그를 남기므로 특히 그렇다.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+volumes:
+  minio-data:
+  # 익명 bbox·confidence JSONL만 담는다. worker가 24시간 보존 정책으로 지우며,
+  # 모델 이미지 재빌드·컨테이너 교체 중에도 통제 실험 trace를 유지한다.
+  inference-traces:
+
+# 포트 방침
+#
+# **fastapi가 개인 PC로 가면서 포트의 성격이 바뀌었다.** 전에는 호스트에 여는 것이
+# "앞단 nginx에 보여 줄 것" 하나였는데, 이제는 **개인 PC의 fastapi가 Tailscale로
+# 넘어와 부를 것**이 더해졌다. 무엇이 경계를 넘는지는 결정 0026의 3번 표가 정본이다.
+#
+# 그래서 여는 방식이 셋으로 갈린다.
+#
+# 1. **Tailscale 주소에만 묶는다**(100.85.0.72). 개인 PC만 닿으면 되는 것들이다.
+#    **0.0.0.0에 묶으면 안 된다** — 이 서버는 공인 IP(116.42.115.24)를 가진 공용
+#    장비라서, 0.0.0.0은 곧 인터넷 공개다. MinIO는 root 자격 증명 하나로 스냅샷
+#    전체(학생 얼굴이 담긴다)가 열리므로 특히 그렇다.
+# 2. **0.0.0.0에 연다.** WebRTC 미디어(18189) 하나뿐이다. 브라우저가 프록시 없이
+#    직접 붙어야 해서 다른 방법이 없다.
+# 3. **아예 열지 않는다.** 같은 network 안에서만 쓰는 것(MinIO 콘솔 9001 등).
+#
+# **호스트 쪽 번호는 5자리로 준다.** 공용 서버라 4자리 기본값은 다른 팀과 겹치기 쉽다.
+#
+# | 호스트 | -> 컨테이너 | 누가 부르나 |
+# | --- | --- | --- |
+# | 100.85.0.72:18100 | deeplearning:8100 | 개인 PC의 fastapi (얼굴 분석) |
+# | 100.85.0.72:19000 | minio:9000 | 개인 PC의 fastapi (스냅샷 읽기) |
+# | 100.85.0.72:18889 | mediamtx:8889 | 개인 PC의 fastapi (WHEP 시그널링 중계) |
+# | 18189 (UDP·TCP) | mediamtx:18189 | 브라우저. **직통.** 프록시 불가 |
+#
+# llama-server(18008)도 개인 PC가 부르지만 compose.llm.dev.yml 소관이라 그쪽에서 연다.
+#
+# **Tailscale이 내려가 있으면 이 스택은 기동에 실패한다.** 없는 주소에는 bind할 수
+# 없기 때문이다. 조용히 도는 것보다 낫다 — 떠 있어도 개인 PC가 닿지 못한다.
+#   확인: tailscale status / ip addr show tailscale0
+
+services:
+  # 얼굴 분석 내부 서비스(SCRFD + MediaPipe). **fastapi만 호출한다.**
+  #
+  # **GPU 1번만 쓴다.** 예전에는 GPU를 예약하지 않고 CPUExecutionProvider를 고정해
+  # CPU로 돌았고, 얼굴 분석이 평균 88.8ms(p95 287ms)였다. 그 상태가 오래 이어졌는데
+  # 아무도 알아채지 못했다 — 조용히 느린 것이라 지표에 "느리다"로만 보였다.
+  #
+  # **device_ids를 반드시 명시한다.** 빠뜨리면 컨테이너가 보이는 GPU를 모두 잡고,
+  # 이 서버는 0·2·3번을 다른 팀이 쓰고 있어(각각 89%·93%·42% 점유) 남의 작업을
+  # 밀어낸다. 1번만 넘기면 컨테이너 안에서 그것이 0번이 되므로 app.py는 물리 번호를
+  # 알 필요가 없다(ctx_id=0).
+  deeplearning:
+    # 서버에서 현재 develop 소스로 빌드한 :latest를 같은 이름으로 덮어쓴다.
+    # registry에서 받지 않고 GPU 서버가 방금 빌드한 image ID만 사용한다.
+    image: ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+    pull_policy: never
+    env_file:
+      # MongoDB 비밀값과 ArcFace/AdaFace 선택 계약을 서버에서 주입한다.
+      # 변수 기준은 deeplearning/.env.example이다.
+      - ./env/deeplearning.dev.env
+    environment:
+      # 가중치는 이미지에도 저장소에도 없다. .docker/models/face에 미리 올려 둔다.
+      # 셋 다 실제 파일이어야 하며, 없으면 기동 시점에 죽는다(app.py의 lifespan).
+      FACE_DETECTION_MODEL_PATH: /models/face/scrfd/scrfd_10g_bnkps.onnx
+      FACE_LANDMARKER_MODEL_PATH: /models/face/mediapipe/face_landmarker.task
+      # 식별 기능 활성화
+      FACE_IDENTIFICATION_ENABLED: "true"
+
+      # GPU 사용 강제
+      FACE_EXECUTION_PROVIDER: cuda
+    volumes:
+      - ./models:/models:ro
+    # **호스트 분할로 새로 열게 된 포트다.** 전에는 fastapi가 같은 network 안에서
+    # deeplearning:8100으로 불렀다. 이제 fastapi가 개인 PC에 있어 경계를 넘는다.
+    # 얼굴 등록의 실시간 가이드가 매 프레임 이 경로를 왕복한다(결정 0026의 결과 항목).
+    ports:
+      - "100.85.0.72:18100:8100"
+    networks:
+      - backend
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # **1번만이다.** 우리 계정에 할당된 카드가 그것뿐이고, inference-worker와
+              # llama-server도 같은 1번을 쓴다. count나 all을 쓰면 다른 팀 카드까지
+              # 잡는다. 컨테이너 안에서는 이 카드가 0번으로 보인다.
+              device_ids: ["1"]
+              capabilities: [gpu]
+    logging: *default-logging
+    restart: unless-stopped
+
+  # stream + inference 조립 실행(python -m pipeline.main). GPU를 쓴다.
+  inference-worker:
+    # **GHCR의 :latest가 아니라 GPU 서버에서 직접 빌드한 이미지다.**
+    # CI는 fastapi 이미지만 올린다(결정 0014) — worker는 14.9GB라 수동 빌드로 남겼고,
+    # 그 결과 GHCR :latest가 2026-08-12에 멈춰 있었다. 그 이미지에는 탐지 결과를
+    # fastapi로 보내는 코드(FASTAPI_URL / inference.handler)가 아예 없어서, 추론은
+    # 도는데 이벤트가 한 건도 도달하지 않았다.
+    #
+    # 같은 :latest 이름으로 다시 빌드하면 기존 태그가 새 image ID를 가리킨다.
+    # registry의 오래된 이미지로 돌아가지 않도록 pull도 금지한다.
+    #   빌드: docker build -t ghcr.io/where-is-jo/classroom-monitoring-worker:latest worker
+    image: ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+    pull_policy: never
+    env_file:
+      # 변수 목록의 기준은 worker/pipeline/.env.example이다(조립 실행이라 pipeline 것을 쓴다).
+      # STREAM_SOURCES에 카메라 자격 증명이 들어가므로 이 파일 전체가 비밀값이다.
+      #
+      # **호스트 분할로 FASTAPI_URL이 바뀐다.** fastapi:8001이 아니라 개인 PC의
+      # Tailscale 주소(http://100.119.241.93:8076)를 가리켜야 탐지 이벤트가 도달한다.
+      - ./env/worker.dev.env
+    environment:
+      APP_ENV: dev
+      # PR 2: 사람 중복·미매칭 저신뢰 탐지를 ByteTrack 앞뒤에서 제거한다.
+      # false로 override하고 force recreate하면 이전 출력으로 즉시 돌아간다.
+      PERSON_DETECTION_POSTPROCESS_ENABLED: "true"
+      # PR 3: bbox 속도 예측만 Kalman 상태 추정으로 교체한다.
+      # false로 override하고 force recreate하면 기존 예측기로 즉시 돌아간다.
+      BYTETRACK_KALMAN_ENABLED: "true"
+      # PR 4: 2회 연속 관측 전 tentative track은 외부 payload에서 숨긴다.
+      # false로 override하고 force recreate하면 기존 즉시 출력으로 돌아간다.
+      PERSON_TRACK_LIFECYCLE_ENABLED: "true"
+      # PR 5: lost 신원을 전역 유일한 새 track으로만 원자 이동한다.
+      # false로 override하고 force recreate하면 기존 문 영역 인계만 사용한다.
+      IDENTITY_TRACK_RECOVERY_ENABLED: "true"
+      # PR 7: CCTV 추적을 약 5 FPS에서 10 FPS로 올리되 lost 복구의 약 6초
+      # 벽시계 창은 유지한다. 4/30으로 override하고 force recreate하면 되돌아간다.
+      PERSON_TRACKING_SAMPLE_INTERVAL_FRAMES: "2"
+      BYTETRACK_BUFFER_FRAMES: "60"
+    volumes:
+      # 모델 가중치는 이미지에도 저장소에도 넣지 않는다(.docker/models/는 .gitignore).
+      # env/worker.dev.env의 MODEL_PATH가 이 안의 파일을 가리켜야 한다.
+      - ./models:/models:ro
+      # 이미지·얼굴은 쓰지 않고 익명 bbox·confidence trace만 최대 24시간 보존한다.
+      - inference-traces:/worker/inference/data/traces
+    networks:
+      - backend
+    depends_on:
+      mediamtx:
+        condition: service_started
+      # MongoDB 갤러리와 thresholds.json까지 준비된 뒤에만 얼굴 호출 워커를 시작한다.
+      deeplearning:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # 서버에는 L40S가 4장 보이지만(individual_tasks/nvidia.md) 우리 계정에
+              # 실제로 할당된 건 1번 하나뿐이다. llama-server도 같은 1번을 쓴다 —
+              # 우리가 쓸 수 있는 GPU가 그것뿐이라 나눌 수 없다.
+              device_ids: ["1"]
+              capabilities: [gpu]
+    logging: *default-logging
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.20.0
+    environment:
+      # 사용자용 실시간 영상은 WebRTC로 간다. 설정은 MTX_<파라미터명 대문자> 환경변수로
+      # 준다 — 커스텀 mediamtx.yml을 마운트하지 않아도 되고 바꾼 값이 여기 다 보인다.
+      #
+      # ICE 후보로 알릴 주소. 미디어는 프록시를 타지 않고 직통하므로 **서버 자신의
+      # 주소**여야 한다. 공인 IP가 아직 일부 포트만 열려 Tailscale IP와 함께 둘 다
+      # 후보로 넣는다.
+      MTX_WEBRTCADDITIONALHOSTS: 100.85.0.72,116.42.115.24
+      # 인터페이스에서 주소를 긁는 기본 동작을 끈다. 켜 두면 컨테이너 사설 IP가
+      # ICE 후보로 나가는데, 브라우저는 닿지 못하면서 내부 주소만 드러난다.
+      MTX_WEBRTCIPSFROMINTERFACES: "no"
+      # 미디어가 실제로 흐르는 포트. **기본값 8189가 아니라 18189를 쓴다** —
+      # 외부에 직접 열리는 유일한 포트라 다른 팀과 겹칠 여지를 줄인다.
+      MTX_WEBRTCLOCALUDPADDRESS: ":18189"
+      MTX_WEBRTCLOCALTCPADDRESS: ":18189"
+    # HLS(8888)는 열지 않는다. 화면은 WebRTC로만 본다.
+    #
+    # **RTSP publish(8554)를 Tailscale 주소에만 연다.** 강의실 CCTV는 개인 PC와
+    # 같은 192.168.0.x 사설망에 있는데, 이 서버도 192.168.0.103/24에 직접 물려 있어
+    # subnet route로는 닿을 수 없다 - 직결 라우트가 tailscale 라우트를 항상 이긴다.
+    # 그래서 방향을 뒤집는다. 개인 PC가 CCTV를 당겨 여기로 밀어 넣고, worker는
+    # mediamtx:8554에서 되받는다. 송출은 개인 PC가 거는 바깥 방향 연결이라
+    # 라우팅이 필요 없다.
+    #
+    # **0.0.0.0에 열지 않는다.** 인증을 걸지 않았으므로(MTX_AUTH* 미설정) 공인 IP에
+    # 열면 누구나 이 경로에 영상을 밀어 넣을 수 있다.
+    ports:
+      # **WHEP 시그널링(8889)을 Tailscale 주소에 연다.** 전에는 fastapi가 같은
+      # network 안에 있어 아예 열지 않았지만(결정 0014), 이제 fastapi가 개인 PC에
+      # 있어 경계를 넘는다. 브라우저는 여전히 fastapi에만 붙는다 — fastapi가
+      # WHEP_BASE_URL=http://100.85.0.72:18889로 중계한다.
+      - "100.85.0.72:18889:8889"
+      # RTSP 수신(개인 PC -> 여기). 바로 위 주석 참고.
+      - "100.85.0.72:18554:8554"
+      # WebRTC 미디어(ICE). **호스트와 컨테이너 번호가 같아야 한다** — MediaMTX가 위
+      # MTX_WEBRTCLOCAL*ADDRESS의 번호를 ICE 후보로 알리기 때문이다.
+      # 브라우저가 직접 붙으므로 여기만 0.0.0.0이다.
+      - "18189:18189/udp"
+      - "18189:18189/tcp" # UDP가 막힌 망에서의 폴백
+    networks:
+      - backend
+    logging: *default-logging
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    env_file:
+      - ./env/minio.dev.env
+    ports:
+      # **S3 API(9000)를 Tailscale 주소에 연다.** 전에는 아무것도 열지 않았지만,
+      # 스냅샷을 읽는 fastapi가 개인 PC로 가면서 경계를 넘게 됐다.
+      # 쓰는 쪽(inference-worker)은 여전히 같은 network 안이라 minio:9000을 쓴다.
+      #
+      # **0.0.0.0에 열면 안 된다.** 지금은 worker와 fastapi가 모두 root 키로 붙어서
+      # 이 포트 하나에 스냅샷 전체가 걸린다(스냅샷에는 학생 얼굴이 담긴다).
+      # 전용 키로 나누는 것은 아직 결정 필요 항목이다.
+      - "100.85.0.72:19000:9000"
+      # 콘솔(9001)은 열지 않는다. 운영자 도구라 SSH 터널로 본다:
+      #   ssh -L 9001:localhost:9001 <서버>
+    volumes:
+      - minio-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+    restart: unless-stopped
+
+  # 스냅샷 버킷과 보존 규칙을 한 번 만들고 끝난다(결정 0028).
+  # **삭제를 저장소가 하게 한다.** 앱이 지우면 워커가 죽어 있는 동안 삭제도 멈춘다.
+  minio-init:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    env_file:
+      - ./env/minio.dev.env
+    environment:
+      # 이미지 안의 inference/config/settings.yml이 갖는 버킷 이름과 같아야 한다.
+      SNAPSHOT_BUCKET: classroom-snapshots
+      SNAPSHOT_RETENTION_DAYS: "30"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      # 비밀번호가 -로 시작하면 mc alias set이 플래그로 오해하므로 MC_HOST_를 쓴다.
+      - |
+        set -e
+        export MC_HOST_local="http://$${MINIO_ROOT_USER}:$${MINIO_ROOT_PASSWORD}@minio:9000"
+        mc ready local
+        mc mb --ignore-existing "local/$${SNAPSHOT_BUCKET}"
+        mc ilm rule add --expire-days "$${SNAPSHOT_RETENTION_DAYS}" "local/$${SNAPSHOT_BUCKET}" 2>/dev/null \
+          || echo "보존 규칙이 이미 있다"
+        mc ilm rule ls "local/$${SNAPSHOT_BUCKET}"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - backend
+    logging: *default-logging
+    restart: "no"

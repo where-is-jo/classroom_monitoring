@@ -1,388 +1,513 @@
 # fastapi
 
-FastAPI 웹 애플리케이션 디렉터리다. API와 화면을 함께 제공한다.
+관리자가 사용하는 강의실 모니터링 화면과 HTTP API를 제공한다.
+이 저장소에서 실행 가능한 웹 서비스이자 브라우저의 단일 진입점이다.
 
-> 현재 상태: **공통 저장소, 인증·사용자 관리, 직원 상태, 인앱 알림, 면담 대기, 강의실 좌석, 관리자 대시보드 동작**. 기존 이벤트 화면/API는
-> 공개 범위를 유지한다. 직원 프로필, 저장된 현재 상태와 이력, 수동 override, 명시적 시간
-> 정책 평가, 사용자별 알림함, 직원 복귀 연계 면담 대기와 mock 좌석 점유·마감 후 경고를 제공하며 local 인메모리 mode와 MongoDB mode가 같은
-> 저장소 계약을 구현한다. 개발환경에서는 외부 네트워크 없는 mock delivery 결과를 기록한다.
+**이 서비스가 학생 상태 판정을 소유한다.** 현재 탐지 결과를 `PRESENT` / `WRONG_SEAT` /
+`UNKNOWN`으로 바꾸는 규칙은 여기 있고, `worker`나 `deeplearning`에 두지 않는다.
+시간표·유예 시간·카메라 건강도가 필요한 `ABSENT`도 후속 구현 시 이 서비스가 소유한다
+([결정 0008](../../docs/architecture/decisions.md#0008--학생-상태-판정을-rule-engine으로-분리하고-fastapi가-소유한다)).
 
-## 실행 방법
+> **현재 범위는 강의실 좌석 현황, 실시간 모니터링, 자연어 검색, 학생 등록, 입구 얼굴
+> 관측 이력과 학생 상태 연동이다.**
+> 학생 원장은 memory 또는 MongoDB의 `students` 컬렉션에 저장된다. 얼굴 데이터 수집은 별도 프로필로 구현되어 있다.
+> 현재 좌석 상태는 "자리가 찼는지"를 뜻하며 "누가 앉았는지"가 아니다.
+> 앞으로 만들 도메인과 계약은 [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md)에 있다.
+
+## 빠른 시작
+
+Python 3.12 환경에서 실행한다.
 
 ```bash
 cd webapps/fastapi
 python -m pip install -r requirements.txt
-cp .env.example .env
-# .env의 네 보안 비밀값을 각각 32자 이상의 서로 다른 무작위 값으로 채운다.
-python -m uvicorn app.main:app --reload --port 8000
+cp .env.example .env.local
+export APP_ENV=local   # 생략하면 어차피 local로 동작한다
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
-브라우저에서 `http://127.0.0.1:8000`을 열면 이벤트 목록으로 이동한다.
-예제 설정은 `APP_ENV=local`, `DATABASE_MODE=memory`를 명시하므로 보안 비밀값을 채우면
-외부 서비스 없이 기동한다. `WEB_ORIGIN`은 브라우저에서 접속하는 origin과 정확히 같아야 한다.
+실행 환경마다 `.env.local` / `.env.dev` / `.env.prod` 중 해당하는 파일을 만든다.
+어떤 파일을 읽을지는 실제 OS 환경변수 `APP_ENV`가 정한다. 재시도 횟수·타임아웃·판정
+임계값처럼 환경과 무관한 값은 `.env.*`가 아니라 커밋된 [`config/settings.yml`](./config/settings.yml)에 있다.
+
+### 얼굴 등록을 확인할 때
+
+SCRFD·MediaPipe 분석을 담당하는 `deeplearning`이 떠 있어야 한다.
+**컨테이너로 띄운다**([결정 0022](../../docs/architecture/decisions.md)).
+
+**그 컨테이너는 GPU 서버에 있다**([결정 0026](../../docs/architecture/decisions.md#0026--백엔드를-개인-pc에-두고-gpu가-필요한-것만-gpu-서버에-남긴다)).
+가중치 346MB가 거기 있고, 개인 PC에서 따로 띄우지 않는다. 소스로 fastapi를 돌릴 때도
+Tailscale 주소로 부른다.
+
+```bash
+# GPU 서버에서 (이미 떠 있으면 생략)
+docker compose -f .docker/compose.main.dev.gpu.yml up -d deeplearning
+```
+
+그리고 `webapps/fastapi/.env.local`에서 분석기를 실제 서비스로 돌린다.
+
+```
+FACE_ANALYZER_MODE=http
+FACE_ANALYZER_URL=http://100.85.0.72:18100
+```
+
+**`http://deeplearning:8100`은 이제 닿지 않는다.** 같은 compose network가 아니다.
+
+**`synthetic`으로 두면 안 된다.** 대역 분석기는 이미지를 읽지 않고 호출 횟수에 따라
+정해진 순서대로 자세를 돌려주므로, 가만히 정면만 봐도 등록이 완주된다. 검사가 있는
+것처럼 보이지만 아무것도 검사하지 않는 상태다.
+
+> 소스에서 두 서버를 직접 띄우던 `run-face-enrollment.ps1`은 삭제했다. 실행 수단이
+> 둘이면 한쪽만 고쳐지고 다른 쪽이 낡는다 — 그 스크립트는 `FACE_ANALYZER_MODE`를
+> 주입하지 않아, 분석 서버를 띄워 놓고 정작 `synthetic`으로 도는 상태였다.
+
+기본 예제는 `APP_ENV=local`, `DATABASE_MODE=memory`라서 외부 서비스 없이 기동한다.
+**로그인이 없다.** 채워야 하는 비밀값도 없다. `http://127.0.0.1:8001`을 열면
+`/classrooms`로 이동한다.
+
+`config/settings.yml`에서 `demo_mode_enabled: true`로 바꾸면(또는 실행 시 실제 OS
+환경변수 `DEMO_MODE_ENABLED=true`로 즉석 재정의하면) 개인정보 없는 합성 영상 source와
+고정 검색 catalog가 붙고, memory 저장소에 강의실·좌석 fixture가 멱등하게 채워진다.
+`APP_ENV=prod`에서는 활성화를 거부한다.
 
 MongoDB를 사용하려면 `DATABASE_MODE=mongodb`와 `DATABASE_URL`, `DATABASE_NAME`을
-주입한다. 앱은 시작할 때 연결과 index 초기화를 확인하며 실패하면 요청을 받기 전에
-종료한다. memory mode는 local에서만 허용한다.
+주입한다. 앱은 요청을 받기 전에 연결을 확인하고 필요한 index를 idempotent하게 초기화한다.
+`memory` mode는 `local`에서만 허용한다.
 
-### 엔드포인트
+> **`APP_ENV=prod`로 배포하지 않는다.** 현재 인증이 없고, 운영 접근 통제 방식이
+> 아직 정해지지 않았다
+> ([결정 0010](../../docs/architecture/decisions.md#0010--mvp-제품-사용자를-관리자-하나로-한정한다)).
+
+## 화면과 API
+
+실행 중인 설정에서 공개되는 정확한 JSON 계약은 `/docs`와 `/openapi.json`에서 확인한다.
+Jinja2 화면 경로는 OpenAPI에 넣지 않는다. 모든 JSON API 오류는
+`{"error": {"code", "message", "details"}}` envelope를 사용한다.
+
+### 화면
 
 | 경로 | 설명 |
 | --- | --- |
-| `GET /` | `/events`로 리다이렉트 |
-| `GET /events?limit=&offset=` | 이벤트 목록 화면 |
-| `GET /events/{event_id}` | 이벤트 상세 화면 |
-| `GET /health` | 기동 확인 |
-| `GET /health/ready` | 현재 저장소 mode 준비 상태 확인 |
-| `GET /api/v1/events?limit=&offset=` | 이벤트 목록 JSON |
-| `GET /api/v1/events/{event_id}` | 이벤트 상세 JSON |
-| `GET/POST /login` | 로그인 화면·제출 |
-| `POST /logout` | CSRF 검증 후 화면 세션 종료 |
-| `GET /admin/users` | `ADMIN`, `SYSTEM_OPERATOR` 사용자 관리 화면 |
-| `GET /employees` | 로그인 사용자 직원 상태 목록 화면 |
-| `GET /employees/{employee_id}` | 현재 상태·override·최근 이력 화면 |
-| `GET /admin/employees` | `ADMIN` 이상 직원 CRUD·명시적 정책 평가 화면 |
-| `GET /admin/dev-tools` | mock 입력 허용 환경의 구조화 관측 화면 |
-| `GET /notifications` | 로그인 사용자의 읽음 상태·유형 필터 인앱 알림함 |
-| `GET/POST /my/interview-waits` | 본인 면담 대기 목록·신청 화면 |
-| `GET /my/interview-waits/{wait_id}` | 본인 또는 권한 있는 담당자의 면담 대기 상세·이력 화면 |
-| `GET /staff/interview-waits` | 연결된 STAFF 대상 면담 대기 화면 |
-| `GET /classrooms` | 강의실별 점유·UNKNOWN·운영 여부 현황 |
-| `GET /classrooms/{classroom_id}` | geometry 배치 또는 code 순 좌석 상세 |
-| `GET /admin/classrooms` | `ADMIN` 이상 강의실·일정·좌석 관리 화면 |
-| `GET /admin/alerts` | `ADMIN` 이상 마감 후 경고·해결 화면 |
-| `GET /admin` | `ADMIN`, `SYSTEM_OPERATOR` 읽기 전용 운영 요약·최근 활동 화면 |
-| `GET /admin/audit-logs` | `ADMIN`, `SYSTEM_OPERATOR` 마스킹된 감사 로그 조회 화면 |
-| `GET /admin/mock-deliveries` | mock 입력 허용 환경의 정제된 delivery 기록·명시적 재시도 화면 |
-| `POST /api/v1/auth/login` | access/refresh `HttpOnly` cookie 발급 |
-| `POST /api/v1/auth/refresh` | refresh rotation |
-| `POST /api/v1/auth/logout` | 현재 refresh family 폐기와 cookie 제거 |
-| `GET /api/v1/auth/me` | 현재 사용자 조회 |
-| `PATCH /api/v1/auth/me/password` | 본인 비밀번호 변경과 refresh 전체 폐기 |
-| `GET/POST /api/v1/users` | `ADMIN` 이상 사용자 목록·생성 |
-| `GET/PATCH/DELETE /api/v1/users/{user_id}` | `ADMIN` 이상 조회·수정·soft deactivate |
-| `GET/POST /api/v1/employees` | 로그인 목록·`ADMIN` 이상 직원 생성 |
-| `GET/PATCH/DELETE /api/v1/employees/{employee_id}` | 로그인 상세·`ADMIN` 이상 수정·비활성화 |
-| `GET /api/v1/employees/{employee_id}/status-history` | 로그인 상태 이력 조회 |
-| `PUT/DELETE /api/v1/employees/{employee_id}/status-override` | 본인 STAFF 또는 `ADMIN` 이상 override 설정·해제 |
-| `POST /api/v1/employee-status-evaluations` | 모든 환경의 `ADMIN` 이상 명시적 시간 정책 평가 |
-| `POST /api/v1/mock-employee-observations` | mock 입력 허용 환경의 `ADMIN` 이상 구조화 관측 |
-| `GET /api/v1/notifications` | 본인 알림 목록, 읽음 상태·유형·페이지 필터 |
-| `GET /api/v1/notifications/unread-count` | 본인 미읽음 알림 수 |
-| `PATCH /api/v1/notifications/{notification_id}` | 본인 알림 읽음 처리 |
-| `POST /api/v1/notification-read-batches` | 본인 알림 전체 읽음 처리 |
-| `GET/POST /api/v1/interview-waits` | 역할 범위 면담 대기 목록·신청 |
-| `GET/PATCH /api/v1/interview-waits/{wait_id}` | 권한 범위 상세·취소·완료 |
-| `POST /api/v1/interview-wait-expirations` | 모든 환경의 `ADMIN` 이상 명시적 만료 평가 |
-| `GET/POST /api/v1/classrooms` | 로그인 목록·`ADMIN` 이상 강의실 생성 |
-| `GET/PATCH/DELETE /api/v1/classrooms/{classroom_id}` | 조회·`ADMIN` 이상 수정·비활성화 |
-| `GET/PUT /api/v1/classrooms/{classroom_id}/schedules` | 조회·`ADMIN` 이상 요일 일정 전체 교체 |
-| `GET/POST /api/v1/classrooms/{classroom_id}/seats` | 좌석 조회·`ADMIN` 이상 생성 |
-| `PATCH/DELETE /api/v1/seats/{seat_id}` | `ADMIN` 이상 좌석 수정·비활성화 |
-| `GET /api/v1/classrooms/{classroom_id}/occupancy` | 현재 좌석과 점유 summary |
-| `GET /api/v1/classrooms/{classroom_id}/occupancy-history` | `ADMIN` 이상 기간·좌석 이력 |
-| `POST /api/v1/mock-seat-observations` | mock 입력 허용 환경의 구조화 좌석 batch |
-| `GET/PATCH /api/v1/after-hours-alerts[/{alert_id}]` | `ADMIN` 이상 경고 목록·해결 |
-| `GET /api/v1/admin/dashboard-summary` | 부서·강의실 필터가 있는 읽기 전용 운영 요약 |
-| `GET /api/v1/admin/dashboard-activities` | 유형·기간·페이지 필터가 있는 최근 활동 |
-| `GET /api/v1/admin/audit-logs` | 작업자·작업·리소스·기간별 마스킹 감사 로그 |
-| `GET /api/v1/admin/mock-deliveries` | mock 입력 허용 환경의 `ADMIN` 이상 delivery 기록 |
-| `POST /api/v1/admin/mock-delivery-attempts` | 실패한 mock delivery의 명시적 멱등 재시도 |
-| `GET /docs` | 자동 생성 API 문서 |
-| `GET /openapi.json` | OpenAPI JSON |
+| `/` | `/classrooms`로 이동 |
+| `/classrooms` | 강의실 선택, 좌석 지도, 재석·부재·확인 필요 집계와 마지막 관측 시각 |
+| `/classrooms/create` | 강의실 등록 |
+| `/classrooms/{id}/edit` | 강의실 수정 |
+| `/classrooms/{id}/seats` | 좌석 배치 관리와 좌석-학생 지정·해제 |
+| `/classrooms/{id}/seats/create` | 좌석 추가 (배치도 위치 비율 입력) |
+| `/classrooms/{id}/seats/{seat_id}/edit` | 좌석 수정 |
+| `/classrooms/{id}/student-states` | 학생별로 저장된 상태 목록. `/classrooms/any/student-states`는 첫 강의실로 302 |
+| `/classrooms/{id}/seat-assignments` | 레거시 URL. 좌석 관리 화면(`/classrooms/{id}/seats`)으로 302 |
+| `/roi-connections` | 강의실 카메라의 **현재 화면을 캡처**해 그 위에 좌석별 다각형 ROI를 그리고 MongoDB에 저장. 이미 등록된 ROI를 좌석 이름과 함께 겹쳐 보여주고, 클릭해서 다시 그리거나 지울 수 있다. ROI 자동 생성 경로는 **탐지 기록에서 사람이 앉았던 자리를 찾는 것 하나**다([결정 0041](../../docs/architecture/decisions.md#0041--좌석-roi를-탐지-밀도에서-찾고-좌석-지정은-사람이-한다)). 좌석 격자를 사영하던 경로는 실제 배치와 맞지 않아 제거했다([결정 0050](../../docs/architecture/decisions.md#0050--좌석-roi-자동-생성을-탐지-밀도-경로-하나로-줄인다)). 미리보기 → 저장 → 확정을 거치며 확정 전에는 좌석 판정에 쓰이지 않는다. 캡처에는 `CAMERA_RTSP_SOURCES`가 필요하다([결정 0031](../../docs/architecture/decisions.md#0031--roi-기준-화면을-fastapi가-rtsp에서-직접-캡처한다)) |
+| `/identity-handover` | 입구 얼굴 신원을 CCTV 사람 track에 넘길 **CCTV 문 사각형 ROI** 관리. 현재 CCTV 화면을 캡처해 저장 영역을 겹쳐 보고 다시 그리며, 저장값은 worker가 주기적으로 읽어 재시작 없이 반영한다 |
+| `/students` | 학생 목록·등록과 얼굴 등록 상태 관리 |
+| `/students/{student_id}/face-enrollment` | 얼굴 등록. WebSocket으로 프레임을 보내며 품질·자세 가이드를 받는다 |
+| `/snapshots` | 탐지 스냅샷 목록. **"스냅샷 없음"과 "저장소 조회 실패"를 구분해 보여준다** |
+| `/monitoring` | 영상 source 목록과 연결 상태. demo가 꺼져 있으면 빈 상태 |
+| `/llm-search` | **자연어 탐지 검색.** 질문을 LLM이 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다. 탐지 인원이 바뀐 시점만 보여준다. **`LLM_SEARCH_MODE=disabled`(기본값)에서는 검색 폼 없이 안내만 나온다** — GPU가 있는 환경에서만 동작한다 |
 
-### 테스트
+`/classrooms/{id}` 상세 페이지는 없다. `/classrooms?classroom_id={id}`에서 같은
+정보를 선택해 본다.
 
-```bash
-cd webapps/fastapi
-python -m pytest
-```
+### API
 
-기본 실행은 memory mode를 명시해 외부 의존성 없이 동작하며 MongoDB 통합 테스트는
-`TEST_DATABASE_URL`이 없으면 건너뛴다.
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| `GET` | `/api/v1/classrooms` | 활성 강의실 목록 |
+| `POST` | `/api/v1/classrooms` | 강의실 생성 |
+| `GET` | `/api/v1/classrooms/{classroom_id}` | 한 강의실의 상세 정보 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 수정 (전달한 필드만 갱신) |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}` | 한 강의실 삭제 (비활성화) |
+| `GET` | `/api/v1/classrooms/{classroom_id}/occupancy` | 한 강의실의 좌석 지도와 현재 점유 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/occupancy-events` | SSE 좌석 점유 실시간 구독 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-states` | 지정 학생 전체의 저장된 상태 조회. 여기서 판정하지 않는다([결정 0032](../../docs/architecture/decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)) |
+| `GET` | `/api/v1/classrooms/{classroom_id}/students/{student_id}/state-history` | 한 학생의 상태 전이 이력을 최신순으로 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/student-state-events` | 강의실별 학생 상태 SSE 변경분 구독 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석에 학생 지정 (같은 강의실 내 이동·멱등) |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment` | 좌석-학생 지정 해제 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/seat-assignments` | 강의실의 좌석-학생 지정 현황 |
+| `POST` | `/api/v1/students` | 학생 인적사항 저장. 생성 리소스는 `Location` 헤더로 반환 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 ROI 기준 JPEG·PNG 이미지를 메모리에 첨부 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-reference-image/capture?camera_id=...` | **카메라의 현재 화면을 RTSP로 잡아 ROI 기준 이미지로 저장.** 실측 1.5~4.2초가 걸리고, 실패는 502 `CAMERA_FRAME_UNAVAILABLE`이다 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-reference-image?camera_id=...` | 카메라별 현재 ROI 기준 이미지 조회 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/roi-connections?camera_id=...` | 카메라·좌석별 ROI 조회. query를 생략하면 legacy 포함 전체 조회 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-connections/auto/from-detections` | **탐지 기록에서 사람이 앉았던 자리를 찾는다.** 저장하지 않고 자리 목록만 돌려준다 — 어느 자리가 몇 번 좌석인지는 카메라가 알 수 없어 관리자가 지정한다([결정 0041](../../docs/architecture/decisions.md#0041--좌석-roi를-탐지-밀도에서-찾고-좌석-지정은-사람이-한다)) |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-connections/auto/from-detections/apply` | 관리자가 좌석을 지정한 자리를 ROI로 저장한다. 좌표의 근거가 캡처 화면이 아니라 탐지 기록이라 `reference_image_revision=0`으로 저장돼 **재시작·재캡처에도 남는다** |
+| `POST` | `/api/v1/classrooms/{classroom_id}/roi-connections/auto/confirm` | 자동 생성분을 확정해 좌석 판정에 넣는다. 기준 화면이 바뀐 것은 확정하지 않고 `stale_count`로 알린다 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection` | body의 `camera_id` 좌표계에 좌석 ROI를 저장 |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/seats/{seat_id}/roi-connection?camera_id=...` | 좌석 하나의 ROI를 삭제. 그 카메라는 해당 좌석을 관측하지 않게 된다. 지울 것이 없으면 404 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/roi-connection` | `camera_id`·좌석·legacy 학생 연결과 ROI를 기준 이미지 없이 저장(`revision=0`). **화면은 더 이상 이 경로를 쓰지 않는다** |
+| `GET` | `/api/v1/classrooms/{classroom_id}/identity-handover-routes` | 강의실의 입구→CCTV 인계 route와 저장 좌표 조회 |
+| `PUT` | `/api/v1/classrooms/{classroom_id}/identity-handover-routes/{classroom_camera_id}` | `IDENTITY_ONLY` 입구 카메라와 `SEAT_JUDGING` CCTV 사이의 정규화 사각형 문 ROI 저장 |
+| `DELETE` | `/api/v1/classrooms/{classroom_id}/identity-handover-routes/{classroom_camera_id}` | CCTV 인계 route 삭제. 다음 worker 갱신부터 새 인계를 중단 |
+| `POST` | `/api/v1/classrooms/{classroom_id}/identity-handover-reference-image/capture?camera_id=...` | CCTV 현재 RTSP 프레임을 인계 ROI 전용 기준 이미지로 캡처. 좌석 ROI 기준 이미지 revision에는 영향을 주지 않는다 |
+| `GET` | `/api/v1/classrooms/{classroom_id}/identity-handover-reference-image?camera_id=...` | 캡처한 인계 ROI 기준 JPEG 조회 |
+| `GET` | `/api/v1/video-streams` | 영상 source 목록. demo + 실제 source |
+| `POST` | `/api/v1/video-streams` | 실제 카메라 source 등록. MongoDB mode에는 seed가 없어 이 경로로 넣으며, 입구 카메라는 `role=IDENTITY_ONLY`로 등록한다 |
+| `GET` | `/api/v1/video-streams/{stream_id}` | 한 source의 상태. 목록의 `id`로 조회하며 `camera_id`도 받는다 |
+| `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions` | 실제·enabled·WebRTC source의 재생 세션 생성 (결정 0014) |
+| `POST` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP offer signaling (MediaMTX proxy) |
+| `PATCH` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | ACTIVE 세션 재협상 signaling |
+| `DELETE` | `/api/v1/video-streams/{stream_id}/playback-sessions/{session_id}` | WHEP resource 종료·세션 CLOSED (idempotent) |
+| `GET` | `/api/v1/video-streams/{stream_id}/detections` | 카메라별 탐지 이벤트 조회 |
+| `GET` | `/api/v1/video-streams/{stream_id}/detection-events` | SSE 실시간 탐지 이벤트 구독 |
+| `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events` | 입구 얼굴 관측 이벤트 조회. 상태·학생·시간·limit·cursor 필터, 기본 최신 50건 |
+| `GET` | `/api/v1/video-streams/{stream_id}/entry-identity-events/stream` | 활성 `IDENTITY_ONLY` 입구 카메라의 얼굴 관측 SSE 구독. `entry-identity` 이벤트로 bbox·화면용 이름·분석 상태를 전달 |
+| `GET` | `/api/v1/video-segments` | 영상 세그먼트 메타데이터 조회 |
+| `POST` | `/api/v1/llm-searches` | 자연어 질문을 검증된 조건으로 바꿔 탐지 기록 검색. 해석한 계획을 응답에 함께 싣는다 |
+| `POST` | `/internal/inference/events` | worker 탐지 이벤트 수신 (멱등) |
+| `POST` | `/internal/entry-identity-events` | worker 입구 얼굴 관측 이벤트 수신. 신규 201, 동일 재전송 200, 충돌 409 |
+| `GET` | `/internal/identity-handover-routes` | 활성 강의실의 인계 route를 worker 형식으로 조회. worker가 기본 5초마다 갱신 |
+| `POST` | `/internal/video-segments` | worker 영상 세그먼트 수신 (멱등) |
+| `GET` | `/health` | 프로세스 기동 상태 |
+| `GET` | `/health/ready` | 현재 저장소 준비 상태 |
 
-실제 MongoDB 통합 테스트를 실행하려면 `TEST_DATABASE_URL` 경로에 `test_`로 시작하는
-database 이름을 명시한 뒤 다음 marker를 사용한다. fixture는 이름을 검증하며 database나
-컬렉션을 삭제하지 않는다.
+**내부 쓰기 API가 있다.** worker가 CCTV 탐지 이벤트(`/internal/inference/events`), 입구
+얼굴 관측 이벤트(`/internal/entry-identity-events`)와 영상 세그먼트
+(`/internal/video-segments`)를 보낼 수 있다. 로그인, 사용자 관리,
+알림, 관리자 대시보드는 현재 구현되어 있지 않다.
 
-```bash
-python -m pytest -m mongodb
-```
+실시간 모니터링 화면은 카메라 역할별 채널을 분리한다. `IDENTITY_ONLY` 입구캠은
+얼굴 관측 SSE에서 얼굴 bbox와 화면용 라벨을 받고, `SEAT_JUDGING` CCTV는 기존 객체
+탐지 SSE를 그대로 사용한다. 등록 학생은 활성 학생 조회에 성공할 때만 이름을 표시하며,
+그 외에는 `등록 얼굴`·`미등록 얼굴`·`판정 보류`로 표시한다. 실시간 응답에는
+`student_id`·학번·유사도·embedding·얼굴 이미지 등 내부 식별자나 생체 원본을 싣지 않는다.
 
-### 린트와 타입 검사
+### 좌석 상태 표기
 
-```bash
-cd webapps/fastapi
-python -m ruff check .        # 린트
-python -m ruff format .       # 포매팅
-python -m mypy                # 타입 검사 (대상은 pyproject.toml에 있다)
-```
+| 저장 값 | 화면 문구 | 의미 |
+| --- | --- | --- |
+| `OCCUPIED` | 재석 | 좌석 점유 관측이 confidence 기준 이상이다. **학생 신원을 뜻하지 않는다** |
+| `VACANT` | 부재 | 좌석 비점유 관측이 confidence 기준 이상이다. **지정 학생의 부재를 확정하지 않는다** |
+| `UNKNOWN` | 확인 필요 | 미관측, 낮은 confidence 또는 신뢰할 수 없는 관측이다 |
 
-`ruff check --fix`로 자동 수정할 수 있는 지적은 `[*]` 표시가 붙는다.
-병합 전에는 세 명령과 `python -m pytest`가 모두 통과해야 한다.
+색만으로 상태를 구분하지 않고 문구와 기호를 함께 쓴다.
+**관측 실패나 영상 없음을 `VACANT`로 바꾸지 않는다.**
 
-설정은 [`pyproject.toml`](./pyproject.toml)에 있다. 저장소 최상위가 아니라 이 디렉터리에
-두는 이유와 각 규칙을 켠 이유는 그 파일의 주석에 적혀 있다.
+좌석 점유도 학생 상태와 같은 카메라별 ROI로 판정한다
+([결정 0020](../../docs/architecture/decisions.md#0020--좌석-위치-판정의-정본을-roi-하나로-통일한다)).
+**관측 대상은 그 카메라에 ROI가 등록된 좌석뿐이다** — 강의실을 나눠 보는 구성에서 다른
+카메라 담당 좌석을 덮어쓰지 않기 위해서다. 그래서 **ROI를 등록하지 않은 카메라의 좌석은
+계속 `UNKNOWN`으로 남는다.** `seat.geometry`는 배치도를 그리는 좌표이며 판정에 쓰지 않는다.
 
-**mypy는 `strict` 모드다.** 공개 함수의 인자와 반환값에 타입 힌트를 붙이라는
-[코딩 규칙](../../docs/conventions/coding-convention.md#python)을 도구로 강제하는 것이며,
-새 제약을 더하는 것이 아니다.
+### 합성 데모
 
-Scripts 디렉터리가 PATH에 없을 수 있어 `ruff`·`mypy`를 직접 부르지 않고
-`python -m` 형태로 적었다. `python -m pytest`, `python -m uvicorn`과 같은 방식이다.
+`APP_ENV=local|dev`와 `DEMO_MODE_ENABLED=true`를 함께 설정할 때만 강의실·좌석 seed를
+넣는다(`app/demo_seed.py`). 개인정보가 없는 고정 fixture다.
 
-## 서비스 목적
+**데모 영상 검색(`/video-search`)과 합성 영상 catalog는 걷어냈다.** 실제 카메라가
+붙은 뒤로는 쓰이지 않았고, `/api/v1/video-streams`가 합성 source를 실제 source와 섞어
+돌려주고 있었다. 지금은 등록된 실제 카메라만 나온다.
 
-외부 클라이언트 요청의 유일한 진입점이다.
-인증과 권한을 판정하고, 비즈니스 로직을 수행하고, 저장된 데이터를
-API 응답 또는 Jinja2 템플릿으로 렌더링한 화면으로 제공한다.
+영상 원본은 저장하지 않는다. 등록된 카메라가 없으면 `/monitoring`은 404가 아니라
+빈 상태를 반환한다.
 
-## 책임
+## 핵심 도메인 규칙
 
-- HTTP API 정의와 요청·응답 스키마 관리
-- Jinja2 템플릿 렌더링과 화면 구성
-- 인증 및 권한 판정
-- 비즈니스 로직 조정(여러 서비스 호출의 순서와 실패 처리)
-- 데이터 저장소 접근
-- 오류 처리와 오류 응답·오류 화면
+- 좌석 관측은 batch 전체를 먼저 검증하고 event ID로 멱등 처리한다. confidence 기준
+  미만은 `UNKNOWN`이고 오래된 관측은 현재 상태를 되돌리지 않는다.
+- 조회 GET은 저장된 상태를 바꾸지 않는다. 시간 기반 평가는 명시적인 쓰기 요청에서만
+  수행한다.
+- 신뢰도 등급 같은 해석은 서비스 계층이 계산해 템플릿에 넘긴다. 템플릿은 enum을
+  새로 판정하지 않는다.
+- 저장소를 사용할 수 없으면 부분 데이터나 demo로 대체하지 않고 503을 반환한다.
 
-## 디렉터리 구조
+학생 식별과 상태 판정이 들어오면 지킬 규칙은
+[MVP 명세](../../docs/specs/student-monitoring-mvp.md)와
+[fastapi 에이전트 규칙](../../docs/agents/fastapi-agent.md#학생-상태-판정)에 있다.
 
-기술 계층별이 아니라 **기능(도메인)별**로 나눈다.
-기능 하나를 추가·삭제·리뷰할 때 디렉터리 하나만 보면 된다.
+## 내부 구조
+
+기능별 디렉터리와 `router -> service -> port <- adapter` 호출 방향을 사용한다. 라우터는
+HTTP 변환만, 서비스는 프레임워크와 분리된 판단만 담당한다. 저장소 구현의 조립은
+`app/shared/dependencies.py` 한 곳에 둔다. 배경은
+[결정 0001](../../docs/architecture/decisions.md#0001--fastapi-계층형-구조와-경계-포트)에 있다.
 
 ```text
 app/
-├─ main.py                 앱 조립. 라우터 등록, 정적 마운트, 예외 핸들러
-├─ auth/                   로그인, JWT 검증, refresh rotation, 공통 인증 dependency
-├─ users/                  사용자 CRUD, RBAC, memory/MongoDB 저장소
-├─ audit/                  민감정보를 제거한 사용자·역할·상태 변경 감사 로그
-├─ employees/              직원 CRUD, 상태 정책, override, memory/MongoDB 저장소
-├─ notifications/          사용자별 인앱 알림, 읽음, dedupe, mock delivery 저장소
-├─ interview_waits/        면담 대기 상태·이력, 직원 복귀 연계, memory/MongoDB 저장소
-├─ classrooms/             강의실·일정·좌석 점유·마감 후 경고, memory/MongoDB 저장소
-├─ admin/                  기존 원본 컬렉션의 읽기 전용 운영 집계·감사 로그 조회
-├─ events/                 탐지 이벤트
-│  ├─ router.py            HTTP 관심사. page_router(HTML) + api_router(JSON)
-│  ├─ service.py           비즈니스 로직. 포트에만 의존
-│  ├─ rules.py             탐지 결과를 업무 의미로 바꾸는 순수 함수
-│  ├─ schemas.py           Pydantic 요청·응답 스키마
-│  ├─ models.py            도메인 모델(dataclass)
-│  ├─ ports.py             외부 I/O 인터페이스(Protocol)
-│  └─ adapters/            포트 구현체
-│     ├─ memory_repository.py    외부 의존 없는 local·테스트 구현체
-│     └─ mongo_repository.py     같은 포트를 구현하는 PyMongo 구현체
-└─ shared/                 공통 설정·예외·의존성 조립
-   ├─ config.py            pydantic-settings
-   ├─ database.py          PyMongo client·database 선택, ping, index 초기화
-   ├─ errors.py            도메인 예외와 오류 응답 형식
-   ├─ dependencies.py      어댑터 조립. 저장소 교체 시 고치는 유일한 파일
-   ├─ schemas.py           health/readiness 응답 스키마
-   ├─ security.py          Argon2, JWT, CSRF, IP HMAC fingerprint
-   └─ templating.py        Jinja2 설정
+├─ main.py              앱 조립, 라우터 등록, 예외 처리
+├─ classrooms/          강의실, 좌석, 좌석 점유 관측
+├─ students/            학생 원장 등록·조회와 memory/MongoDB 저장소
+├─ video_monitoring/    영상 source 목록과 검색 (local/dev 합성 catalog)
+├─ face_enrollment/     능동형 얼굴 등록 세션·품질·pose 완료 판정
+├─ entry_identity_events/ 입구 얼굴 관측 이벤트 저장·관리 조회
+├─ student_monitoring/  탐지 이벤트 수신·SSE·영상 세그먼트 메타데이터
+├─ llm_search/          자연어 질문 → 검증된 검색 조건 → 탐지 기록 조회
+├─ shared/              설정, 저장소 조립, 공통 오류·템플릿·스키마
+└─ demo_seed.py         demo fixture 멱등 생성
 
-templates/                 Jinja2 템플릿
-├─ base.html               공통 레이아웃
-├─ auth/                   로그인 화면
-├─ users/                  사용자 관리 화면
-├─ employees/              직원 목록·상세 화면
-├─ admin/employees/        직원 관리·명시적 정책 평가 화면
-├─ admin/dev_tools/        환경별로 등록되는 구조화 mock 관측 화면
-├─ admin/mock_deliveries/  환경별로 등록되는 정제된 mock delivery 화면
-├─ notifications/          사용자별 알림함
-├─ interview_waits/        본인·STAFF 면담 대기 목록과 상세
-├─ classrooms/             강의실 목록과 geometry/code 순 좌석 상세
-├─ admin/classrooms/       강의실·요일 일정·좌석 숫자 geometry 관리
-├─ admin/alerts/           OPEN 우선 마감 후 경고와 해결 action
-├─ admin/dashboard.html    운영 요약 카드와 최근 활동
-├─ admin/audit_logs.html   필터·페이지가 있는 마스킹 감사 로그
-├─ events/                 기능별 템플릿
-└─ errors/                 오류 화면
-
-static/                    css, 브라우저 스크립트, 이미지
-tests/                     기본 테스트와 선택적 integration/ MongoDB 테스트
+templates/              기능별 Jinja2 화면
+static/                 CSS와 화면 보조 JavaScript
+api-spec/               구현 전 API 설계 명세 JSON
+tests/                  단위·API·템플릿·선택적 MongoDB 통합 테스트
 ```
 
-기능이 늘어나면 같은 구조의 기능 디렉터리를 추가한다.
+`face_enrollment`는 memory
+저장소와 SCRFD 중앙 분석 HTTP 어댑터를 사용하는 local MVP가 구현됐다.
+`student_monitoring` 도메인이 구현되어 탐지 이벤트 수신·MongoDB 저장, 학생 상태 판정과
+REST·SSE 발행이 동작한다. 탐지 SSE의 bbox 라벨은 FastAPI가 확인한 활성 학생 이름만
+사용하고 그 외에는 `사람`으로 표시한다. 학생 상태 SSE는 현재 in-memory broadcaster를
+사용하므로 단일 FastAPI 프로세스에서만 전달되며 replay와 다중 프로세스 fan-out은 지원하지
+않는다.
 
-호출 방향은 `router → service → port ← adapter`다.
-**서비스 계층은 어댑터를 직접 import하지 않는다.**
-어댑터를 서비스에 연결하는 조립 코드는 `shared/`에 한 곳으로 모은다.
+**판정 구조는 [결정 0032](../../docs/architecture/decisions.md#0032--학생-상태-판정을-좌석-근거-하나에서-파생시키고-수신-시점에-저장한다)를
+따른다.** 요약하면 이렇다.
 
-현재 포트는 프로세스 밖 I/O인 저장소 경계에만 만든다. mock HTTP 입력과 같은 프로세스의
-서비스 호출에는 포트를 만들지 않는다.
-선택 배경과 포트 판단 기준은 [ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)에 있다.
+```text
+탐지 이벤트 → SeatEvidence(좌석별 근거) ┬→ 좌석 점유 (classrooms)
+                                        └→ 학생 상태 (state_rules) → 저장 + 이력 + SSE
+```
 
-포트 외의 설계 패턴(파사드·Strategy·Observer 등)을 언제 만들어도 되는지는
-[ADR-0005](../../docs/architecture/decisions/ADR-0005-design-pattern-scope.md)의 판정 질문으로 정한다.
-현재는 모두 "아직 만들지 않는다" 상태이며, `service.py`가 라우터에 대한 파사드 역할을 겸한다.
+- 좌석 점유와 학생 상태가 **같은 근거**에서 갈라진다. 두 화면이 어긋날 수 없다.
+- 판정 규칙은 `app/student_monitoring/state_rules.py`의 **순수 함수**다. 저장소·HTTP·
+  시계에 의존하지 않으므로 입력만 놓고 판정을 재현할 수 있다.
+- **판정은 탐지 이벤트를 받을 때만 한다.** 조회는 저장된 값을 읽기만 하고, 근거가 오래된
+  판정은 화면에서 `UNKNOWN`으로 가릴 뿐 저장된 값을 바꾸지 않는다.
+- 상태는 `PRESENT` / `WRONG_SEAT` / `IN_CLASSROOM` / `ABSENT` / `UNKNOWN` 다섯이고,
+  모든 판정에 근거 코드(`StudentStateReason`)가 붙는다. `UNKNOWN` 하나로는 "좌석을 못
+  봤다"와 "누군가 있는데 누군지 모른다"가 구분되지 않기 때문이다.
+- **`ABSENT`는 지정 좌석이 비어 있는 것을 유예 시간 동안 계속 본 경우에만 나온다.**
+  카메라가 죽거나 ROI가 없어 관측이 끊기면 `UNKNOWN`이다 — 미관측은 부재가 아니다.
 
-템플릿은 기능별로 나누되 `app/` 밖에 둔다. Python 코드와 템플릿 파일을 섞지 않는다.
+입구 SCRFD·활성 얼굴 인식 모델 결과는 좌석 탐지와 분리된 얼굴 관측 이벤트로 저장되고, worker가
+CCTV 문 ROI의 유일한 ByteTrack에 인계한 `student_id`·`identity_confidence`만 학생 상태
+판정으로 들어온다. 세부 계약은
+[worker/inference/MODEL_INTEGRATION.md](../../worker/inference/MODEL_INTEGRATION.md)를 본다.
+`students`는 학생 인적사항을 memory 또는 MongoDB 저장소에 영속화한다. 학생 등록은
+`/students`의 등록 dialog가 `POST /api/v1/students` 계약을 사용해 처리한다. 좌석 화면은
+등록된 학생을 선택한 뒤 `PUT /api/v1/classrooms/{classroom_id}/seats/{seat_id}/assignment`로
+지정한다. 학생 관리 화면의 얼굴 등록 모달은 기존 얼굴 등록 API를 재사용하며 동의 확인,
+촬영, 완료 순서로 진행된다.
+책임과 목표 계약은 [MVP 명세의 도메인 구조](../../docs/specs/student-monitoring-mvp.md#도메인-구조-예정)에 있다.
 
-## 포함해야 할 기능
+추론 연산, 스트림 연결·디코딩, 실제 영상 저장은 이 서비스에 포함하지 않는다.
+영상과 얼굴 데이터의 저장 범위·보존 기간·권한은 여전히 결정이 필요하다.
 
-- 라우터 계층(HTTP 관심사만 담당)
-- 서비스 계층(비즈니스 로직, 프레임워크 비의존)
-- Pydantic 스키마(요청·응답 검증)
-- 포트 정의와 어댑터 구현(현재 범위에서는 저장소)
-- Jinja2 템플릿과 정적 자산
-- 의존성 조립 지점
-- 오류 핸들러와 로깅
+## 환경변수와 설정
 
-## 포함하지 않아야 할 기능
+값은 두 파일에 나뉘어 있다. 환경마다 달라야 하는 값과 비밀값은 `.env.{local,dev,prod}`
+(전체 이름은 [`.env.example`](./.env.example)이 기준), 환경과 무관한 값은 커밋된
+[`config/settings.yml`](./config/settings.yml)에 있다. 어떤 `.env.*`를 읽을지는 실제
+OS 환경변수 `APP_ENV`가 정한다(없으면 `local`).
 
-- 모델 로딩과 추론 연산 자체(→ [deeplearning](../../deeplearning/README.md))
-- 스트림 연결 유지와 프레임 디코딩(→ [worker](../../worker/README.md))
-- 라우터 함수 안에 직접 작성한 비즈니스 로직
-- 템플릿 안의 비즈니스 판단(임계값 해석, 이벤트 분류)
-- 비밀값의 소스 코드 내 하드코딩
+### `.env.{local,dev,prod}`
 
-## 화면 작업 규칙
-
-- **템플릿에는 표시 로직만 둔다.** 판단은 서비스 계층에서 끝내고 템플릿에는 결과만 넘긴다.
-- **정상·빈 상태·오류 상태를 모두 다룬다.** "데이터 없음"과 "조회 실패"를 구분해 표시한다.
-- **상태를 색으로만 구분하지 않는다.** 문구나 아이콘을 함께 쓴다.
-- 이미지와 아이콘에 대체 텍스트를 넣고, 키보드로 모든 조작이 가능하게 한다.
-- 좁은 화면에서 레이아웃이 깨지지 않는지 확인한다.
-- 브라우저 스크립트는 화면 보조에 한정한다. 비즈니스 로직을 클라이언트로 옮기지 않는다.
-
-## 예상 기술
-
-| 항목 | 상태 | 비고 |
+| 이름 | 용도 | 제약 |
 | --- | --- | --- |
-| 언어 | Python | 타입 힌트 필수 |
-| 웹 프레임워크 | FastAPI | 프로젝트 전제 |
-| 템플릿 | Jinja2 | 화면을 서버에서 렌더링 |
-| 검증 | Pydantic | 요청·응답 스키마 |
-| 메타데이터 저장소 | MongoDB ([ADR-0003](../../docs/architecture/decisions/ADR-0003-metadata-store-mongodb.md)) | 동기 PyMongo, 저장소 포트 뒤에 격리 |
-| 내부 구조 | 계층형 + 경계 포트 ([ADR-0002](../../docs/architecture/decisions/ADR-0002-fastapi-layered-with-ports.md)) | |
+| `APP_ENV` | 실행 환경 | `local` / `dev` / `prod` |
+| `DATABASE_MODE` | 저장소 종류 | `memory` / `mongodb`. memory는 `local` 전용 |
+| `DATABASE_URL`, `DATABASE_NAME` | MongoDB 접속 정보 | mongodb mode에서 필수. URL은 비밀값 |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
+| `DEMO_MODE_ENABLED` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
+| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 이 값 미만의 좌석 관측은 `UNKNOWN` | 기본 0.3(실측으로 정했다). `0 <= x <= 1` |
+| `SEAT_OCCUPANCY_HOLD_SECONDS` | 마지막 점유 관측 뒤 좌석을 점유로 붙들어 두는 시간 | 기본 5초(실측으로 정했다). 0이면 붙들지 않는다 |
+| `PAGE_SIZE_DEFAULT`, `PAGE_SIZE_MAX` | 목록 페이지 크기 | 최대 200 |
+| `ROI_REFERENCE_IMAGE_MAX_BYTES` | ROI 임시 기준 이미지 업로드 제한 | 기본 5MB, 최대 20MB |
+| `CAMERA_RTSP_SOURCES` | ROI 기준 화면을 캡처할 카메라 접속 정보 | `<카메라 식별자>=<RTSP URL>`을 쉼표로 잇는다. worker의 `STREAM_SOURCES`와 같은 형식. **비밀값이다.** 비우면 캡처만 꺼진다 |
+| `CAMERA_FRAME_CAPTURE_TIMEOUT_SECONDS` | 캡처 한 번의 제한 시간 | 기본 15초 |
+| `FACE_ENROLLMENT_REQUIRED_SAMPLES` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
+| `FACE_ENROLLMENT_AUGMENTED_SAMPLES` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
+| `FACE_POSE_*_QUOTA` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
+| `FACE_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 환경변수로 조정 |
+| `FACE_MOTION_SPEED_DPS_MAX` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
+| `FACE_PITCH_DOWN_DEGREES` | 아래 방향으로 분류하는 최소 pitch | 기본 5도. 위 방향 기준과 별도 적용 |
+| `FACE_LOCAL_SAMPLE_STORAGE_ENABLED` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
+| `FACE_LOCAL_SAMPLE_STORAGE_DIR` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
+| `SSE_HEARTBEAT_INTERVAL_SECONDS` | SSE heartbeat 간격 | 기본 30 |
+| `SSE_RECONNECTION_TIMEOUT_SECONDS` | SSE 재연결 타임아웃 | 기본 60 |
+| `DETECTION_EVENT_MAX_DETECTIONS_PER_EVENT` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
+| `DETECTION_EVENT_STALE_SECONDS` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `WHEP_BASE_URL` | WHEP proxy target의 base URL (결정 0014). source의 camera_id로만 조립된다 | 기본 `http://127.0.0.1:8889` |
+| `WHEP_TIMEOUT_SECONDS` | MediaMTX signaling 호출 타임아웃 | 기본 5 |
+| `PLAYBACK_SESSION_TTL_SECONDS` | 재생 세션 TTL | 기본 300. 30~3600 |
+| `PLAYBACK_SESSION_COOKIE_SECURE` | owner cookie Secure 플래그 | 기본 true. local/http에서는 false로 내려야 전송된다 |
+| `PLAYBACK_SESSION_SDP_MAX_BYTES` | SDP 본문 최대 크기 | 기본 65536 |
+| `FACE_ANALYZER_MODE`, `FACE_ANALYZER_URL` | 얼굴 분석 companion 방식과 주소 | local은 보통 `synthetic`, dev/prod는 `http` |
+| `FACE_RECOGNIZER` | 활성 얼굴 인식 모델 | AI 서버와 같은 `arcface` / `adaface` |
+| `STUDENT_IDENTITY_CONFIDENCE_THRESHOLD_ADAFACE` | AdaFace 학생 상태 판정 최소 similarity | AdaFace일 때 필수, 모델 평가값 사용 |
+| `SNAPSHOT_STORAGE_BACKEND` | 탐지 스냅샷 저장소 | `memory` / `minio`. local은 보통 `memory` |
+| `SNAPSHOT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY` | MinIO 접속 정보 | `minio` backend에서만 필수. 비밀값 |
+| `LLM_SEARCH_MODE` | 자연어 검색의 계획 생성 방식 | 기본 `disabled`(기능 차단). `stub`은 질문을 읽지 않고 "오늘 하루"만 돌려주는 **테스트 전용** 대역, `llama`는 llama-server 호출. [결정 0021](../../docs/architecture/decisions.md#0021--자연어-검색을-gpu-서버에서만-켜고-그-밖의-환경에서는-기능을-끈다) |
+| `LLM_SEARCH_URL` | llama-server의 OpenAI 호환 API 주소 | `llama` mode에서 필수. 기본 `http://127.0.0.1:8008` |
+| `LLM_SEARCH_MODEL` | 요청에 넣을 모델 이름 | llama-server의 `LLAMA_ARG_ALIAS`와 같아야 한다. 기본 `gemma` |
+| `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트용 | database 이름이 `test_`로 시작해야 한다 |
 
-동기 service/repository 계약과 맞는 공식 드라이버가 필요해 `pymongo>=4.17,<5`를 사용한다.
-현재 4.x 범위 안의 호환 업데이트는 허용하고, breaking change 검토가 필요한 다음 major는
-자동으로 설치하지 않는다. ORM이나 별도 MongoDB mock 패키지는 사용하지 않는다.
+### `config/settings.yml`
 
-비밀번호는 FastAPI의 현재 보안 가이드와 맞는 `pwdlib[argon2]`, JWT는 고정 `HS256`
-algorithm과 필수 claim을 검증하는 `PyJWT`를 사용한다. 원문 비밀번호와 refresh token은
-저장하지 않으며 브라우저 JavaScript에 access/refresh token을 노출하지 않는다.
-
-## 다른 서비스와의 관계
-
-현재 MVP 직원 상태 기능은 다른 서비스와 연동하지 않는다. mock 관측은 사람이 입력한
-boolean, confidence, UTC 시각만 받고 카메라·영상·AI·RPA 계약을 정의하지 않는다.
-
-## 환경변수
-
-값의 취급과 명명 규칙, 필수값 검증 방식은 [환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
-
-| 이름 | 용도 | 비고 |
+| 이름 | 용도 | 제약 |
 | --- | --- | --- |
-| `APP_ENV` | 실행 환경 구분 | `local` / `dev` / `prod` |
-| `DATABASE_MODE` | 저장소 구현 선택 | `memory` / `mongodb`, memory는 local 전용 |
-| `DATABASE_URL` | MongoDB 접속 정보 | MongoDB mode 필수, 비밀값, 응답·로그 비노출 |
-| `DATABASE_NAME` | MongoDB database 이름 | MongoDB mode 필수 |
-| `DATABASE_CONNECT_TIMEOUT_SECONDS` | MongoDB 연결 제한 시간 | 기본 5초 |
-| `MOCK_INPUTS_ENABLED` | mock 직원 관측 API·개발 도구 등록 | 기본 false, prod에서 true 금지 |
-| `EMPLOYEE_AWAY_AFTER_SECONDS` | 마지막 사람 있음 후 AWAY 기준 | 기본 180초 |
-| `EMPLOYEE_OFFSITE_AFTER_SECONDS` | 마지막 사람 있음 후 OFFSITE 기준 | 기본 3600초, AWAY보다 커야 함 |
-| `NOTIFICATION_MOCK_DELIVERY_MODE` | mock 입력 허용 환경의 기록 결과 | `success` / `fail_once` / `always_fail` |
-| `NOTIFICATION_MOCK_DELIVERY_MAX_ATTEMPTS` | 명시적 mock delivery 최대 시도 | 기본 3, 최대 10 |
-| `INTERVIEW_WAIT_EXPIRES_AFTER_HOURS` | 면담 대기 만료 기준 | 기본 24시간, 1~168시간 |
-| `SEAT_OCCUPANCY_CONFIDENCE_THRESHOLD` | 좌석 UNKNOWN 판정 confidence 기준 | 기본 0.6, 0~1 |
-| `JWT_ACCESS_SECRET` | access JWT 서명 | 필수 비밀값, 32자 이상, 기본값 없음 |
-| `JWT_REFRESH_SECRET` | refresh JWT 서명 | 필수 비밀값, 32자 이상, access와 분리 |
-| `CSRF_SECRET` | CSRF token 서명 | 필수 비밀값, 32자 이상 |
-| `AUDIT_IP_HASH_SECRET` | audit·rate limit IP HMAC | 필수 비밀값, 32자 이상 |
-| `WEB_ORIGIN` | 브라우저 쓰기 요청 허용 origin | 필수, exact match |
-| `AUTH_ACCESS_TOKEN_TTL_SECONDS` | access token 유효기간 | 기본 900초 |
-| `AUTH_REFRESH_TOKEN_TTL_SECONDS` | refresh token 유효기간 | 기본 604800초 |
-| `AUTH_LOGIN_MAX_FAILURES` / `AUTH_LOCKOUT_SECONDS` | 계정 실패 제한·잠금 | 기본 5회·900초 |
-| `AUTH_IP_MAX_FAILURES` / `AUTH_IP_WINDOW_SECONDS` | IP 지문 실패 제한 | 기본 20회·300초 |
-| `AUTH_PASSWORD_MIN_LENGTH` | 비밀번호 최소 길이 | 기본 12자, 대·소문자/숫자/기호 필요 |
-| `AUTH_SEED_ENABLED` | 네 역할 가상 사용자 seed | 기본 false, local/dev에서 명시적으로 사용 |
-| `AUTH_SEED_*_PASSWORD` | 역할별 seed 비밀번호 | seed 활성화 시 환경 주입, 문서·로그 비노출 |
-| `HIGH_CONFIDENCE_THRESHOLD` | 기존 이벤트 신뢰도 high 기준 | 0.0~1.0 |
-| `MEDIUM_CONFIDENCE_THRESHOLD` | 기존 이벤트 신뢰도 medium 기준 | 0.0~1.0, high 이하 |
-| `PAGE_SIZE_DEFAULT` | 목록 기본 크기 | 기본 50 |
-| `PAGE_SIZE_MAX` | 목록 최대 크기 | 최대 200 |
-| `TEST_DATABASE_URL` | 선택적 MongoDB 통합 테스트 접속 정보 | URL 경로 DB 이름은 `test_` 접두사 필수 |
+| `database_connect_timeout_seconds` | 연결 타임아웃 | 기본 5. `0 < x <= 60` |
+| `demo_mode_enabled` | 합성 영상·검색 demo | 기본 false. `local`/`dev` 전용. prod 금지 |
+| `seat_occupancy_confidence_threshold` | 이 값 미만의 좌석 관측·학생 사람 탐지는 `UNKNOWN` | **기본 0.3.** 3A컴퓨터실 CCTV 실측으로 정했다 — 이전 0.6은 실제 6명 중 1명만 통과시켰다. 근거는 `config/settings.yml` 주석에 있다 |
+| `seat_occupancy_hold_seconds` | 마지막 점유 관측 뒤 좌석을 점유로 유지하는 시간 | **기본 5초.** 앉은 사람도 프레임마다 잡히지는 않아 이것이 없으면 좌석이 몇 초마다 깜빡인다. 정책 비교와 근거는 `config/settings.yml` 주석에 있다 |
+| `page_size_default`, `page_size_max` | 목록 페이지 크기 | 최대 200 |
+| `face_enrollment_required_samples` | 얼굴 등록 완료 최소 실제 촬영 유효본 수 | 기본 120 |
+| `face_enrollment_augmented_samples` | local 데이터셋 완료 시 생성할 증강본 수 | 기본 180 |
+| `face_pose_*_quota` | 방향별 실제 촬영 유효본 수 | 합계가 전체 필수 수와 같아야 함. 기본값은 정면 32, 좌·우 각 24, 위·아래 각 20장 |
+| `face_*` 품질 설정 | 탐지·크기·roll·흐림·밝기·landmark·가림·중복·pose 기준 | 코드가 아닌 설정 파일로 조정 |
+| `face_motion_speed_dps_max` | 프레임 간 허용 머리 각속도 | 기본 220도/초. 초과 프레임은 저장하지 않음 |
+| `face_local_sample_storage_enabled` | local 테스트의 유효 JPEG 파일 저장 | 기본 false, local 전용 |
+| `face_local_sample_storage_dir` | local 얼굴 샘플 저장 위치 | 기본 `local_face_data`, Git 추적 제외 |
+| `sse_heartbeat_interval_seconds` | SSE heartbeat 간격 | 기본 30 |
+| `sse_reconnection_timeout_seconds` | SSE 재연결 타임아웃 | 기본 60 |
+| `detection_event_max_detections_per_event` | 탐지 이벤트당 최대 탐지 수 | 기본 100 |
+| `detection_event_stale_seconds` | 탐지 이벤트 stale 판정 기준 | 기본 300 |
+| `student_identity_confidence_threshold` | ArcFace 학생 상태 판정 최소 similarity | 기존 기본 0.5. `0 <= x <= 1` |
+| `student_identity_hold_seconds` | 마지막 식별 뒤 직전 판정을 이어받는 시간 | 기본 15. **실측 근거 없는 기본값이다** |
+| `student_absent_grace_seconds` | 지정 좌석이 비어 있는 것을 이만큼 계속 본 뒤 `ABSENT` | 기본 300. **팀 합의값이 아니다** |
+| `student_state_history_limit` | 상태 전이 이력 조회 개수 | 기본 50. 최대 200 |
+| `entry_identity_event_retention_days` | 입구 얼굴 관측 메타데이터 보존일 | 기본 7일. MongoDB TTL과 memory 지연 만료에 동일 적용 |
+| `snapshot_storage_bucket`, `_secure`, `_timeout_seconds` | 스냅샷 버킷 이름·TLS·타임아웃 | 접속 정보(`endpoint`·키)는 `.env.*`에 있다 |
+| `llm_search_timeout_seconds` | 계획 생성 타임아웃 | 기본 20. `0 < x <= 120`. 생성은 조회보다 느리다. **호출 한 번의 상한이다** — 모델이 규격을 벗어나면 한 번 더 물으므로 최악의 경우 두 배까지 걸린다 |
+| `llm_search_max_span_days` | 조회 기간 상한 | 기본 7. 넘으면 거절하지 않고 줄인 뒤 응답에 알린다 |
+| `llm_search_scan_limit` | 카메라 한 대에서 한 번에 읽는 탐지 이벤트 수 | 기본 500. 걸리면 응답의 `truncated`가 참이 된다 |
 
-MongoDB mode는 시작 시 ping한 뒤 events, users, refresh_tokens, audit_logs, employees,
-employee_status_history, employee_observations, notifications, notification_deliveries,
-interview_waits, interview_wait_history, classrooms, seats, seat_observation_batches,
-seat_occupancy_history, after_hours_alerts의
-고정 이름 index를 초기화한다. email, employee_no, STAFF 연결, refresh hash,
-operation/event ID, 알림 dedupe key와 notification+attempt는 unique index로 중복을 막고
-사용자·직원 갱신은 compare-and-set으로 경합을 감지한다. multi-document transaction을
-가정하지 않는다.
+최종 `ABSENT` 판정에 필요한 수업 시간표·유예 시간 설정은 아직 없다. 예정 목록은
+[MVP 명세의 설정](../../docs/specs/student-monitoring-mvp.md#설정-예정)에 있다.
 
-관리자 대시보드는 별도 제품 컬렉션이나 materialized view를 만들지 않고 위 원본 컬렉션을
-제한된 쿼리로 집계한다. 최근 활동은 시각 내림차순·ID 오름차순으로 안정 정렬하며 기본 범위는
-최근 24시간이다. 원본 쿼리 하나라도 실패하면 불완전한 수치를 섞지 않고 요청 전체를 503으로
-처리한다. 조회 API와 화면에는 자동 polling, background 갱신, 쓰기 동작이 없다.
+환경변수·yml의 저장·명명 규칙은
+[환경변수 규칙](../../docs/conventions/environment-convention.md)을 따른다.
+실제 비밀값과 `.env.local`/`.env.dev`/`.env.prod`는 커밋하지 않는다.
 
-`NotificationService.create()`는 후속 같은-process 기능이 호출하는 생성 API다. 일반 사용자가
-알림을 임의 생성하는 HTTP API는 없다. 알림 `data`는 제한된 구조화 값과 허용된 내부 route만
-저장하며 token·cookie·비밀번호·영상·이미지 관련 키를 거부한다. mock delivery는
-`MOCK_INPUTS_ENABLED=true`에서만 기록·조회하고 외부 SDK, 네트워크, background worker를
-사용하지 않는다. `fail_once`와 `always_fail` 재시도는 HTTP 요청 안에서만 명시적으로 실행한다.
+## 얼굴 등록 API와 화면
 
-직원 조회 GET은 저장된 상태만 반환하고 상태·이력·version을 변경하지 않는다. 3분 부재와
-60분 외근, override 만료는 `POST /api/v1/employee-status-evaluations` 또는 관련 쓰기에서만
-평가한다. override는 `AWAY`와 `OFFSITE`만 허용하며 해제 시 최신 유효 mock 관측으로 즉시
-재평가한다. 시각은 API에서 ISO 8601 UTC로 주고받고 화면에서는 KST로 표시한다.
+- 화면: `/students/{student_id}/face-enrollment`
+- 세션 생성: `POST /api/v1/students/{student_id}/face-enrollments`
+- 상태 조회·취소: `GET`, `DELETE /api/v1/face-enrollments/{enrollment_id}`
+- 실시간 프레임: `WS /api/v1/face-enrollments/{enrollment_id}/frames`
+- 프로필 조회·삭제: `GET`, `DELETE /api/v1/students/{student_id}/face-profile`
 
-면담 대기는 요청자와 직원 조합당 활성 `WAITING` 또는 `READY` 한 건만 허용한다. 직원이 이미
-재석 중이면 즉시 `READY`, 부재 중이면 `WAITING`으로 만들며 부재→재석 전이에서만 `READY`
-알림을 한 번 생성한다. 목록·상세 GET은 상태와 이력을 변경하지 않고, 만료는 관리자 전용
-`POST /api/v1/interview-wait-expirations` 또는 관련 상태 변경 요청에서만 평가한다. 요청자와
-관리자는 활성 대기를 취소할 수 있고, `READY` 대기는 요청자·관리자·연결된 STAFF가 완료할 수 있다.
+현재 local 구현은 SCRFD 중앙 분석 서비스와 메모리 메타데이터 저장소를 사용한다.
+실제 얼굴 원본을 운영에서 처리하려면 관리자 인증과 MongoDB·MinIO 접근 통제가 선행돼야 한다.
 
-강의실 일정은 IANA timezone과 월요일 0~일요일 6의 당일 운영시간으로 저장한다. 좌석 geometry는
-0~1 범위의 `x/y/width/height` 숫자만 허용하고 도면이나 영상은 저장하지 않는다. 구조화 mock batch는
-좌석 소속·활성을 전부 검증한 뒤 처리하며 event_id 재전송은 멱등하다. confidence가 설정 기준보다
-낮으면 `UNKNOWN`, 이상이면 boolean에 따라 `OCCUPIED/VACANT`로 판정하고 오래된 관측은 current를
-되돌리지 않는다. 마감+grace 이후 실제 `OCCUPIED` 전이만 영업일별 경고·관리자 알림을 한 번 만들며,
-해결된 같은 영업일 경고는 다시 열지 않는다.
+모델별 대표 embedding은 `face_embeddings_arcface`와 `face_embeddings_adaface`에
+분리한다. `/students` 화면은 두 모델의 등록 여부와 현재 `FACE_RECOGNIZER`를 표시하고,
+기존 등록 학생도 활성 모델로 다시 촬영할 수 있다. 재등록은 활성 모델 컬렉션만 upsert하며
+다른 모델 embedding은 유지한다. FastAPI 설정과 분석 서버가 반환한 모델명이 다르면 저장하지
+않는다. 학생 얼굴 삭제는 두 컬렉션과 레거시 `face_embeddings`를 모두 정리한다.
 
-### 가상 사용자 seed
+레거시 ArcFace 복사와 저장소 밖 원본 폴더 기반 AdaFace 일괄 생성은 관리자 CLI를 사용한다.
+두 명령은 기본 dry-run이며 `--apply`를 명시하기 전에는 MongoDB에 쓰지 않는다.
 
-`AUTH_SEED_ENABLED=true`일 때만 아래 네 가상 이메일을 idempotent하게 만든다. 비밀번호는
-대응하는 `AUTH_SEED_*_PASSWORD` 환경변수에서만 받으며 소스·문서·로그에 기록하지 않는다.
+```bash
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  migrate-arcface-gallery
+python -m app.face_embeddings.admin --env-file ../../.docker/env/deeplearning.dev.env \
+  build-gallery --model adaface \
+  --manifest <외부 절대경로>/adaface-gallery.json \
+  --analyzer-url http://<deeplearning-host>:18100
+```
 
-| 이메일 | 역할 |
-| --- | --- |
-| `student@example.invalid` | `STUDENT` |
-| `staff@example.invalid` | `STAFF` |
-| `admin@example.invalid` | `ADMIN` |
-| `operator@example.invalid` | `SYSTEM_OPERATOR` |
+manifest는 `schema_version=1`과 학생별 `student_id`, 절대 `image_dir`만 허용한다. CLI
+출력에는 학생 ID·이름·학번·이미지 경로·embedding을 남기지 않는다.
 
-쓰기 API는 로그인 뒤 발급된 `som_csrf` cookie 값을 `X-CSRF-Token` header로 보내고
-`Origin`을 `WEB_ORIGIN`과 일치시켜야 한다. Jinja2 form은 같은 검증을 hidden field로 처리한다.
+직접 등록 테스트는 다음 순서로 한다.
 
-## 테스트 전략
+1. FastAPI와 분석 서버의 `FACE_RECOGNIZER`를 같은 모델로 설정한다.
+2. `/students`에서 현재 등록 모델과 학생별 ArcFace/AdaFace 상태를 확인한다.
+3. 활성 모델의 `등록` 또는 `다시 등록`을 눌러 동의를 확인하고 촬영을 완료한다.
+4. 화면을 새로 고친 뒤 해당 모델 상태가 완료인지 확인한다.
+5. 등록에 쓰지 않은 별도 촬영본으로 known 평가를 하고, 미등록 인물 촬영본으로 unknown
+   평가를 한다. ArcFace 임계값을 AdaFace에 재사용하지 않는다.
 
-- 서비스 계층은 포트를 memory fake로 대체해 단위 테스트한다. 실제 MongoDB가 필요 없다.
-- 라우터는 상태 코드, 검증 실패, 오류 응답 형식을 API 테스트로 검증한다.
-- 템플릿 렌더링은 정상·빈 상태·오류 상태가 각각 렌더링되는지 확인한다.
-- 인증 테스트는 hash/policy, 잠금·rate limit, refresh rotation·재사용, CSRF와 네 역할 권한표를 확인한다.
-- 사용자 여정 테스트는 관리자 로그인→사용자 생성→수정→비활성화를 수행한다.
-- 직원 테스트는 CRUD·STAFF 연결, 2분59초/3분/59분59초/60분 경계, GET 무부작용,
-  중복·역전 관측, CAS 재시도, override 권한·만료·해제 사용자 여정을 확인한다.
-- 알림 테스트는 사용자 격리, dedupe, 개별·전체 읽음, badge, 민감 데이터 제거,
-  mock delivery 실패·최대 시도·동일 attempt 방지와 production 라우터 미등록을 확인한다.
-- 면담 대기 테스트는 중복 방지, 상태 전이표, 역할별 조회·변경, 명시적 만료, 직원 복귀 연계,
-  알림 dedupe와 신청→복귀→알림 읽음→완료 사용자 여정을 확인한다.
-- 강의실 테스트는 일정·timezone·geometry 검증, confidence 0.599/0.6, 오래된 관측 보호,
-  batch 멱등·전체 검증, 마감·grace 경계, 경고 dedupe·해결과 좌석→경고→알림 사용자 여정을 확인한다.
-- 관리자 대시보드 테스트는 비활성 원본 제외, 0건, 안정 정렬, 역할 권한, 전체 503,
-  감사 필드 마스킹, 경고 해결 후 요약 감소와 MongoDB bounded query/index explain을 확인한다.
-- MongoDB 연결·index는 `mongodb` marker 통합 테스트로 분리한다.
-- 계약 변경 시 기존 응답 스키마 테스트를 함께 갱신한다.
+`face_local_sample_storage_enabled: false`인 local 테스트에서는 수집 원본을 프로세스
+메모리에서 완료 직후 embedding 생성에만 넘기고 파일로 보존하지 않는다. 서버를 재시작하면
+미완료 수집본은 사라진다.
+
+수집된 JPEG를 local에서 직접 확인하려면 `config/settings.yml`에서
+`face_local_sample_storage_enabled: true`로 바꾼다. 완료된 세션은
+`local_face_data/<YYYYMMDD-HHMMSS-student_id>/`에 카메라와 같은 해상도의 JPEG가
+`originals/<student_id>_<pose>_<sequence>.jpg` 형식으로 남는다. 실제 촬영본 120장이
+완료되면 `augmented/`에 교실 카메라의 저해상도·조명·흐림·압축·미세 회전을 모사한
+파생본 180장을 만들고, `manifest.json`에 원본·파생 관계와 적용 파라미터를 기록한다.
+증강본은 실제 촬영 진행률이나 프로필의 `sample_count`에 포함하지 않는다. 타원 바깥은
+분석 전에 어두운 단색으로 제거되며 취소·연결 중단 세션 폴더는 즉시 삭제된다. 메뉴의 `demo-student`는
+학생 원장·선택 화면이 구현되기 전의 local 테스트용 ID이며, 실제 학생 ID는
+`/students/{student_id}/face-enrollment` 경로로 전달된다.
+
+## 자연어 탐지 검색
+
+- 화면: `/llm-search` (질문은 쿼리스트링 `q`)
+- API: `POST /api/v1/llm-searches` — 본문 `{"question": "...", "limit": 20}`
+
+책임 분리는
+[결정 0016](../../docs/architecture/decisions.md#0016--자연어-검색에서-llm은-계획만-만들고-검증조회는-fastapi가-소유한다)이
+정한다. **LLM은 질문을 검색 조건 JSON으로 바꾸는 데서 끝나고 DB에 접근하지 않는다.**
+서버가 그 JSON을 검증한 뒤 기존 탐지 이벤트 저장소를 조회한다. 검증을 통과한 계획은
+응답의 `plan`과 화면에 그대로 노출되므로 어떻게 해석되었는지 확인할 수 있다.
+
+계획 생성 지연과 **첫 시도 규격 위반율**은 지표로 나간다([지표 노출](#지표-노출)).
+모델이 규격을 어기면 서비스가 한 번 더 묻는데, 사용자에게는 "조금 느리네"로만 보여서
+로그로는 재시도가 잦아지는 것을 알아채기 어렵다.
+
+기본 `LLM_SEARCH_MODE=stub`은 LLM 없이 "오늘 하루 전체, 대상 지정 없음" 계획을
+돌려준다. 계약과 화면 상태를 GPU 서버 없이 확인하기 위한 대역이며 자연어를 해석하지
+않는다. 실제 해석은 `llama`로 바꾸고 `.docker/compose.llm.yml`의 llama-server를
+띄운 뒤에 동작한다.
+
+결과는 **탐지 인원이 직전과 달라진 시점만** 남긴다. 탐지 이벤트는 카메라당 프레임마다
+한 건이라 전부 보여주면 거의 같은 줄이 수천 개가 된다.
+
+주의할 점 두 가지가 있다.
+
+- worker `pipeline`에 `FASTAPI_URL`을 설정하면 탐지 이벤트가
+  `/internal/inference/events`로 전달된다. 설정하지 않으면 로그만 남기므로 저장소와 검색
+  결과가 비어 있는 것이 정상이다. 실제 영상 없이 확인할 때는
+  [`worker/inference` 계약 fixture](../../worker/inference/MODEL_INTEGRATION.md)를 사용한다.
+- `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정한 worker는 deeplearning의 얼굴 식별
+  결과로 `student_id`를 채운다. 문 영역·통과 시간 route가 설정되면 신원을 CCTV
+  ByteTrack에 보수적으로 인계한다. route는 `/identity-handover`에서 관리하며 worker가
+  `/internal/identity-handover-routes`를 주기적으로 읽는다. 조회 장애 때는 마지막 정상
+  설정을 유지하고, 정상 응답이 빈 목록이면 새 인계를 끈다. 응답과 화면은 값을 그대로
+  통과시켜 이름과 `track_id`를 보여주며, 미식별이면 "식별 미연동"으로 표시한다. 실제
+  카메라에서는 얼굴 가중치·갤러리·문 영역·인계 시간 창을 별도로 검증해야 한다.
+
+## 지표 노출
+
+`METRICS_ENABLED`가 켜져 있으면(기본) 앱과 같은 포트에 `/metrics`를 연다.
+**끄면 라우트 자체를 만들지 않는다** — 500이나 404를 돌려주는 경로를 남기면 "지표가
+있는데 지금 실패한 것"과 "이 배포에는 없는 것"이 구분되지 않는다. 값은 import 시점에
+읽으므로 바꾸면 앱을 다시 띄워야 한다.
+
+```bash
+curl -s http://127.0.0.1:8000/metrics | grep classroom_monitoring_
+```
+
+지금 나오는 것은 **자연어 검색 지표뿐**이다(계획 생성 지연·재시도, 검색 지연,
+`json_schema` 폴백, 조회 상한 도달). HTTP 요청 일반 지표는 아직 없다.
+
+정의는 [`app/llm_search/metrics.py`](./app/llm_search/metrics.py)에 있고, 무엇을 왜
+재는지와 PromQL 예시는
+[`monitoring/internal/README.md`](../../monitoring/internal/README.md#지금-노출하는-지표--fastapi)가
+정본이다.
+
+**uvicorn을 워커 여러 개로 띄우면 값이 갈라진다.** 프로세스마다 레지스트리가 따로
+생기고 스크랩은 그중 하나에만 닿는다. 배포 방식이 `결정 필요`라 워커를 늘릴 때
+`prometheus_client`의 multiprocess 모드를 켜야 한다.
+
+## 검증
+
+```bash
+cd webapps/fastapi
+python -m ruff check app tests
+python -m ruff format --check app tests
+python -m mypy app tests
+python -m pytest -q
+```
+
+기본 테스트는 memory mode와 대역 저장소를 사용해 외부 서비스 없이 실행된다. MongoDB 통합
+테스트는 `TEST_DATABASE_URL`이 없으면 skip한다. 실제 MongoDB를 검증할 때는 URL 경로에
+`test_`로 시작하는 database 이름을 넣고 실행한다. fixture는 database나 collection을
+삭제하지 않는다.
+
+```bash
+python -m pytest -q -m mongodb
+```
 
 ## 관련 문서
 
+- [학생 모니터링 MVP 명세](../../docs/specs/student-monitoring-mvp.md) — 앞으로 만들 것
 - [FastAPI 에이전트 규칙](../../docs/agents/fastapi-agent.md)
-- `create-fastapi-feature` 스킬
 - [API 규칙](../../docs/conventions/api-convention.md)
-- [아키텍처 개요](../../docs/architecture/overview.md)
-- [데이터 흐름](../../docs/architecture/data-flow.md)
+- [테스트 배치 기준](./tests/README.md)
+- [아키텍처](../../docs/architecture/README.md)
+- [결정 기록](../../docs/architecture/decisions.md)

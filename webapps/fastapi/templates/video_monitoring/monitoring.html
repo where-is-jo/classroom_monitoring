@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}실시간 모니터링 · 학습 모니터링{% endblock %}
+{% block head_extra %}
+<script src="{{ url_for('static', path='/monitoring.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+  <header class="page-header">
+    <div class="title-wrap">
+      <p class="page-eyebrow">연결된 카메라</p>
+      <h1 class="page-title">실시간 모니터링</h1>
+    </div>
+    <div class="page-header-actions">
+      <button class="fullscreen-toggle" type="button" data-fullscreen-toggle aria-pressed="false">
+        <span class="fullscreen-toggle-icon" aria-hidden="true">⛶</span>
+        <span data-fullscreen-label>전체화면</span>
+      </button>
+    </div>
+  </header>
+
+  {% if real_streams %}
+    <section aria-labelledby="monitoring-streams-title">
+      <header class="page-header">
+        <div class="title-wrap">
+          <h2 id="monitoring-streams-title" class="page-subtitle">연결된 카메라 영상</h2>
+        </div>
+        {% if real_streams|length > 1 %}
+          {# 한 번에 한 화면만 본다. 카메라마다 화각과 비율이 다르고(어안 CCTV는 세로,
+             입구 카메라는 가로) 나란히 놓으면 둘 다 작아진다. #}
+          <div class="camera-switcher" role="tablist" aria-label="카메라 선택">
+            {% for stream in real_streams %}
+              <button class="camera-switcher-tab" type="button" role="tab"
+                      id="camera-tab-{{ stream.camera_id }}"
+                      data-camera-tab="{{ stream.camera_id }}"
+                      aria-controls="camera-panel-{{ stream.camera_id }}"
+                      aria-selected="{{ 'true' if loop.first else 'false' }}"
+                      tabindex="{{ '0' if loop.first else '-1' }}">
+                <span class="camera-switcher-label">{{ stream.camera_label }}</span>
+                <span class="camera-switcher-id">{{ stream.camera_id }}</span>
+              </button>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </header>
+      <div class="camera-monitoring-stage">
+        {% for stream in real_streams %}
+          {% set source_status = stream_service.get_source_status(stream) %}
+          {% set status_value = source_status.value %}
+          <article class="camera-monitoring-card" data-real-stream
+                   id="camera-panel-{{ stream.camera_id }}"
+                   {% if real_streams|length > 1 %}role="tabpanel" aria-labelledby="camera-tab-{{ stream.camera_id }}"{% endif %}
+                   data-stream-id="{{ stream.id }}" data-camera-id="{{ stream.camera_id }}"
+                   data-camera-role="{{ stream.role.value }}"
+                   {% if not loop.first %}hidden{% endif %}>
+            <div class="camera-monitoring-frame">
+              <video data-webrtc muted autoplay playsinline aria-label="{{ stream.camera_label }} 실시간 영상"></video>
+              <div class="camera-monitoring-error" data-video-error hidden role="alert">영상을 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.</div>
+            </div>
+            <div class="camera-monitoring-meta">
+              <div class="camera-monitoring-identity">
+                <p class="eyebrow">{{ stream.camera_id }}</p>
+                <h3>{{ stream.camera_label }}</h3>
+              </div>
+              <span data-source-status class="status-label status-label--{{ 'active' if status_value == 'CONNECTED' else ('stale' if status_value == 'STALE' else ('no-video' if status_value == 'NO_VIDEO' else 'unknown')) }}">{{ '탐지 수신 중' if status_value == 'CONNECTED' else ('탐지 지연' if status_value == 'STALE' else ('최근 탐지 없음' if status_value == 'NO_VIDEO' else '상태 확인 중')) }}</span>
+            </div>
+            <p class="card-meta">
+              <span>마지막 탐지 <strong data-last-detection>{{ stream.last_detection_at|kst_datetime_plain if stream.last_detection_at else '없음' }}</strong></span>
+            </p>
+            <p class="camera-analysis-status" data-analysis-status hidden role="status"></p>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% else %}
+    <section aria-labelledby="monitoring-empty-title">
+      <div class="empty" role="status">
+        <strong>연결된 카메라가 없습니다.</strong>
+        <p>카메라가 연결되기 전에는 영상이 표시되지 않습니다. 연결 실패를 학생 부재로 해석하지 않습니다.</p>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

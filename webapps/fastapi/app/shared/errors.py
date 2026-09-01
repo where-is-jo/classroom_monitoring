@@ -26,15 +26,6 @@ class DomainError(Exception):
         self.details = details or {}
 
 
-class EventNotFoundError(DomainError):
-    code = "EVENT_NOT_FOUND"
-    status_code = 404
-
-    def __init__(self, event_id: str) -> None:
-        super().__init__("요청한 이벤트를 찾을 수 없습니다.")
-        self.event_id = event_id
-
-
 class RepositoryUnavailableError(DomainError):
     code = "REPOSITORY_UNAVAILABLE"
     status_code = 503
@@ -57,6 +48,36 @@ class DatabaseUnavailableError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("데이터 저장소 준비 상태를 확인할 수 없습니다.")
+
+
+class ClassroomInputError(DomainError):
+    """공통 입력 검증 실패 (중립 shared error)."""
+
+    code = "CLASSROOM_INPUT_INVALID"
+    status_code = 422
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class StudentNotFoundError(DomainError):
+    """요청한 학생을 찾을 수 없음 (중립 shared error)."""
+
+    code = "STUDENT_NOT_FOUND"
+    status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__("요청한 학생을 찾을 수 없습니다.")
+
+
+class StudentInactiveForAssignmentError(DomainError):
+    """비활성화된 학생을 좌석에 지정 시도 (중립 shared error)."""
+
+    code = "STUDENT_INACTIVE_FOR_ASSIGNMENT"
+    status_code = 422
+
+    def __init__(self) -> None:
+        super().__init__("비활성화된 학생은 좌석에 지정할 수 없습니다.")
 
 
 class ErrorDetail(BaseModel):

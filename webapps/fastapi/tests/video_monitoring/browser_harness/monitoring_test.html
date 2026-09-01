@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>monitoring.js player lifecycle test</title>
+  <style>
+    /* 실제 화면 CSS의 필수 지오메트리만 재현한다 (bbox overlay 좌표 계산용). */
+    .camera-monitoring-frame { position: relative; width: 640px; height: 360px; }
+    .camera-monitoring-frame video { width: 100%; height: 100%; }
+    .camera-monitoring-error[hidden] { display: none; }
+    .bbox-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <!-- 카드 1: 성공 카드 (playback session + signaling + SSE 모두 정상) -->
+  <article class="camera-monitoring-card" data-real-stream data-stream-id="stream-01" data-camera-id="camera-01" data-camera-role="IDENTITY_ONLY">
+    <div class="camera-monitoring-frame">
+      <video data-webrtc muted autoplay playsinline></video>
+      <div class="camera-monitoring-error" data-video-error hidden role="alert">기본 오류 문구</div>
+    </div>
+    <span data-source-status class="status-label status-label--no-video">최근 탐지 없음</span>
+    <p class="card-meta">
+      <span>마지막 탐지 <strong data-last-detection>없음</strong></span>
+    </p>
+    <p data-analysis-status hidden role="status"></p>
+  </article>
+  <!-- 카드 2: 오류 카드 (signaling POST가 503으로 실패한다) -->
+  <article class="camera-monitoring-card" data-real-stream data-stream-id="stream-02" data-camera-id="camera-02" data-camera-role="SEAT_JUDGING">
+    <div class="camera-monitoring-frame">
+      <video data-webrtc muted autoplay playsinline></video>
+      <div class="camera-monitoring-error" data-video-error hidden role="alert">기본 오류 문구</div>
+    </div>
+    <span data-source-status class="status-label status-label--no-video">최근 탐지 없음</span>
+    <p class="card-meta">
+      <span>마지막 탐지 <strong data-last-detection>없음</strong></span>
+    </p>
+    <p data-analysis-status hidden role="status"></p>
+  </article>
+
+  <pre id="test-results"></pre>
+
+  <script>
+    /* ===== 테스트 harness stubs (네트워크·WebRTC·SSE를 대역으로 교체) ===== */
+    window.__results = { calls: [], checkpoints: [], log: [] };
+    window.__eventSources = [];
+    window.__peerConnections = [];
+
+    function recordCall(entry) {
+      window.__results.calls.push(entry);
+    }
+
+    /* 시나리오 설정: stream-02의 signaling은 항상 실패한다 (카드 한정 오류 검증). */
+    window.__scenario = { failSignalingFor: ["stream-02"] };
+
+    /* fetch stub: FastAPI 계약만 모의하고 MediaMTX는 절대 호출하지 않는다. */
+    window.fetch = function (url, options) {
+      options = options || {};
+      var method = (options.method || "GET").toUpperCase();
+      var entry = { url: String(url), method: method };
+      if (options.headers && options.headers["Content-Type"]) {
+        entry.contentType = options.headers["Content-Type"];
+      }
+      if (typeof options.body === "string") {
+        entry.body = options.body;
+      }
+      recordCall(entry);
+
+      var s = String(url);
+      var m = s.match(/\/video-streams\/([^/]+)\/playback-sessions$/);
+      if (method === "POST" && m) {
+        /* playback session 생성 (201) */
+        var streamId = m[1];
+        var sessionId = "session-" + streamId;
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: function () {
+            return Promise.resolve({
+              session_id: sessionId,
+              signaling_url: "/api/v1/video-streams/" + streamId + "/playback-sessions/" + sessionId,
+              expires_at: "2026-08-14T13:00:00+00:00"
+            });
+          }
+        });
+      }
+      if (method === "POST" && /\/playback-sessions\/session-/.test(s)) {
+        /* WHEP offer → answer (FastAPI signaling proxy 모의) */
+        var failed = window.__scenario.failSignalingFor.some(function (id) {
+          return s.indexOf(id) !== -1;
+        });
+        if (failed) {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            text: function () { return Promise.resolve("WHEP_UNAVAILABLE"); }
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          text: function () { return Promise.resolve("v=0\r\nanswer"); }
+        });
+      }
+      if (method === "DELETE") {
+        /* playback session 폐기 (204, idempotent) */
+        return Promise.resolve({ ok: true, status: 204 });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    };
+
+    /* EventSource stub */
+    function FakeEventSource(url) {
+      this.url = String(url);
+      this.listeners = {};
+      this.readyState = 0; /* CONNECTING */
+      window.__eventSources.push(this);
+      window.__results.log.push("EventSource: " + this.url);
+    }
+    FakeEventSource.prototype.addEventListener = function (type, handler) {
+      (this.listeners[type] = this.listeners[type] || []).push(handler);
+    };
+    FakeEventSource.prototype.removeEventListener = function (type, handler) {
+      var list = this.listeners[type] || [];
+      var i = list.indexOf(handler);
+      if (i !== -1) list.splice(i, 1);
+    };
+    FakeEventSource.prototype.close = function () {
+      this.readyState = 2; /* CLOSED */
+      window.__results.log.push("EventSource close: " + this.url);
+    };
+    FakeEventSource.prototype.emit = function (type, data) {
+      var handlers = this.listeners[type] || [];
+      var event = { type: type, data: JSON.stringify(data) };
+      handlers.forEach(function (handler) { handler.call(this, event); });
+    };
+    window.EventSource = FakeEventSource;
+
+    /* RTCPeerConnection stub */
+    function FakePeerConnection() {
+      this.closed = false;
+      this.transceivers = [];
+      this.listeners = {};
+      window.__peerConnections.push(this);
+      window.__results.log.push("RTCPeerConnection created");
+    }
+    FakePeerConnection.prototype.addTransceiver = function (kind, init) {
+      this.transceivers.push({ kind: kind, init: init });
+    };
+    FakePeerConnection.prototype.addEventListener = function (type, handler) {
+      (this.listeners[type] = this.listeners[type] || []).push(handler);
+    };
+    FakePeerConnection.prototype.createOffer = function () {
+      return Promise.resolve({ type: "offer", sdp: "v=0\r\noffer" });
+    };
+    FakePeerConnection.prototype.setLocalDescription = function (desc) {
+      this.localDescription = desc;
+      return Promise.resolve();
+    };
+    FakePeerConnection.prototype.setRemoteDescription = function (desc) {
+      this.remoteDescription = desc;
+      return Promise.resolve();
+    };
+    FakePeerConnection.prototype.close = function () {
+      this.closed = true;
+      window.__results.log.push("RTCPeerConnection closed");
+    };
+    window.RTCPeerConnection = FakePeerConnection;
+  </script>
+
+  <script src="{{ MONITORING_JS_URI }}" defer></script>
+
+  <script>
+    /* ===== 시나리오 러너: player lifecycle 검증 ===== */
+    (async function run() {
+      var results = window.__results;
+      var checkpoints = results.checkpoints;
+
+      function checkpoint(name, ok, detail) {
+        checkpoints.push({ name: name, ok: !!ok, detail: detail == null ? null : String(detail) });
+      }
+
+      function findByUrl(regex) {
+        return window.__eventSources.find(function (es) { return regex.test(es.url); });
+      }
+
+      try {
+        await new Promise(function (resolve) {
+          if (document.readyState === "interactive" || document.readyState === "complete") {
+            resolve();
+          } else {
+            document.addEventListener("DOMContentLoaded", resolve, { once: true });
+          }
+        });
+        /* init의 fetch 체인(마이크로태스크) 완료 대기 */
+        await new Promise(function (r) { setTimeout(r, 100); });
+
+        /* 1) playback session 생성 (카드별 POST) */
+        var sessionPosts = results.calls.filter(function (c) {
+          return c.method === "POST" && /\/playback-sessions$/.test(c.url);
+        });
+        var sessionStream01 = sessionPosts.some(function (c) { return c.url.indexOf("/stream-01/") !== -1; });
+        var sessionStream02 = sessionPosts.some(function (c) { return c.url.indexOf("/stream-02/") !== -1; });
+        checkpoint("playback-session-created", sessionStream01 && sessionStream02,
+          JSON.stringify(sessionPosts.map(function (c) { return c.url; })));
+
+        /* 2) WebRTC signaling 연결 (성공 카드: stream-01) */
+        var signalingPosts = results.calls.filter(function (c) {
+          return c.method === "POST" && /\/playback-sessions\/session-/.test(c.url);
+        });
+        var sigStream01 = signalingPosts.find(function (c) { return c.url.indexOf("stream-01") !== -1; });
+        var sigOk = !!sigStream01 && sigStream01.contentType === "application/sdp" &&
+          sigStream01.body && sigStream01.body.indexOf("v=0") !== -1;
+        checkpoint("signaling-connected", sigOk, sigStream01 ? JSON.stringify(sigStream01) : "no signaling post");
+
+        /* 3) 역할별 SSE 구독 */
+        var sseUrls = window.__eventSources.map(function (es) { return es.url; });
+        var sseCam1 = sseUrls.some(function (u) { return u.indexOf("/stream-01/entry-identity-events/stream") !== -1; });
+        var sseCam2 = sseUrls.some(function (u) { return u.indexOf("/camera-02/detection-events") !== -1; });
+        checkpoint("sse-subscribed", sseCam1 && sseCam2, JSON.stringify(sseUrls));
+
+        /* 4) 입구 얼굴 bbox·이름·탐지 metadata·분석 오류 상태 */
+        var esCam1 = findByUrl(/stream-01\/entry-identity-events/);
+        if (esCam1) {
+          esCam1.emit("entry-identity", {
+            type: "entry-identity",
+            event_id: "face-100",
+            camera_id: "camera-01",
+            captured_at: "2026-08-14T12:00:00+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            processing_status: "SUCCEEDED",
+            observations: [
+              { display_label: "김로운", face_track_id: "face-17", detection_confidence: 0.9, face_bbox: [10, 20, 100, 200] },
+              { display_label: "미등록 얼굴", face_track_id: "face-18", detection_confidence: 0.8, face_bbox: [300, 50, 400, 250] }
+            ],
+            observations_count: 2
+          });
+        }
+        var card1 = document.querySelector('[data-camera-id="camera-01"]');
+        var lastEl = card1.querySelector("[data-last-detection]");
+        var boxCount = card1.querySelectorAll(".bbox-box").length;
+        checkpoint("bbox-drawn", boxCount === 2, "boxes=" + boxCount);
+        var labels = Array.from(card1.querySelectorAll(".bbox-label")).map(function (item) {
+          return item.textContent;
+        });
+        checkpoint("safe-identification-labels",
+          labels[0] === "김로운" && labels[1] === "미등록 얼굴",
+          JSON.stringify(labels));
+        checkpoint("track-label-visible",
+          labels[0].indexOf("#face-17") === -1 && labels[0].indexOf("90%") === -1,
+          JSON.stringify(labels));
+        checkpoint("last-detection-updated", lastEl.textContent !== "없음", lastEl.textContent);
+        var sourceStatus = card1.querySelector("[data-source-status]");
+        checkpoint("face-source-connected",
+          sourceStatus.textContent === "얼굴 탐지 수신 중" && sourceStatus.classList.contains("status-label--active"),
+          sourceStatus.textContent);
+
+        var analysisStatus = card1.querySelector("[data-analysis-status]");
+        if (esCam1) {
+          esCam1.emit("entry-identity", {
+            type: "entry-identity",
+            event_id: "face-101",
+            camera_id: "camera-01",
+            captured_at: "2026-08-14T12:00:01+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            processing_status: "ANALYZER_UNAVAILABLE",
+            observations: [],
+            observations_count: 0
+          });
+        }
+        checkpoint("face-analysis-error-visible",
+          analysisStatus.hidden === false && analysisStatus.textContent.indexOf("연결할 수 없습니다") !== -1,
+          analysisStatus.textContent);
+        if (esCam1) {
+          esCam1.emit("entry-identity", {
+            type: "entry-identity",
+            event_id: "face-102",
+            camera_id: "camera-01",
+            captured_at: "2026-08-14T12:00:02+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            processing_status: "SUCCEEDED",
+            observations: [],
+            observations_count: 0
+          });
+        }
+        checkpoint("face-analysis-error-cleared", analysisStatus.hidden === true, analysisStatus.textContent);
+
+        /* CCTV는 기존 객체 detection만 처리한다. */
+        var esCam2 = findByUrl(/camera-02\/detection-events/);
+        if (esCam2) {
+          esCam2.emit("detection", {
+            event_id: "evt-200",
+            camera_id: "camera-02",
+            captured_at: "2026-08-14T12:00:00+09:00",
+            frame: { width_pixels: 1280, height_pixels: 720 },
+            detections: [
+              { display_label: "김로운", track_id: "person-7", confidence: 0.88, bbox: [20, 30, 120, 210] },
+              { display_label: "인식 불가", track_id: "person-8", confidence: 0.81, bbox: [180, 30, 280, 210] }
+            ],
+            detections_count: 2
+          });
+        }
+        var card2 = document.querySelector('[data-camera-id="camera-02"]');
+        checkpoint("cctv-object-detection-kept",
+          card2.querySelectorAll(".bbox-box").length === 2 &&
+          card2.querySelectorAll(".bbox-label")[0].textContent === "김로운" &&
+          card2.querySelectorAll(".bbox-label")[1].textContent === "인식 불가",
+          Array.from(card2.querySelectorAll(".bbox-label")).map(function (item) { return item.textContent; }).join(","));
+
+        /* 5) 오류 카드 한정: stream-02 signaling 실패는 카드 2에만 표시 */
+        var errCam2 = document.querySelector('[data-camera-id="camera-02"] [data-video-error]');
+        var errCam1 = document.querySelector('[data-camera-id="camera-01"] [data-video-error]');
+        checkpoint("error-isolated", errCam2.hidden === false && errCam1.hidden === true,
+          "cam2 hidden=" + errCam2.hidden + ", cam1 hidden=" + errCam1.hidden);
+        var esCam1After = findByUrl(/stream-01\/entry-identity-events/);
+        checkpoint("other-card-kept",
+          !!sigStream01 && esCam1After && esCam1After.readyState === 0,
+          "sig=" + !!sigStream01 + ", esClosed=" + (esCam1After && esCam1After.readyState === 2));
+
+        /* 6) unload 정리: EventSource·RTCPeerConnection 종료, playback session DELETE */
+        window.dispatchEvent(new Event("beforeunload"));
+        var deletes = results.calls.filter(function (c) { return c.method === "DELETE"; });
+        var deleteUrls = deletes.map(function (c) { return c.url; });
+        var esAllClosed = window.__eventSources.every(function (es) { return es.readyState === 2; });
+        var pcsAllClosed = window.__peerConnections.every(function (pc) { return pc.closed; });
+        var deleteStream01 = deleteUrls.some(function (u) { return u.indexOf("stream-01") !== -1; });
+        var deleteStream02 = deleteUrls.some(function (u) { return u.indexOf("stream-02") !== -1; });
+        checkpoint("unload-event-source-closed", esAllClosed, JSON.stringify(window.__eventSources.map(function (es) { return es.readyState; })));
+        checkpoint("unload-peer-connection-closed", pcsAllClosed, "pcs=" + window.__peerConnections.length);
+        checkpoint("unload-session-deleted", deleteStream01 && deleteStream02, JSON.stringify(deleteUrls));
+
+        results.done = true;
+      } catch (err) {
+        results.error = String((err && err.stack) || err);
+        checkpoint("harness-error", false, String((err && err.message) || err));
+      }
+
+      document.getElementById("test-results").textContent = JSON.stringify(results);
+    })();
+  </script>
+</body>
+</html>

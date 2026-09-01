@@ -3,19 +3,29 @@
 **목적**: fastapi가 제공하는 HTTP API의 형태를 통일한다.
 **대상 독자**: API를 만드는 사람과 소비하는 사람, AI 에이전트.
 
-> 아직 구현된 엔드포인트가 없다. 이 문서는 첫 엔드포인트를 만들 때 적용할 기준이다.
-> 여기서 정하지 않은 것은 첫 구현 시 결정하고 이 문서에 반영한다.
+실행 중인 설정에서 공개되는 정확한 계약은 `/docs`와 `/openapi.json`이 정본이다.
+이 문서는 새 엔드포인트를 만들 때 적용할 형식 기준이다.
 
 ## URL과 리소스 이름
 
-- 리소스는 **복수형 명사**를 쓴다: `/events`, `/cameras`
-- 소문자와 하이픈을 쓴다: `/stream-sessions`
+- 리소스는 **복수형 명사**를 쓴다: `/students`, `/classrooms`
+- 소문자와 하이픈을 쓴다: `/face-enrollments`, `/student-states`
 - URL에 동사를 넣지 않는다. 동작은 HTTP 메서드로 표현한다.
-  - `POST /events/create` (X) → `POST /events` (O)
-- 계층은 두 단계까지만 쓴다: `/cameras/{camera_id}/events`
+  - `POST /students/create` (X) → `POST /students` (O)
+- 계층은 두 단계까지만 쓴다: `/classrooms/{classroom_id}/seats`
   더 깊어지면 쿼리 파라미터로 푼다.
 - 상태 변경처럼 CRUD로 표현하기 어려운 동작은 하위 리소스로 만든다:
-  `POST /stream-sessions/{id}/reconnect`
+  `POST /students/{student_id}/face-enrollments`
+- 부작용 없는 조회에 본문이 필요하면 동작을 리소스로 만들고 `POST`를 쓴다:
+  `POST /llm-searches`
+
+### 브라우저가 부르지 않는 경로
+
+서비스 사이의 내부 호출은 `/api/v1`이 아니라 **`/internal`** 아래에 둔다.
+탐지 결과 수신(`POST /internal/inference/events`)이 여기 해당한다.
+
+경로를 나누는 이유는 두 가지다. 제품 API와 내부 계약의 하위 호환 부담이 다르고,
+접근 통제를 경로 단위로 나눌 수 있어야 하기 때문이다.
 
 ## 메서드
 
@@ -39,7 +49,7 @@
 
 **응답 래퍼를 강제하지 않는다.** 모든 응답을 `{"data": ..., "error": ...}`로 감싸는
 방식은 이 프로젝트에서 채택하지 않았다. 리소스를 그대로 반환하고, 오류는 상태 코드와
-오류 본문으로 표현한다. 래퍼가 필요하다는 근거가 생기면 [ADR](../architecture/decisions/README.md)로 남긴 뒤 도입한다.
+오류 본문으로 표현한다. 래퍼가 필요하다는 근거가 생기면 [결정 기록](../architecture/decisions.md)에 남긴 뒤 도입한다.
 
 ## 상태 코드
 
@@ -67,8 +77,8 @@
 ```json
 {
   "error": {
-    "code": "CAMERA_NOT_FOUND",
-    "message": "요청한 카메라를 찾을 수 없습니다.",
+    "code": "STUDENT_NOT_FOUND",
+    "message": "요청한 학생을 찾을 수 없습니다.",
     "details": {}
   }
 }
@@ -79,14 +89,14 @@
 - `details`: 필드별 오류 등 부가 정보. 없으면 생략한다.
 
 **오류 본문에 내부 정보를 넣지 않는다.** 스택 트레이스, 쿼리문, 내부 호스트 주소,
-파일 경로는 로그로만 남긴다.
+파일 경로는 로그로만 남긴다. **얼굴 embedding과 원본 이미지 경로도 여기 포함된다.**
 
 ## 페이지네이션
 
 목록 조회는 처음부터 페이지네이션을 넣는다. 나중에 추가하면 계약이 깨진다.
 
 ```text
-GET /events?limit=50&offset=0
+GET /students?limit=50&offset=0
 ```
 
 - `limit`: 기본 50, 최대 200. 상한을 두지 않으면 전체 조회 요청이 들어온다.
@@ -102,18 +112,18 @@ GET /events?limit=50&offset=0
 }
 ```
 
-이벤트처럼 계속 쌓이고 실시간으로 늘어나는 목록은 offset 방식에서 항목이
-밀리거나 중복될 수 있다. 커서 기반으로 바꿀지는 **결정 필요** 항목이다.
+탐지 이벤트와 상태 이력처럼 계속 쌓이고 실시간으로 늘어나는 목록은 offset 방식에서
+항목이 밀리거나 중복될 수 있다. 커서 기반으로 바꿀지는 **결정 필요** 항목이다.
 
 ## 정렬과 필터
 
 - 정렬: `?sort=created_at&order=desc`
-- 필터는 필드 이름을 그대로 쓴다: `?camera_id=cam-01&status=active`
+- 필터는 필드 이름을 그대로 쓴다: `?classroom_id=class-a&state=PRESENT`
 - 기간 조회: `?from=...&to=...` (ISO 8601, `from` 포함, `to` 미포함)
 
 ## 버전 정책
 
-경로에 버전을 넣는다: `/api/v1/events`
+경로에 버전을 넣는다: `/api/v1/students`
 
 - 첫 릴리스는 `v1`이다.
 - 버전은 **하위 호환을 깨야 할 때만** 올린다. 필드 추가는 버전을 올릴 이유가 아니다.
@@ -137,9 +147,19 @@ GET /events?limit=50&offset=0
 
 깨는 변경이 필요하면 새 필드를 추가하고 이전 필드를 한동안 함께 유지한 뒤 제거한다.
 
+## 개인정보가 담긴 응답
+
+- **얼굴 embedding과 원본 이미지를 응답 본문에 넣지 않는다.** 등록 여부, 샘플 수,
+  품질 판정 결과, 모델 버전, 등록 시각까지만 돌려준다.
+- **미식별을 부재로 바꾸지 않는다.** 식별 실패는 `UNKNOWN`이고, 좌석이 비었다는
+  뜻이 아니다. 두 값을 같은 필드에 담지 않는다.
+- 신뢰도는 원값(`0.87`)과 서비스가 계산한 등급을 함께 준다. 등급 계산을 클라이언트나
+  템플릿이 하지 않는다.
+
 ## 관련 문서
 
 - `create-fastapi-feature` 스킬
 - [fastapi-agent](../agents/fastapi-agent.md)
 - [코딩 규칙](./coding-convention.md)
+- [학생 모니터링 MVP 명세](../specs/student-monitoring-mvp.md) — 목표 API 계약
 - [fastapi README](../../webapps/fastapi/README.md)

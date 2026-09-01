@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}ROI 등록 · 학습 모니터링{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', path='/roi-connections.css') }}">{% endblock %}
+{% block content %}
+<section
+  id="roi-live-editor"
+  class="roi-live-editor"
+  data-classroom-id="{{ classroom.id if classroom else '' }}"
+>
+  <div class="roi-filter-line" aria-label="ROI 등록 도구">
+    <div class="roi-filter-row">
+      <div class="roi-filter-wrap">
+        <button id="roi-capture" type="button"{% if not classroom or not cameras %} disabled{% endif %}>현재 화면 캡처</button>
+        <span id="roi-capture-progress" class="roi-capture-progress" role="status" aria-live="polite" hidden>카메라에서 현재 화면을 가져오는 중입니다. 몇 초 걸립니다.</span>
+      </div>
+      <div class="roi-filter-wrap">
+        <button id="roi-detect" type="button"{% if not cameras %} disabled{% endif %}>탐지로 자리 찾기</button>
+        <button id="roi-detect-save" type="button" hidden>찾은 자리 저장</button>
+        <button id="roi-auto-confirm" type="button" class="secondary" hidden>자동 생성 확정</button>
+      </div>
+    </div>
+    <div class="roi-filter-row">
+      <div class="roi-filter-wrap">
+        <button id="roi-start" type="button" disabled>등록 시작</button>
+        <button id="roi-finish" type="button" disabled>선택 완료</button>
+        <button id="roi-reset" type="button" class="secondary" disabled>초기화</button>
+        <button id="roi-cancel" type="button" class="secondary" disabled>등록 취소</button>
+        <button id="roi-redraw" type="button" class="secondary" disabled>다시 그리기</button>
+        <button id="roi-delete" type="button" class="danger" disabled>삭제</button>
+      </div>
+      <div class="roi-filter-wrap">
+        <label class="roi-classroom-filter">강의실
+          <select id="roi-classroom-select"{% if not classrooms %} disabled{% endif %}>
+            {% for item in classrooms %}<option value="{{ item.id }}"{% if classroom and classroom.id == item.id %} selected{% endif %}>{{ item.name }}</option>{% endfor %}
+          </select>
+        </label>
+        {# 좌석 ROI는 좌석 판정 카메라(SEAT_JUDGING)에만 의미가 있다. 한 대뿐이면 고르게 하지 않고 무엇을 쓰는지만 알린다. #}
+        {% if cameras|length == 1 %}
+        <p class="roi-camera-fixed" id="roi-camera-fixed"
+           data-camera-id="{{ cameras[0].camera_id }}"
+           data-camera-label="{{ cameras[0].camera_label }}"
+           data-capture-available="{{ 'true' if cameras[0].capture_available else 'false' }}">
+          카메라 <strong>{{ cameras[0].camera_label }}</strong>{% if not cameras[0].capture_available %} <span class="roi-camera-warning">접속 정보 없음</span>{% endif %}
+        </p>
+        {% else %}
+        <label class="roi-classroom-filter">카메라
+          <select id="roi-camera-select"{% if not cameras %} disabled{% endif %}>
+            {% if not cameras %}<option value="">좌석 판정 카메라가 없습니다</option>{% endif %}
+            {% for camera in cameras %}<option value="{{ camera.camera_id }}" data-camera-label="{{ camera.camera_label }}" data-capture-available="{{ 'true' if camera.capture_available else 'false' }}">{{ camera.camera_label }}{% if not camera.capture_available %} (접속 정보 없음){% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="roi-status-notices">
+    <div id="roi-media-placeholder" class="roi-media-notice" role="status"><strong>캡처된 화면이 없습니다</strong><span>‘현재 화면 캡처’를 눌러 ROI를 그릴 기준 화면을 가져오세요.</span></div>
+    <p id="roi-live-status" class="roi-media-notice" role="status" aria-live="polite"></p>
+    <p id="roi-saved-summary" class="roi-saved-summary" role="status" aria-live="polite"></p>
+  </div>
+
+  <div id="roi-media-stage" class="roi-media-stage" data-state="empty">
+    <img id="roi-reference-image" alt="ROI를 그릴 기준이 되는 카메라 캡처 화면" hidden>
+    <svg id="roi-live-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"><g id="roi-saved-shapes"></g><g id="roi-auto-preview"></g><polygon id="roi-live-polygon" points=""></polygon><g id="roi-live-points"></g></svg>
+    <div id="roi-saved-labels" class="roi-saved-labels"></div>
+  </div>
+
+  <section id="roi-detect-panel" class="roi-detect-panel" hidden aria-labelledby="roi-detect-title">
+    <div class="roi-detect-heading">
+      <h2 id="roi-detect-title" class="section-title">찾은 자리에 좌석 지정</h2>
+      <p id="roi-detect-summary" class="summary"></p>
+    </div>
+    <p class="summary">좌석은 찾은 순서대로 미리 붙여 두었습니다. <strong>카메라는 자리를 알지만 그 자리가 몇 번 좌석인지는 알지 못하므로 추측입니다</strong> — 화면과 대조해 다른 자리는 바꿔 주세요. 비워 둔 자리는 저장하지 않습니다. 저장한 뒤에도 ‘자동 생성 확정’ 전까지는 좌석 판정에 쓰이지 않습니다.</p>
+    <ul id="roi-detect-list" class="roi-detect-list"></ul>
+  </section>
+
+  {# 탐지는 사람이 앉았던 자리만 찾는다. 아무도 앉지 않은 좌석은 표본이 없어 영영 나오지
+     않으므로, 남은 좌석을 여기 모아 사람이 직접 그려 채우게 한다. #}
+  <section id="roi-missing-panel" class="roi-missing-panel" hidden aria-labelledby="roi-missing-title">
+    <div class="roi-detect-heading">
+      <h2 id="roi-missing-title" class="section-title">ROI가 없는 좌석</h2>
+      <p id="roi-missing-summary" class="summary"></p>
+    </div>
+    <p class="summary">탐지는 사람이 앉았던 자리만 찾습니다. 아무도 앉지 않은 좌석은 탐지로 채울 수 없으므로 직접 그려 주세요. ‘직접 그리기’를 누른 뒤 화면에서 좌석 구역의 꼭짓점을 3개 이상 찍고 ‘선택 완료’를 누르면 그 좌석에 저장됩니다.</p>
+    <ul id="roi-missing-list" class="roi-missing-list"></ul>
+  </section>
+
+  {% if not classrooms %}<div class="empty" role="status"><strong>등록된 강의실이 없습니다.</strong></div>{% endif %}
+</section>
+
+<dialog id="roi-student-dialog" class="roi-student-dialog" aria-labelledby="roi-dialog-title">
+  <form id="roi-save-form" method="dialog">
+    <div><p class="eyebrow">Seat connection</p><h2 id="roi-dialog-title" class="dialog-title">학생 좌석 연결</h2><p>선택한 ROI가 어떤 학생의 좌석인지 지정해 주세요.</p></div>
+    <label>좌석
+      <select id="roi-seat-select" required><option value="">{% if seats %}좌석을 선택해 주세요{% else %}등록된 좌석이 없습니다{% endif %}</option>{% for seat in seats %}<option value="{{ seat.id }}">{{ seat.label }} · {{ seat.code }}</option>{% endfor %}</select>
+    </label>
+    <label>학생
+      <select id="roi-student-select" required><option value="">학생을 선택해 주세요</option>{% for student in students %}<option value="{{ student.id }}">{{ student.student_no }} · {{ student.name }}</option>{% endfor %}</select>
+    </label>
+    <p id="roi-save-error" class="form-error" role="alert" hidden></p>
+    <div class="roi-dialog-actions"><button id="roi-dialog-close" type="button" class="secondary">닫기</button><button id="roi-dialog-save" type="submit">저장하기</button></div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/roi-connections.js') }}" defer></script>{% endblock %}

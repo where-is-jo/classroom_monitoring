@@ -1,0 +1,488 @@
+name: GPU 서버 배포
+
+# 서버에 올라가는 docker compose·수집·Grafana 설정과 서버 로컬 추론 이미지를 저장소
+# 상태로 맞춘다. 설정만 옮기고 worker·deeplearning을 다시 빌드하지 않으면 같은 :latest
+# 태그가 오래된 image ID를 계속 가리키므로 두 이미지를 현재 커밋으로 함께 갱신한다.
+#
+# 배포 대상은 커밋되는 파일뿐이다. .docker/env/(비밀값)와 .docker/models/(가중치)는
+# 저장소에 없고 서버 로컬에만 있으므로 전송하거나 삭제하지 않는다(결정 0018).
+# 단, 선택한 얼굴 인식기와 경로가 어긋나 모든 배포가 막히는 것을 복구하기 위해 실제
+# 모델 파일을 확인한 뒤 FACE_RECOGNITION_MODEL_PATH 한 줄만 계약값으로 정렬한다.
+#
+# 여기서는 paths 필터를 써도 안전하다. ci.yml이 paths-ignore를 피한 이유는 필수 상태
+# 체크가 "대기 중"으로 남는 함정 때문인데, 이 워크플로우는 필수 체크가 아니다.
+
+on:
+  push:
+    branches: [develop]
+    # **호스트 축으로 좁힌다.** 이 워크플로우가 바꾸는 것은 GPU 서버뿐인데, 전에는
+    # `.docker/**` 통짜라 개인 PC 쪽 절반(결정 0026)이나 이미지에 들어가지도 않는
+    # 파일이 배포를 깨웠다. 실제로 compose.main.dev.pc.yml만 고친 n8n 설정 변경이
+    # 14.9GB 이미지 재빌드와 컨테이너 강제 재생성까지 끌고 갔다.
+    paths:
+      # 서버에서 실행하거나 컨테이너가 마운트하는 것만 고른다. pc 스택 둘은 여기
+      # 없다 — rsync로 올라가기는 하지만 이 서버에서 검증도 실행도 하지 않는다.
+      - '.docker/compose.main.dev.gpu.yml'
+      - '.docker/compose.llm.dev.yml'
+      - '.docker/compose.monitoring.dev.yml'
+      - '.docker/alloy/**'
+      - '.docker/prometheus/**'
+      - '.docker/minio/**'
+      - '.docker/scripts/**'
+      # monitoring compose가 이 경로를 read-only mount하므로 대시보드와 provisioning도
+      # 같은 배포에서 서버 checkout에 전달해야 한다.
+      - 'monitoring/internal/grafana/**'
+      # 배포 검증 스크립트의 테스트는 CI 러너에서만 돈다. 서버 동작을 바꾸지 않는다.
+      - '!.docker/scripts/tests/**'
+      # 서버에서 이미지로 빌드되는 소스. .dockerignore가 빼는 것은 여기서도 뺀다 —
+      # 이미지에 들어가지 않는 파일을 위해 재빌드할 이유가 없다.
+      - 'worker/**'
+      - '!worker/**/tests/**'
+      - '!worker/**/*.md'
+      # deeplearning/Dockerfile은 app.py·face_identity.py·face_identification.py·
+      # metrics.py만 COPY한다. tests/와 training/은 이미지 밖이다.
+      - 'deeplearning/**'
+      - '!deeplearning/tests/**'
+      - '!deeplearning/training/**'
+      - '!deeplearning/**/*.md'
+      - '!deeplearning/**/*.ps1'
+      - '.github/workflows/deploy-gpu-server.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 서버는 하나뿐이라 배포를 전역으로 직렬화한다. 진행 중인 배포를 취소하면
+# 파일만 올라가고 up -d를 못 한 중간 상태로 남을 수 있어 취소하지 않는다.
+concurrency:
+  group: deploy-gpu-server
+  cancel-in-progress: false
+
+env:
+  # 이 서버에서 돌리는 스택만 검증하고 재적용한다. compose.main.dev.pc.yml과
+  # compose.publisher.dev.pc.yml은 개인 PC 쪽 절반이라(결정 0026) 여기서 실행하지
+  # 않는다. 파일 자체는 서버로 함께 올라가지만 검증 대상이 아니다 — 그 둘이 참조하는
+  # env 파일이 이 서버에는 없어서 config 단계에서 실패한다.
+  SERVER_STACKS: compose.main.dev.gpu.yml compose.llm.dev.yml compose.monitoring.dev.yml
+
+jobs:
+  reachability:
+    name: GPU 서버 생존 확인
+    runs-on: ubuntu-latest
+    outputs:
+      alive: ${{ steps.probe.outputs.alive }}
+    steps:
+      # 접속 정보가 없는 것은 "서버가 꺼짐"과 다르다. 설정 누락을 조용히 넘기면
+      # 배포가 영원히 스킵되는데도 워크플로우는 계속 초록불이 된다.
+      - name: 배포 시크릿이 설정되어 있는지 확인
+        env:
+          HOST: ${{ secrets.GPU_SERVER_HOST }}
+          USER_NAME: ${{ secrets.GPU_SERVER_USER }}
+          SSH_KEY: ${{ secrets.GPU_SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "$HOST" ] || missing="$missing GPU_SERVER_HOST"
+          [ -n "$USER_NAME" ] || missing="$missing GPU_SERVER_USER"
+          [ -n "$SSH_KEY" ] || missing="$missing GPU_SERVER_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::저장소 시크릿이 없다:$missing"
+            echo "Settings → Secrets and variables → Actions에서 등록한다." >&2
+            exit 1
+          fi
+
+      # SSH 포트에 TCP로 붙어 본다. 여기서 실패하면 서버가 꺼졌거나 네트워크가 끊긴
+      # 것으로 보고 배포를 건너뛴다 — job을 실패시키지 않는다. 공용 GPU 서버는
+      # 우리가 전원을 통제하지 않으므로 꺼져 있는 것은 장애가 아니라 정상 상태다.
+      # 인증·권한 문제는 아래 deploy job에서 따로 걸러 실패로 알린다.
+      - name: SSH 포트 도달성 확인
+        id: probe
+        env:
+          HOST: ${{ secrets.GPU_SERVER_HOST }}
+          PORT: ${{ secrets.GPU_SERVER_PORT }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-2222}"
+          alive=false
+          # 한 번의 패킷 손실로 배포를 통째로 거르지 않도록 세 번까지 본다.
+          for attempt in 1 2 3; do
+            if timeout 10 bash -c "exec 3<>/dev/tcp/$HOST/$port" 2>/dev/null; then
+              alive=true
+              echo "시도 $attempt: 연결됨"
+              break
+            fi
+            echo "시도 $attempt: 응답 없음"
+            [ "$attempt" -eq 3 ] || sleep 10
+          done
+          echo "alive=$alive" >> "$GITHUB_OUTPUT"
+
+      - name: 서버가 꺼져 있으면 이유를 남긴다
+        if: steps.probe.outputs.alive != 'true'
+        run: |
+          set -euo pipefail
+          echo "::notice::GPU 서버의 SSH 포트에 닿지 못해 배포를 건너뛴다. 실패가 아니다."
+          {
+            echo "## 배포를 건너뛰었다"
+            echo
+            echo "GPU 서버의 SSH 포트에 닿지 못했다. 서버가 꺼져 있거나 네트워크가 끊긴 상태로 본다."
+            echo
+            echo "저장소의 \`.docker/\` 는 서버에 **반영되지 않았다.** 서버를 켠 뒤"
+            echo "Actions 탭에서 이 워크플로우를 \`Run workflow\` 로 다시 돌린다."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: compose 설정 배포
+    needs: reachability
+    if: needs.reachability.outputs.alive == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH 키와 호스트 키 준비
+        env:
+          HOST: ${{ secrets.GPU_SERVER_HOST }}
+          PORT: ${{ secrets.GPU_SERVER_PORT }}
+          SSH_KEY: ${{ secrets.GPU_SERVER_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.GPU_SERVER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-2222}"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/gpu_deploy_key"
+          chmod 600 "$HOME/.ssh/gpu_deploy_key"
+
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          else
+            # 호스트 키를 그 자리에서 받아 신뢰한다(TOFU). 중간자 공격을 막지 못하므로
+            # GPU_SERVER_KNOWN_HOSTS 시크릿에 서버 호스트 키를 넣어 두는 편이 낫다.
+            ssh-keyscan -p "$port" -H "$HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null || :
+            if [ ! -s "$HOME/.ssh/known_hosts" ]; then
+              echo "::error::ssh-keyscan이 호스트 키를 받지 못했다. SSH 포트는 열려 있으나 sshd가 응답하지 않는 상태로 보인다."
+              exit 1
+            fi
+            echo "::warning::GPU_SERVER_KNOWN_HOSTS가 없어 ssh-keyscan 결과를 그대로 신뢰했다. 서버에서 ssh-keyscan 결과를 시크릿에 등록하면 이 경고가 사라진다."
+          fi
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      # 포트가 열렸다고 배포할 수 있는 것은 아니다. 키 인증·배포 경로·필요한 도구를
+      # 파일을 옮기기 전에 확인한다. 여기서 실패하면 설정 문제이므로 job을 실패시킨다.
+      - name: 접속과 배포 전제 확인
+        env:
+          HOST: ${{ secrets.GPU_SERVER_HOST }}
+          PORT: ${{ secrets.GPU_SERVER_PORT }}
+          USER_NAME: ${{ secrets.GPU_SERVER_USER }}
+          DEPLOY_PATH: ${{ vars.GPU_SERVER_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          port="${PORT:-2222}"
+          deploy_path="${DEPLOY_PATH:-~/classroom-monitoring}"
+          ssh_opts="-i $HOME/.ssh/gpu_deploy_key -p $port -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes"
+          echo "SSH_OPTS=$ssh_opts" >> "$GITHUB_ENV"
+          echo "TARGET=$USER_NAME@$HOST" >> "$GITHUB_ENV"
+
+          # 배포 경로의 ~ 를 서버 셸이 풀게 하고 절대 경로로 고정한다.
+          # rsync 원격 경로에 ~ 를 그대로 넘기면 확장 시점이 애매해진다.
+          if ! remote_path=$(ssh $ssh_opts "$USER_NAME@$HOST" "cd $deploy_path && pwd"); then
+            echo "::error::배포 경로($deploy_path)로 이동하지 못했다. 키 인증에 실패했거나 경로가 없다. 경로는 저장소 변수 GPU_SERVER_DEPLOY_PATH로 지정한다."
+            exit 1
+          fi
+          echo "REMOTE_PATH=$remote_path" >> "$GITHUB_ENV"
+          echo "배포 경로: $remote_path"
+
+          if ! ssh $ssh_opts "$USER_NAME@$HOST" 'command -v rsync >/dev/null'; then
+            echo "::error::서버에 rsync가 없다. sudo apt-get install -y rsync 로 설치한다."
+            exit 1
+          fi
+          if ! ssh $ssh_opts "$USER_NAME@$HOST" 'docker compose version >/dev/null'; then
+            echo "::error::서버에서 docker compose 를 실행하지 못했다. 도커 설치나 계정 권한(docker 그룹)을 확인한다."
+            exit 1
+          fi
+
+      # 문법이 깨진 파일을 서버에 올리는 것 자체를 막는다. 서버에는 .docker/env/가
+      # 있지만 러너에는 없으므로, compose가 참조하는 env 파일을 빈 파일로 만들어
+      # 검증한다. 값이 아니라 YAML 구조를 보는 검사다 — 값 검증은 서버에서 다시 한다.
+      - name: 러너에서 compose 문법 사전 검증
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp -r .docker "$tmp/.docker"
+          cd "$tmp"
+          mkdir -p .docker/models
+          # grep 은 매치가 0건이면 exit 1 이라 pipefail 아래에서 스텝을 실패시킨다.
+          # env_file 참조가 없는 구성도 정상이므로 그 경우를 실패로 보지 않는다.
+          { grep -ho '\./env/[A-Za-z0-9._-]*\.env' .docker/*.yml || :; } | sed 's|^\./|.docker/|' | sort -u \
+            | while read -r p; do mkdir -p "$(dirname "$p")"; : > "$p"; done
+          for stack in $SERVER_STACKS; do
+            echo "검증: $stack"
+            docker compose -f ".docker/$stack" config --quiet
+          done
+
+      # 검증이나 재기동이 실패하면 설정뿐 아니라 latest 이미지 태그도 되돌린다.
+      # models/(5GB대 가중치)와 env/(비밀값)는 건드리지 않으므로 백업에서 뺀다.
+      - name: 서버의 현재 설정과 이미지 태그 백업
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "BACKUP_STAMP=$stamp" >> "$GITHUB_ENV"
+          ssh $SSH_OPTS "$TARGET" "REMOTE_PATH='$REMOTE_PATH' STAMP='$stamp' STACKS='$SERVER_STACKS' bash -s" <<'REMOTE'
+          set -euo pipefail
+          backup_dir="$REMOTE_PATH/.deploy-backups"
+          mkdir -p "$backup_dir"
+          tar czf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH" \
+            --exclude='.docker/models' --exclude='.docker/env' \
+            .docker monitoring/internal/grafana
+          deep_id=$(docker image inspect --format '{{.Id}}' ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest 2>/dev/null || :)
+          worker_id=$(docker image inspect --format '{{.Id}}' ghcr.io/where-is-jo/classroom-monitoring-worker:latest 2>/dev/null || :)
+          printf 'deeplearning=%s\nworker=%s\n' "$deep_id" "$worker_id" \
+            > "$backup_dir/$STAMP.images"
+          : > "$backup_dir/$STAMP.running"
+          for stack in $STACKS; do
+            if [ -n "$(docker compose -f "$REMOTE_PATH/.docker/$stack" ps -q)" ]; then
+              echo "$stack" >> "$backup_dir/$STAMP.running"
+            fi
+          done
+          echo "백업: $backup_dir/$STAMP.tar.gz"
+          # 오래된 백업은 정리한다. 디스크를 공용으로 쓰는 서버다.
+          { ls -1t "$backup_dir"/*.tar.gz 2>/dev/null || :; } | tail -n +11 \
+            | while IFS= read -r archive; do
+                prefix=${archive%.tar.gz}
+                rm -f "$archive" "$prefix.images" "$prefix.running"
+              done
+          REMOTE
+
+      # checkout의 추적 소스만 tar로 보내므로 로컬 .env·모델·얼굴 데이터는 빌드 context에
+      # 들어가지 않는다. candidate 둘이 모두 성공하기 전에는 :latest 태그를 바꾸지
+      # 않아 한쪽만 새 버전이 되는 배포를 막는다.
+      - name: 현재 커밋으로 추론 이미지 candidate 빌드
+        run: |
+          set -euo pipefail
+          deep_candidate="ghcr.io/where-is-jo/classroom-monitoring-deeplearning:candidate-$GITHUB_SHA"
+          worker_candidate="ghcr.io/where-is-jo/classroom-monitoring-worker:candidate-$GITHUB_SHA"
+          echo "DEEP_CANDIDATE=$deep_candidate" >> "$GITHUB_ENV"
+          echo "WORKER_CANDIDATE=$worker_candidate" >> "$GITHUB_ENV"
+
+          build_candidates() {
+            echo "== deeplearning candidate 빌드"
+            git archive --format=tar HEAD:deeplearning \
+              | ssh $SSH_OPTS "$TARGET" \
+                  "docker build --label 'org.opencontainers.image.revision=$GITHUB_SHA' -t '$deep_candidate' -" \
+              || return
+            echo "== worker candidate 빌드"
+            git archive --format=tar HEAD:worker \
+              | ssh $SSH_OPTS "$TARGET" \
+                  "docker build --label 'org.opencontainers.image.revision=$GITHUB_SHA' -t '$worker_candidate' -" \
+              || return
+          }
+          if ! build_candidates 2>&1 | tee /tmp/build.log; then
+            ssh $SSH_OPTS "$TARGET" \
+              "docker image rm '$deep_candidate' '$worker_candidate' >/dev/null 2>&1 || :"
+            exit 1
+          fi
+
+      # git이 추적하는 GPU 설정 파일만 목록으로 넘긴다. --delete를 쓰지 않는 이유가
+      # 여기 있다 —
+      # 서버에만 있는 env/·models/·data/를 지울 위험을 아예 만들지 않는다.
+      # 저장소에서 파일을 지웠을 때 서버에서도 지우는 일은 사람이 판단해서 한다.
+      - name: 커밋된 GPU 서버 설정 파일 전송
+        run: |
+          set -euo pipefail
+          rollback_transfer() {
+            ssh $SSH_OPTS "$TARGET" \
+              "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" <<'REMOTE'
+          set -uo pipefail
+          tar xzf "$REMOTE_PATH/.deploy-backups/$STAMP.tar.gz" -C "$REMOTE_PATH" || :
+          docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+          REMOTE
+          }
+          if ! git ls-files -z .docker monitoring/internal/grafana \
+              | rsync -rlt --no-owner --no-group --from0 --files-from=- \
+                  --itemize-changes \
+                  -e "ssh $SSH_OPTS" \
+                  ./ "$TARGET:$REMOTE_PATH/" \
+              | tee /tmp/rsync.log; then
+            rollback_transfer || :
+            exit 1
+          fi
+
+      # 서버의 실제 env 값까지 포함한 검증이다. 실패하면 방금 올린 파일을 백업으로
+      # 되돌린 뒤 job을 실패시킨다. 깨진 설정을 서버에 남겨 두지 않는다.
+      - name: 서버에서 compose 검증 (실패 시 롤백)
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$TARGET" \
+            "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' STACKS='$SERVER_STACKS' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" \
+            <<'REMOTE'
+          set -uo pipefail
+          cd "$REMOTE_PATH"
+          failed=""
+          # env 전체를 전송하거나 출력하지 않는다. 선택한 인식기와 실제 ONNX를 확인한
+          # 뒤 비민감 경로 키 한 줄만 원자적으로 정렬한다.
+          if ! python3 .docker/scripts/sync_face_recognizer_model_path.py; then
+            failed="$failed face-model-path"
+          fi
+          for stack in $STACKS; do
+            if ! docker compose -f ".docker/$stack" config --quiet; then
+              failed="$failed $stack"
+            fi
+          done
+          if ! python3 .docker/scripts/validate_face_handover_deployment.py; then
+            failed="$failed face-handover-inputs"
+          fi
+          if [ -n "$failed" ]; then
+            echo "검증 실패:$failed — 백업으로 되돌린다" >&2
+            tar xzf "$REMOTE_PATH/.deploy-backups/$STAMP.tar.gz" -C "$REMOTE_PATH"
+            docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+            echo "롤백 완료" >&2
+            exit 1
+          fi
+          echo "세 스택 모두 검증 통과"
+          REMOTE
+
+      # 두 candidate의 revision label을 확인한 뒤에만 :latest 이름을 함께 옮긴다. 같은
+      # 이름을 다시 지정하므로 다음 빌드가 이전 latest 태그를 덮어쓴다.
+      - name: candidate를 latest 이미지로 전환
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$TARGET" \
+            "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' SHA='$GITHUB_SHA' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          activate() {
+            deep_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$DEEP_CANDIDATE")
+            worker_revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$WORKER_CANDIDATE")
+            [ "$deep_revision" = "$SHA" ]
+            [ "$worker_revision" = "$SHA" ]
+            docker image tag "$DEEP_CANDIDATE" ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+            docker image tag "$WORKER_CANDIDATE" ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+          }
+          if ! activate; then
+            echo "latest 전환 실패 — 설정과 이미지 태그를 되돌린다" >&2
+            backup_dir="$REMOTE_PATH/.deploy-backups"
+            tar xzf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH" || :
+            deep_id=$(sed -n 's/^deeplearning=//p' "$backup_dir/$STAMP.images")
+            worker_id=$(sed -n 's/^worker=//p' "$backup_dir/$STAMP.images")
+            if [ -n "$deep_id" ]; then
+              docker image tag "$deep_id" ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest || :
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest >/dev/null 2>&1 || :
+            fi
+            if [ -n "$worker_id" ]; then
+              docker image tag "$worker_id" ghcr.io/where-is-jo/classroom-monitoring-worker:latest || :
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-worker:latest >/dev/null 2>&1 || :
+            fi
+            docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+            exit 1
+          fi
+          REMOTE
+
+      # 원격 FastAPI(개인 PC) 계약 검증은 --require-live-handoff 없이는 경고로만
+      # 남는다. 그 경고는 stderr로 나오므로 2>&1로 합쳐 요약에서도 보이게 한다.
+      # 떠 있는 스택만 다시 올린다. 내려 둔 스택을 CI가 마음대로 켜지 않는다 —
+      # 모니터링 스택은 MVP에서 일부러 띄우지 않고 있다(.docker/README.server.md).
+      # 그 스택의 파일은 이미 갱신됐으므로 사람이 다음에 up 할 때 반영된다.
+      # 순서는 main.gpu 먼저다. 그 스택이 backend network를 만들고 나머지 둘이
+      # external로 참조한다.
+      - name: 떠 있는 스택 재적용
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$TARGET" \
+            "REMOTE_PATH='$REMOTE_PATH' STAMP='$BACKUP_STAMP' STACKS='$SERVER_STACKS' DEEP_CANDIDATE='$DEEP_CANDIDATE' WORKER_CANDIDATE='$WORKER_CANDIDATE' bash -s" \
+            <<'REMOTE' 2>&1 | tee /tmp/apply.log
+          set -euo pipefail
+          cd "$REMOTE_PATH"
+
+          rollback() {
+            set +e
+            echo "재기동 실패 — 설정과 latest 이미지 태그를 되돌린다" >&2
+            backup_dir="$REMOTE_PATH/.deploy-backups"
+            tar xzf "$backup_dir/$STAMP.tar.gz" -C "$REMOTE_PATH"
+            deep_id=$(sed -n 's/^deeplearning=//p' "$backup_dir/$STAMP.images")
+            worker_id=$(sed -n 's/^worker=//p' "$backup_dir/$STAMP.images")
+            if [ -n "$deep_id" ]; then
+              docker image tag "$deep_id" ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-deeplearning:latest >/dev/null 2>&1 || :
+            fi
+            if [ -n "$worker_id" ]; then
+              docker image tag "$worker_id" ghcr.io/where-is-jo/classroom-monitoring-worker:latest
+            else
+              docker image rm ghcr.io/where-is-jo/classroom-monitoring-worker:latest >/dev/null 2>&1 || :
+            fi
+            while IFS= read -r stack; do
+              [ -n "$stack" ] || continue
+              if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
+                docker compose -f ".docker/$stack" up -d --force-recreate \
+                  deeplearning inference-worker || :
+                docker compose -f ".docker/$stack" up -d || :
+              else
+                docker compose -f ".docker/$stack" up -d || :
+              fi
+            done < "$backup_dir/$STAMP.running"
+            docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+          }
+          finish() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              rollback
+            fi
+            exit "$status"
+          }
+          trap finish EXIT
+
+          for stack in $STACKS; do
+            if [ -n "$(docker compose -f ".docker/$stack" ps -q)" ]; then
+              echo "== $stack: up -d"
+              if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
+                docker compose -f ".docker/$stack" up -d --force-recreate \
+                  deeplearning inference-worker
+                # mediamtx·minio 등 같은 스택의 설정 변경도 이전 배포처럼 반영한다.
+                docker compose -f ".docker/$stack" up -d
+              else
+                docker compose -f ".docker/$stack" up -d
+              fi
+              docker compose -f ".docker/$stack" ps
+              if [ "$stack" = "compose.main.dev.gpu.yml" ]; then
+                # worker는 YOLO·GPU 모델과 카메라 파이프라인을 조립한 뒤에야
+                # /metrics를 연다. 컨테이너 생성 직후 한 번만 확인하면 정상 기동도
+                # 실패로 오판하므로 준비 완료를 제한 시간 동안 기다린다.
+                python3 .docker/scripts/verify_face_handover_runtime.py \
+                  --worker-readiness-timeout-seconds 120
+              fi
+            else
+              echo "== $stack: 실행 중인 컨테이너가 없어 건너뛴다"
+            fi
+          done
+          docker image rm "$DEEP_CANDIDATE" "$WORKER_CANDIDATE" >/dev/null 2>&1 || :
+          trap - EXIT
+          REMOTE
+
+      - name: 결과 요약
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## GPU 서버 배포"
+            echo
+            echo "- 배포 경로: \`${REMOTE_PATH:-미확인}\`"
+            echo "- 백업: \`${REMOTE_PATH:-?}/.deploy-backups/${BACKUP_STAMP:-없음}.tar.gz\`"
+            echo "- 소스 revision: \`${GITHUB_SHA}\`"
+            echo
+            echo "### 추론 이미지 빌드"
+            echo '```'
+            cat /tmp/build.log 2>/dev/null || echo "(빌드 단계에 이르지 못했다)"
+            echo '```'
+            echo
+            echo "### 전송된 파일"
+            echo '```'
+            cat /tmp/rsync.log 2>/dev/null || echo "(전송 단계에 이르지 못했다)"
+            echo '```'
+            echo
+            echo "### 스택 재적용"
+            echo '```'
+            cat /tmp/apply.log 2>/dev/null || echo "(재적용 단계에 이르지 못했다)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

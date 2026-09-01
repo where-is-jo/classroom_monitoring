@@ -1,0 +1,32 @@
+# 공용 GPU 서버에서 사용할 학습 설정 예시입니다.
+# SSH 정보나 비밀번호를 이 파일에 넣지 않습니다.
+schema_version: 1
+server_root: /absolute/path/to/classroom-training
+dataset_dir: null
+dataset_archive: /absolute/path/to/classroom-training/input/06-colab-export.zip
+archive_sha256: REPLACE_WITH_64_HEX_SHA256
+extract_root: /absolute/path/to/classroom-training/datasets
+output_root: /absolute/path/to/classroom-training/runs/person-detection
+experiment_name: n2-yolo11n-v009-seed42
+
+# 인터넷 또는 Ultralytics cache를 사용할 수 있으면 관리 이름을 사용합니다.
+base_model: yolo11n.pt
+base_model_sha256: null
+# 오프라인 서버에서는 위 두 줄 대신 아래처럼 로컬 파일과 해시를 지정합니다.
+# base_model: /absolute/path/to/classroom-training/input/yolo11n.pt
+# base_model_sha256: REPLACE_WITH_64_HEX_SHA256
+
+# 1 epoch smoke가 성공한 뒤 50 epoch 정식 학습을 이어갑니다.
+mode: smoke-full
+epochs: 50
+patience: 10
+image_size: 640
+batch: 16
+device: auto
+seed: 42
+workers: 2
+confidence: 0.25
+require_cuda: true
+minimum_cuda_free_gib: 8
+# 2026-08-22 서버의 기존 compose와 실제 컨테이너에서 프로젝트 할당 GPU가 1번임을 확인했습니다.
+allowed_cuda_devices: [1]

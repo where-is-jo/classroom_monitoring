@@ -1,0 +1,797 @@
+{
+  "name": "study-status-report",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f8a10d42-6b88-46f7-903e-65ed695eb001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -860,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "d07c68a0-8182-4ae7-9403-4a5e5e7c6e01",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -860,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "879a1d29-8c86-48bc-a00a-203ff02a6101",
+      "name": "Daily End Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -860,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/RPAs/study-status-report/schedule/시간표.md'}}"
+      },
+      "id": "66a2e33a-aa9d-4d94-9df3-c70d5df1b601",
+      "name": "Read Schedule File",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        20
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// **컨테이너의 TZ에 기대지 않는다.** n8n 2.x는 Code 노드를 별도 러너 프로세스에서\n// 돌리는데 그 프로세스는 TZ를 물려받지 않아 UTC로 동작한다 — 실측으로 확인했다\n// (TZ=Asia/Seoul인데도 new Date()가 GMT+0000을 냈다). 시간표는 한국 시각 기준이므로\n// UTC에 9시간을 더한 값으로 판정하고, 시각을 읽고 쓸 때는 UTC 계열 함수를 쓴다.\nconst KST_OFFSET_MINUTES = 9 * 60;\nconst now = new Date(Date.now() + KST_OFFSET_MINUTES * 60 * 1000);\nconst today = now.toISOString().slice(0, 10);\n// 시간표를 읽지 못하면 기본 시간표로 넘어가지 않는다. 그 상태로 진행하면 실제와\n// 다른 시간표로 출결을 기록하게 된다. 오류로 표시해 Slack 알림 후 중단시킨다.\nlet scheduleText = '';\nlet scheduleError = '';\ntry {\n  // $binary는 Code 노드에서 정의되지 않는다(항목별 실행 모드 전용). 앞 노드의\n  // 항목을 직접 집어야 한다. 실측으로 $binary가 undefined인 것을 확인했다.\n  const incoming = $input.first().binary;\n  if (incoming && incoming.data && incoming.data.data) {\n    scheduleText = Buffer.from(incoming.data.data, 'base64').toString('utf8');\n  } else {\n    scheduleError = '시간표 문서를 읽지 못했습니다. 경로를 확인하세요.';\n  }\n} catch (error) {\n  scheduleError = '시간표 문서를 여는 중 오류가 났습니다: ' + String(error).slice(0, 200);\n}\nconst defaultPeriods = [\n  { name: 'morning-study', start: '08:00', end: '08:40' },\n  { name: 'period-1', start: '08:40', end: '10:10' },\n  { name: 'period-2', start: '10:20', end: '11:50' },\n  { name: 'period-3', start: '13:00', end: '14:30' },\n  { name: 'period-4', start: '14:40', end: '16:10' },\n  { name: 'period-5', start: '16:20', end: '17:50' },\n  { name: 'night-period-1', start: '19:00', end: '20:30' },\n  { name: 'night-period-2', start: '20:40', end: '22:00' }\n];\nconst parsed = [];\n// 구간 이름은 그 줄에서 끝난다. [^|]는 줄바꿈까지 삼켜서 표가 아닌 형식일 때\n// 다음 줄을 이름에 붙이고 구간을 통째로 건너뛴다. 개행을 제외해 막는다.\nconst lineRegex = /\\*\\*(\\d{2}:\\d{2})\\s*~\\s*(\\d{2}:\\d{2})\\*\\*\\s*\\|\\s*([^|\\n\\r]+)/g;\nlet match;\nlet index = 0;\nwhile ((match = lineRegex.exec(scheduleText)) !== null) {\n  const label = match[3].trim();\n  if (!/(자습|교시|study|period)/i.test(label)) continue;\n  parsed.push({ name: label || `period-${++index}`, start: match[1], end: match[2] });\n}\nif (!scheduleError && !parsed.length) {\n  scheduleError = '시간표 문서에서 공부 시간 구간을 찾지 못했습니다. 형식을 확인하세요.';\n}\nconst periods = parsed.length ? parsed : defaultPeriods;\nfunction at(time) {\n  const [hour, minute] = time.split(':').map(Number);\n  const value = new Date(now);\n  value.setUTCHours(hour, minute, 0, 0);\n  return value;\n}\nconst active = periods.find((period) => now >= at(period.start) && now <= at(period.end));\n\n// **교시 종료 보고는 시간 창이 아니라 원장으로 판정한다.**\n// 예전에는 \"끝난 지 5분 안\"에 든 교시만 보고했다. 트리거 주기가 5분과 같아서 n8n\n// 재시작 등으로 틱이 한 번만 밀려도 그 교시 보고서가 조용히 사라졌다. 지금은 \"끝났는데\n// 아직 보고하지 않은 교시\"를 찾고, 실제로 Slack 전송이 끝난 뒤에야 원장에 적는다\n// (Mark Period Reported). 그래서 틱이 밀리거나 전송이 실패해도 다음 틱이 이어받는다.\nconst CATCH_UP_MINUTES = Number($env.PERIOD_REPORT_CATCH_UP_MINUTES || 60);\nlet ended = null;\nlet missedPeriods = [];\n// 시간표를 읽지 못했으면 원장에 손대지 않는다. 이때 periods는 기본 시간표라,\n// 여기서 기록하면 실제와 다른 교시 이름이 원장에 남는다.\nif (!scheduleError) {\n  const staticData = $getWorkflowStaticData('global');\n  staticData.reportedPeriods = staticData.reportedPeriods || {};\n  staticData.watchingSince = staticData.watchingSince || {};\n  // 오늘 것만 남긴다. 날짜별로 쌓이면 워크플로 정적 데이터가 끝없이 자란다.\n  for (const key of Object.keys(staticData.reportedPeriods)) {\n    if (!key.startsWith(today + '|')) delete staticData.reportedPeriods[key];\n  }\n  for (const key of Object.keys(staticData.watchingSince)) {\n    if (key !== today) delete staticData.watchingSince[key];\n  }\n  // 오늘 처음 (정상적으로) 돈 시각. 이보다 먼저 끝난 교시는 애초에 관측하지 않았으니\n  // 보고 대상이 아니다. 이 기준이 없으면 낮에 워크플로를 처음 켤 때 오전 교시를 전부\n  // \"놓쳤다\"고 알리게 된다.\n  if (!staticData.watchingSince[today]) staticData.watchingSince[today] = now.toISOString();\n  const watchingSince = new Date(staticData.watchingSince[today]).getTime();\n\n  const pending = periods\n    .map((period) => ({ period, endAt: at(period.end).getTime() }))\n    .filter((entry) => now.getTime() >= entry.endAt)\n    .filter((entry) => entry.endAt >= watchingSince)\n    .filter((entry) => !staticData.reportedPeriods[today + '|' + entry.period.name])\n    .sort((a, b) => a.endAt - b.endAt);\n  // 따라잡기 창을 넘긴 교시는 포기한다. 여기까지 밀렸다면 다음 교시가 이미 한참\n  // 지났고, 늦은 보고서를 올리면 어느 교시 것인지 오히려 헷갈린다. 대신 포기했다는\n  // 사실을 Slack으로 알린다 — 조용히 사라지게 두지 않는다.\n  const missed = pending.filter((entry) => now.getTime() - entry.endAt > CATCH_UP_MINUTES * 60 * 1000);\n  for (const entry of missed) staticData.reportedPeriods[today + '|' + entry.period.name] = 'missed';\n  missedPeriods = missed.map((entry) => entry.period.name);\n  const next = pending.find((entry) => now.getTime() - entry.endAt <= CATCH_UP_MINUTES * 60 * 1000);\n  ended = next ? next.period : null;\n}\nreturn [{ json: { today, periods, scheduleError, activePeriod: active || null, endedPeriod: ended, missedPeriods, classroomId: $env.CLASSROOM_ID, classroomName: $env.CLASSROOM_NAME || $env.CLASSROOM_ID } }];"
+      },
+      "id": "ce94bc0e-5ac7-4952-9b8c-338884e79801",
+      "name": "Parse Schedule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c4cbff9c-618c-43f0-bfbb-fde796a603c0",
+              "leftValue": "={{$json.activePeriod !== null || $json.endedPeriod !== null}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "2e09c710-4352-4dc9-8fd1-dc15b1c60120",
+      "name": "Inside Study Window",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{($env.FASTAPI_BASE_URL || 'http://fastapi:8001') + '/api/v1/classrooms/' + $json.classroomId + '/student-states'}}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "b18dd6c1-1a98-4d05-a5f7-8a8e96de4101",
+      "name": "Get Student States",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        -20
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "FastAPI가 도는 기계가 사람에 따라 오간다. 이 노드가 실패하면 오류 분기가 'Get Student States (Fallback)'으로 넘긴다.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 좌석 상태는 바로 앞 HTTP 응답에서, 시간표·강의실 정보는 Parse Schedule에서 가져온다.\n// HTTP 응답이 $json을 통째로 덮어써서 Parse Schedule이 만든 today·classroomId가\n// 여기까지 따라오지 않는다.\n//\n// **n8n 표현식은 노드를 이름으로만 부를 수 있다.** 편집기에서 'Parse Schedule'의 이름을\n// 바꾸면 이 참조가 깨지는데, 그냥 두면 undefined가 아래로 흘러 빈 보고서가 조용히\n// 만들어진다. 그래서 여기서 즉시 멈춘다. 이름이 실제 노드와 맞는지는\n// scripts/validate_workflow_artifacts.py도 검사한다. 워크플로에 남은 노드 이름 참조는\n// 이 한 곳뿐이다 — 나머지는 실행기가 되돌려 주는 context로 넘긴다.\nconst states = $input.first().json.states || [];\nlet input;\ntry {\n  input = $('Parse Schedule').first().json;\n} catch (error) {\n  throw new Error(\"'Parse Schedule' 노드를 찾지 못했습니다. 노드 이름을 바꿨다면 이 코드의 참조도 함께 바꾸세요: \" + String(error).slice(0, 200));\n}\nif (!input || !input.today || !input.classroomId) {\n  throw new Error(\"'Parse Schedule'이 today·classroomId를 주지 않았습니다. 노드 이름이나 출력이 바뀌었는지 확인하세요.\");\n}\nconst workflowData = $getWorkflowStaticData('global');\nworkflowData.lastState = workflowData.lastState || {};\n// 이벤트는 날짜별로 쌓이는데 실제로 쓰는 것은 오늘 것뿐이다. 지난 날짜를 버리지 않으면\n// 워크플로 정적 데이터가 끝없이 자라 저장이 느려진다.\nworkflowData.events = (workflowData.events || []).filter((event) => event.key && event.key.startsWith(input.today + '|'));\nconst now = new Date().toISOString();\nconst period = input.activePeriod || input.endedPeriod || { name: 'manual-run' };\nconst meaningfulStates = new Set(['ABSENT', 'WRONG_SEAT', 'IN_CLASSROOM', 'UNKNOWN', 'PRESENT']);\nconst newEvents = [];\nfor (const state of states) {\n  const studentId = state.student_id;\n  const current = state.current_state || 'UNKNOWN';\n  if (!studentId || !meaningfulStates.has(current)) continue;\n  const last = workflowData.lastState[studentId];\n  const changed = !last || last.state !== current;\n  workflowData.lastState[studentId] = { state: current, at: now };\n  if (!changed) continue;\n  const seatNumber = state.assigned_seat_label || state.current_seat_label || state.assigned_seat_id || state.current_seat_id || '';\n  const key = [input.today, input.classroomId, period.name, studentId, current, state.last_observed_at || now].join('|');\n  if (workflowData.events.some((event) => event.key === key)) continue;\n  const event = {\n    key,\n    period: period.name,\n    observed_at: state.last_observed_at || now,\n    seat_number: seatNumber,\n    student_id: studentId,\n    student_name: state.student_name,\n    student_state: current\n  };\n  workflowData.events.push(event);\n  newEvents.push(event);\n}\nconst allEvents = workflowData.events.filter((event) => event.key.startsWith(input.today + '|' + input.classroomId + '|'));\nconst eventsBase64 = Buffer.from(JSON.stringify(allEvents), 'utf8').toString('base64');\nconst workbookPath = `RPAs/study-status-report/reports/study_status_${input.today}_${input.classroomId}.xlsx`;\nconst endedPeriodName = (input.endedPeriod && input.endedPeriod.name) || '';\n// **Slack에 보이는 문구는 한국어로 쓴다.** 이 채널을 보는 사람은 강의실 관리자다.\n// 교시 이름은 시간표 문서에서 그대로 온다('1교시', '아침 자습'처럼 받침 유무가 갈린다).\n// 조사를 붙이면 '아침 자습가 끝났습니다'가 되므로 '[이름 종료]' 형태로 조사를 피한다.\n// periodName은 원장 키라서 손대지 않는다 — 바뀌는 것은 사람이 읽는 문구뿐이다.\n// **뒤 노드들이 쓸 값은 context에 담아 실행기에 함께 보낸다.** 실행기가 이걸 그대로\n// 돌려주므로 HTTP 응답 뒤의 노드들이 이 노드를 이름으로 거슬러 참조할 필요가 없다. 이름을 바꿔도 깨지지 않고, 어느 교시를 보고했는지가 응답에 실려\n// 와서 Mark Period Reported가 원장에 적을 수 있다.\nconst context = {\n  today: input.today,\n  classroomId: input.classroomId,\n  classroomName: input.classroomName,\n  periodName: endedPeriodName || period.name,\n  endedPeriodName,\n  shouldSendPeriodReport: Boolean(input.endedPeriod),\n  uploadTitle: endedPeriodName\n    ? `자습 현황 (${endedPeriodName}) - ${input.classroomName} ${input.today}`\n    : `자습 현황 - ${input.classroomName} ${input.today}`,\n  // endedPeriodName이 비면 shouldSendPeriodReport도 false라 이 문구는 Slack까지 가지\n  // 않는다. 그래도 실행 이력에는 남으므로 사실대로 적는다 — '수동 실행'이라고 적었더니\n  // 수업 중 정기 틱까지 수동 실행으로 보였다.\n  uploadComment: endedPeriodName\n    ? `[${endedPeriodName} 종료] 오늘 자습 현황을 정리한 관리 문서입니다.`\n    : `[보고 대상 아님] 교시 종료 시점이 아니라 전송하지 않습니다.`\n};\nreturn [{ json: { ...input, newEvents, allEvents, eventsBase64, workbookPath, context } }];\n"
+      },
+      "id": "cc7e1cd6-983a-46ee-8c79-4000d65a0e01",
+      "name": "Build Change Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/workbook' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ date: $json.today, classroom: $json.classroomName, events_base64: $json.eventsBase64, out: $json.workbookPath, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "603cd98b-29ba-4d90-b4ed-df4bd95e0b01",
+      "name": "Create Workbook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "5531f8fe-2502-49a1-a3e2-7ae77f4ba201",
+              "leftValue": "={{ $json.context.shouldSendPeriodReport }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a5b4fdb1-c736-4682-bfcf-f4db63c27501",
+      "name": "Period End?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        840,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-upload' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ files: [$json.workbook_path].concat($json.page_path ? [$json.page_path] : []), title: $json.context.uploadTitle, comment: $json.context.uploadComment, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "d7d3c03f-d897-4f5a-97c1-b13a7cbfb701",
+      "name": "Upload Workbook to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        -120
+      ],
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{$env.SCHEDULE_FILE_PATH || '/repo/RPAs/study-status-report/schedule/시간표.md'}}"
+      },
+      "id": "fcf9c81b-d29a-4eaa-bebd-1bce276f5d01",
+      "name": "Read Schedule For Daily Report",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        340
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Schedule과 같은 이유로 KST 기준 날짜를 쓴다. UTC로 두면 자정 직후\n// 일일 리포트가 전날 날짜로 만들어진다.\nconst today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);\nconst workflowData = $getWorkflowStaticData('global');\nconst classroomId = $env.CLASSROOM_ID;\nconst classroomName = $env.CLASSROOM_NAME || classroomId;\nconst allEvents = (workflowData.events || []).filter((event) => event.key && event.key.startsWith(today + '|' + classroomId + '|'));\nconst eventsBase64 = Buffer.from(JSON.stringify(allEvents), 'utf8').toString('base64');\nconst workbookPath = `RPAs/study-status-report/reports/study_status_${today}_${classroomId}.xlsx`;\n// 교시 보고와 같은 이유로 context를 실행기에 실어 보낸다 — 뒤 노드가 이 노드를\n// 이름으로 참조하지 않게 하려는 것이다.\nconst context = {\n  today,\n  classroomId,\n  classroomName,\n  periodName: 'daily-report',\n  uploadTitle: `일일 자습 리포트 - ${classroomName} ${today}`,\n  // 시트 이름은 create_management_workbook.py가 만드는 실제 이름이다.\n  uploadComment: \"[오늘 자습 종료] '일일 리포트' 시트에 상태별 종합과 학생별 자리 이탈 정도가 정리돼 있습니다.\"\n};\nreturn [{ json: { today, classroomId, classroomName, allEvents, eventsBase64, workbookPath, context } }];\n"
+      },
+      "id": "bc267679-89be-49df-a225-09cc37617701",
+      "name": "Build Daily Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/workbook' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ date: $json.today, classroom: $json.classroomName, events_base64: $json.eventsBase64, out: $json.workbookPath, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "2deffb1f-5b72-4e96-b474-a538c66b2a01",
+      "name": "Create Daily Workbook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-upload' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ files: [$json.workbook_path].concat($json.page_path ? [$json.page_path] : []), title: $json.context.uploadTitle, comment: $json.context.uploadComment, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "f7b6df67-140e-4b2a-aab1-8657ea924901",
+      "name": "Upload Daily Report to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        100,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "schedule-ok-if",
+      "name": "Schedule OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        20
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "sched-ok-1",
+              "leftValue": "={{ $json.scheduleError === '' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "schedule-alert",
+      "name": "Notify Schedule Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        160
+      ],
+      "retryOnFail": false,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-message' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '[study-status-report] ' + $json.scheduleError + ' 시간표를 확인할 때까지 기록을 중단합니다.', reason: 'schedule_unavailable' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// **Slack 전송이 끝난 뒤에야 보고 완료로 적는다.** 여기 도달하기 전에 실패하면\n// 원장에 남지 않으므로 다음 5분 틱이 같은 교시를 다시 보고한다. 전송이 실패했다고\n// 보고서가 조용히 사라지지 않게 하려는 것이다. 어느 교시였는지는 실행기가 되돌려 준\n// context에서 읽는다 — 노드 이름으로 거슬러 올라가지 않는다.\nconst context = ($input.first().json || {}).context;\nif (!context || !context.today || !context.periodName) {\n  throw new Error('실행기 응답에 context가 없습니다. Create Workbook과 Upload Workbook to Slack이 context를 함께 보내는지 확인하세요.');\n}\nconst staticData = $getWorkflowStaticData('global');\nstaticData.reportedPeriods = staticData.reportedPeriods || {};\nconst key = context.today + '|' + context.periodName;\nstaticData.reportedPeriods[key] = new Date().toISOString();\nreturn [{ json: { reportedPeriod: key } }];\n"
+      },
+      "id": "0f1c5d84-7a1e-4d2b-9f3a-6b5c4d3e2f01",
+      "name": "Mark Period Reported",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ]
+    },
+    {
+      "id": "missed-period-if",
+      "name": "Missed Period?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "missed-period-1",
+              "leftValue": "={{ $json.missedPeriods.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "missed-period-alert",
+      "name": "Notify Missed Period",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        520
+      ],
+      "retryOnFail": false,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-message' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '[study-status-report] 교시 종료 보고를 놓쳤습니다: ' + $json.missedPeriods.join(', ') + '. 자동화가 멈춰 있는 사이 따라잡기 창(' + ($env.PERIOD_REPORT_CATCH_UP_MINUTES || 60) + '분)을 넘겨 보고서를 올리지 못했습니다. 관리 문서는 reports/ 에 남아 있으니 필요하면 직접 올려 주세요.', reason: 'period_report_missed|' + $json.today + '|' + $json.missedPeriods.join(',') }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "10 18 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -860,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// **주간 보고서가 담을 기간을 정한다.** 금요일 저녁에 돌아 그 주 월요일부터 오늘까지를\n// 담는다. 주말에 자습이 없으므로 토·일을 넣어도 '기록 없음' 줄만 늘어난다.\n//\n// Parse Schedule과 같은 이유로 KST를 직접 계산한다 — Code 노드는 별도 러너 프로세스에서\n// 돌아 컨테이너 TZ를 물려받지 않는다.\nconst now = new Date(Date.now() + 9 * 60 * 60 * 1000);\nconst to = now.toISOString().slice(0, 10);\n// getUTCDay는 0=일요일이다. 월요일을 0으로 옮겨 이번 주 시작까지 며칠 전인지 센다.\nconst mondayOffset = (now.getUTCDay() + 6) % 7;\nconst from = new Date(now.getTime() - mondayOffset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);\nconst classroomId = $env.CLASSROOM_ID;\nconst classroomName = $env.CLASSROOM_NAME || classroomId;\nconst workbookPath = `RPAs/study-status-report/reports/weekly_study_status_${from}_${to}_${classroomId}.xlsx`;\n// 교시 보고와 같이 context로 실어 보낸다 — 뒤 노드가 이 노드를 이름으로 참조하지 않게.\nconst context = {\n  today: to,\n  classroomId,\n  classroomName,\n  periodName: 'weekly-report',\n  from,\n  to,\n  workbookPath,\n  // Slack 업로드 응답에는 경로가 없다. 메일이 첨부를 잃지 않게 함께 넘긴다.\n  pagePath: workbookPath.replace(/\\.xlsx$/, '.html'),\n  subject: `주간 자습 현황 - ${classroomName} ${from} ~ ${to}`,\n  body: [\n    `${classroomName} 주간 자습 현황을 보냅니다.`,\n    '',\n    `기간: ${from} ~ ${to}`,\n    '',\n    \"첨부한 파일의 '주간 요약' 시트에 기간 전체 수치가, '학생별' 시트에 자리 이탈률이 높은\",\n    \"순으로 정리돼 있습니다. 기록이 없는 날은 0이 아니라 '기록 없음'으로 표시됩니다.\",\n    '',\n    '이 메일은 study-status-report 자동화가 보냈습니다.',\n  ].join('\\n'),\n};\nreturn [{ json: { from, to, classroomId, classroomName, workbookPath, context } }];\n"
+      },
+      "id": "weekly-range",
+      "name": "Build Weekly Range",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/weekly-workbook' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, to: $json.to, classroom: $json.classroomName, out: $json.workbookPath, context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "weekly-workbook",
+      "name": "Create Weekly Workbook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -380,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/email' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ subject: $json.context.subject, body: $json.context.body, files: [$json.context.workbookPath, $json.context.pagePath], context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "weekly-email",
+      "name": "Send Weekly Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        100,
+        700
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.RPA_RUNNER_URL || 'http://rpa-runner:8099') + '/slack-upload' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ files: [$json.workbook_path].concat($json.page_path ? [$json.page_path] : []), title: $json.context.subject, comment: '[주간 자습 현황] ' + $json.context.from + ' ~ ' + $json.context.to + ' 집계입니다. 엑셀과 함께 검색·필터가 되는 HTML을 첨부했습니다.', context: $json.context }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "weekly-slack",
+      "name": "Upload Weekly to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        700
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.FASTAPI_FALLBACK_URL || 'http://100.103.0.94:8076') + '/api/v1/classrooms/' + $('Parse Schedule').first().json.classroomId + '/student-states' }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fallback-student-states-0001",
+      "name": "Get Student States (Fallback)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        180
+      ],
+      "notes": "주 호스트가 죽었을 때만 돈다. 여기까지 실패하면 실행을 실패로 남긴다 - FastAPI가 전부 내려간 것은 보이게 해야 한다.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Schedule File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Read Schedule File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily End Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Schedule For Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Schedule File": {
+      "main": [
+        [
+          {
+            "node": "Parse Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Schedule": {
+      "main": [
+        [
+          {
+            "node": "Schedule OK?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Missed Period?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inside Study Window": {
+      "main": [
+        [
+          {
+            "node": "Get Student States",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get Student States": {
+      "main": [
+        [
+          {
+            "node": "Build Change Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Student States (Fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Change Events": {
+      "main": [
+        [
+          {
+            "node": "Create Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Workbook": {
+      "main": [
+        [
+          {
+            "node": "Period End?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period End?": {
+      "main": [
+        [
+          {
+            "node": "Upload Workbook to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Read Schedule For Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Build Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Create Daily Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Daily Workbook": {
+      "main": [
+        [
+          {
+            "node": "Upload Daily Report to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule OK?": {
+      "main": [
+        [
+          {
+            "node": "Inside Study Window",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Schedule Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Missed Period?": {
+      "main": [
+        [
+          {
+            "node": "Notify Missed Period",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Upload Workbook to Slack": {
+      "main": [
+        [
+          {
+            "node": "Mark Period Reported",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Weekly Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Weekly Range": {
+      "main": [
+        [
+          {
+            "node": "Create Weekly Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Weekly Workbook": {
+      "main": [
+        [
+          {
+            "node": "Upload Weekly to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Weekly to Slack": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Student States (Fallback)": {
+      "main": [
+        [
+          {
+            "node": "Build Change Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "RPA"
+    },
+    {
+      "name": "study-status"
+    }
+  ],
+  "triggerCount": 4,
+  "updatedAt": "2026-08-22T00:00:00.000Z",
+  "versionId": "study-status-report-v1"
+}
