@@ -5,19 +5,67 @@
 
 ## 목차
 
+- [프로젝트 개요 및 팀 소개](#프로젝트-개요-및-팀-소개)
 - [프로젝트 목적](#프로젝트-목적)
+- [핵심 기능 구현](#핵심-기능-구현)
+- [시연 영상](#시연-영상)
 - [시스템 아키텍처](#시스템-아키텍처)
 - [기술 스택](#기술-스택)
 - [추론 모델](#추론-모델)
 - [필요한 기기](#필요한-기기)
 - [실행 방법](#실행-방법)
-- [현재 단계](#현재-단계)
+- [일정 관리 및 팀 협업](#일정-관리-및-팀-협업)
 - [디렉터리 구조](#디렉터리-구조)
 - [팀원이 가장 먼저 읽을 문서](#팀원이-가장-먼저-읽을-문서)
-- [AI 에이전트 사용 방법](#ai-에이전트-사용-방법)
-- [새로 추가할 때 위치](#새로-추가할-때-위치)
-- [기여 흐름](#기여-흐름)
-- [확정된 결정](#확정된-결정)
+
+## 프로젝트 개요 및 팀 소개
+
+**스마트 클래스 모니터링 시스템.** 관리자가 강의실을 직접 돌지 않아도 학생 현황을
+확인하고, 확인한 결과가 자동으로 기록·보고되게 한다.
+
+### 왜 만들었나
+
+| 문제 | 지금까지 |
+| --- | --- |
+| 관리자가 **직접 확인**해야 한다 | 공부 시간마다 강의실을 돌며 학생이 자기 자리에 앉아 있는지 눈으로 본다 |
+| 확인 결과를 **직접 기록**해야 한다 | 재석 상태를 손으로 적어 보고 문서를 만든다 |
+
+### 산출물
+
+- 실시간 강의실 모니터링 웹 페이지
+- 공부 시간별 학생 현황 기록 문서(Excel)와 통계 대시보드(HTML)
+- 학생 얼굴 탐지·식별 모델 / 강의실 내 학생 탐지 모델
+- 객체 탐지·얼굴 탐지/식별 모델 학습 데이터셋
+
+### 업무 효율화 기대 효과
+
+강의실 1실 30석, 1회 순회 점검 3분, 1일 8교시, 월 20일 운영을 가정했다.
+
+| 구분 | 효과 | 근거 |
+| --- | --- | --- |
+| 월 8시간 | 강의실 1실의 순회 점검 시간 | 3분 × 8교시 × 20일 = 480분을 상시 자동 판정이 대체한다 |
+| 월 40시간 | 5개 강의실로 확장할 때 | 사람 시간은 강의실 수에 비례하지만 시스템은 카메라만 늘리면 된다 |
+| 관리자는 확인만 | 식별·판정·기록·보고·통계까지 자동화 | 관리자는 결과물 검증만 한다 |
+
+### 팀 소개
+
+| 이름 | 역할 | 맡은 일 |
+| --- | --- | --- |
+| 최하늘 | 팀장(PM) | 일정·역할 조율, 얼굴 인식 모델 비교 분석, RPA 업무 자동화 |
+| 김도윤 | CTO | 시스템 아키텍처 설계, FastAPI 백엔드, 영상 스트리밍, 로컬 LLM 자연어 검색 |
+| 박무현 | 객체 탐지 모델 엔지니어 | 사람 탐지 모델 학습·검증, 강의실·좌석 관리, ROI, 실시간 모니터링, 신원 인계 |
+| 방우리 | 얼굴 탐지/식별 모델 엔지니어 | 얼굴 탐지·식별 모델 학습·평가, 등록 파이프라인 |
+
+### 개발 현황
+
+마무리 시점의 저장소 실측값이다.
+
+| 항목 | 수 | 세는 기준 |
+| --- | --- | --- |
+| Commit | 585 | `develop` 기준 |
+| Merged PR | 129 | GitHub에서 병합된 PR |
+| ADR | 49 | [결정 기록](./docs/architecture/decisions.md)의 확정 항목 |
+| 테스트 파일 | 136 | `test_*.py`와 `*.test.js` |
 
 ## 프로젝트 목적
 
@@ -40,6 +88,30 @@
 얼굴을 인식하지 않는다.
 
 무엇을 만들 것인지는 [학생 모니터링 MVP 명세](./docs/specs/student-monitoring-mvp.md)에 있다.
+
+## 핵심 기능 구현
+
+| 기능 | 무엇을 하는가 |
+| --- | --- |
+| **얼굴 탐지·식별 + 객체 탐지·추적** | 직접 모은 데이터로 모델을 학습해 실제 학생을 식별하고, 강의실 안에서 그 신원이 유지되도록 추적한다 |
+| **좌석 ROI 설정 자동화** | 탐지 기록에서 사람이 오래 앉아 있던 자리를 찾아 좌석 ROI 후보를 만들고, 사람이 좌석을 지정해 최종 확정·저장한다 |
+| **실시간 모니터링 화면** | 강의실 좌석 현황과 학생 상태를 bbox·라벨과 함께 보여준다. 초기 조회는 REST, 이후 갱신은 SSE다 |
+| **자연어 탐지 검색** | 로컬 LLM이 질문을 검색 조건으로 바꾸고 서버가 검증한 뒤 탐지 기록을 찾는다 |
+| **학생·얼굴 등록** | 다섯 자세를 촬영해 품질·일관성을 검사하고 학생별 대표 얼굴 벡터를 만든다 |
+| **RPA 업무 자동화** | 시간표에 맞춰 학생 상태를 기록하고 교시마다 Slack으로 보고한다. 일일 리포트와 주간 자습 현황도 자동으로 만든다 |
+| **성능 모니터링 대시보드** | 추론·프레임·신원 인계·LLM 검색 지표와 스택 로그를 대시보드로 본다 |
+
+### 구현하지 않은 것
+
+| 계획 | 왜 빠졌나 |
+| --- | --- |
+| 제3 카메라를 더해 트래킹 고도화 | 웹캠 해상도로는 실적용이 어렵다고 판단했다 |
+| 공부 시간 중 자리 이탈 시 알림 전송 | 프로젝트 일정상 자동화 과제에서 뺐다 |
+| 영상 저장 및 검색 | 저장소 공간이 부족해 스냅샷 이미지로 대체했다 |
+
+## 시연 영상
+
+<!-- 여기에 시연 영상 링크나 임베드를 넣는다 -->
 
 ## 시스템 아키텍처
 
@@ -151,10 +223,10 @@ Atlas라 호스트와 무관하다.
 
 | 단계 | 모델 | 실행 위치 | 비고 |
 | --- | --- | --- | --- |
-| 사람 탐지 | YOLO(Ultralytics). 자체 학습한 `person-v0002` | `worker/inference` (GPU) | 원본 프레임 계약(`original-frame-v1`)으로 학습하고 가중치 SHA-256·클래스·image size를 `model_contract.json`으로 검증한다. 하나라도 다르면 기동하지 않는다. 고정 validation 80장에서 mAP50 0.957, confidence 0.30에서 F1 0.927 |
+| 사람 탐지 | **YOLO26n** (`original-500`) | `worker/inference` (GPU) | 원본 CCTV 프레임 500장을 `train 350 / val 75 / 고정 test 75`로 나눠 seed 42, imgsz 1280, 100 epoch·patience 20으로 학습했고 best epoch은 81이다. 봉인한 고정 test 75장에서 **F1 0.8826**(precision 0.9008 / recall 0.8651, mAP50 0.8101, mAP50-95 0.4660, 인원 오차 0.2명) |
 | 사람 추적 | ByteTrack 자체 구현 + Kalman bbox 예측 | `worker/inference` | 신뢰도 2단계 연관(high 0.5 / low 0.1)으로 가림 직후의 ID 단절을 줄인다. 카메라마다 ID 공간을 나눈다 |
 | 얼굴 검출 | SCRFD 10G (`scrfd_10g_bnkps.onnx`) | `deeplearning` (onnxruntime CUDA) | 입구 카메라와 얼굴 등록에서만 쓴다. 좌석 화각에서는 얼굴을 보지 않는다 |
-| 얼굴 인식 | ArcFace `buffalo_l/w600k_r50.onnx`(기본) 또는 AdaFace IR50 WebFace4M | `deeplearning` | 한 배포에서 `FACE_RECOGNIZER`로 **한 모델만** 켠다. embedding 공간이 호환되지 않아 갤러리 컬렉션을 나누고 임계값도 모델별로 FAR 0.001에서 고른다 |
+| 얼굴 인식 | **AdaFace IR50 WebFace4M** (512-D). ArcFace `buffalo_l/w600k_r50.onnx`는 초기 기준선·rollback | `deeplearning` | 실제 입구 환경은 작은 얼굴·모션 블러·조명 편차·압축 손실이 커, 품질을 embedding norm으로 반영하는 **품질 적응형 margin**을 택했다. 한 배포에서 `FACE_RECOGNIZER`로 **한 모델만** 켠다 — embedding 공간이 호환되지 않아 갤러리 컬렉션과 임계값을 모델별로 나눈다 |
 | 얼굴 자세·품질 | MediaPipe Face Landmarker (`face_landmarker.task`) | `deeplearning` (CPU) | 얼굴 등록 화면의 실시간 촬영 가이드 |
 | 자연어 검색 | Gemma GGUF (llama.cpp server) | GPU 서버 | **LLM은 검색 계획 JSON만 만든다.** 검증·조회는 fastapi가 하고 조회 Tool을 모델에 주지 않는다. GPU가 없는 환경에서는 기능을 끈다 |
 
@@ -162,6 +234,28 @@ Atlas라 호스트와 무관하다.
 좌석 점유는 confidence 0.3 이상 bbox의 **중심점**이 좌석 ROI 안에 들어올 때 인정하며 마지막
 관측 뒤 5초간 유지한다. 앉은 사람은 하반신이 책상에 가려 bbox 하단이 발에서 끊기지 않기
 때문이고, 근거는 각 `config/settings.yml` 주석에 적어 두었다.
+
+### 모델을 고른 기준과 결과
+
+사람 탐지는 **정확도·속도·재현성 세 가지의 균형점**으로 골랐다. 고정 test 75장에서
+F1 0.8826을 내면서 평균 지연 20.860ms, p95 23.353ms, 처리량 47.938 FPS로 교실 영상
+속도를 충족한다. 가중치만 넘기지 않고 전처리 계약(`original-frame-v1`), 가중치 SHA-256,
+test 데이터 SHA를 함께 봉인해 넘긴다 — 같은 입력 규칙과 같은 평가 기준으로만 재현된다.
+
+얼굴 식별은 목표 FAR 0.1% 조건에서 내부 고정 데이터로 검증했다.
+
+| 지표 | 결과 |
+| --- | --- |
+| 등록 얼굴 식별 | 100% (150 probes) |
+| 미등록 얼굴 오수락 | 0건 (0 / 1,500) |
+| Track 오연결 | 0.0933% (7 / 7,500 pairs) |
+| 식별 지연 | p95 131.72ms |
+| 최종 임계값 | similarity ≥ 0.2280, track similarity ≥ 0.3013 |
+
+등록은 정면·좌·우·위·아래 다섯 자세를 찍어 품질과 일관성을 검사한 뒤, 유효한 특징만
+합쳐 학생별 대표 벡터(512-D, L2 정규화) 하나를 만든다. 기준에 못 미치거나 서로
+일관되지 않은 샘플은 대표 벡터 계산에서 뺀다. 실시간 응답에는 이미지나 벡터를 싣지 않고,
+기준에 못 미친 얼굴은 이름 대신 `UNKNOWN`으로 둔다.
 
 작은 얼굴을 Super Resolution으로 풀지 않는다. 얼굴 인식을 얼굴이 크게 잡히는 입구에서만
 하도록 카메라 구성을 바꿨다.
@@ -252,55 +346,23 @@ node RPAs/study-status-report/tests/period_report.test.js      RPAs/study-status
 fastapi 1111건, worker 442건, RPA 워크플로 테스트 3종이 장비·모델·MinIO 없이 돈다.
 mypy는 strict라 공개 함수에 타입 힌트가 없으면 실패한다.
 
-## 현재 단계
+## 일정 관리 및 팀 협업
 
-핵심 실행 코드는 `webapps/fastapi`, `worker`, `deeplearning`, `RPAs` 네 곳에 있다.
+AI 에이전트를 적극적으로 쓰는 팀이라, **사람과 에이전트가 같은 규칙 위에서 일하도록**
+만드는 데 관리의 초점을 뒀다.
 
-- **`webapps/fastapi`** — 강의실·좌석·좌석 지정과 학생 상태, 학생 등록과 얼굴 등록,
-  좌석 ROI 연결, 입구→CCTV 신원 인계 설정, 실시간 모니터링, 탐지 스냅샷, 자연어
-  탐지 검색 화면과 그 API. worker가 식별한 학생을 카메라별 좌석 ROI와
-  좌석 지정에 대조해 `PRESENT`·`WRONG_SEAT`·`UNKNOWN`을 계산하고 REST와 SSE로 제공한다.
-  좌석 점유 상태는 여전히 "자리가 찼는지"이고 학생 상태와는 별도다. 자연어 탐지
-  검색은 LLM이 질문을 검색 조건으로 바꾸고 fastapi가 검증·조회한다.
-  **이 기능만은 GPU가 있는 환경에서만 켠다** — 그 밖의 환경에서는 꺼져 있고 화면이
-  그 사실을 안내한다.
-  local/dev에서는 실제 영상이나 개인정보 없이 합성 모니터링·검색 흐름을 시연할 수 있다.
-- **`worker`** — 카메라 영상을 받아(`stream`) 프레임을 골라 탐지하고(`inference`),
-  탐지 인원 수가 바뀌면 스냅샷을 객체 저장소에 올린다.
-  **영상 원본은 저장하지 않는다**.
-  세그먼트 적재용 `recorder`는 코드가 남아 있으나 공용 서버에서 실행하지 않는다.
-  `FASTAPI_URL`을 설정하면 탐지 결과를 `/internal/inference/events`로 제한 재시도하며
-  전달한다. `FACE_IDENTITY_URL`과 입구 카메라 ID를 설정하면 그 카메라는 YOLO 없이
-  deeplearning의 SCRFD→ArcFace→얼굴 track만 실행한다. CCTV는 YOLO 사람 탐지와
-  ByteTrack만 실행한다. 두 역할은 별도 최신 프레임 버퍼·소비자를 사용해 얼굴 HTTP가
-  느려도 CCTV 추적을 막지 않는다. 입구 얼굴 관측은 FastAPI에 7일 메타데이터로 저장한다.
-  FastAPI의 `/identity-handover`
-  화면에서 저장한 CCTV 문 ROI를 주기적으로 읽어 입구 신원을 CCTV ByteTrack으로
-  넘기며, 설정 조회가 잠시 실패하면 마지막 정상값을 유지한다. 기본값은 꺼져 있다.
+| 방법 | 어떻게 했나 |
+| --- | --- |
+| **결정 기록(ADR)** | 되돌리기 어려운 기술 결정은 [`decisions.md`](./docs/architecture/decisions.md) 한 파일에 항목으로 쌓는다. 배경·결정·버린 대안·결과를 함께 적어, 에이전트에게 작업을 맡길 때 근거 문서로 쓴다 |
+| **팀 컨벤션** | Git·코딩·API·환경변수·문서 규칙을 [`docs/conventions/`](./docs/conventions/)에 두고 사람과 에이전트가 같은 것을 본다 |
+| **에이전트 스킬 공유** | 반복 작업(기능 추가, RPA 작성, 지표 추가, 문서 갱신, 커밋, 리뷰) 절차를 스킬로 만들어 팀원 모두가 같은 절차로 작업하게 했다 |
+| **브랜치와 PR** | `develop`에서 `<타입>/<설명>` 브랜치를 따고 PR로 병합한다. `main`에는 배포 시점에만 `develop`을 넣는다. 이슈·PR 템플릿을 저장소에 둔다 |
+| **CI** | PR과 `develop` push에서 [CI](./.github/workflows/ci.yml)가 변경 범위를 판정해 필요한 린트·타입 검사·테스트만 돌리고, `develop` 병합 시 이미지를 GHCR에 올린다. GPU 서버 반영은 [배포 워크플로](./.github/workflows/deploy-gpu-server.yml)가 SSH로 처리한다 |
+| **디자인 패턴** | 에이전트가 쓰는 코드의 일관성과 책임 분리를 위해 Facade·Strategy 등을 적용하고, 어디에 무엇을 두는지 계층 규칙으로 못 박았다 |
+| **내부 성능 모니터링** | 지표와 로그를 대시보드로 모아 성능 저하와 에러를 눈으로 확인했다 |
 
-`deeplearning`에는 얼굴 등록용 SCRFD 검출·MediaPipe 자세 분석, 갤러리 얼굴 식별
-내부 서비스와 모델 학습·얼굴 식별 평가용 Jupyter/CLI 도구가 있다.
-얼굴 인식은 배포마다 활성 모델 하나만 켠다 — 기본은 ArcFace이고 AdaFace는 갤러리를
-따로 두고 검증 뒤에 전환한다.
-
-`monitoring/internal`에는 Grafana 데이터소스·대시보드 provisioning이 있다.
-Prometheus·Loki·Alloy 설정 파일은 아직 `.docker/` 아래에 있으며, 통합 실행 수단이
-공식화되면 옮긴다([monitoring/internal README](./monitoring/internal/README.md)).
-
-`RPAs`에는 자습 현황 보고 워크플로 [`study-status-report`](./RPAs/study-status-report/README.md)가
-있다. 시간표를 읽어 교시마다 FastAPI에서 학생 상태를 받고, 유의미한 상태 변화를 관리
-문서(`.xlsx`)에 적어 교시가 끝날 때 Slack에 올리며, 주간 집계는 메일로 보낸다. 개인 PC
-스택의 `n8n`·`rpa-runner` 컨테이너가 실행한다.
-
-입구 카메라의 얼굴 track과 특정 학생 식별, CCTV 사람 ByteTrack, 문 영역·통과
-시각을 이용한 입구→CCTV 신원 인계가 코드와 합성 테스트로 연결됐다.
-CCTV detection의 `student_id`와 `track_id`는 FastAPI의 ROI·좌석 판정을 거쳐 저장·SSE·
-화면까지 전달된다. `/identity-handover`에서 CCTV 현재 화면에 문 영역을 겹쳐 보고 다시
-그리면 worker가 재시작 없이 반영한다. 입구 사람 track ID가 바뀌더라도 활성 학생 하나를
-CCTV track 하나에만 인계한다. 얼굴 track은 위치와 embedding을 함께 확인하고 낮은 품질의
-새 관측에는 과거 이름을 노출하지 않으며, CCTV track이 만료되면 인계 신원도 즉시 지운다.
-남은 일은 실제 입구 카메라·CCTV로 하는 종단 간 검증, 문 영역·인계 시간 창 보정,
-시간표 기반 `ABSENT` 판정이다.
+비밀키와 실제 환경변수 값은 커밋하지 않는다.
+**학생 얼굴이 담긴 영상·이미지·캡처도 커밋하지 않는다.**
 
 ## 디렉터리 구조
 
@@ -368,66 +430,3 @@ FastAPI가 저장한 학생 상태를 읽어 관리 문서와 보고서를 만�
 4. [아키텍처](./docs/architecture/README.md) — 서비스 관계와 미결정 항목
 5. 개발 규칙 — [Git](./docs/conventions/git-convention.md) · [코딩](./docs/conventions/coding-convention.md) · [API](./docs/conventions/api-convention.md) · [환경변수](./docs/conventions/environment-convention.md) · [문서](./docs/conventions/documentation-convention.md)
 6. [개발 가이드](./docs/guides/README.md) — 실행하고 검증하는 명령
-
-## AI 에이전트 사용 방법
-
-이 저장소는 AI 코딩 에이전트와 함께 작업하는 것을 전제로 한다.
-
-- 공통 작업 계약은 [docs/agents/AGENTS.md](./docs/agents/AGENTS.md)에 있다. 에이전트는 이 문서를 먼저 읽는다.
-- 역할별 규칙: [FastAPI](./docs/agents/fastapi-agent.md) · [AI](./docs/agents/ai-agent.md) · [RPA](./docs/agents/rpa-agent.md) · [문서](./docs/agents/documentation-agent.md)
-- 반복 작업은 Claude Code 스킬을 따른다. `/skills`로 목록을 볼 수 있다.
-  스킬은 `.claude/skills/`에 있으며 **저장소에 포함되지 않는다.** 팀원과는 따로 공유한다.
-- 작업 지시는 `docs/prompts/`의 템플릿을 복사해 변수를 채운 뒤 사용한다.
-  [프로젝트 초기화](./docs/prompts/initialize-project.md) · [기능 구현](./docs/prompts/implement-feature.md) · [버그 조사](./docs/prompts/investigate-bug.md) · [PR 리뷰](./docs/prompts/review-pull-request.md) · [문서 갱신](./docs/prompts/update-project-docs.md)
-- 저장소를 직접 읽지 못하는 도구(웹 GPT 등)로 작업할 때는
-  [GPT 코딩 프롬프트](./docs/prompts/gpt-agent.md)의 규칙 블록을 대화에 붙여넣는다.
-
-에이전트 관련 문서는 모두 `docs/` 아래에 두며, 최상위에 `AGENTS.md`를 만들지 않는다.
-
-## 새로 추가할 때 위치
-
-| 추가할 것 | 위치 | 참고 |
-| --- | --- | --- |
-| 새 웹 애플리케이션 | `webapps/<service-name>/` | [서비스 README 템플릿](./docs/templates/service-readme-template.md) |
-| 웹이 아닌 새 서비스 | 최상위 `<service-name>/` | 동일. AGENTS.md의 최상위 제약도 갱신한다 |
-| fastapi의 새 기능 | `webapps/fastapi/app/<기능>/` | `create-fastapi-feature` 스킬 |
-| 새 RPA | `RPAs/<rpa-name>/` | [RPA 규칙](./RPAs/README.md) |
-| 구현 전 기능 명세 | `docs/specs/` | [기능 명세 템플릿](./docs/templates/feature-spec-template.md) |
-| 아키텍처 결정 | `docs/architecture/decisions.md` | [기록 방법](./docs/architecture/decisions.md#어떻게-기록하는가). 결정마다 파일을 만들지 않는다 |
-| 개발 규칙 | `docs/conventions/` | 기존 문서 수정을 우선 |
-| 작업 절차 | `.claude/skills/<skill-name>/` | 저장소 밖. 작성법은 `.claude/skills/README.md` |
-| 문서 템플릿 | `docs/templates/` | |
-
-## 기여 흐름
-
-1. 작업 대상 디렉터리의 README와 관련 규칙 문서를 읽는다.
-2. `develop`에서 브랜치를 만들어 작업한다.
-3. 변경 범위를 작게 유지한다.
-4. 가능한 검증을 실행하고, 실행하지 못한 검증은 그대로 밝힌다.
-5. 문서 갱신이 필요한지 확인한다.
-6. `develop`으로 Pull Request를 열어 리뷰를 요청한다.
-
-PR과 `develop` push에서 [CI](./.github/workflows/ci.yml)가 변경 범위를 판정해
-fastapi·worker의 린트·타입 검사·테스트를 돌리고, `develop` 병합 시 fastapi 이미지를
-GHCR에 올린다. GPU 서버에 반영되는 경로가 바뀌면
-[배포 워크플로](./.github/workflows/deploy-gpu-server.yml)가 SSH로 compose 설정을
-반영한다.
-
-비밀키와 실제 환경변수 값은 어떤 경우에도 커밋하지 않는다.
-**학생 얼굴이 담긴 영상·이미지·캡처도 커밋하지 않는다.**
-상세 규칙은 [Git 규칙](./docs/conventions/git-convention.md)에 있다.
-
-## 확정된 결정
-
-확정된 결정은 [결정 기록](./docs/architecture/decisions.md)에 있다.
-fastapi 내부 구조, 설계 패턴 판단 기준, 메타데이터 저장소(MongoDB),
-영상·얼굴 이미지 저장소(MinIO), worker 분리와 프레임 전달, 상태 판정 소유 서비스,
-추론 책임 경계, MVP 제품 사용자 범위, 실시간 관제의 HTTP·WebRTC·SSE 구성,
-실시간 영상의 인증 최소화가 여기에 해당한다. 마지막 대역(0043~0051)은 실측으로 병목을 찾아 고친 결정들이다 —
-탐지 결과 전송을 추론 소비자에서 떼어내고 밀리면 최신만 남기기, 탐지 이벤트의 MongoDB
-TTL 삭제, 좌석 관측의 batch transaction 적용, bbox 오버레이를 저장과 다른 경로로 보내기,
-얼굴 모델의 GPU 이전, 모델 교체의 계약·해시 검증, 좌석 ROI 자동 생성을 탐지 밀도 경로
-하나로 줄이기가 들어 있다.
-
-**운영 접근 통제는 MVP 동안 도입하지 않기로 했다.** 그래서 `APP_ENV=prod` 배포는
-하지 않는다.
